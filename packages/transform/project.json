@@ -1,0 +1,9 @@
+{
+  "name": "@perfect/transform",
+  "sourceRoot": "packages/transform/src",
+  "targets": {
+    "test": {},
+    "lint": {},
+    "typecheck": {}
+  }
+}

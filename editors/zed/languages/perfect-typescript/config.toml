@@ -1,0 +1,16 @@
+name = "Perfect TypeScript"
+grammar = "typescript"
+path_suffixes = ["ts", "tsx"]
+line_comments = ["//"]
+block_comment = ["/*", "*/"]
+autoclose_before = ";:.,=}])> \n\t"
+brackets = [
+  { start = "{", end = "}", close = true, newline = true },
+  { start = "[", end = "]", close = true, newline = true },
+  { start = "(", end = ")", close = true, newline = true },
+  { start = "\"", end = "\"", close = true, newline = false },
+  { start = "'", end = "'", close = true, newline = false },
+  { start = "`", end = "`", close = true, newline = false },
+]
+word_characters = ["$", "#"]
+tab_size = 2

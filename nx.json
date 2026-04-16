@@ -1,0 +1,68 @@
+{
+  "$schema": "./node_modules/nx/schemas/nx-schema.json",
+  "namedInputs": {
+    "default": [
+      "{projectRoot}/**/*",
+      "sharedGlobals"
+    ],
+    "production": [
+      "default"
+    ],
+    "sharedGlobals": []
+  },
+  "plugins": [
+    {
+      "plugin": "@nx/js/typescript",
+      "include": ["packages/**/*"],
+      "options": {
+        "typecheck": {
+          "targetName": "typecheck"
+        },
+        "build": {
+          "targetName": "build"
+        }
+      }
+    }
+  ],
+  "targetDefaults": {
+    "build": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["^build"],
+      "options": {
+        "commands": ["tsc -b tsconfig.lib.json"],
+        "cwd": "{projectRoot}"
+      },
+      "outputs": ["{projectRoot}/dist"]
+    },
+    "typecheck": {
+      "dependsOn": ["^typecheck"]
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "commands": ["bun test --pass-with-no-tests"],
+        "cwd": "{projectRoot}"
+      }
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "commands": ["oxlint -c .oxlintrc.json {projectRoot}"],
+        "cwd": "{workspaceRoot}"
+      },
+      "inputs": [
+        "default",
+        "{workspaceRoot}/.oxlintrc.json"
+      ]
+    },
+    "ci": {
+      "executor": "nx:noop",
+      "dependsOn": [
+        "typecheck",
+        "lint",
+        "test",
+        "^ci"
+      ]
+    }
+  }
+}

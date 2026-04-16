@@ -1,0 +1,9 @@
+{
+  "name": "@perfect/core",
+  "sourceRoot": "packages/core/src",
+  "targets": {
+    "test": {},
+    "lint": {},
+    "typecheck": {}
+  }
+}

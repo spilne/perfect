@@ -1,0 +1,26 @@
+{
+  "name": "perfect-effect",
+  "displayName": "Perfect Effect",
+  "description": "Syntax highlighting for the Perfect effect runtime — eff($) and for-comprehension",
+  "version": "0.1.0",
+  "publisher": "perfect",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": ["Programming Languages"],
+  "keywords": ["typescript", "effect", "monad", "for-comprehension"],
+  "contributes": {
+    "grammars": [
+      {
+        "path": "./syntaxes/perfect-effect.tmLanguage.json",
+        "scopeName": "source.ts.perfect",
+        "injectTo": ["source.ts", "source.tsx"]
+      }
+    ]
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/perfect-effect/perfect"
+  },
+  "license": "MIT"
+}

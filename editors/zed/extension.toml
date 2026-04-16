@@ -1,0 +1,7 @@
+[extension]
+id = "perfect-effect"
+name = "Perfect Effect"
+version = "0.1.0"
+description = "Syntax support for Perfect effect library — for-comprehension and eff($) syntax"
+authors = ["Perfect Team"]
+schema_version = 1

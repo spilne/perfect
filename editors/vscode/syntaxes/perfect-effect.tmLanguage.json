@@ -1,0 +1,39 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "scopeName": "source.ts.perfect",
+  "injectionSelector": "L:source.ts -comment -string, L:source.tsx -comment -string",
+  "patterns": [
+    { "include": "#eff-keyword" },
+    { "include": "#dollar-bind" },
+    { "include": "#effect-constructors" },
+    { "include": "#effect-types" },
+    { "include": "#fluent-methods" },
+    { "include": "#effect-namespaces" }
+  ],
+  "repository": {
+    "eff-keyword": {
+      "match": "\\beff\\s*(?=\\()",
+      "name": "keyword.control.effect.perfect"
+    },
+    "dollar-bind": {
+      "match": "\\$\\s*(?=\\()",
+      "name": "keyword.operator.bind.perfect"
+    },
+    "effect-constructors": {
+      "match": "\\b(succeed|fail|die|sync|suspend|async|tryPromise|sleep|delay|fork|forkDaemon|join|interrupt|awaitFiber|uninterruptible|interruptible|yieldNow|race|raceFirst|raceEither|raceAll|timeout|timeoutFail|timeoutOption|all|provide|ensuring|onExit|acquireRelease|scoped|retry|service)\\s*(?=\\()",
+      "name": "support.function.effect.perfect"
+    },
+    "effect-types": {
+      "match": "\\b(Eff|Throws|Needs|Exit|Cause|Stream|Chunk|Pipe|Fiber|Scope|Schedule)\\b",
+      "name": "support.type.effect.perfect"
+    },
+    "fluent-methods": {
+      "match": "\\.(flatMap|map|flatten|tap|tapError|tapErrorCause|tapBoth|as|asVoid|zip|zipWith|zipLeft|zipRight|parZip|parZipWith|parMap|parFlatMap|filter|catch|catchTag|catchSome|catchAllCause|orElse|orDie|option|either|mapError|provide|ensuring|onExit|fork|forkDaemon|uninterruptible|interruptible|timeoutFail|timeoutOption|race|delay|when|unless|merge|through|parEvalMap|parEvalMapUnordered|grouped|groupWithin|debounce|throttle|runCollect|runDrain|runForEach|runFold|runHead|runLast|runCount|toArray|concat|interleave)\\b",
+      "name": "keyword.operator.effect.perfect"
+    },
+    "effect-namespaces": {
+      "match": "\\b(Stream|Chunk|Queue|Deferred|Semaphore|Ref|Schedule|WorkerPool|Cause|Exit|Fiber)(?=\\.)",
+      "name": "support.class.effect.perfect"
+    }
+  }
+}

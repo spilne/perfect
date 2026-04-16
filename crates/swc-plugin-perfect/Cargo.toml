@@ -1,0 +1,30 @@
+[package]
+name = "swc-plugin-perfect"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+swc_core = { version = "63", features = [
+  "ecma_plugin_transform",
+  "ecma_ast",
+  "ecma_visit",
+  "ecma_utils",
+] }
+serde = "1"
+
+[dev-dependencies]
+swc_core = { version = "63", features = [
+  "ecma_ast",
+  "ecma_visit",
+  "ecma_utils",
+  "ecma_parser",
+  "ecma_codegen",
+  "common",
+] }
+
+[profile.release]
+lto = true
+opt-level = "s"

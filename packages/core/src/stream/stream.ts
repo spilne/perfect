@@ -1,0 +1,914 @@
+// Stream<A, S> — lazy, pull-based, chunked, resource-safe
+//
+// Internally: each step is an Eff that produces either:
+//   Emit(chunk, nextStream) — a chunk of values + continuation
+//   Done                    — stream exhausted
+//
+// Consumer drives: upstream only runs when downstream pulls.
+// Backpressure is structural — no buffering, no highWaterMark.
+
+import { type Eff, type Throws, type Needs, Suspend, Op } from "../eff"
+import { succeed, fail, sync, suspend, async, sleep, fork, join } from "../constructors"
+import { all } from "../combinators"
+import { Chunk } from "./chunk"
+
+// ── Step type ──────────────────────────────────────────────────────
+
+export type Step<A> =
+  | { readonly _tag: "Emit"; readonly chunk: Chunk<A>; readonly next: Stream<A, any> }
+  | { readonly _tag: "Done" }
+
+const DONE: Step<any> = { _tag: "Done" }
+
+function emit<A>(chunk: Chunk<A>, next: Stream<A, any>): Step<A> {
+  return { _tag: "Emit", chunk, next }
+}
+
+// ── Stream class ───────────────────────────────────────────────────
+
+export class Stream<A, S = never> {
+  constructor(readonly step: Eff<Step<A>, S>) {}
+
+  // ── Constructors ─────────────────────────────────────────────────
+
+  static empty<A = never>(): Stream<A, never> {
+    return new Stream(succeed(DONE))
+  }
+
+  static succeed<A>(value: A): Stream<A, never> {
+    return new Stream(succeed(emit(Chunk.single(value), Stream.empty())))
+  }
+
+  static of<A>(...values: A[]): Stream<A, never> {
+    if (values.length === 0) return Stream.empty()
+    return new Stream(succeed(emit(Chunk.fromArray(values), Stream.empty())))
+  }
+
+  static fromChunk<A>(chunk: Chunk<A>): Stream<A, never> {
+    if (chunk.isEmpty) return Stream.empty()
+    return new Stream(succeed(emit(chunk, Stream.empty())))
+  }
+
+  static fromArray<A>(arr: ReadonlyArray<A>): Stream<A, never> {
+    return Stream.fromChunk(Chunk.fromArray(arr))
+  }
+
+  static fromIterable<A>(iter: Iterable<A>): Stream<A, never> {
+    return Stream.fromArray(Array.from(iter))
+  }
+
+  static fromEffect<A, S>(eff: Eff<A, S>): Stream<A, S> {
+    return new Stream(
+      (eff as any).map((a: A) => emit(Chunk.single(a), Stream.empty()))
+    )
+  }
+
+  static fail<E>(error: E): Stream<never, Throws<E>> {
+    return new Stream(fail(error) as any)
+  }
+
+  static suspend<A, S>(f: () => Stream<A, S>): Stream<A, S> {
+    return new Stream(suspend(() => f().step))
+  }
+
+  static unfold<A, B>(seed: B, f: (b: B) => [A, B] | null): Stream<A, never> {
+    function go(s: B): Stream<A, never> {
+      return new Stream(sync(() => {
+        const result = f(s)
+        if (result === null) return DONE
+        const [value, next] = result
+        return emit(Chunk.single(value), go(next))
+      }))
+    }
+    return go(seed)
+  }
+
+  static unfoldEffect<A, B, S>(seed: B, f: (b: B) => Eff<[A, B] | null, S>): Stream<A, S> {
+    function go(s: B): Stream<A, S> {
+      return new Stream(
+        (f(s) as any).map((result: [A, B] | null) => {
+          if (result === null) return DONE
+          const [value, next] = result
+          return emit(Chunk.single(value), go(next))
+        })
+      )
+    }
+    return go(seed)
+  }
+
+  static iterate<A>(seed: A, f: (a: A) => A): Stream<A, never> {
+    return Stream.unfold(seed, s => [s, f(s)])
+  }
+
+  static range(start: number, end: number, step = 1): Stream<number, never> {
+    return Stream.unfold(start, n => n < end ? [n, n + step] : null)
+  }
+
+  static repeat<A, S>(eff: Eff<A, S>): Stream<A, S> {
+    const self: Stream<A, S> = new Stream(
+      (eff as any).map((a: A) => emit(Chunk.single(a), self))
+    )
+    return self
+  }
+
+  static repeatValue<A>(value: A): Stream<A, never> {
+    return Stream.suspend(() => {
+      const chunk = Chunk.single(value)
+      return new Stream(succeed(emit(chunk, Stream.repeatValue(value))))
+    })
+  }
+
+  static tick(intervalMs: number): Stream<void, never> {
+    function go(): Stream<void, never> {
+      return new Stream(
+        (sleep(intervalMs) as any).map(() => emit(Chunk.single(undefined as void), go()))
+      )
+    }
+    return go()
+  }
+
+  static fromQueue<A>(queue: { take(): Eff<A, any> }): Stream<A, any> {
+    function go(): Stream<A, any> {
+      return new Stream(
+        (queue.take() as any)
+          .map((a: A) => emit(Chunk.single(a), go()))
+          .catch(() => DONE) // shutdown
+      )
+    }
+    return go()
+  }
+
+  static bracket<A, S>(
+    acquire: Eff<A, S>,
+    release: (a: A) => Eff<void, never>,
+  ): Stream<A, S> {
+    return new Stream(
+      (acquire as any).map((resource: A) => {
+        const done = new Stream<A, never>(
+          new Suspend(Op.Ensuring,
+            succeed(DONE),
+            release(resource),
+          ) as any
+        )
+        return emit(Chunk.single(resource), done)
+      })
+    )
+  }
+
+  // ── Transform operators ──────────────────────────────────────────
+
+  map<B>(f: (a: A) => B): Stream<B, S> {
+    return new Stream(
+      (this.step as any).map((s: Step<A>) => {
+        if (s._tag === "Done") return DONE
+        return emit(s.chunk.map(f), s.next.map(f))
+      })
+    )
+  }
+
+  mapChunks<B>(f: (chunk: Chunk<A>) => Chunk<B>): Stream<B, S> {
+    return new Stream(
+      (this.step as any).map((s: Step<A>) => {
+        if (s._tag === "Done") return DONE
+        return emit(f(s.chunk), s.next.mapChunks(f))
+      })
+    )
+  }
+
+  filter(p: (a: A) => boolean): Stream<A, S> {
+    return new Stream(
+      (this.step as any).map((s: Step<A>) => {
+        if (s._tag === "Done") return DONE
+        const filtered = s.chunk.filter(p)
+        const next = s.next.filter(p)
+        if (filtered.isEmpty) return next.step
+        return emit(filtered, next)
+      }).flatMap((r: any) => r instanceof Suspend ? r : succeed(r))
+    )
+  }
+
+  collect<B>(f: (a: A) => B | undefined): Stream<B, S> {
+    return this.map(f).filter((b): b is B => b !== undefined) as any
+  }
+
+  flatMap<B, S2>(f: (a: A) => Stream<B, S2>): Stream<B, S | S2> {
+    return new Stream(
+      (this.step as any).flatMap((s: Step<A>) => {
+        if (s._tag === "Done") return succeed(DONE)
+        const innerStreams = Array.from(s.chunk).map(f)
+        const combined = innerStreams.reduce<Stream<B, S2>>(
+          (acc, stream) => acc.concat(stream),
+          Stream.empty(),
+        )
+        return combined.concat(s.next.flatMap(f)).step
+      })
+    )
+  }
+
+  evalMap<B, S2>(f: (a: A) => Eff<B, S2>): Stream<B, S | S2> {
+    return new Stream(
+      (this.step as any).flatMap((s: Step<A>) => {
+        if (s._tag === "Done") return succeed(DONE)
+        return evalMapChunk(s.chunk, f).map((mapped: Chunk<B>) =>
+          emit(mapped, s.next.evalMap(f))
+        )
+      })
+    )
+  }
+
+  evalFilter<S2>(p: (a: A) => Eff<boolean, S2>): Stream<A, S | S2> {
+    return this.evalMap<A | typeof SKIP, S2>(a =>
+      (p(a) as any).map((b: boolean) => b ? a : SKIP)
+    ).filter((a): a is A => a !== SKIP) as any
+  }
+
+  take(n: number): Stream<A, S> {
+    if (n <= 0) return Stream.empty()
+    return new Stream(
+      (this.step as any).map((s: Step<A>) => {
+        if (s._tag === "Done") return DONE
+        if (s.chunk.length <= n) {
+          return emit(s.chunk, s.next.take(n - s.chunk.length))
+        }
+        return emit(s.chunk.take(n), Stream.empty())
+      })
+    )
+  }
+
+  drop(n: number): Stream<A, S> {
+    if (n <= 0) return this
+    return new Stream(
+      (this.step as any).map((s: Step<A>) => {
+        if (s._tag === "Done") return DONE
+        if (n >= s.chunk.length) {
+          return s.next.drop(n - s.chunk.length).step
+        }
+        return emit(s.chunk.drop(n), s.next)
+      }).flatMap((r: any) => r instanceof Suspend ? r : succeed(r))
+    )
+  }
+
+  takeWhile(p: (a: A) => boolean): Stream<A, S> {
+    return new Stream(
+      (this.step as any).map((s: Step<A>) => {
+        if (s._tag === "Done") return DONE
+        const taken: A[] = []
+        for (const item of s.chunk) {
+          if (!p(item)) return emit(Chunk.fromArray(taken), Stream.empty())
+          taken.push(item)
+        }
+        return emit(Chunk.fromArray(taken), s.next.takeWhile(p))
+      })
+    )
+  }
+
+  dropWhile(p: (a: A) => boolean): Stream<A, S> {
+    return new Stream(
+      (this.step as any).map((s: Step<A>) => {
+        if (s._tag === "Done") return DONE
+        let dropCount = 0
+        for (const item of s.chunk) {
+          if (!p(item)) break
+          dropCount++
+        }
+        if (dropCount === s.chunk.length) {
+          return s.next.dropWhile(p).step
+        }
+        return emit(s.chunk.drop(dropCount), s.next)
+      }).flatMap((r: any) => r instanceof Suspend ? r : succeed(r))
+    )
+  }
+
+  scan<B>(zero: B, f: (acc: B, a: A) => B): Stream<B, S> {
+    function go(acc: B, stream: Stream<A, any>): Stream<B, any> {
+      return new Stream(
+        (stream.step as any).map((s: Step<A>) => {
+          if (s._tag === "Done") return DONE
+          const results: B[] = []
+          let current = acc
+          for (const item of s.chunk) {
+            current = f(current, item)
+            results.push(current)
+          }
+          return emit(Chunk.fromArray(results), go(current, s.next))
+        })
+      )
+    }
+    return new Stream(
+      succeed(emit(Chunk.single(zero), go(zero, this)))
+    )
+  }
+
+  tap(f: (a: A) => void): Stream<A, S> {
+    return this.map(a => { f(a); return a })
+  }
+
+  tapEffect<S2>(f: (a: A) => Eff<any, S2>): Stream<A, S | S2> {
+    return this.evalMap(a => (f(a) as any).map(() => a))
+  }
+
+  zipWithIndex(): Stream<[A, number], S> {
+    let index = 0
+    return this.map(a => [a, index++] as [A, number])
+  }
+
+  changes(): Stream<A, S> {
+    let last: A | typeof SENTINEL = SENTINEL
+    return this.filter(a => {
+      if (a === last) return false
+      last = a
+      return true
+    })
+  }
+
+  // ── Batching ─────────────────────────────────────────────────────
+
+  grouped(size: number): Stream<Chunk<A>, S> {
+    function go(buffer: A[], stream: Stream<A, any>): Stream<Chunk<A>, any> {
+      return new Stream(
+        (stream.step as any).map((s: Step<A>) => {
+          if (s._tag === "Done") {
+            if (buffer.length > 0) {
+              return emit(Chunk.single(Chunk.fromArray(buffer)), Stream.empty())
+            }
+            return DONE
+          }
+          const combined = [...buffer]
+          for (const item of s.chunk) combined.push(item)
+          const groups: Chunk<A>[] = []
+          let i = 0
+          while (i + size <= combined.length) {
+            groups.push(Chunk.fromArray(combined.slice(i, i + size)))
+            i += size
+          }
+          const remainder = combined.slice(i)
+          const next = go(remainder, s.next)
+          if (groups.length === 0) return next.step
+          return emit(Chunk.fromArray(groups), next)
+        }).flatMap((r: any) => r instanceof Suspend ? r : succeed(r))
+      )
+    }
+    return go([], this)
+  }
+
+  rechunk(size: number): Stream<A, S> {
+    return this.grouped(size).flatMap(chunk => Stream.fromChunk(chunk))
+  }
+
+  // ── Combination ──────────────────────────────────────────────────
+
+  concat<S2>(that: Stream<A, S2>): Stream<A, S | S2> {
+    return new Stream(
+      (this.step as any).map((s: Step<A>) => {
+        if (s._tag === "Done") return that.step
+        return emit(s.chunk, s.next.concat(that))
+      }).flatMap((r: any) => r instanceof Suspend ? r : succeed(r))
+    )
+  }
+
+  zip<B, S2>(that: Stream<B, S2>): Stream<[A, B], S | S2> {
+    return this.zipWith(that, (a, b) => [a, b] as [A, B])
+  }
+
+  zipWith<B, C, S2>(that: Stream<B, S2>, f: (a: A, b: B) => C): Stream<C, S | S2> {
+    function go(
+      left: Stream<A, any>,
+      right: Stream<B, any>,
+      leftBuf: Chunk<A>,
+      rightBuf: Chunk<B>,
+    ): Stream<C, any> {
+      // if both buffers have elements, pair them
+      if (!leftBuf.isEmpty && !rightBuf.isEmpty) {
+        const len = Math.min(leftBuf.length, rightBuf.length)
+        const results: C[] = []
+        for (let i = 0; i < len; i++) {
+          results.push(f(leftBuf.get(i), rightBuf.get(i)))
+        }
+        return new Stream(
+          succeed(emit(
+            Chunk.fromArray(results),
+            go(left, right, leftBuf.drop(len), rightBuf.drop(len)),
+          ))
+        )
+      }
+
+      // need to pull from whichever buffer is empty
+      if (leftBuf.isEmpty) {
+        return new Stream(
+          (left.step as any).flatMap((s: Step<A>) => {
+            if (s._tag === "Done") return succeed(DONE)
+            return go(s.next, right, s.chunk, rightBuf).step
+          })
+        )
+      }
+
+      return new Stream(
+        (right.step as any).flatMap((s: Step<B>) => {
+          if (s._tag === "Done") return succeed(DONE)
+          return go(left, s.next, leftBuf, s.chunk).step
+        })
+      )
+    }
+
+    return go(this, that, Chunk.empty(), Chunk.empty())
+  }
+
+  interleave<S2>(that: Stream<A, S2>): Stream<A, S | S2> {
+    return this.zip(that).flatMap(([a, b]) => Stream.of(a, b))
+  }
+
+  merge<S2>(that: Stream<A, S2>): Stream<A, S | S2> {
+    // concurrent merge via fibers writing to a shared buffer
+    const self = this
+    return new Stream(
+      async<Step<A>>((resume) => {
+        let done1 = false
+        let done2 = false
+        const buffer: A[] = []
+        let waiting: ((s: Eff<Step<A>, any>) => void) | null = null
+
+        function deliver() {
+          if (waiting && buffer.length > 0) {
+            const chunk = Chunk.fromArray(buffer.splice(0))
+            const w = waiting
+            waiting = null
+            w(succeed(emit(chunk, rest())))
+          }
+          if (waiting && done1 && done2) {
+            const w = waiting
+            waiting = null
+            if (buffer.length > 0) {
+              const chunk = Chunk.fromArray(buffer.splice(0))
+              w(succeed(emit(chunk, Stream.empty())))
+            } else {
+              w(succeed(DONE))
+            }
+          }
+        }
+
+        function rest(): Stream<A, any> {
+          return new Stream(
+            async<Step<A>>((resume2) => {
+              waiting = resume2
+              deliver()
+            }) as any
+          )
+        }
+
+        function drainOne(stream: Stream<A, any>, markDone: () => void) {
+          function go(s: Stream<A, any>): void {
+            const stepEff = s.step as any
+            import("../runtime").then(({ run }) => {
+              run(stepEff).then(
+                (step: Step<A>) => {
+                  if (step._tag === "Done") { markDone(); deliver(); return }
+                  for (const item of step.chunk) buffer.push(item)
+                  deliver()
+                  go(step.next)
+                },
+                () => { markDone(); deliver() },
+              )
+            })
+          }
+          go(stream)
+        }
+
+        drainOne(self, () => { done1 = true })
+        drainOne(that as any, () => { done2 = true })
+        waiting = resume
+        deliver()
+      }) as any
+    )
+  }
+
+  // ── Concurrency ──────────────────────────────────────────────────
+
+  parEvalMap<B, S2>(concurrency: number, f: (a: A) => Eff<B, S2>): Stream<B, S | S2> {
+    // bounded parallel evaluation, preserving order
+    // uses Deferred slots to maintain ordering
+    return new Stream(
+      async<Step<B>>((outerResume) => {
+        const slots: Array<{ resolve: (b: B) => void; promise: Promise<B> }> = []
+        let running = 0
+        let inputDone = false
+        let outputIndex = 0
+        const results: Array<{ value?: B; done: boolean }> = []
+        let outputWaiting: ((s: Eff<Step<B>, any>) => void) | null = null
+
+        function tryOutput(): void {
+          if (!outputWaiting) return
+          const ready: B[] = []
+          while (outputIndex < results.length && results[outputIndex]?.done) {
+            ready.push(results[outputIndex]!.value!)
+            outputIndex++
+          }
+          if (ready.length > 0) {
+            const w = outputWaiting
+            outputWaiting = null
+            w(succeed(emit(Chunk.fromArray(ready), outputRest())))
+          } else if (inputDone && outputIndex >= results.length) {
+            const w = outputWaiting
+            outputWaiting = null
+            w(succeed(DONE))
+          }
+        }
+
+        function outputRest(): Stream<B, any> {
+          return new Stream(
+            async<Step<B>>((resume) => {
+              outputWaiting = resume
+              tryOutput()
+            }) as any
+          )
+        }
+
+        function drainInput(stream: Stream<A, any>) {
+          import("../runtime").then(({ run }) => {
+            function go(s: Stream<A, any>): void {
+              run(s.step as any).then(
+                (step: Step<A>) => {
+                  if (step._tag === "Done") {
+                    inputDone = true
+                    tryOutput()
+                    return
+                  }
+                  const items = Array.from(step.chunk)
+                  processItems(items, 0, () => go(step.next))
+                },
+                () => { inputDone = true; tryOutput() },
+              )
+            }
+
+            function processItems(items: A[], i: number, cont: () => void): void {
+              if (i >= items.length) { cont(); return }
+
+              if (running >= concurrency) {
+                // wait for a slot to free up
+                setTimeout(() => processItems(items, i, cont), 1)
+                return
+              }
+
+              const idx = results.length
+              results.push({ done: false })
+              running++
+
+              run(f(items[i]!) as any).then(
+                (value: B) => {
+                  results[idx] = { value, done: true }
+                  running--
+                  tryOutput()
+                },
+                () => {
+                  running--
+                  inputDone = true
+                  tryOutput()
+                },
+              )
+
+              processItems(items, i + 1, cont)
+            }
+
+            go(stream)
+          })
+        }
+
+        drainInput(this)
+        outputWaiting = outerResume
+      }) as any
+    )
+  }
+
+  parEvalMapUnordered<B, S2>(concurrency: number, f: (a: A) => Eff<B, S2>): Stream<B, S | S2> {
+    // bounded parallel evaluation, results emit as they complete
+    return new Stream(
+      async<Step<B>>((outerResume) => {
+        let running = 0
+        let inputDone = false
+        const buffer: B[] = []
+        let outputWaiting: ((s: Eff<Step<B>, any>) => void) | null = null
+
+        function deliver() {
+          if (outputWaiting && buffer.length > 0) {
+            const chunk = Chunk.fromArray(buffer.splice(0))
+            const w = outputWaiting
+            outputWaiting = null
+            w(succeed(emit(chunk, rest())))
+          }
+          if (outputWaiting && inputDone && running === 0) {
+            const w = outputWaiting
+            outputWaiting = null
+            w(succeed(DONE))
+          }
+        }
+
+        function rest(): Stream<B, any> {
+          return new Stream(
+            async<Step<B>>((resume) => {
+              outputWaiting = resume
+              deliver()
+            }) as any
+          )
+        }
+
+        function drainInput(stream: Stream<A, any>) {
+          import("../runtime").then(({ run }) => {
+            function go(s: Stream<A, any>): void {
+              run(s.step as any).then(
+                (step: Step<A>) => {
+                  if (step._tag === "Done") { inputDone = true; deliver(); return }
+                  const items = Array.from(step.chunk)
+                  processItems(items, 0, () => go(step.next))
+                },
+                () => { inputDone = true; deliver() },
+              )
+            }
+
+            function processItems(items: A[], i: number, cont: () => void): void {
+              if (i >= items.length) { cont(); return }
+              if (running >= concurrency) {
+                setTimeout(() => processItems(items, i, cont), 1)
+                return
+              }
+              running++
+              run(f(items[i]!) as any).then(
+                (value: B) => {
+                  buffer.push(value)
+                  running--
+                  deliver()
+                },
+                () => { running--; deliver() },
+              )
+              processItems(items, i + 1, cont)
+            }
+
+            go(stream)
+          })
+        }
+
+        drainInput(this)
+        outputWaiting = outerResume
+      }) as any
+    )
+  }
+
+  // ── Time-based operators ─────────────────────────────────────────
+
+  groupWithin(maxSize: number, timeoutMs: number): Stream<Chunk<A>, S> {
+    const self = this
+    return new Stream(
+      async<Step<Chunk<A>>>((outerResume) => {
+        let buffer: A[] = []
+        let inputDone = false
+        let timer: ReturnType<typeof setTimeout> | null = null
+        let outputWaiting: ((s: Eff<Step<Chunk<A>>, any>) => void) | null = null
+
+        function flush() {
+          if (timer) { clearTimeout(timer); timer = null }
+          if (buffer.length > 0 && outputWaiting) {
+            const chunk = Chunk.single(Chunk.fromArray(buffer.splice(0)))
+            const w = outputWaiting
+            outputWaiting = null
+            w(succeed(emit(chunk, rest())))
+          } else if (inputDone && outputWaiting) {
+            const w = outputWaiting
+            outputWaiting = null
+            if (buffer.length > 0) {
+              const chunk = Chunk.single(Chunk.fromArray(buffer.splice(0)))
+              w(succeed(emit(chunk, Stream.empty())))
+            } else {
+              w(succeed(DONE))
+            }
+          }
+        }
+
+        function resetTimer() {
+          if (timer) clearTimeout(timer)
+          timer = setTimeout(() => { timer = null; flush() }, timeoutMs)
+        }
+
+        function rest(): Stream<Chunk<A>, any> {
+          return new Stream(
+            async<Step<Chunk<A>>>((resume) => {
+              outputWaiting = resume
+              if (inputDone) flush()
+            }) as any
+          )
+        }
+
+        import("../runtime").then(({ run }) => {
+          function go(s: Stream<A, any>): void {
+            run(s.step as any).then(
+              (step: Step<A>) => {
+                if (step._tag === "Done") { inputDone = true; flush(); return }
+                for (const item of step.chunk) buffer.push(item)
+                if (buffer.length >= maxSize) flush()
+                else if (!timer) resetTimer()
+                go(step.next)
+              },
+              () => { inputDone = true; flush() },
+            )
+          }
+          resetTimer()
+          go(self)
+        })
+
+        outputWaiting = outerResume
+      }) as any
+    )
+  }
+
+  debounce(ms: number): Stream<A, S> {
+    const self = this
+    return new Stream(
+      async<Step<A>>((outerResume) => {
+        let latest: A | typeof SENTINEL = SENTINEL
+        let timer: ReturnType<typeof setTimeout> | null = null
+        let inputDone = false
+        let outputWaiting: ((s: Eff<Step<A>, any>) => void) | null = null
+
+        function deliver() {
+          if (outputWaiting && latest !== SENTINEL) {
+            const val = latest as A
+            latest = SENTINEL
+            const w = outputWaiting
+            outputWaiting = null
+            w(succeed(emit(Chunk.single(val), rest())))
+          }
+          if (outputWaiting && inputDone && latest === SENTINEL) {
+            const w = outputWaiting
+            outputWaiting = null
+            w(succeed(DONE))
+          }
+        }
+
+        function rest(): Stream<A, any> {
+          return new Stream(
+            async<Step<A>>((resume) => {
+              outputWaiting = resume
+              deliver()
+            }) as any
+          )
+        }
+
+        import("../runtime").then(({ run }) => {
+          function go(s: Stream<A, any>): void {
+            run(s.step as any).then(
+              (step: Step<A>) => {
+                if (step._tag === "Done") { inputDone = true; deliver(); return }
+                const last = step.chunk.last()
+                if (last !== undefined) {
+                  latest = last
+                  if (timer) clearTimeout(timer)
+                  timer = setTimeout(() => { timer = null; deliver() }, ms)
+                }
+                go(step.next)
+              },
+              () => { inputDone = true; deliver() },
+            )
+          }
+          go(self)
+        })
+
+        outputWaiting = outerResume
+      }) as any
+    )
+  }
+
+  throttle(ms: number): Stream<A, S> {
+    let lastEmit = 0
+    return this.evalMap(a =>
+      sync(() => {
+        const now = Date.now()
+        const wait = Math.max(0, ms - (now - lastEmit))
+        lastEmit = now + wait
+        return { a, wait }
+      }).flatMap(({ a, wait }) =>
+        wait > 0 ? sleep(wait).map(() => a) : succeed(a)
+      ) as any
+    )
+  }
+
+  // ── Pipe ─────────────────────────────────────────────────────────
+
+  through<B, S2>(pipe: Pipe<A, B, S2>): Stream<B, S | S2> {
+    return pipe(this) as any
+  }
+
+  // ── Error handling ───────────────────────────────────────────────
+
+  catch<B, S2>(handler: (error: any) => Stream<B, S2>): Stream<A | B, S2> {
+    return new Stream(
+      (this.step as any)
+        .map((s: Step<A>) => {
+          if (s._tag === "Done") return DONE
+          return emit(s.chunk, s.next.catch(handler))
+        })
+        .catch((e: any) => handler(e).step)
+    )
+  }
+
+  onFinalize<S2>(finalizer: Eff<void, S2>): Stream<A, S | S2> {
+    return new Stream(
+      new Suspend(Op.Ensuring, this.step, finalizer) as any
+    ).mapContinuation(next => next.onFinalize(finalizer))
+  }
+
+  private mapContinuation(f: (next: Stream<A, any>) => Stream<A, any>): Stream<A, S> {
+    return new Stream(
+      (this.step as any).map((s: Step<A>) => {
+        if (s._tag === "Done") return DONE
+        return emit(s.chunk, f(s.next))
+      })
+    )
+  }
+
+  // ── Terminal operators (run the stream) ──────────────────────────
+
+  runCollect(): Eff<A[], S> {
+    return this.runFold<A[]>([], (acc, a) => { acc.push(a); return acc })
+  }
+
+  runDrain(): Eff<void, S> {
+    function go(stream: Stream<any, any>): Eff<void, any> {
+      return (stream.step as any).flatMap((s: Step<any>) => {
+        if (s._tag === "Done") return succeed(undefined)
+        return go(s.next)
+      })
+    }
+    return go(this) as any
+  }
+
+  runForEach<S2>(f: (a: A) => Eff<void, S2>): Eff<void, S | S2> {
+    function go(stream: Stream<A, any>): Eff<void, any> {
+      return (stream.step as any).flatMap((s: Step<A>) => {
+        if (s._tag === "Done") return succeed(undefined)
+        return runChunkForEach(s.chunk, f).flatMap(() => go(s.next))
+      })
+    }
+    return go(this) as any
+  }
+
+  runFold<B>(zero: B, f: (acc: B, a: A) => B): Eff<B, S> {
+    function go(acc: B, stream: Stream<A, any>): Eff<B, any> {
+      return (stream.step as any).flatMap((s: Step<A>) => {
+        if (s._tag === "Done") return succeed(acc)
+        const next = s.chunk.reduce(acc, f)
+        return go(next, s.next)
+      })
+    }
+    return go(zero, this) as any
+  }
+
+  runHead(): Eff<A | undefined, S> {
+    return (this.step as any).map((s: Step<A>) => {
+      if (s._tag === "Done") return undefined
+      return s.chunk.head()
+    })
+  }
+
+  runLast(): Eff<A | undefined, S> {
+    function go(last: A | undefined, stream: Stream<A, any>): Eff<A | undefined, any> {
+      return (stream.step as any).flatMap((s: Step<A>) => {
+        if (s._tag === "Done") return succeed(last)
+        return go(s.chunk.last() ?? last, s.next)
+      })
+    }
+    return go(undefined, this) as any
+  }
+
+  runCount(): Eff<number, S> {
+    return this.runFold(0, (n, _) => n + 1)
+  }
+
+  toArray(): Eff<A[], S> {
+    return this.runCollect()
+  }
+}
+
+// ── Pipe type ──────────────────────────────────────────────────────
+
+export type Pipe<I, O, S = never> = (input: Stream<I, any>) => Stream<O, S>
+
+// ── Helpers ────────────────────────────────────────────────────────
+
+const SENTINEL = Symbol("sentinel")
+const SKIP = Symbol("skip")
+
+function evalMapChunk<A, B, S>(chunk: Chunk<A>, f: (a: A) => Eff<B, S>): Eff<Chunk<B>, S> {
+  if (chunk.isEmpty) return succeed(Chunk.empty()) as any
+  const items = Array.from(chunk)
+  return items.reduce<Eff<B[], S>>(
+    (acc, item) => (acc as any).flatMap((arr: B[]) =>
+      (f(item) as any).map((b: B) => { arr.push(b); return arr })
+    ),
+    succeed([]) as any,
+  ).map(arr => Chunk.fromArray(arr)) as any
+}
+
+function runChunkForEach<A, S>(chunk: Chunk<A>, f: (a: A) => Eff<void, S>): Eff<void, S> {
+  const items = Array.from(chunk)
+  return items.reduce<Eff<void, S>>(
+    (acc, item) => (acc as any).flatMap(() => f(item)),
+    succeed(undefined) as any,
+  )
+}

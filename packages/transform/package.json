@@ -1,0 +1,17 @@
+{
+  "name": "@perfect/transform",
+  "version": "0.0.1",
+  "type": "module",
+  "main": "src/rewrite.ts",
+  "exports": {
+    ".": "./src/rewrite.ts",
+    "./bun-plugin": "./src/bun-plugin.ts",
+    "./plugin": "./src/plugin.ts"
+  },
+  "scripts": {
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}

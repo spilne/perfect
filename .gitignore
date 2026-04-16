@@ -1,0 +1,19 @@
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Rust
+target/
+Cargo.lock
+
+# Bun
+bun.lockb
+
+# Nx cache
+.nx/
+
+# Transform artifacts
+*.~transformed.ts
+
+# OS
+.DS_Store
