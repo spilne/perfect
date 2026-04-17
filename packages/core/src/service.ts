@@ -22,6 +22,8 @@ export function service<T>(name: string): ServiceTag<T> {
 
 export type Context = Map<symbol, unknown>
 
+// "Empty" minus defaults — populated with a real Clock by runtime.ts.
+// Kept mutable so bootstrap can seed it without a circular import.
 export const emptyContext: Context = new Map()
 
 export function makeContext<T>(tag: ServiceTag<T>, impl: T): Context {

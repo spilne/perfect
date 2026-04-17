@@ -5,6 +5,11 @@ import { Fiber, FiberState } from "./fiber"
 import { Scope } from "./scope"
 import { type Scheduler, BunScheduler, SyncScheduler, DEFAULT_BUDGET, getDefaultScheduler } from "./scheduler"
 import { succeed } from "./constructors"
+import { Clock, realClock } from "./clock"
+
+// Seed the default context once — real Clock is always available so sleep()
+// works without explicit provide(). Tests override via provide(eff, Clock, testClock).
+if (!emptyContext.has(Clock.key)) emptyContext.set(Clock.key, realClock)
 
 type Resolve = (value: any) => void
 type Reject = (cause: Cause) => void
