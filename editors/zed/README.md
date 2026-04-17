@@ -19,10 +19,18 @@ Uses the built-in TypeScript tree-sitter grammar — no custom grammar needed fo
 
 ## Installation (dev)
 
-Symlink this folder into Zed's extensions directory:
+The easiest way: open the command palette in Zed and run
+`zed: install dev extension`, then pick the `editors/zed` folder in this repo.
+
+Alternatively, symlink this folder into Zed's extensions directory. The path
+depends on your OS — the example below is for Linux:
 
 ```bash
+# Linux
 ln -s /path/to/perfect/editors/zed ~/.local/share/zed/extensions/installed/perfect-effect
+
+# macOS
+ln -s /path/to/perfect/editors/zed "$HOME/Library/Application Support/Zed/extensions/installed/perfect-effect"
 ```
 
 Then restart Zed. The extension applies to `.ts` and `.tsx` files.
