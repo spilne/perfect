@@ -15,5 +15,8 @@ bun.lockb
 # Transform artifacts
 *.~transformed.ts
 
+# Internal — not for public repo yet
+docs/
+
 # OS
 .DS_Store
