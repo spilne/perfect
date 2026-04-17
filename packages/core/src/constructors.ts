@@ -91,11 +91,17 @@ export const yieldNow: Eff<void, never> =
 
 // ── Timing ─────────────────────────────────────────────────────────
 
+// sleep routes through the Clock service in the fiber context.
+// Clock is seeded to a real default in runtime.ts, so no user provide() is
+// needed. Tests swap in a TestClock via provide(eff, Clock, testClock).
+const CLOCK_KEY = Symbol.for("spilne/svc/Clock")
 export function sleep(ms: number): Eff<void, never> {
-  return async<void>((resume) => {
-    const id = setTimeout(() => resume(succeed(undefined) as any), ms)
-    return () => clearTimeout(id)
-  }) as any
+  // Op.FlatMap directly so we don't depend on the fluent prototype being installed.
+  return new Suspend(
+    Op.FlatMap,
+    new Suspend(Op.GetCtx, CLOCK_KEY, null),
+    (clock: any) => clock.sleep(ms),
+  ) as any
 }
 
 export function delay<A, S>(eff: Eff<A, S>, ms: number): Eff<A, S> {
