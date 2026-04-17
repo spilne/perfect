@@ -1,1 +1,1 @@
-export { WorkerPool } from "./pool"
+export { WorkerPool } from "./pool";

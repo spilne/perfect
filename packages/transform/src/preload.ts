@@ -1,5 +1,5 @@
-import { plugin } from "bun"
-import { rewriteEffBlocks } from "./rewrite"
+import { plugin } from "bun";
+import { rewriteEffBlocks } from "./rewrite";
 
 await plugin({
   name: "perfect-for-comprehension",
@@ -7,16 +7,16 @@ await plugin({
     build.onLoad({ filter: /\.ts$/ }, async (args) => {
       // don't transform ourselves or node_modules
       if (args.path.includes("node_modules") || args.path.includes("preload")) {
-        return undefined
+        return undefined;
       }
-      const source = await Bun.file(args.path).text()
+      const source = await Bun.file(args.path).text();
       if (!source.includes("<-") && !source.includes("eff(($)")) {
-        return undefined
+        return undefined;
       }
-      const transformed = rewriteEffBlocks(source)
-      return { contents: transformed, loader: "ts" }
-    })
+      const transformed = rewriteEffBlocks(source);
+      return { contents: transformed, loader: "ts" };
+    });
   },
-})
+});
 
-export {}
+export {};
