@@ -24,7 +24,7 @@ Point directly at the built file — no npm install needed:
 
 ```ts
 // next.config.js / vite.config.ts / etc.
-const PLUGIN = new URL("./packages/swc-plugin/dist/plugin.wasm", import.meta.url).pathname
+const PLUGIN = new URL("./packages/swc-plugin/dist/plugin.wasm", import.meta.url).pathname;
 ```
 
 ### After publishing or `npm link` (package import)
@@ -33,21 +33,21 @@ Once this package is on npm or linked into `node_modules/@perfect/swc-plugin`:
 
 ```js
 // Next.js
-import { createRequire } from "module"
-const require = createRequire(import.meta.url)
+import { createRequire } from "module";
+const require = createRequire(import.meta.url);
 
 export default {
   experimental: {
     swcPlugins: [[require.resolve("@perfect/swc-plugin"), {}]],
   },
-}
+};
 ```
 
 ```ts
 // Vite
-import swc from "unplugin-swc"
-import { createRequire } from "module"
-const require = createRequire(import.meta.url)
+import swc from "unplugin-swc";
+import { createRequire } from "module";
+const require = createRequire(import.meta.url);
 
 export default {
   plugins: [
@@ -59,7 +59,7 @@ export default {
       },
     }),
   ],
-}
+};
 ```
 
 ### Local link (between projects on your machine)

@@ -1,16 +1,25 @@
-import { describe, test, expect } from "bun:test"
-import { rewriteEffBlocks } from "../src/rewrite"
+import { describe, test, expect } from "bun:test";
+import { rewriteEffBlocks } from "../src/rewrite";
 
 // These tests write for-comprehension source code, transform it,
 // then eval() the result with the real Perfect runtime to verify
 // it actually works end-to-end.
 
 async function runForComprehension(source: string): Promise<any> {
-  const transformed = rewriteEffBlocks(source)
-  const { succeed, fail, sync, sleep, service, provide, all, run } = await import("../../core/src")
-  const fn = new Function("succeed", "fail", "sync", "sleep", "service", "provide", "all", "run",
-    `return (async () => { ${transformed} })()`)
-  return fn(succeed, fail, sync, sleep, service, provide, all, run)
+  const transformed = rewriteEffBlocks(source);
+  const { succeed, fail, sync, sleep, service, provide, all, run } = await import("../../core/src");
+  const fn = new Function(
+    "succeed",
+    "fail",
+    "sync",
+    "sleep",
+    "service",
+    "provide",
+    "all",
+    "run",
+    `return (async () => { ${transformed} })()`,
+  );
+  return fn(succeed, fail, sync, sleep, service, provide, all, run);
 }
 
 describe("for-comprehension e2e", () => {
@@ -21,9 +30,9 @@ describe("for-comprehension e2e", () => {
         y <- succeed(20)
       } yield x + y
       return await run(program)
-    `)
-    expect(result).toBe(30)
-  })
+    `);
+    expect(result).toBe(30);
+  });
 
   test("three binds", async () => {
     const result = await runForComprehension(`
@@ -33,9 +42,9 @@ describe("for-comprehension e2e", () => {
         c <- succeed("world")
       } yield a + b + c
       return await run(program)
-    `)
-    expect(result).toBe("hello world")
-  })
+    `);
+    expect(result).toBe("hello world");
+  });
 
   test("discard bind with _", async () => {
     const result = await runForComprehension(`
@@ -46,9 +55,9 @@ describe("for-comprehension e2e", () => {
       } yield x
       const r = await run(program)
       return { r, sideEffect }
-    `)
-    expect(result).toEqual({ r: 42, sideEffect: 42 })
-  })
+    `);
+    expect(result).toEqual({ r: 42, sideEffect: 42 });
+  });
 
   test("guards throw at transform time (no longer supported)", () => {
     expect(() =>
@@ -58,8 +67,8 @@ describe("for-comprehension e2e", () => {
           if x > 5
         } yield x * 2
       `),
-    ).toThrow(/guards \(if\) are not supported/)
-  })
+    ).toThrow(/guards \(if\) are not supported/);
+  });
 
   test("monad-generic — works on Array directly", async () => {
     const result = await runForComprehension(`
@@ -68,9 +77,9 @@ describe("for-comprehension e2e", () => {
         y <- [10, 20]
       } yield x + y
       return pairs
-    `)
-    expect(result).toEqual([11, 21, 12, 22, 13, 23])
-  })
+    `);
+    expect(result).toEqual([11, 21, 12, 22, 13, 23]);
+  });
 
   test("val binding", async () => {
     const result = await runForComprehension(`
@@ -79,9 +88,9 @@ describe("for-comprehension e2e", () => {
         val doubled = x * 2
       } yield doubled
       return await run(program)
-    `)
-    expect(result).toBe(20)
-  })
+    `);
+    expect(result).toBe(20);
+  });
 
   test("with services", async () => {
     const result = await runForComprehension(`
@@ -91,9 +100,9 @@ describe("for-comprehension e2e", () => {
         name <- db.find("1")
       } yield name
       return await run(provide(program, Db, { find: (id) => succeed("user-" + id) }))
-    `)
-    expect(result).toBe("user-1")
-  })
+    `);
+    expect(result).toBe("user-1");
+  });
 
   test("chained with fluent API", async () => {
     const result = await runForComprehension(`
@@ -107,9 +116,9 @@ describe("for-comprehension e2e", () => {
         .flatMap(n => succeed(n + 1))
 
       return await run(program)
-    `)
-    expect(result).toBe(81) // (5+3)*10 + 1
-  })
+    `);
+    expect(result).toBe(81); // (5+3)*10 + 1
+  });
 
   test("error handling with .catch after for", async () => {
     const result = await runForComprehension(`
@@ -117,9 +126,9 @@ describe("for-comprehension e2e", () => {
         x <- fail("boom")
       } yield x).catch(() => succeed("recovered"))
       return await run(program)
-    `)
-    expect(result).toBe("recovered")
-  })
+    `);
+    expect(result).toBe("recovered");
+  });
 
   test("nested for-comprehensions", async () => {
     const result = await runForComprehension(`
@@ -132,10 +141,10 @@ describe("for-comprehension e2e", () => {
         y <- succeed(x + 5)
       } yield y
       return await run(program)
-    `)
-    expect(result).toBe(15)
-  })
-})
+    `);
+    expect(result).toBe(15);
+  });
+});
 
 describe("eff($) e2e", () => {
   test("simple bind + return", async () => {
@@ -146,9 +155,9 @@ describe("eff($) e2e", () => {
         return x + y
       })
       return await run(program)
-    `)
-    expect(result).toBe(30)
-  })
+    `);
+    expect(result).toBe(30);
+  });
 
   test("discard + side effect", async () => {
     const result = await runForComprehension(`
@@ -160,9 +169,9 @@ describe("eff($) e2e", () => {
       })
       const r = await run(program)
       return { r, seen }
-    `)
-    expect(result).toEqual({ r: 42, seen: 42 })
-  })
+    `);
+    expect(result).toEqual({ r: 42, seen: 42 });
+  });
 
   test("with services", async () => {
     const result = await runForComprehension(`
@@ -177,7 +186,7 @@ describe("eff($) e2e", () => {
       return await run(provide(program, Logger, {
         info: (msg) => sync(() => { logs.push(msg) })
       }))
-    `)
-    expect(result).toBe("hello, world")
-  })
-})
+    `);
+    expect(result).toBe("hello, world");
+  });
+});
