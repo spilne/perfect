@@ -6,10 +6,15 @@ import { Scope } from "./scope"
 import { type Scheduler, BunScheduler, SyncScheduler, DEFAULT_BUDGET, getDefaultScheduler } from "./scheduler"
 import { succeed } from "./constructors"
 import { Clock, realClock } from "./clock"
+import { Random, realRandom } from "./random"
+import { Console, realConsole } from "./console"
 
-// Seed the default context once — real Clock is always available so sleep()
-// works without explicit provide(). Tests override via provide(eff, Clock, testClock).
-if (!emptyContext.has(Clock.key)) emptyContext.set(Clock.key, realClock)
+// Seed the default context once — real Clock/Random/Console are always
+// available so sleep() / Random.next / Console.log etc. work without an
+// explicit provide(). Tests override via provide(eff, Clock|Random|Console, testImpl).
+if (!emptyContext.has(Clock.key))   emptyContext.set(Clock.key,   realClock)
+if (!emptyContext.has(Random.key))  emptyContext.set(Random.key,  realRandom)
+if (!emptyContext.has(Console.key)) emptyContext.set(Console.key, realConsole)
 
 type Resolve = (value: any) => void
 type Reject = (cause: Cause) => void
