@@ -9,6 +9,81 @@ import { succeed } from "./constructors"
 type Resolve = (value: any) => void
 type Reject = (cause: Cause) => void
 
+// Try to evaluate a node fully synchronously without spawning a fiber.
+// Returns:
+//   { ok: true, value }   — completed sync with a value
+//   { ok: false, cause }  — completed sync with a cause
+//   null                  — needs the fiber runtime (Async, Fork, Race, nested All, etc.)
+function evalSync(
+  node: Suspend,
+  ctx: Context,
+): { ok: true; value: any } | { ok: false; cause: Cause } | null {
+  let cur: any = node
+  let context = ctx
+  let k: Cont | null = null
+
+  loop: while (true) {
+    if (!(cur instanceof Suspend)) {
+      while (k !== null) {
+        const frame = k
+        k = frame.next
+        switch (frame.op) {
+          case Op.FlatMap: { cur = frame.fn(cur); continue loop }
+          case Op.Catch:
+          case Op.CatchAll: { continue }
+          case Op.Provide: { context = frame.fn as Context; continue }
+          case Op.SetInterruptible: { continue }
+        }
+      }
+      return { ok: true, value: cur }
+    }
+
+    switch (cur.op) {
+      case Op.Succeed: { cur = cur.a; continue loop }
+      case Op.Sync: {
+        try { cur = cur.a() } catch (e) { cur = new Suspend(Op.Fail, Cause.die(e), null) }
+        continue loop
+      }
+      case Op.Fail: {
+        const cause = cur.a as Cause
+        while (k !== null) {
+          const frame = k
+          k = frame.next
+          if (frame.op === Op.Catch) {
+            const f = Cause.firstFail(cause)
+            if (f) { cur = frame.fn(f.value); continue loop }
+          }
+          if (frame.op === Op.CatchAll) { cur = frame.fn(cause); continue loop }
+          if (frame.op === Op.Provide) { context = frame.fn as Context; continue }
+          if (frame.op === Op.SetInterruptible) { continue }
+        }
+        return { ok: false, cause }
+      }
+      case Op.FlatMap:  { k = new Cont(Op.FlatMap, cur.b, k);  cur = cur.a; continue loop }
+      case Op.Catch:    { k = new Cont(Op.Catch, cur.b, k);    cur = cur.a; continue loop }
+      case Op.CatchAll: { k = new Cont(Op.CatchAll, cur.b, k); cur = cur.a; continue loop }
+      case Op.Provide: {
+        k = new Cont(Op.Provide, context, k)
+        context = mergeContexts(context, cur.b as Context)
+        cur = cur.a
+        continue loop
+      }
+      case Op.GetCtx: {
+        const key = cur.a as symbol
+        const val = context.get(key)
+        if (val === undefined) {
+          return { ok: false, cause: Cause.die(new Error(`Service not provided: ${key.description}`)) }
+        }
+        cur = val
+        continue loop
+      }
+      // Anything else (Async, Fork, ForkDaemon, Race, All, Ensuring, Scoped,
+      // AcqRel, GetScope, SetInterruptible, YieldNow) needs the fiber runtime.
+      default: return null
+    }
+  }
+}
+
 function runFiberLoop(fiber: Fiber): void {
   if (fiber.state === FiberState.Done) return
   fiber.state = FiberState.Running
@@ -199,19 +274,43 @@ function runFiberLoop(fiber: Fiber): void {
 
       case Op.All: {
         const effects = cur.a as Suspend[]
-        if (effects.length === 0) {
+        const len = effects.length
+        if (len === 0) {
           cur = []
           continue loop
         }
 
+        // Fast path: try to evaluate every child synchronously without spawning
+        // a fiber. evalSync returns null the moment it hits anything async-y
+        // (Async, Fork, Race, nested All, Ensuring, Scoped, AcqRel, GetScope,
+        // SetInterruptible, YieldNow, ForkDaemon).
+        const fastResults = new Array(len)
+        let fastOK = true
+        let fastFail: Cause | null = null
+        for (let i = 0; i < len; i++) {
+          const r = evalSync(effects[i] as Suspend, context)
+          if (r === null) { fastOK = false; break }
+          if (!r.ok) { fastFail = r.cause; break }
+          fastResults[i] = r.value
+        }
+        if (fastOK) {
+          if (fastFail !== null) {
+            cur = new Suspend(Op.Fail, fastFail, null)
+          } else {
+            cur = fastResults
+          }
+          continue loop
+        }
+
+        // Slow path: full fiber-per-element parallel.
         fiber.stack = k
         fiber.context = context
         const savedCtx = context
-        const results = new Array(effects.length)
-        let remaining = effects.length
+        const results = new Array(len)
+        let remaining = len
         let failed = false
 
-        for (let i = 0; i < effects.length; i++) {
+        for (let i = 0; i < len; i++) {
           const child = new Fiber()
           child.current = effects[i]
           child.context = savedCtx
