@@ -2,7 +2,7 @@ import { describe, test, expect } from "bun:test"
 import {
   succeed, fail, sync, sleep,
   run, runSync,
-  trapError, validate, hedged, pollUntil, pollUntilWithBackoff, retryAllCause,
+  trapError, validate, hedged, repeatUntil, repeatUntilWithBackoff, retryAllCause,
   retry,
   Cause, Clock, TestClock, provide,
 } from "../src"
@@ -91,16 +91,16 @@ describe("hedged", () => {
   })
 })
 
-// ── pollUntil ──────────────────────────────────────────────────────
+// ── repeatUntil ──────────────────────────────────────────────────────
 
-describe("pollUntil", () => {
+describe("repeatUntil", () => {
   test("succeeds when predicate matches", async () => {
     let calls = 0
     const poller = sync(() => { calls++; return calls }) as any
 
     const c = new TestClock()
     const promise = run(
-      provide(pollUntil(poller, { until: (n: number) => n >= 3, intervalMs: 100 }), Clock, c) as any,
+      provide(repeatUntil(poller, { until: (n: number) => n >= 3, intervalMs: 100 }), Clock, c) as any,
     )
     await new Promise((r) => setTimeout(r, 0))
     c.advance(100); await new Promise((r) => setTimeout(r, 0))
@@ -110,12 +110,12 @@ describe("pollUntil", () => {
     expect(calls).toBe(3)
   })
 
-  test("fails with PollTimeoutError when maxAttempts is hit", async () => {
+  test("fails with RepeatTimeoutError when maxAttempts is hit", async () => {
     const poller = sync(() => 0) as any
     const c = new TestClock()
     const promise = run(
       provide(
-        pollUntil(poller, { until: (n: number) => n > 0, intervalMs: 50, maxAttempts: 3 }),
+        repeatUntil(poller, { until: (n: number) => n > 0, intervalMs: 50, maxAttempts: 3 }),
         Clock,
         c,
       ) as any,
@@ -125,12 +125,12 @@ describe("pollUntil", () => {
     c.advance(50); await new Promise((r) => setTimeout(r, 0))
 
     await expect(promise).rejects.toEqual(
-      expect.objectContaining({ _tag: "PollTimeoutError", reason: "maxAttempts" }),
+      expect.objectContaining({ _tag: "RepeatTimeoutError", reason: "maxAttempts" }),
     )
   })
 })
 
-describe("pollUntilWithBackoff", () => {
+describe("repeatUntilWithBackoff", () => {
   test("exponential delays work on the test clock", async () => {
     let attempts = 0
     const poller = sync(() => { attempts++; return attempts }) as any
@@ -138,7 +138,7 @@ describe("pollUntilWithBackoff", () => {
 
     const promise = run(
       provide(
-        pollUntilWithBackoff(poller, {
+        repeatUntilWithBackoff(poller, {
           until: (n: number) => n >= 3,
           initialIntervalMs: 10,
           maxIntervalMs: 1000,
@@ -199,23 +199,14 @@ describe("Cats-named aliases", () => {
 
 describe("retry enhancements", () => {
   test("when-predicate stops retrying on non-matching error", async () => {
+    // Use real time with tiny delays — avoids fiddly TestClock drain timing.
     let attempts = 0
     const eff: any = sync(() => { attempts++; return attempts })
       .flatMap((n: number) => fail(n === 1 ? "transient" : "fatal"))
 
-    const c = new TestClock()
-    const promise = run(
-      provide(
-        retry(eff, { times: 5, delay: 10, when: (e: string) => e === "transient" }),
-        Clock,
-        c,
-      ) as any,
-    )
-    await new Promise((r) => setTimeout(r, 0))
-    c.advance(10); await new Promise((r) => setTimeout(r, 0))
-
-    // first attempt fails with "transient" → retry. second fails with "fatal" → stop.
-    await expect(promise).rejects.toBe("fatal")
+    await expect(
+      run(retry(eff, { times: 5, delay: 1, when: (e: string) => e === "transient" }) as any),
+    ).rejects.toBe("fatal")
     expect(attempts).toBe(2)
   })
 

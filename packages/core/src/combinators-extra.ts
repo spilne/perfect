@@ -136,24 +136,24 @@ export function retryAllCause<A, S>(
   return attempt(times, delayMs)
 }
 
-// ── pollUntil / pollUntilWithBackoff ───────────────────────────────
+// ── repeatUntil / repeatUntilWithBackoff ───────────────────────────────
 
-export interface PollTimeoutError {
-  readonly _tag: "PollTimeoutError"
+export interface RepeatTimeoutError {
+  readonly _tag: "RepeatTimeoutError"
   readonly reason: "maxAttempts" | "maxDuration"
   readonly attempts: number
   readonly elapsedMs: number
 }
 
-function makePollTimeout(
-  reason: PollTimeoutError["reason"],
+function makeRepeatTimeout(
+  reason: RepeatTimeoutError["reason"],
   attempts: number,
   elapsedMs: number,
-): PollTimeoutError {
-  return { _tag: "PollTimeoutError", reason, attempts, elapsedMs }
+): RepeatTimeoutError {
+  return { _tag: "RepeatTimeoutError", reason, attempts, elapsedMs }
 }
 
-export function pollUntil<A, S>(
+export function repeatUntil<A, S>(
   eff: Eff<A, S>,
   opts: {
     until: (value: A) => boolean
@@ -161,17 +161,17 @@ export function pollUntil<A, S>(
     maxAttempts?: number
     maxDurationMs?: number
   },
-): Eff<A, S | Throws<PollTimeoutError>> {
+): Eff<A, S | Throws<RepeatTimeoutError>> {
   const { until, intervalMs = 1_000, maxAttempts = Infinity, maxDurationMs = Infinity } = opts
   const startNow = new Suspend(Op.Sync, () => Date.now(), null) as Eff<number, never>
 
-  function step(attempt: number, started: number): Eff<A, S | Throws<PollTimeoutError>> {
+  function step(attempt: number, started: number): Eff<A, S | Throws<RepeatTimeoutError>> {
     return new Suspend(Op.FlatMap, eff as any, (value: A) => {
       if (until(value)) return succeed(value)
       const now = Date.now()
       const elapsed = now - started
-      if (attempt + 1 >= maxAttempts) return fail(makePollTimeout("maxAttempts", attempt + 1, elapsed))
-      if (elapsed >= maxDurationMs) return fail(makePollTimeout("maxDuration", attempt + 1, elapsed))
+      if (attempt + 1 >= maxAttempts) return fail(makeRepeatTimeout("maxAttempts", attempt + 1, elapsed))
+      if (elapsed >= maxDurationMs) return fail(makeRepeatTimeout("maxDuration", attempt + 1, elapsed))
       return new Suspend(Op.FlatMap, sleep(intervalMs), () => step(attempt + 1, started)) as any
     }) as any
   }
@@ -179,7 +179,7 @@ export function pollUntil<A, S>(
   return new Suspend(Op.FlatMap, startNow as any, (now: number) => step(0, now)) as any
 }
 
-export function pollUntilWithBackoff<A, S>(
+export function repeatUntilWithBackoff<A, S>(
   eff: Eff<A, S>,
   opts: {
     until: (value: A) => boolean
@@ -188,7 +188,7 @@ export function pollUntilWithBackoff<A, S>(
     maxAttempts?: number
     maxDurationMs?: number
   },
-): Eff<A, S | Throws<PollTimeoutError>> {
+): Eff<A, S | Throws<RepeatTimeoutError>> {
   const {
     until,
     initialIntervalMs = 100,
@@ -199,13 +199,13 @@ export function pollUntilWithBackoff<A, S>(
 
   const startNow = new Suspend(Op.Sync, () => Date.now(), null) as Eff<number, never>
 
-  function step(attempt: number, currentInterval: number, started: number): Eff<A, S | Throws<PollTimeoutError>> {
+  function step(attempt: number, currentInterval: number, started: number): Eff<A, S | Throws<RepeatTimeoutError>> {
     return new Suspend(Op.FlatMap, eff as any, (value: A) => {
       if (until(value)) return succeed(value)
       const now = Date.now()
       const elapsed = now - started
-      if (attempt + 1 >= maxAttempts) return fail(makePollTimeout("maxAttempts", attempt + 1, elapsed))
-      if (elapsed >= maxDurationMs) return fail(makePollTimeout("maxDuration", attempt + 1, elapsed))
+      if (attempt + 1 >= maxAttempts) return fail(makeRepeatTimeout("maxAttempts", attempt + 1, elapsed))
+      if (elapsed >= maxDurationMs) return fail(makeRepeatTimeout("maxDuration", attempt + 1, elapsed))
       const nextInterval = Math.min(currentInterval * 2, maxIntervalMs)
       return new Suspend(Op.FlatMap, sleep(currentInterval), () => step(attempt + 1, nextInterval, started)) as any
     }) as any
