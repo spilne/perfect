@@ -62,6 +62,42 @@ declare module "../eff" {
       onError: (e: E) => Eff<any, S2>,
       onSuccess: (a: A) => Eff<any, S3>,
     ): Eff<A, S | Throws<E> | S2 | S3>
+
+    // ── Cats-flavored aliases (for users migrating from cats-effect / promin) ──
+
+    /** alias: catch — total handler returning an Eff for any error. */
+    handleErrorWith<A, S, E, B, S2>(
+      this: Eff<A, S | Throws<E>>,
+      handler: (error: E) => Eff<B, S2>,
+    ): Eff<A | B, Exclude<S, Throws<E>> | S2>
+
+    /** alias: catchSome via predicate + plain-value handler (cats `recover`). */
+    recover<A, S, E, B>(
+      this: Eff<A, S | Throws<E>>,
+      predicate: (error: E) => boolean,
+      handler: (error: E) => B,
+    ): Eff<A | B, S | Throws<E>>
+
+    /** alias: catchSome via predicate + Eff-returning handler (cats `recoverWith`). */
+    recoverWith<A, S, E, B, S2>(
+      this: Eff<A, S | Throws<E>>,
+      predicate: (error: E) => boolean,
+      handler: (error: E) => Eff<B, S2>,
+    ): Eff<A | B, S | Throws<E> | S2>
+
+    /** cats: match both channels with plain-value functions. */
+    redeem<A, S, E, B>(
+      this: Eff<A, S | Throws<E>>,
+      onError: (error: E) => B,
+      onSuccess: (value: A) => B,
+    ): Eff<B, Exclude<S, Throws<E>>>
+
+    /** cats: match both channels with Eff-returning functions. */
+    redeemWith<A, S, E, B, S2, S3>(
+      this: Eff<A, S | Throws<E>>,
+      onError: (error: E) => Eff<B, S2>,
+      onSuccess: (value: A) => Eff<B, S3>,
+    ): Eff<B, Exclude<S, Throws<E>> | S2 | S3>
   }
 }
 
@@ -129,4 +165,28 @@ Suspend.prototype.tapErrorCause = function (f: any) {
 
 Suspend.prototype.tapBoth = function (onError: any, onSuccess: any) {
   return (this as any).tapError(onError).tap(onSuccess)
+}
+
+// ── Cats-flavored aliases ────────────────────────────────────────
+
+Suspend.prototype.handleErrorWith = Suspend.prototype.catch
+
+Suspend.prototype.recover = function (predicate: any, handler: any) {
+  return (this as any).catchSome((e: any) => (predicate(e) ? succeed(handler(e)) : undefined))
+}
+
+Suspend.prototype.recoverWith = function (predicate: any, handler: any) {
+  return (this as any).catchSome((e: any) => (predicate(e) ? handler(e) : undefined))
+}
+
+Suspend.prototype.redeem = function (onError: any, onSuccess: any) {
+  return (this as any)
+    .map((a: any) => onSuccess(a))
+    .catch((e: any) => succeed(onError(e)))
+}
+
+Suspend.prototype.redeemWith = function (onError: any, onSuccess: any) {
+  return (this as any)
+    .flatMap((a: any) => onSuccess(a))
+    .catch((e: any) => onError(e))
 }

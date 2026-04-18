@@ -111,16 +111,20 @@ describe("ensuring", () => {
 // ── Retry ──────────────────────────────────────────────────────────
 
 describe("retry", () => {
-  test("retries on failure", async () => {
+  test("retries on typed failure", async () => {
     let attempts = 0
-    const flaky = sync(() => {
-      attempts++
-      if (attempts < 3) throw new Error("not yet")
-      return "ok"
-    })
+    const flaky: any = sync(() => ++attempts)
+      .flatMap((n: number) => (n < 3 ? fail("not yet") : succeed("ok")))
 
     expect(await run(retry(flaky, { times: 5 }))).toBe("ok")
     expect(attempts).toBe(3)
+  })
+
+  test("does NOT retry defects (thrown errors) by default", async () => {
+    let attempts = 0
+    const flaky = sync(() => { attempts++; throw new Error("defect") })
+    await expect(run(retry(flaky, { times: 5 }))).rejects.toBeInstanceOf(Error)
+    expect(attempts).toBe(1)
   })
 
   test("gives up after max retries", async () => {
@@ -130,11 +134,8 @@ describe("retry", () => {
 
   test("retry with delay", async () => {
     let attempts = 0
-    const flaky = sync(() => {
-      attempts++
-      if (attempts < 2) throw new Error("not yet")
-      return "ok"
-    })
+    const flaky: any = sync(() => ++attempts)
+      .flatMap((n: number) => (n < 2 ? fail("not yet") : succeed("ok")))
 
     const start = Date.now()
     await run(retry(flaky, { times: 3, delay: 20 }))
@@ -245,11 +246,8 @@ describe("sleep and delay", () => {
 describe("complex compositions", () => {
   test("retry + timeout", async () => {
     let attempts = 0
-    const flaky = sync(() => {
-      attempts++
-      if (attempts < 3) throw new Error("nope")
-      return "ok"
-    })
+    const flaky: any = sync(() => ++attempts)
+      .flatMap((n: number) => (n < 3 ? fail("nope") : succeed("ok")))
 
     const eff = timeout(
       retry(flaky, { times: 5, delay: 10 }),
@@ -260,7 +258,7 @@ describe("complex compositions", () => {
   })
 
   test("service + retry + ensuring", async () => {
-    interface ApiClient { fetch(url: string): Eff<string, Throws<Error>> }
+    interface ApiClient { fetch(url: string): Eff<string, Throws<string>> }
     const ApiClient = service<ApiClient>("ApiClient")
 
     let attempts = 0
@@ -274,11 +272,8 @@ describe("complex compositions", () => {
     )
 
     const provided = provide(program, ApiClient, {
-      fetch: (_url) => sync(() => {
-        attempts++
-        if (attempts < 2) throw new Error("fail")
-        return "response"
-      }),
+      fetch: (_url) => sync(() => ++attempts)
+        .flatMap((n: number) => (n < 2 ? fail("fail") : succeed("response"))) as any,
     })
 
     expect(await run(provided)).toBe("response")
