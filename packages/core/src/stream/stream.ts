@@ -11,6 +11,7 @@ import { type Eff, type Throws, type Needs, Suspend, Op } from "../eff"
 import { succeed, fail, sync, suspend, async, sleep, fork, join } from "../constructors"
 import { all } from "../combinators"
 import { Chunk } from "./chunk"
+import { type FusibleOp, compileFused, hasFilterOps, SKIP } from "./fusion"
 
 // ── Step type ──────────────────────────────────────────────────────
 
@@ -26,8 +27,66 @@ function emit<A>(chunk: Chunk<A>, next: Stream<A, any>): Step<A> {
 
 // ── Stream class ───────────────────────────────────────────────────
 
+// ── Fusion helper ──────────────────────────────────────────────────
+// Wraps a raw step so every emitted chunk has `compiled` applied. Recursive
+// through s.next so continuations inherit the same compilation.
+function fuseStep<A, S>(
+  rawStep: Eff<Step<A>, S>,
+  compiled: (v: any) => any,
+  hasFilter: boolean,
+): Eff<Step<A>, S> {
+  return (rawStep as any).map((s: Step<A>) => {
+    if (s._tag === "Done") return DONE
+    let out: Chunk<A>
+    if (hasFilter) {
+      // Use the underlying array directly — avoids per-element method-call overhead.
+      const src = s.chunk.toArray()
+      const len = src.length
+      const arr: any[] = []
+      for (let i = 0; i < len; i++) {
+        const v = compiled(src[i])
+        if (v !== SKIP) arr.push(v)
+      }
+      out = Chunk.fromArray(arr)
+    } else {
+      out = s.chunk.map(compiled)
+    }
+    // s.next.step triggers s.next's own flush (if it has _pending).
+    // We then wrap its raw step with THIS compilation.
+    const nextStream = new Stream<A, any>(fuseStep(s.next.step, compiled, hasFilter))
+    return { _tag: "Emit", chunk: out, next: nextStream }
+  })
+}
+
 export class Stream<A, S = never> {
-  constructor(readonly step: Eff<Step<A>, S>) {}
+  // Raw step; `step` getter below flushes pending fusible ops lazily.
+  private _rawStep: Eff<Step<A>, S>
+  // Accumulated pure ops (map/filter/filterMap/tap) awaiting compilation.
+  private _pending: FusibleOp[] = []
+
+  constructor(step: Eff<Step<A>, S>) {
+    this._rawStep = step
+  }
+
+  /** The stream's step effect. Flushes any pending fused ops before returning. */
+  get step(): Eff<Step<A>, S> {
+    if (this._pending.length === 0) return this._rawStep
+    const ops = this._pending
+    const compiled = compileFused(ops)
+    const fused = fuseStep<A, S>(this._rawStep, compiled, hasFilterOps(ops))
+    // Cache the fused step so subsequent reads are O(1).
+    this._rawStep = fused
+    this._pending = []
+    return fused
+  }
+
+  /** Append a pure op to the fusion buffer; returns a new Stream sharing the
+   *  raw step but with its own pending list. */
+  private _withOp(op: FusibleOp): Stream<any, S> {
+    const s = new Stream<any, S>(this._rawStep)
+    s._pending = this._pending.length === 0 ? [op] : [...this._pending, op]
+    return s
+  }
 
   // ── Constructors ─────────────────────────────────────────────────
 
@@ -335,12 +394,13 @@ export class Stream<A, S = never> {
   // ── Transform operators ──────────────────────────────────────────
 
   map<B>(f: (a: A) => B): Stream<B, S> {
-    return new Stream(
-      (this.step as any).map((s: Step<A>) => {
-        if (s._tag === "Done") return DONE
-        return emit(s.chunk.map(f), s.next.map(f))
-      })
-    )
+    return this._withOp({ _tag: "map", fn: f as any }) as Stream<B, S>
+  }
+
+  /** Like `map` but returning `undefined` means "skip this element". Fused
+   *  together with adjacent map/filter/tap ops for a single chunk walk. */
+  filterMap<B>(f: (a: A) => B | undefined): Stream<B, S> {
+    return this._withOp({ _tag: "filterMap", fn: f as any }) as Stream<B, S>
   }
 
   mapChunks<B>(f: (chunk: Chunk<A>) => Chunk<B>): Stream<B, S> {
@@ -352,16 +412,19 @@ export class Stream<A, S = never> {
     )
   }
 
-  filter(p: (a: A) => boolean): Stream<A, S> {
-    return new Stream(
-      (this.step as any).map((s: Step<A>) => {
-        if (s._tag === "Done") return DONE
-        const filtered = s.chunk.filter(p)
-        const next = s.next.filter(p)
-        if (filtered.isEmpty) return next.step
-        return emit(filtered, next)
-      }).flatMap((r: any) => r instanceof Suspend ? r : succeed(r))
-    )
+  /**
+   * Keep (or drop) elements matching the predicate.
+   * @param p predicate
+   * @param action "keep" (default) keeps matches; "drop" inverts.
+   */
+  filter(p: (a: A) => boolean, action: "keep" | "drop" = "keep"): Stream<A, S> {
+    const fn: (a: A) => boolean = action === "drop" ? (a) => !p(a) : p
+    return this._withOp({ _tag: "filter", fn: fn as any }) as Stream<A, S>
+  }
+
+  /** Drop null/undefined values. Fused with adjacent pure ops. */
+  unNone(): Stream<NonNullable<A>, S> {
+    return this._withOp({ _tag: "filter", fn: (a: any) => a != null } as any) as Stream<NonNullable<A>, S>
   }
 
   collect<B>(f: (a: A) => B | undefined): Stream<B, S> {
@@ -419,9 +482,9 @@ export class Stream<A, S = never> {
   }
 
   evalFilter<S2>(p: (a: A) => Eff<boolean, S2>): Stream<A, S | S2> {
-    return this.evalMap<A | typeof SKIP, S2>(a =>
-      (p(a) as any).map((b: boolean) => b ? a : SKIP)
-    ).filter((a): a is A => a !== SKIP) as any
+    return this.evalMap<A | typeof FILTER_SENTINEL, S2>(a =>
+      (p(a) as any).map((b: boolean) => b ? a : FILTER_SENTINEL)
+    ).filter((a): a is A => a !== FILTER_SENTINEL) as any
   }
 
   take(n: number): Stream<A, S> {
@@ -502,7 +565,7 @@ export class Stream<A, S = never> {
   }
 
   tap(f: (a: A) => void): Stream<A, S> {
-    return this.map(a => { f(a); return a })
+    return this._withOp({ _tag: "tap", fn: f as any })
   }
 
   tapEffect<S2>(f: (a: A) => Eff<any, S2>): Stream<A, S | S2> {
@@ -1094,7 +1157,7 @@ export type Pipe<I, O, S = never> = (input: Stream<I, any>) => Stream<O, S>
 // ── Helpers ────────────────────────────────────────────────────────
 
 const SENTINEL = Symbol("sentinel")
-const SKIP = Symbol("skip")
+const FILTER_SENTINEL = Symbol("filter-sentinel")
 
 function evalMapChunk<A, B, S>(chunk: Chunk<A>, f: (a: A) => Eff<B, S>): Eff<Chunk<B>, S> {
   if (chunk.isEmpty) return succeed(Chunk.empty()) as any
