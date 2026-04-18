@@ -69,4 +69,5 @@ export { WorkerPool } from "./worker";
 export { Chunk, Stream, Pipes } from "./stream";
 export type { Pipe } from "./stream";
 
+export { eff } from "./syntax";
 import "./syntax";
