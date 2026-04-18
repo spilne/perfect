@@ -228,6 +228,41 @@ function runFiberLoop(fiber: Fiber): void {
             }
             continue;
           }
+          case Op.EnsuringFrame: {
+            // Body succeeded with `cur`. Run finalizer (uninterruptibly,
+            // swallowing its own failures), then yield the success value.
+            const value = cur;
+            const finalizer = frame.fn as Suspend;
+            cur = new Suspend(
+              Op.SetInterruptible,
+              new Suspend(
+                Op.FlatMap,
+                new Suspend(Op.CatchAll, finalizer, () => succeed(undefined)),
+                () => new Suspend(Op.Succeed, value, null),
+              ),
+              false,
+            );
+            continue loop;
+          }
+          case Op.ScopeFrame: {
+            // Body succeeded. Close scope (uninterruptibly), restore old
+            // scope, then yield the value.
+            const { scope, oldScope } = frame.fn as { scope: Scope; oldScope: Scope | null };
+            const value = cur;
+            fiber.scope = oldScope;
+            cur = new Suspend(
+              Op.SetInterruptible,
+              new Suspend(
+                Op.FlatMap,
+                new Suspend(Op.CatchAll, scope.close() as unknown as Suspend, () =>
+                  succeed(undefined),
+                ),
+                () => new Suspend(Op.Succeed, value, null),
+              ),
+              false,
+            );
+            continue loop;
+          }
         }
       }
       // close scope on success
@@ -286,6 +321,37 @@ function runFiberLoop(fiber: Fiber): void {
           if (frame.op === Op.SetInterruptible) {
             fiber.interruptible = frame.fn as unknown as boolean;
             continue;
+          }
+          if (frame.op === Op.EnsuringFrame) {
+            // Run the finalizer (uninterruptibly, swallowing its failures),
+            // then re-fail with the original cause.
+            const finalizer = frame.fn as Suspend;
+            cur = new Suspend(
+              Op.SetInterruptible,
+              new Suspend(
+                Op.FlatMap,
+                new Suspend(Op.CatchAll, finalizer, () => succeed(undefined)),
+                () => new Suspend(Op.Fail, cause, null),
+              ),
+              false,
+            );
+            continue loop;
+          }
+          if (frame.op === Op.ScopeFrame) {
+            const { scope, oldScope } = frame.fn as { scope: Scope; oldScope: Scope | null };
+            fiber.scope = oldScope;
+            cur = new Suspend(
+              Op.SetInterruptible,
+              new Suspend(
+                Op.FlatMap,
+                new Suspend(Op.CatchAll, scope.close() as unknown as Suspend, () =>
+                  succeed(undefined),
+                ),
+                () => new Suspend(Op.Fail, cause, null),
+              ),
+              false,
+            );
+            continue loop;
           }
         }
         reject(cause);
@@ -457,28 +523,12 @@ function runFiberLoop(fiber: Fiber): void {
       }
 
       case Op.Ensuring: {
-        const body = cur.a as Suspend;
-        const finalizer = cur.b as Suspend;
-
-        fiber.stack = k;
-        fiber.context = context;
-        const savedCtx = context;
-
-        const child = makeChild(fiber, body, savedCtx);
-
-        const resume = (result: { ok: true; value: any } | { ok: false; cause: Cause }) => {
-          const cont = () => {
-            if (fiber.state === FiberState.Done) return;
-            fiber.current = result.ok ? result.value : new Suspend(Op.Fail, result.cause, null);
-            fiber.state = FiberState.Ready;
-            fiber.scheduler.schedule(() => runFiberLoop(fiber));
-          };
-          stepInline(finalizer, savedCtx, null, cont, cont, fiber);
-        };
-
-        child.onComplete(resume);
-        runChild(child);
-        return;
+        // Push a frame; body runs on the same fiber. When the frame is popped
+        // (success-path or fail-walk), we run the finalizer then propagate the
+        // body's outcome.
+        k = new Cont(Op.EnsuringFrame, cur.b /* finalizer */, k);
+        cur = cur.a /* body */;
+        continue loop;
       }
 
       case Op.AcqRel: {
@@ -507,30 +557,15 @@ function runFiberLoop(fiber: Fiber): void {
       }
 
       case Op.Scoped: {
-        const body = cur.a;
+        // Set a fresh scope for the duration of the body, run on same fiber.
+        // ScopeFrame stores both the new scope (to close on pop) and the prior
+        // scope (to restore).
         const scope = new Scope();
-
-        fiber.stack = k;
-        fiber.context = context;
-        const savedCtx = context;
-
-        const child = makeChild(fiber, body, savedCtx);
-        child.scope = scope;
-
-        const resume = (result: { ok: true; value: any } | { ok: false; cause: Cause }) => {
-          const closer = scope.close();
-          const cont = () => {
-            if (fiber.state === FiberState.Done) return;
-            fiber.current = result.ok ? result.value : new Suspend(Op.Fail, result.cause, null);
-            fiber.state = FiberState.Ready;
-            fiber.scheduler.schedule(() => runFiberLoop(fiber));
-          };
-          stepInline(closer as unknown as Suspend, savedCtx, null, cont, cont, fiber);
-        };
-
-        child.onComplete(resume);
-        runChild(child);
-        return;
+        const oldScope = fiber.scope;
+        fiber.scope = scope;
+        k = new Cont(Op.ScopeFrame, { scope, oldScope }, k);
+        cur = cur.a /* body */;
+        continue loop;
       }
 
       case Op.SetInterruptible: {
@@ -596,6 +631,29 @@ function stepInline(
             if (parentFiber) parentFiber.interruptible = frame.fn as unknown as boolean;
             continue;
           }
+          case Op.EnsuringFrame: {
+            const value = cur;
+            const finalizer = frame.fn as Suspend;
+            cur = new Suspend(
+              Op.FlatMap,
+              new Suspend(Op.CatchAll, finalizer, () => succeed(undefined)),
+              () => new Suspend(Op.Succeed, value, null),
+            );
+            continue loop;
+          }
+          case Op.ScopeFrame: {
+            const { scope, oldScope } = frame.fn as { scope: Scope; oldScope: Scope | null };
+            if (parentFiber) parentFiber.scope = oldScope;
+            const value = cur;
+            cur = new Suspend(
+              Op.FlatMap,
+              new Suspend(Op.CatchAll, scope.close() as unknown as Suspend, () =>
+                succeed(undefined),
+              ),
+              () => new Suspend(Op.Succeed, value, null),
+            );
+            continue loop;
+          }
         }
       }
       resolve(cur);
@@ -634,6 +692,26 @@ function stepInline(
           if (frame.op === Op.Provide) context = frame.fn as Context;
           if (frame.op === Op.SetInterruptible && parentFiber) {
             parentFiber.interruptible = frame.fn as unknown as boolean;
+          }
+          if (frame.op === Op.EnsuringFrame) {
+            cur = new Suspend(
+              Op.FlatMap,
+              new Suspend(Op.CatchAll, frame.fn as Suspend, () => succeed(undefined)),
+              () => new Suspend(Op.Fail, cause, null),
+            );
+            continue loop;
+          }
+          if (frame.op === Op.ScopeFrame) {
+            const { scope, oldScope } = frame.fn as { scope: Scope; oldScope: Scope | null };
+            if (parentFiber) parentFiber.scope = oldScope;
+            cur = new Suspend(
+              Op.FlatMap,
+              new Suspend(Op.CatchAll, scope.close() as unknown as Suspend, () =>
+                succeed(undefined),
+              ),
+              () => new Suspend(Op.Fail, cause, null),
+            );
+            continue loop;
           }
         }
         reject(cause);
@@ -769,17 +847,19 @@ function bootstrapFiber<A>(eff: Eff<A, any>, scheduler?: Scheduler): Fiber<A> {
   fiber.context = emptyContext;
   fiber.scheduler = scheduler ?? getDefaultScheduler();
   fiber.state = FiberState.Ready;
+  fiber._resume = () => runFiberLoop(fiber);
   return fiber;
 }
 
 // Create a child fiber — used by every op that spawns (All, Fork, Race,
-// Ensuring, Scoped, ForkDaemon, stepInline fallback). Doesn't schedule;
-// caller attaches onComplete/scope/etc., then calls runChild(child).
+// ForkDaemon, stepInline fallback). Doesn't schedule; caller attaches
+// onComplete/scope/etc., then calls runChild(child).
 function makeChild(parent: Fiber, eff: any, context: Context, structured = true): Fiber {
   const child = new Fiber();
   child.current = eff;
   child.context = context;
   child.scheduler = parent.scheduler;
+  child._resume = () => runFiberLoop(child);
   if (structured) parent.addChild(child);
   return child;
 }

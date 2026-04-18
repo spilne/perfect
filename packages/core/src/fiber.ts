@@ -1,5 +1,5 @@
 import type { Cause } from "./cause";
-import type { Eff, Cont } from "./eff";
+import { type Eff, type Cont, Suspend, Op } from "./eff";
 import type { Exit } from "./exit";
 import type { Context } from "./service";
 import { type Scheduler, getDefaultScheduler } from "./scheduler";
@@ -67,8 +67,24 @@ export class Fiber<A = unknown> {
       this.interruptHandle();
       this.interruptHandle = null;
     }
+    // If the fiber has a non-empty continuation stack, inject a Fail(Interrupt)
+    // and re-schedule — the interpreter loop walks the stack and fires any
+    // EnsuringFrame/ScopeFrame finalizers before completing.
+    // Otherwise (no frames to walk), complete directly.
+    if (this.stack !== null) {
+      this.current = new Suspend(Op.Fail, { _tag: "Interrupt" } as Cause, null);
+      this.state = FiberState.Ready;
+      // Avoid a circular import on runtime.ts by going through the scheduler;
+      // bootstrapFiber installs a `_resume` callback that wraps runFiberLoop.
+      this.scheduler.schedule(() => this._resume?.());
+      return;
+    }
     this.complete({ ok: false, cause: { _tag: "Interrupt" } });
   }
+
+  // Set by bootstrapFiber to point at runFiberLoop(this); avoids a fiber.ts ⇄
+  // runtime.ts circular import.
+  _resume?: () => void;
 
   addChild(child: Fiber): void {
     this.children.push(child);
