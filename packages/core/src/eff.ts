@@ -33,12 +33,22 @@ export const enum Op {
   SetInterruptible = 16,
   YieldNow = 17,
   ForkDaemon = 18,
+  // Continuation frames (only ever appear on the Cont stack, not as Suspend nodes):
+  EnsuringFrame = 19,
+  ScopeFrame = 20,
 }
 
 // ── Continuation cell (singly-linked stack) ────────────────────────
 export class Cont {
   constructor(
-    public readonly op: Op.FlatMap | Op.Catch | Op.Provide | Op.CatchAll | Op.SetInterruptible,
+    public readonly op:
+      | Op.FlatMap
+      | Op.Catch
+      | Op.Provide
+      | Op.CatchAll
+      | Op.SetInterruptible
+      | Op.EnsuringFrame
+      | Op.ScopeFrame,
     public readonly fn: any,
     public next: Cont | null,
   ) {}
