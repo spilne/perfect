@@ -1,32 +1,35 @@
-// Compare three ways to write an effect pipeline:
+// Compare four ways to write an effect pipeline:
 //
 //   A. Composed `.flatMap` chain — single fiber, all steps share state
 //   B. `await eff` per step — one thenable fast-path per await + microtask
-//   C. `eff(($) => { ... $(e) ... })` source syntax — compiles to (A)
-//      via @perfect/transform, so runtime cost is identical to A
+//   C. `eff(($) => { ... $(e) ... })` — build-time rewriter, compiles to (A)
+//   D. `eff(function* () { yield* e })` — runtime generator driver, no build
 //
-// Scenarios capture realistic mixes: pure compute, single async, all-async,
-// service injection, and error recovery.
+// Scenarios: pure compute, single async, all-async, service injection,
+// error recovery.
 //
-// Headline results (Bun, M-series, N=100):
+// Headline results (Bun, M-series, N=100, per step):
 //
-//   pure × 100         composed flatMap   1.5 µs   ◀ baseline
-//                      eff($) compiled    3.5 µs   ~2× (async IIFE wrap)
-//                      Promise.then       3.0 µs
-//                      await Promise/step 2.3 µs
-//                      await eff/step    13.5 µs   ~9× — avoid in hot loops
+//   pure × 100          for loop (no Promise)     0.3 ns/step
+//                       composed .flatMap        14.5 ns/step  ◀ baseline
+//                       await Promise/step       22.4 ns
+//                       Promise.then chain       28.5 ns
+//                       eff($) compiled          34   ns
+//                       eff(function*)           64   ns  ~4× baseline
+//                       await eff/step          128   ns  ~9× baseline
 //
-//   service × 100      composed (lookup once) 3.0 µs
-//                      await (lookup per step) 44 µs   ~15× — avoid
+//   service × 100       composed                 3.0 µs  ◀ lookup once
+//                       eff(function*)           9.3 µs
+//                       await per step          42   µs  ~14× — avoid
 //
-//   all-async sleep(0) all approaches collapse — overhead dominated by timer
+//   all-async sleep(0)  all approaches ≈ identical (timer dominates)
 //
 // Takeaways:
 //   1. Hot loops → composed `.flatMap`. Don't `await` per step.
-//   2. Real I/O → any approach is fine; pipeline cost is in the noise.
-//   3. `eff($)` syntax costs ~2× raw composed but reads best — use where
-//      readability beats microseconds.
-//   4. Composed Eff is faster than raw Promise chains in JS once built.
+//   2. Real I/O → any syntax; pipeline cost is invisible.
+//   3. `eff(function*)` is the Pareto sweet spot — no build step, ~4×
+//      composed, but 2× faster than `await` per step.
+//   4. `eff($)` needs SWC/TS plugin; costs the build pipeline for perf wins.
 //
 // Full table + per-scenario interpretation: ./await-vs-flatmap-vs-dollar.md
 //
@@ -34,7 +37,7 @@
 
 import { group, bench, run as mitataRun } from "mitata";
 import {
-  succeed, fail, sync, sleep, service, provide, run, runSync,
+  eff, succeed, fail, sync, sleep, service, provide, run, runSync,
   type Eff, type Throws, type Needs,
 } from "../src";
 import { rewriteEffBlocks } from "../../transform/src/rewrite";
@@ -99,6 +102,15 @@ group(`pure compute × ${N}`, () => {
     `return (async () => { ${dollarRewritten} })()`,
   );
   bench("eff($) syntax (compiled at load) → run", async () => dollarFn(succeed, sync, run));
+
+  // (D) eff(function*) — runtime generator syntax, no build step.
+  // Driver builds a lazy FlatMap tree equivalent to (A).
+  const genPure = eff(function* () {
+    let x: number = yield* succeed(0);
+    for (let i = 0; i < N; i++) x = yield* succeed(x + 1);
+    return x;
+  });
+  bench("eff(function*) + runSync (generator, no build step)", () => runSync(genPure));
 });
 
 // ── 2. Single async — sleep(0) once, then N-1 pure steps ──────────────
@@ -204,6 +216,19 @@ group(`service lookup × ${N}`, () => {
     for (let i = 0; i < N; i++) p = p.then(counterPromise);
     return p;
   });
+
+  // (D) generator: lookup once via yield*, reuse inside the loop
+  const genSvc = provide(
+    eff(function* () {
+      const c = yield* Counter.get;
+      let x: number = 0;
+      for (let i = 0; i < N; i++) x = yield* c.add(x);
+      return x;
+    }),
+    Counter,
+    counterImpl,
+  );
+  bench("eff(function*): lookup once + loop of yield* c.add()", async () => run(genSvc as any));
 });
 
 // ── 5. Error recovery: fail mid-chain, catch + continue ───────────────
@@ -235,6 +260,20 @@ group("fail mid-chain + recover", () => {
     for (let i = 0; i < N / 2; i++) p = p.then((x) => x + 1);
     return p;
   });
+
+  // (D) generator: try/catch inside the generator body
+  const genRecover = eff(function* () {
+    let x = 0;
+    for (let i = 0; i < N / 2; i++) x = yield* succeed(x + 1);
+    try {
+      yield* (fail("midway") as Eff<never, Throws<string>>);
+    } catch {
+      x = 999;
+    }
+    for (let i = 0; i < N / 2; i++) x = yield* succeed(x + 1);
+    return x;
+  });
+  bench("eff(function*): try/catch around yield* fail", async () => run(genRecover as any));
 });
 
 await mitataRun();
