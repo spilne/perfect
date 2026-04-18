@@ -101,7 +101,18 @@ export class Stream<A, S = never> {
   }
 
   static range(start: number, end: number, step = 1): Stream<number, never> {
-    return Stream.unfold(start, n => n < end ? [n, n + step] : null)
+    // Emit in chunks of up to 4096 — avoids one Suspend per element and
+    // stays memory-bounded on very large ranges.
+    const CHUNK_SIZE = 4096
+    function chunkFrom(from: number): Stream<number, never> {
+      if (from >= end) return Stream.empty()
+      const remaining = Math.max(0, Math.ceil((end - from) / step))
+      const size = Math.min(remaining, CHUNK_SIZE)
+      const arr = new Array<number>(size)
+      for (let i = 0; i < size; i++) arr[i] = from + i * step
+      return new Stream(succeed(emit(Chunk.fromArray(arr), chunkFrom(from + size * step))))
+    }
+    return chunkFrom(start)
   }
 
   static repeat<A, S>(eff: Eff<A, S>): Stream<A, S> {
@@ -192,17 +203,42 @@ export class Stream<A, S = never> {
   }
 
   flatMap<B, S2>(f: (a: A) => Stream<B, S2>): Stream<B, S | S2> {
-    return new Stream(
-      (this.step as any).flatMap((s: Step<A>) => {
-        if (s._tag === "Done") return succeed(DONE)
-        const innerStreams = Array.from(s.chunk).map(f)
-        const combined = innerStreams.reduce<Stream<B, S2>>(
-          (acc, stream) => acc.concat(stream),
-          Stream.empty(),
-        )
-        return combined.concat(s.next.flatMap(f)).step
-      })
+    // Pull one element at a time, drain its inner stream, then move on.
+    // Avoids the O(N²) concat-reduce the previous implementation used.
+    type OuterS = S
+    const self = this
+
+    const drainInner = (
+      inner: Stream<B, S2>,
+      outer: Stream<A, OuterS>,
+      pending: Chunk<A>,
+      idx: number,
+    ): Stream<B, OuterS | S2> => new Stream(
+      (inner.step as any).flatMap((s: Step<B>) => {
+        if (s._tag === "Emit") {
+          return succeed(emit(s.chunk, drainInner(s.next, outer, pending, idx + 0)))
+        }
+        return nextElement(outer, pending, idx + 1).step
+      }),
     )
+
+    const nextElement = (
+      outer: Stream<A, OuterS>,
+      pending: Chunk<A>,
+      idx: number,
+    ): Stream<B, OuterS | S2> => {
+      if (idx < pending.length) {
+        return drainInner(f(pending.get(idx)), outer, pending, idx)
+      }
+      return new Stream(
+        (outer.step as any).flatMap((s: Step<A>) => {
+          if (s._tag === "Done") return succeed(DONE)
+          return nextElement(s.next, s.chunk, 0).step
+        }),
+      )
+    }
+
+    return nextElement(self, Chunk.empty(), 0)
   }
 
   evalMap<B, S2>(f: (a: A) => Eff<B, S2>): Stream<B, S | S2> {

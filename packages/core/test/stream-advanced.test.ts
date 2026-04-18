@@ -65,9 +65,11 @@ describe("Stream.groupWithin", () => {
   })
 
   test("groupWithin flushes on size", async () => {
-    // with slow input, each element arrives separately
+    // Use iterate (one-element chunks) so each evalMap emits separately and
+    // groupWithin sees a real timeline rather than a single batch.
     const result = await run(
-      Stream.range(0, 5)
+      Stream.iterate(0, (n: number) => n + 1)
+        .take(5)
         .evalMap(x => sleep(5).map(() => x) as any)
         .groupWithin(2, 500)
         .map((c: any) => c.toArray())
