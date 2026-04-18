@@ -13,7 +13,9 @@ export {
   ensuring, onExit, acquireRelease, scoped,
   retry,
 } from "./constructors"
-export type { RetryPolicy } from "./constructors"
+export type { RetryConfig } from "./constructors"
+export { RetryPolicy, runRetry } from "./retry-policy"
+export type { RetryDetails } from "./retry-policy"
 export { all } from "./combinators"
 export { trapError, validate, hedged, pollUntil, pollUntilWithBackoff, retryAllCause } from "./combinators-extra"
 export type { PollTimeoutError } from "./combinators-extra"

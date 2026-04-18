@@ -213,7 +213,7 @@ export function scoped<A, S>(
 
 // ── Retry ──────────────────────────────────────────────────────────
 
-export interface RetryPolicy<E = unknown> {
+export interface RetryConfig<E = unknown> {
   times: number
   delay?: number
   backoff?: "fixed" | "exponential"
@@ -223,7 +223,8 @@ export interface RetryPolicy<E = unknown> {
    * Defaults to always-true (retry all typed errors).
    * Defects and interrupts never retry — they indicate something
    * unexpected (bug, OOM) or a deliberate cancellation. Use
-   * `retryAllCause` if you explicitly want defect-aware retry.
+   * `retryAllCause` (or `RetryPolicy.whenCause`) if you explicitly
+   * want defect-aware retry.
    */
   when?: (error: E) => boolean
   /** Randomize each delay by ±50% to avoid thundering-herd patterns. */
@@ -232,9 +233,30 @@ export interface RetryPolicy<E = unknown> {
   timeBudgetMs?: number
 }
 
+
+// Overload: pass either a new RetryPolicy class or the legacy config dict.
+export function retry<A, S>(eff: Eff<A, S>, policy: import("./retry-policy").RetryPolicy): Eff<A, S>
+export function retry<A, S>(eff: Eff<A, S>, config: RetryConfig): Eff<A, S>
 export function retry<A, S>(
   eff: Eff<A, S>,
-  policy: RetryPolicy,
+  policyOrConfig: RetryConfig | import("./retry-policy").RetryPolicy,
+): Eff<A, S> {
+  // Dispatch on shape — a RetryPolicy instance has `.impl`, the legacy config
+  // has `.times` (and no `.impl`).
+  const isPolicy = typeof (policyOrConfig as any).impl !== "undefined"
+  if (isPolicy) {
+    // Delegate to the unified applier. Imported lazily to avoid the circular
+    // retry-policy.ts → constructors.ts → retry-policy.ts cycle on module load.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { runRetry } = require("./retry-policy") as typeof import("./retry-policy")
+    return runRetry(eff, policyOrConfig as any)
+  }
+  return retryLegacy(eff, policyOrConfig as RetryConfig)
+}
+
+function retryLegacy<A, S>(
+  eff: Eff<A, S>,
+  policy: RetryConfig,
 ): Eff<A, S> {
   const {
     times,
