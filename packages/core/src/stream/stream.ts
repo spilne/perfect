@@ -149,6 +149,172 @@ export class Stream<A, S = never> {
     return go()
   }
 
+  // ── Push-source bridges ──────────────────────────────────────────
+  //
+  // Wrap a push-style source (callback, EventEmitter) into a pull-based
+  // Stream via an internal buffer. When the buffer fills, new emits are
+  // dropped silently — pass a bufferSize you're comfortable with, or use
+  // fromQueue(Queue.bounded(N)) directly for proper backpressure.
+
+  /**
+   * Create a Stream from a push-callback API.
+   *
+   * @param register called once with `emit(value)` and `close()`; may return
+   *   a cleanup function that fires when the stream terminates.
+   * @param bufferSize how many queued items to hold before dropping (default: 1024).
+   */
+  static fromCallback<A>(
+    register: (emit: (value: A) => void, close: () => void) => (() => void) | void,
+    bufferSize = 1024,
+  ): Stream<A, never> {
+    return Stream.suspend(() => {
+      const buffer: A[] = []
+      let closed = false
+      let cleanup: (() => void) | void
+      let waiter: ((step: Step<A>) => void) | null = null
+
+      const pushEmit = (value: A): void => {
+        if (closed) return
+        if (waiter !== null) {
+          const w = waiter
+          waiter = null
+          w(emit(Chunk.single(value), next()))
+          return
+        }
+        if (buffer.length < bufferSize) buffer.push(value)
+        // else drop
+      }
+      const pushClose = (): void => {
+        if (closed) return
+        closed = true
+        if (waiter !== null && buffer.length === 0) {
+          const w = waiter
+          waiter = null
+          if (cleanup) cleanup()
+          w(DONE)
+        }
+      }
+
+      cleanup = register(pushEmit, pushClose) ?? undefined
+
+      function next(): Stream<A, never> {
+        return new Stream(new Suspend(Op.Async, (resume: (eff: any) => void) => {
+          if (buffer.length > 0) {
+            const chunkArr: A[] = buffer.splice(0, buffer.length)
+            resume(succeed(emit(Chunk.fromArray(chunkArr), next())))
+            return
+          }
+          if (closed) {
+            if (cleanup) cleanup()
+            resume(succeed(DONE))
+            return
+          }
+          waiter = (step) => resume(succeed(step))
+          // interrupt handle: drop the waiter so a late emit doesn't call into nothing
+          return () => { waiter = null }
+        }, null) as any)
+      }
+
+      return next()
+    })
+  }
+
+  /**
+   * Create a Stream from a Node-style EventEmitter.
+   * Listens for `event`; the stream terminates if a `close`/`end`/`finish`/`error`
+   * event is observed. On cleanup the listener is removed.
+   */
+  static fromEventEmitter<A = unknown>(
+    emitter: {
+      on(event: string, listener: (...args: any[]) => void): any
+      off?(event: string, listener: (...args: any[]) => void): any
+      removeListener?(event: string, listener: (...args: any[]) => void): any
+    },
+    event: string,
+    bufferSize = 1024,
+  ): Stream<A, never> {
+    const removeListener = (ev: string, l: (...args: any[]) => void) => {
+      if (typeof emitter.off === "function") emitter.off(ev, l)
+      else if (typeof emitter.removeListener === "function") emitter.removeListener(ev, l)
+    }
+    return Stream.fromCallback<A>((emit, close) => {
+      const onValue = (...args: any[]) => emit(args.length <= 1 ? args[0] : (args as any))
+      const onEnd = () => close()
+      emitter.on(event, onValue)
+      emitter.on("error", onEnd)
+      emitter.on("end", onEnd)
+      emitter.on("close", onEnd)
+      emitter.on("finish", onEnd)
+      return () => {
+        removeListener(event, onValue)
+        removeListener("error", onEnd)
+        removeListener("end", onEnd)
+        removeListener("close", onEnd)
+        removeListener("finish", onEnd)
+      }
+    }, bufferSize)
+  }
+
+  /**
+   * Like fromCallback, but the registration itself is an effect — useful when
+   * setting up the push source requires IO (opening a socket, subscribing).
+   * The cleanup effect runs when the stream terminates.
+   */
+  static async<A, S>(
+    register: (emit: (value: A) => void, close: () => void) => Eff<(() => void) | void, S>,
+    bufferSize = 1024,
+  ): Stream<A, S> {
+    return new Stream(
+      (succeed(null) as any).flatMap(() => {
+        const buffer: A[] = []
+        let closed = false
+        let waiter: ((step: Step<A>) => void) | null = null
+        let cleanup: (() => void) | void
+
+        const pushEmit = (value: A) => {
+          if (closed) return
+          if (waiter !== null) {
+            const w = waiter; waiter = null
+            w(emit(Chunk.single(value), next()))
+            return
+          }
+          if (buffer.length < bufferSize) buffer.push(value)
+        }
+        const pushClose = () => {
+          if (closed) return
+          closed = true
+          if (waiter !== null && buffer.length === 0) {
+            const w = waiter; waiter = null
+            if (cleanup) cleanup()
+            w(DONE)
+          }
+        }
+
+        function next(): Stream<A, never> {
+          return new Stream(new Suspend(Op.Async, (resume: (eff: any) => void) => {
+            if (buffer.length > 0) {
+              const chunkArr: A[] = buffer.splice(0, buffer.length)
+              resume(succeed(emit(Chunk.fromArray(chunkArr), next())))
+              return
+            }
+            if (closed) {
+              if (cleanup) cleanup()
+              resume(succeed(DONE))
+              return
+            }
+            waiter = (step) => resume(succeed(step))
+            return () => { waiter = null }
+          }, null) as any)
+        }
+
+        return (register(pushEmit, pushClose) as any).map((c: (() => void) | void) => {
+          cleanup = c ?? undefined
+          return next().step
+        }).flatMap((s: any) => s)
+      })
+    )
+  }
+
   static bracket<A, S>(
     acquire: Eff<A, S>,
     release: (a: A) => Eff<void, never>,
