@@ -213,27 +213,66 @@ export function scoped<A, S>(
 
 // ── Retry ──────────────────────────────────────────────────────────
 
-export interface RetryPolicy {
+export interface RetryPolicy<E = unknown> {
   times: number
   delay?: number
   backoff?: "fixed" | "exponential"
   maxDelay?: number
+  /**
+   * Predicate on the typed error. Only retry when it returns true.
+   * Defaults to always-true (retry all typed errors).
+   * Defects and interrupts never retry — they indicate something
+   * unexpected (bug, OOM) or a deliberate cancellation. Use
+   * `retryAllCause` if you explicitly want defect-aware retry.
+   */
+  when?: (error: E) => boolean
+  /** Randomize each delay by ±50% to avoid thundering-herd patterns. */
+  jitter?: boolean
+  /** Total wall-clock budget across all attempts; fail when exceeded. */
+  timeBudgetMs?: number
 }
 
 export function retry<A, S>(
   eff: Eff<A, S>,
   policy: RetryPolicy,
 ): Eff<A, S> {
-  const { times, delay: baseDelay = 0, backoff = "fixed", maxDelay = 30_000 } = policy
+  const {
+    times,
+    delay: baseDelay = 0,
+    backoff = "fixed",
+    maxDelay = 30_000,
+    when,
+    jitter = false,
+    timeBudgetMs = Infinity,
+  } = policy
+
+  const deadline = timeBudgetMs === Infinity ? Infinity : Date.now() + timeBudgetMs
+
+  function nextDelayMs(current: number): number {
+    const base = backoff === "exponential" ? Math.min(current * 2, maxDelay) : current
+    if (!jitter) return base
+    // ±50% jitter, never below 0
+    const factor = 0.5 + Math.random()
+    return Math.max(0, Math.min(maxDelay, Math.floor(base * factor)))
+  }
 
   function attempt(remaining: number, currentDelay: number): Eff<A, S> {
     return new Suspend(Op.CatchAll, eff, (cause: any) => {
       if (remaining <= 0) return new Suspend(Op.Fail, cause, null)
+      if (Date.now() >= deadline) return new Suspend(Op.Fail, cause, null)
+
+      // Only retry typed failures. Defects / interrupts propagate immediately.
+      const f = Cause.firstFail(cause)
+      if (f === null) return new Suspend(Op.Fail, cause, null)
+
+      // Predicate: if supplied, decide per typed error
+      if (when !== undefined && !when(f.value)) {
+        return new Suspend(Op.Fail, cause, null)
+      }
+
       const waitEff = currentDelay > 0 ? sleep(currentDelay) : succeed(undefined)
-      const nextDelay = backoff === "exponential"
-        ? Math.min(currentDelay * 2, maxDelay)
-        : currentDelay
-      return new Suspend(Op.FlatMap, waitEff, () => attempt(remaining - 1, nextDelay))
+      const nextD = nextDelayMs(currentDelay)
+      return new Suspend(Op.FlatMap, waitEff, () => attempt(remaining - 1, nextD))
     }) as any
   }
 

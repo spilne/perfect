@@ -15,6 +15,8 @@ export {
 } from "./constructors"
 export type { RetryPolicy } from "./constructors"
 export { all } from "./combinators"
+export { trapError, validate, hedged, pollUntil, pollUntilWithBackoff, retryAllCause } from "./combinators-extra"
+export type { PollTimeoutError } from "./combinators-extra"
 export { service, provide } from "./service"
 export type { ServiceTag } from "./service"
 export { Clock, RealClock, TestClock, realClock } from "./clock"

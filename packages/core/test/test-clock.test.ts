@@ -1,6 +1,6 @@
 import { describe, test, expect } from "bun:test"
 import {
-  succeed, sync,
+  succeed, fail, sync,
   sleep, delay, timeoutFail,
   forkDaemon, awaitFiber,
   retry,
@@ -148,31 +148,33 @@ describe("TestClock — delay", () => {
 })
 
 describe("TestClock — retry", () => {
+  // Drain the event loop enough for setImmediate + microtask chains to flush.
+  const drain = async () => {
+    for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r))
+  }
+
   test("retry with delay does not block real time", async () => {
     const c = new TestClock()
     let attempts = 0
 
-    const flaky: any = sync(() => {
-      attempts++
-      if (attempts < 3) throw "not-yet"
-      return "ok"
-    })
+    const flaky: any = sync(() => ++attempts).flatMap((n: number) =>
+      n < 3 ? fail("not-yet") : succeed("ok"),
+    )
 
     const program = provide(
       retry(flaky, { times: 5, delay: 1000, backoff: "fixed" }),
-      Clock,
-      c,
+      Clock, c,
     )
 
     const promise = run(program as any)
-    await tick()
+    await drain()
     expect(attempts).toBe(1)
 
-    c.advance(1000) // first retry delay
-    await tick()
+    c.advance(1000)
+    await drain()
     expect(attempts).toBe(2)
 
-    c.advance(1000) // second retry delay
+    c.advance(1000)
     expect(await promise).toBe("ok")
     expect(attempts).toBe(3)
   })
@@ -180,24 +182,18 @@ describe("TestClock — retry", () => {
   test("retry exhausts all attempts and surfaces the original failure", async () => {
     const c = new TestClock()
     let attempts = 0
-
-    const alwaysFails: any = sync(() => {
-      attempts++
-      throw "nope"
-    })
+    const alwaysFails: any = sync(() => ++attempts).flatMap(() => fail("nope"))
 
     const program = provide(
       retry(alwaysFails, { times: 2, delay: 100, backoff: "fixed" }),
-      Clock,
-      c,
+      Clock, c,
     )
 
     const promise = run(program as any)
-    await tick()
-    c.advance(100)
-    await tick()
+    await drain()
+    c.advance(100); await drain()
     c.advance(100)
     await expect(promise).rejects.toBe("nope")
-    expect(attempts).toBe(3) // initial + 2 retries
+    expect(attempts).toBe(3)
   })
 })
