@@ -8,7 +8,12 @@
 // Backpressure is structural — no buffering, no highWaterMark.
 
 import { type Eff, type Throws, type Needs, Suspend, Op } from "../eff";
-import { succeed, fail, sync, suspend, async, sleep, fork, join } from "../constructors";
+import {
+  succeed, fail, sync, suspend, async, sleep, fork, join,
+  retry as effRetry,
+  type RetryConfig,
+} from "../constructors";
+import type { RetryPolicy } from "../retry-policy";
 import { all } from "../combinators";
 import { Chunk } from "./chunk";
 import { type FusibleOp, compileFused, hasFilterOps, SKIP } from "./fusion";
@@ -1145,6 +1150,26 @@ export class Stream<A, S = never> {
     return new Stream(new Suspend(Op.Ensuring, this.step, finalizer) as any).mapContinuation(
       (next) => next.onFinalize(finalizer),
     );
+  }
+
+  /**
+   * Retry each pull according to the given policy. If a step fails, retry it
+   * up to the policy's limit. Once a chunk emits, retry resets — failures in
+   * the next pull are retried independently.
+   *
+   * For "restart the entire stream from scratch on failure" semantics, build
+   * the stream inside `Stream.suspend(() => makeStream())` and apply retry
+   * around that — the suspend re-creates the source on each retry.
+   */
+  retry(policy: RetryPolicy | RetryConfig): Stream<A, S> {
+    const wrap = (s: Stream<A, S>): Stream<A, S> =>
+      new Stream(
+        (effRetry(s.step as any, policy as any) as any).map((step: Step<A>) => {
+          if (step._tag === "Done") return DONE;
+          return emit(step.chunk, wrap(step.next));
+        }),
+      );
+    return wrap(this);
   }
 
   private mapContinuation(f: (next: Stream<A, any>) => Stream<A, any>): Stream<A, S> {
