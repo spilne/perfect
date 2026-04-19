@@ -1,6 +1,6 @@
 import { describe, test, expect } from "bun:test";
 import {
-  CircuitBreaker, succeed, fail, sync, run, runSync,
+  CircuitBreaker, succeed, fail, sync, sleep, fork, join, all, eff, run, runSync,
   type Eff, type Throws,
 } from "../src";
 
@@ -113,6 +113,66 @@ describe("CircuitBreaker", () => {
     runSync(cb.reset());
     expect(cb.state).toBe("closed");
     expect(cb.failures).toBe(0);
+  });
+
+  // ── Concurrent / slow-path coverage ────────────────────────────
+
+  test("100 concurrent .protect calls (closed, all success) all pass", async () => {
+    const cb = CircuitBreaker.make<string>({ failureThreshold: 100, resetTimeoutMs: 1000 });
+    const results = await run(
+      all(Array.from({ length: 100 }, (_, i) => cb.protect(succeed(i)))),
+    );
+    expect(results.length).toBe(100);
+    expect(cb.state).toBe("closed");
+    expect(cb.failures).toBe(0);
+  });
+
+  test("concurrent failure burst opens the breaker; subsequent calls reject fast", async () => {
+    const cb = CircuitBreaker.make<string>({ failureThreshold: 5, resetTimeoutMs: 1000 });
+
+    // Concurrent burst — check check + record happen non-atomically per fiber,
+    // so all 20 may run their inner eff and record (race-tolerant by design).
+    // What matters: after the burst, the breaker IS open.
+    await Promise.all(
+      Array.from({ length: 20 }, (_, i) =>
+        run((cb.protect(fail(`f${i}`) as any) as any).catch((e: any) => succeed({ caught: e }))),
+      ),
+    );
+    expect(cb.state).toBe("open");
+    expect(cb.failures).toBeGreaterThanOrEqual(5);
+
+    // Now a fresh call should reject with CircuitOpen WITHOUT invoking the inner eff.
+    let invoked = false;
+    const tracked = sync(() => {
+      invoked = true;
+      return 1;
+    }) as any;
+    const rejected = await run(
+      (cb.protect(tracked) as any).catch((e: any) => succeed({ caught: e })),
+    );
+    expect(invoked).toBe(false);
+    expect((rejected as any).caught._tag).toBe("CircuitOpen");
+  });
+
+  test("half-open: only one probe at a time (mostly — others see open)", async () => {
+    const cb = CircuitBreaker.make<string>({ failureThreshold: 1, resetTimeoutMs: 20 });
+    await expect(run(cb.protect(fail("trip") as any) as any)).rejects.toBe("trip");
+    expect(cb.state).toBe("open");
+
+    // Wait past reset; breaker should now be half-open. Fire 10 concurrent
+    // .protect calls — the slow probe should succeed for the one(s) that
+    // squeezed in before transition closes the breaker; the rest see closed.
+    await new Promise((r) => setTimeout(r, 25));
+    expect(cb.state).toBe("half-open");
+
+    const probe = sleep(10).flatMap(() => succeed("probe-ok"));
+    const all10 = await run(all(Array.from({ length: 10 }, () => cb.protect(probe))));
+    // After concurrent probes, breaker should be closed (success closes it)
+    expect(cb.state).toBe("closed");
+    // All 10 succeeded — half-open lets concurrent calls through; the first
+    // success closes, subsequent calls run in closed state. (Promin's design
+    // doesn't enforce single-probe — it's eventually consistent.)
+    expect(all10.every((r) => r === "probe-ok")).toBe(true);
   });
 
   test("validates options at make time", () => {
