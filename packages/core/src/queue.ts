@@ -1,62 +1,82 @@
+// Queue<A> — multi-producer, multi-consumer FIFO with backpressure.
+//
+// Eff-typed contract; in-process implementation by default.
+// `close()` (alias `shutdown()`) signals "no more values" — pending takers
+// receive `QueueClosed`; new offers fail; already-buffered values drain.
+
 import { type Eff, type Throws } from "./eff";
 import { succeed, fail, sync, async } from "./constructors";
 
-class QueueShutdown {
-  readonly _tag = "QueueShutdown" as const;
+export class QueueClosed {
+  readonly _tag = "QueueClosed" as const;
 }
 
-type TakeResume<A> = (eff: Eff<A, Throws<QueueShutdown>>) => void;
-type OfferResume = (eff: Eff<boolean, Throws<QueueShutdown>>) => void;
+/** Backwards-compat alias. Prefer `QueueClosed`. */
+export const QueueShutdown = QueueClosed;
+export type QueueShutdown = QueueClosed;
 
-export class Queue<A> {
+type TakeResume<A> = (eff: Eff<A, Throws<QueueClosed>>) => void;
+type OfferResume = (eff: Eff<boolean, Throws<QueueClosed>>) => void;
+
+export interface Queue<A> {
+  /** Push a value. Blocks if bounded and full. Fails with QueueClosed if closed. */
+  offer(value: A): Eff<boolean, Throws<QueueClosed>>;
+  /** Pop a value. Blocks if empty. Fails with QueueClosed if closed AND empty. */
+  take(): Eff<A, Throws<QueueClosed>>;
+  /** Drain everything immediately, including queued offerers' values. */
+  takeAll(): Eff<A[], never>;
+  /** Push many — sequentially, respecting backpressure. */
+  offerAll(values: A[]): Eff<void, Throws<QueueClosed>>;
+  /** Number of buffered items (not including pending offerers). */
+  readonly size: Eff<number, never>;
+  /** Has close() been called? */
+  readonly isClosed: Eff<boolean, never>;
+  /** Backwards-compat alias for `isClosed`. */
+  readonly isShutdown: Eff<boolean, never>;
+  /** Signal "no more values" — wakes pending takers/offerers with QueueClosed. */
+  close(): Eff<void, never>;
+  /** Backwards-compat alias for `close`. */
+  shutdown(): Eff<void, never>;
+  /** Block until close() is called. */
+  readonly awaitClose: Eff<void, never>;
+  /** Backwards-compat alias for `awaitClose`. */
+  readonly awaitShutdown: Eff<void, never>;
+}
+
+class InProcessQueue<A> implements Queue<A> {
   private buffer: A[] = [];
   private takers: TakeResume<A>[] = [];
   private offerers: Array<{ value: A; resume: OfferResume }> = [];
-  private _shutdown = false;
-  private shutdownWaiters: Array<() => void> = [];
+  private _closed = false;
+  private closeWaiters: Array<() => void> = [];
 
-  private constructor(private readonly capacity: number) {}
+  constructor(private readonly capacity: number) {}
 
-  static bounded<A>(capacity: number): Eff<Queue<A>, never> {
-    return sync(() => new Queue<A>(capacity));
-  }
-
-  static unbounded<A>(): Eff<Queue<A>, never> {
-    return sync(() => new Queue<A>(Infinity));
-  }
-
-  offer(value: A): Eff<boolean, Throws<QueueShutdown>> {
-    return async<boolean, QueueShutdown>((resume) => {
-      if (this._shutdown) {
-        resume(fail(new QueueShutdown()) as any);
+  offer(value: A): Eff<boolean, Throws<QueueClosed>> {
+    return async<boolean, QueueClosed>((resume) => {
+      if (this._closed) {
+        resume(fail(new QueueClosed()) as any);
         return;
       }
-
-      // if a taker is waiting, hand off directly
       const taker = this.takers.shift();
       if (taker) {
         taker(succeed(value) as any);
         resume(succeed(true) as any);
         return;
       }
-
-      // if buffer has room, enqueue
       if (this.buffer.length < this.capacity) {
         this.buffer.push(value);
         resume(succeed(true) as any);
         return;
       }
-
-      // buffer full — block
       this.offerers.push({ value, resume: resume as any });
     }) as any;
   }
 
-  take(): Eff<A, Throws<QueueShutdown>> {
-    return async<A, QueueShutdown>((resume) => {
+  take(): Eff<A, Throws<QueueClosed>> {
+    return async<A, QueueClosed>((resume) => {
       if (this.buffer.length > 0) {
         const item = this.buffer.shift()!;
-        // wake a blocked offerer
         const offerer = this.offerers.shift();
         if (offerer) {
           this.buffer.push(offerer.value);
@@ -65,21 +85,16 @@ export class Queue<A> {
         resume(succeed(item) as any);
         return;
       }
-
-      if (this._shutdown) {
-        resume(fail(new QueueShutdown()) as any);
+      if (this._closed) {
+        resume(fail(new QueueClosed()) as any);
         return;
       }
-
-      // if an offerer is waiting, take directly
       const offerer = this.offerers.shift();
       if (offerer) {
         offerer.resume(succeed(true) as any);
         resume(succeed(offerer.value) as any);
         return;
       }
-
-      // block
       this.takers.push(resume as any);
     }) as any;
   }
@@ -96,9 +111,9 @@ export class Queue<A> {
     });
   }
 
-  offerAll(values: A[]): Eff<void, Throws<QueueShutdown>> {
-    if (this._shutdown) return fail(new QueueShutdown()) as any;
-    return values.reduce<Eff<void, Throws<QueueShutdown>>>(
+  offerAll(values: A[]): Eff<void, Throws<QueueClosed>> {
+    if (this._closed) return fail(new QueueClosed()) as any;
+    return values.reduce<Eff<void, Throws<QueueClosed>>>(
       (acc, v) => (acc as any).flatMap(() => this.offer(v).map(() => undefined)),
       succeed(undefined) as any,
     );
@@ -108,31 +123,52 @@ export class Queue<A> {
     return sync(() => this.buffer.length);
   }
 
-  get isShutdown(): Eff<boolean, never> {
-    return sync(() => this._shutdown);
+  get isClosed(): Eff<boolean, never> {
+    return sync(() => this._closed);
   }
 
-  shutdown(): Eff<void, never> {
+  get isShutdown(): Eff<boolean, never> {
+    return this.isClosed;
+  }
+
+  close(): Eff<void, never> {
     return sync(() => {
-      if (this._shutdown) return;
-      this._shutdown = true;
+      if (this._closed) return;
+      this._closed = true;
       const takers = this.takers.splice(0);
       const offerers = this.offerers.splice(0);
-      for (const t of takers) t(fail(new QueueShutdown()) as any);
-      for (const o of offerers) o.resume(fail(new QueueShutdown()) as any);
-      for (const w of this.shutdownWaiters) w();
-      this.shutdownWaiters.length = 0;
+      for (const t of takers) t(fail(new QueueClosed()) as any);
+      for (const o of offerers) o.resume(fail(new QueueClosed()) as any);
+      for (const w of this.closeWaiters) w();
+      this.closeWaiters.length = 0;
     });
   }
 
-  get awaitShutdown(): Eff<void, never> {
-    if (this._shutdown) return succeed(undefined);
+  shutdown(): Eff<void, never> {
+    return this.close();
+  }
+
+  get awaitClose(): Eff<void, never> {
+    if (this._closed) return succeed(undefined);
     return async<void>((resume) => {
-      if (this._shutdown) {
+      if (this._closed) {
         resume(succeed(undefined) as any);
         return;
       }
-      this.shutdownWaiters.push(() => resume(succeed(undefined) as any));
+      this.closeWaiters.push(() => resume(succeed(undefined) as any));
     }) as any;
   }
+
+  get awaitShutdown(): Eff<void, never> {
+    return this.awaitClose;
+  }
 }
+
+export const Queue = {
+  bounded<A>(capacity: number): Eff<Queue<A>, never> {
+    return sync(() => new InProcessQueue<A>(capacity));
+  },
+  unbounded<A>(): Eff<Queue<A>, never> {
+    return sync(() => new InProcessQueue<A>(Infinity));
+  },
+} as const;

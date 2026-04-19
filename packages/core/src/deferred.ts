@@ -1,5 +1,7 @@
-import { type Eff, type Throws, Suspend, Op } from "./eff";
-import { Cause } from "./cause";
+// Deferred<A, E> — write-once promise/handle.
+// Eff-typed contract; in-process implementation by default.
+
+import { type Eff, type Throws } from "./eff";
 import { succeed, fail, sync, async } from "./constructors";
 
 export type DeferredState<A, E> =
@@ -10,14 +12,24 @@ type DeferredResult<A, E> =
   | { readonly ok: true; readonly value: A }
   | { readonly ok: false; readonly error: E };
 
-export class Deferred<A, E = never> {
+export interface Deferred<A, E = never> {
+  /** Complete with success. Returns true if this call set the value, false if already done. */
+  succeed(value: A): Eff<boolean, never>;
+  /** Complete with failure. Returns true if this call set the error, false if already done. */
+  fail(error: E): Eff<boolean, never>;
+  /** Block until completed. */
+  readonly await: Eff<A, Throws<E>>;
+  /** True if already settled. */
+  readonly isDone: Eff<boolean, never>;
+}
+
+/**
+ * Concrete in-process implementation. Exposed for primitives that need to
+ * construct a Deferred synchronously (e.g. Singleflight's atomic check+
+ * register). Most users should call `Deferred.make()` instead.
+ */
+export class InProcessDeferred<A, E = never> implements Deferred<A, E> {
   private state: DeferredState<A, E> = { _tag: "Pending", waiters: [] };
-
-  private constructor() {}
-
-  static make<A, E = never>(): Eff<Deferred<A, E>, never> {
-    return sync(() => new Deferred<A, E>());
-  }
 
   succeed(value: A): Eff<boolean, never> {
     return sync(() => {
@@ -56,3 +68,9 @@ export class Deferred<A, E = never> {
     return sync(() => this.state._tag === "Done");
   }
 }
+
+export const Deferred = {
+  make<A, E = never>(): Eff<Deferred<A, E>, never> {
+    return sync(() => new InProcessDeferred<A, E>());
+  },
+} as const;
