@@ -37,7 +37,7 @@
 
 import { group, bench, run as mitataRun } from "mitata";
 import {
-  eff, succeed, fail, sync, sleep, service, provide, run, runSync,
+  eff, succeed, fail, sync, sleep, tryPromise, service, provide, run, runSync,
   type Eff, type Throws, type Needs,
 } from "../src";
 import { rewriteEffBlocks } from "../../transform/src/rewrite";
@@ -274,6 +274,49 @@ group("fail mid-chain + recover", () => {
     return x;
   });
   bench("eff(function*): try/catch around yield* fail", async () => run(genRecover as any));
+});
+
+// ── 6. Eff wrapping promises vs plain promises ────────────────────────
+//
+// Question: if every step of a flatMap chain awaits a real Promise (via
+// tryPromise), does Eff still beat plain Promise.then? Hypothesis: NO —
+// the microtask cost of the Promise resolution dominates and Eff adds
+// interpreter overhead on top.
+
+group(`Eff wrapping promises vs plain promises × ${N}`, () => {
+  // Baseline: pure Eff with succeed (no Promise wrapping at all)
+  const composedSucceed = (() => {
+    let e: Eff<number, never> = succeed(0);
+    for (let i = 0; i < N; i++) e = e.flatMap((x) => succeed(x + 1));
+    return e;
+  })();
+  bench("Eff: composed flatMap + succeed (NO promises)", async () => run(composedSucceed));
+
+  // Eff wrapping a Promise per step — every step pays a microtask
+  const composedTryPromise = (() => {
+    let e: Eff<number, any> = succeed(0);
+    for (let i = 0; i < N; i++) {
+      e = e.flatMap((x) => tryPromise(() => Promise.resolve(x + 1)));
+    }
+    return e;
+  })();
+  bench("Eff: composed flatMap + tryPromise(Promise.resolve)", async () =>
+    run(composedTryPromise as any),
+  );
+
+  // Plain Promise.then chain — what we're competing against
+  bench("Promise: .then(Promise.resolve(...)) chain", async () => {
+    let p: Promise<number> = Promise.resolve(0);
+    for (let i = 0; i < N; i++) p = p.then((x) => Promise.resolve(x + 1));
+    return p;
+  });
+
+  // Plain Promise.then with sync callback (closer to flatMap+succeed semantically)
+  bench("Promise: .then(sync) chain (no inner Promise)", async () => {
+    let p: Promise<number> = Promise.resolve(0);
+    for (let i = 0; i < N; i++) p = p.then((x) => x + 1);
+    return p;
+  });
 });
 
 await mitataRun();

@@ -42,8 +42,34 @@ Divide by N=100:
 | `await Promise` | 22.4 |
 | `Promise.then` | 28.5 |
 | `eff($)` compiled | 34 |
-| `eff(function*)` | **64** |
+| `eff(function*)` | 64 |
 | `await eff` (thenable) | 128 |
+| **`flatMap + tryPromise(...)` (bridges per step)** | **569** |
+
+The last row deserves its own warning — see "Bridging Promises in a hot loop"
+below.
+
+## Bridging Promises in a hot loop
+
+If every step of an Eff chain wraps a Promise via `tryPromise`, you pay
+~570 ns per step — **20× the composed flatMap baseline, 11× plain
+Promise.then**. The cost is the bridging machinery itself: each `tryPromise`
+allocates a Suspend, installs error-catch handlers, registers an async
+resume — much more than just the underlying microtask.
+
+| approach | per 100 steps | ns/step |
+|---|---:|---:|
+| Eff `.flatMap + succeed` (no promise) | 2.2 µs | 22 |
+| Promise `.then(sync)` chain | 2.9 µs | 29 |
+| Promise `.then(Promise.resolve(...))` chain | 5.2 µs | 52 |
+| **Eff `.flatMap + tryPromise(Promise.resolve)`** | **56.9 µs** | **569** |
+
+**The lesson**: bridge to Promises **once at the boundary** (e.g., one
+`tryPromise(() => fetch(...))` at the entry point), then compose everything
+else inside Eff. Don't `tryPromise` inside a tight loop.
+
+Eff is great when you stay inside Eff. The moment you bounce in/out of the
+Promise world per step, you pay heavily for each crossing.
 
 ## Interpretation
 
