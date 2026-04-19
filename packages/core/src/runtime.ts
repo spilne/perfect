@@ -8,6 +8,7 @@ import { succeed } from "./constructors"
 import { Clock, realClock } from "./clock"
 import { Random, realRandom } from "./random"
 import { Console, realConsole } from "./console"
+import type { Exit } from "./exit"
 
 // Seed the default context once — real Clock/Random/Console are always
 // available so sleep() / Random.next / Console.log etc. work without an
@@ -689,4 +690,88 @@ export function runFiber<A>(eff: Eff<A, any>, scheduler?: Scheduler): Fiber<A> {
   fiber.scheduler.schedule(() => runFiberLoop(fiber))
 
   return fiber
+}
+
+/**
+ * Run an effect and return its Exit. Never throws — on failure the Cause is
+ * wrapped as `{ _tag: "Failure", cause }`, on success as `{ _tag: "Success", value }`.
+ *
+ * Use this when you want to pattern-match on success vs every flavour of
+ * failure (typed error, defect, interrupt) and inspect the full Cause tree.
+ */
+export function runExit<A>(
+  eff: Eff<A, any>,
+  scheduler?: Scheduler,
+): Promise<Exit<unknown, A>> {
+  return new Promise((resolve) => {
+    const fiber = new Fiber<A>()
+    fiber.current = eff
+    fiber.context = emptyContext
+    fiber.scheduler = scheduler ?? getDefaultScheduler()
+
+    fiber.onComplete((r) => {
+      resolve(r.ok
+        ? { _tag: "Success", value: r.value }
+        : { _tag: "Failure", cause: r.cause })
+    })
+
+    fiber.state = FiberState.Ready
+    fiber.scheduler.schedule(() => runFiberLoop(fiber))
+  })
+}
+
+/**
+ * Run an effect and return a discriminated `{ data, error }` pair. Never
+ * throws for typed failures.
+ *
+ * By default, only typed errors (Cause.Fail leaves) go into `error`; defects
+ * (Cause.Die) and interrupts still throw. Pass `{ catchDefects: true }` to
+ * also catch defects — they'll be squashed into the `error` field.
+ *
+ * @example
+ *   const { data, error } = await runSafe(mayFail)
+ *   if (error) handle(error); else use(data)
+ *
+ *   const { data, error } = await runSafe(mayFail, { catchDefects: true })
+ *   // error is now typed | unknown (defects as well)
+ */
+export function runSafe<A, E = unknown>(
+  eff: Eff<A, any>,
+  opts: { catchDefects: true },
+  scheduler?: Scheduler,
+): Promise<{ data: A; error: null } | { data: null; error: E | unknown }>
+export function runSafe<A, E = unknown>(
+  eff: Eff<A, any>,
+  opts?: { catchDefects?: false },
+  scheduler?: Scheduler,
+): Promise<{ data: A; error: null } | { data: null; error: E }>
+export function runSafe<A>(
+  eff: Eff<A, any>,
+  opts: { catchDefects?: boolean } = {},
+  scheduler?: Scheduler,
+): Promise<{ data: A; error: null } | { data: null; error: unknown }> {
+  return new Promise((resolve, reject) => {
+    const fiber = new Fiber<A>()
+    fiber.current = eff
+    fiber.context = emptyContext
+    fiber.scheduler = scheduler ?? getDefaultScheduler()
+
+    fiber.onComplete((r) => {
+      if (r.ok) return resolve({ data: r.value, error: null })
+
+      const typedFail = Cause.firstFail(r.cause)
+      if (typedFail !== null) {
+        return resolve({ data: null, error: typedFail.value })
+      }
+      // No typed error — only defects or interrupts in the cause.
+      if (opts.catchDefects) {
+        return resolve({ data: null, error: Cause.squash(r.cause) })
+      }
+      // Throw through the Promise.
+      reject(Cause.squash(r.cause))
+    })
+
+    fiber.state = FiberState.Ready
+    fiber.scheduler.schedule(() => runFiberLoop(fiber))
+  })
 }
