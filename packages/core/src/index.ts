@@ -11,6 +11,7 @@ export {
   suspend,
   async,
   tryPromise,
+  fromPromise,
   fork,
   forkDaemon,
   join,
@@ -52,6 +53,7 @@ export type { RepeatTimeoutError } from "./combinators-extra";
 export { service, provide } from "./service";
 export type { ServiceTag } from "./service";
 export { Layer } from "./layer";
+export type { Layer as LayerT } from "./layer";
 import "./layer";
 export { Clock, RealClock, TestClock, realClock } from "./clock";
 export { Random, RealRandom, TestRandom, realRandom } from "./random";
