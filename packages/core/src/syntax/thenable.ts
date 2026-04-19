@@ -14,6 +14,7 @@ import { type Eff, Suspend } from "../eff";
 import { Cause } from "../cause";
 import { emptyContext } from "../service";
 import { evalSync, run } from "../runtime";
+import { PROMISE_THUNK, PROMISE_ON_REJECT } from "../constructors";
 
 declare module "../eff" {
   interface Suspend {
@@ -29,6 +30,22 @@ declare module "../eff" {
 }
 
 Suspend.prototype.then = function (this: Suspend, onFulfilled?: any, onRejected?: any): any {
+  // Shortcut for bare `await tryPromise(p)` — skip fiber spawn entirely.
+  // Saves ~500 ns vs run() for promise bridging in the no-composition case.
+  // Only fires when this Suspend IS the tryPromise leaf (no surrounding
+  // FlatMap/Catch/Provide/etc. — those Suspends won't carry the markers).
+  const thunk = (this as any)[PROMISE_THUNK];
+  if (thunk !== undefined) {
+    const onReject = (this as any)[PROMISE_ON_REJECT];
+    return (thunk() as Promise<any>).then(
+      (v) => (onFulfilled ? onFulfilled(v) : v),
+      (e) => {
+        const mapped = onReject ? onReject(e) : e;
+        return onRejected ? onRejected(mapped) : Promise.reject(mapped);
+      },
+    );
+  }
+
   // Fast path: evaluate purely-synchronous effects without the fiber runtime.
   const syncResult = evalSync(this as any, emptyContext);
   if (syncResult !== null) {
