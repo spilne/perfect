@@ -30,13 +30,15 @@ const N = 1000;
 // ── Ref ─────────────────────────────────────────────────────────────
 
 group(`Ref — get/set × ${N}`, () => {
-  bench("perfect Ref + runSync", () => {
+  bench("perfect Ref (single fiber)", () => {
     runSync(
-      Ref.make(0).flatMap((r) => {
-        let e: any = succeed(undefined);
-        for (let i = 0; i < N; i++) e = e.flatMap(() => r.set(i)).flatMap(() => r.get);
-        return e;
-      }),
+      eff(function* () {
+        const r = yield* Ref.make(0);
+        for (let i = 0; i < N; i++) {
+          yield* r.set(i);
+          yield* r.get;
+        }
+      }) as any,
     );
   });
 
@@ -64,12 +66,16 @@ group(`Ref — get/set × ${N}`, () => {
 // ── Deferred ────────────────────────────────────────────────────────
 
 group(`Deferred — make + succeed + await × ${N}`, () => {
-  bench("perfect Deferred", async () => {
-    for (let i = 0; i < N; i++) {
-      const d = await run(Deferred.make<number>());
-      await run(d.succeed(i));
-      await run(d.await);
-    }
+  bench("perfect Deferred (single fiber)", async () => {
+    await run(
+      eff(function* () {
+        for (let i = 0; i < N; i++) {
+          const d = yield* Deferred.make<number>();
+          yield* d.succeed(i);
+          yield* d.await;
+        }
+      }) as any,
+    );
   });
 
   bench("effect Deferred", async () => {
@@ -129,9 +135,13 @@ group(`Queue — offer + take × ${Q_N}`, () => {
 
 const S_N = 500;
 group(`Semaphore — withPermit × ${S_N}`, () => {
-  bench("perfect Semaphore.withPermit", async () => {
-    const s = await run(Semaphore.make(10));
-    for (let i = 0; i < S_N; i++) await run(s.withPermit(succeed(i)));
+  bench("perfect Semaphore.withPermit (single fiber)", async () => {
+    await run(
+      eff(function* () {
+        const s = yield* Semaphore.make(10);
+        for (let i = 0; i < S_N; i++) yield* s.withPermit(succeed(i));
+      }) as any,
+    );
   });
 
   bench("naive: counter mutex (no real semaphore)", async () => {
@@ -148,9 +158,13 @@ group(`Semaphore — withPermit × ${S_N}`, () => {
 
 const CB_N = 500;
 group(`CircuitBreaker — protect (closed, all success) × ${CB_N}`, () => {
-  bench("perfect CircuitBreaker.protect", async () => {
+  bench("perfect CircuitBreaker.protect (single fiber)", async () => {
     const cb = CircuitBreaker.make({ failureThreshold: 100, resetTimeoutMs: 1000 });
-    for (let i = 0; i < CB_N; i++) await run(cb.protect(succeed(i)));
+    await run(
+      eff(function* () {
+        for (let i = 0; i < CB_N; i++) yield* cb.protect(succeed(i));
+      }) as any,
+    );
   });
 
   bench("naive: try/catch around fn (no breaker)", async () => {
@@ -171,13 +185,21 @@ group(`CircuitBreaker — protect (closed, all success) × ${CB_N}`, () => {
 
 const SF_N = 200;
 group(`Singleflight — do (different keys, no contention) × ${SF_N}`, () => {
-  bench("perfect Singleflight.do (unique keys)", async () => {
+  bench("perfect Singleflight.do (single fiber)", async () => {
     const sf = Singleflight.make();
-    for (let i = 0; i < SF_N; i++) await run(sf.do(`k${i}`, succeed(i)));
+    await run(
+      eff(function* () {
+        for (let i = 0; i < SF_N; i++) yield* sf.do(`k${i}`, succeed(i));
+      }) as any,
+    );
   });
 
-  bench("naive: bare effect (no dedup)", async () => {
-    for (let i = 0; i < SF_N; i++) await run(succeed(i));
+  bench("naive: bare effect (single fiber, no dedup)", async () => {
+    await run(
+      eff(function* () {
+        for (let i = 0; i < SF_N; i++) yield* succeed(i);
+      }) as any,
+    );
   });
 });
 
@@ -185,22 +207,22 @@ group(`Singleflight — do (different keys, no contention) × ${SF_N}`, () => {
 
 const RL_N = 500;
 group(`RateLimiter — sliding-window tryAcquire × ${RL_N}`, () => {
-  bench("perfect RateLimiter.tryAcquire (sliding)", async () => {
-    const rl = await run(
-      RateLimiter.slidingWindow({ limit: 10000, windowMs: 1000 }),
-    );
-    for (let i = 0; i < RL_N; i++) await run(rl.tryAcquire);
-  });
+  const benchStrategy = (
+    name: string,
+    factory: (opts: { limit: number; windowMs: number }) => any,
+  ) =>
+    bench(name, async () => {
+      await run(
+        eff(function* () {
+          const rl = yield* factory({ limit: 10000, windowMs: 1000 });
+          for (let i = 0; i < RL_N; i++) yield* rl.tryAcquire;
+        }) as any,
+      );
+    });
 
-  bench("perfect RateLimiter.tryAcquire (token-bucket)", async () => {
-    const rl = await run(RateLimiter.tokenBucket({ limit: 10000, windowMs: 1000 }));
-    for (let i = 0; i < RL_N; i++) await run(rl.tryAcquire);
-  });
-
-  bench("perfect RateLimiter.tryAcquire (fixed-window)", async () => {
-    const rl = await run(RateLimiter.fixedWindow({ limit: 10000, windowMs: 1000 }));
-    for (let i = 0; i < RL_N; i++) await run(rl.tryAcquire);
-  });
+  benchStrategy("perfect RateLimiter.tryAcquire (sliding)", RateLimiter.slidingWindow);
+  benchStrategy("perfect RateLimiter.tryAcquire (token-bucket)", RateLimiter.tokenBucket);
+  benchStrategy("perfect RateLimiter.tryAcquire (fixed-window)", RateLimiter.fixedWindow);
 
   bench("naive: counter compare", () => {
     let count = 0;
@@ -212,23 +234,31 @@ group(`RateLimiter — sliding-window tryAcquire × ${RL_N}`, () => {
 
 const L_N = 500;
 group(`Latch — countDown all + await × ${L_N}`, () => {
-  bench("perfect Latch", async () => {
-    for (let i = 0; i < 50; i++) {
-      const l = await run(Latch.make({ count: L_N / 50 }));
-      for (let j = 0; j < L_N / 50; j++) await run(l.countDown);
-      await run(l.await);
-    }
+  bench("perfect Latch (single fiber)", async () => {
+    await run(
+      eff(function* () {
+        for (let i = 0; i < 50; i++) {
+          const l = yield* Latch.make({ count: L_N / 50 });
+          for (let j = 0; j < L_N / 50; j++) yield* l.countDown;
+          yield* l.await;
+        }
+      }) as any,
+    );
   });
 });
 
 // ── Barrier ─────────────────────────────────────────────────────────
 
 group(`Barrier — single party rounds × 100`, () => {
-  bench("perfect Barrier (1 party, 100 rounds)", async () => {
-    for (let i = 0; i < 100; i++) {
-      const b = await run(Barrier.make({ parties: 1 }));
-      await run(b.await);
-    }
+  bench("perfect Barrier (1 party, 100 rounds, single fiber)", async () => {
+    await run(
+      eff(function* () {
+        for (let i = 0; i < 100; i++) {
+          const b = yield* Barrier.make({ parties: 1 });
+          yield* b.await;
+        }
+      }) as any,
+    );
   });
 });
 
@@ -236,10 +266,14 @@ group(`Barrier — single party rounds × 100`, () => {
 
 const PS_N = 200;
 group(`PubSub — publish to N subscribers × ${PS_N}`, () => {
-  bench("perfect PubSub.publish (5 subscribers)", async () => {
-    const ps = await run(PubSub.unbounded<number>());
-    for (let i = 0; i < 5; i++) await run(ps.subscribe);
-    for (let i = 0; i < PS_N; i++) await run(ps.publish(i));
+  bench("perfect PubSub.publish (5 subscribers, single fiber)", async () => {
+    await run(
+      eff(function* () {
+        const ps = yield* PubSub.unbounded<number>();
+        for (let i = 0; i < 5; i++) yield* ps.subscribe;
+        for (let i = 0; i < PS_N; i++) yield* ps.publish(i);
+      }) as any,
+    );
   });
 
   bench("effect PubSub.publish (5 subscribers)", async () => {
@@ -263,14 +297,22 @@ group(`PubSub — publish to N subscribers × ${PS_N}`, () => {
 
 const SR_N = 200;
 group(`SubscriptionRef — set × ${SR_N}`, () => {
-  bench("perfect SubscriptionRef.set", async () => {
-    const ref = await run(SubscriptionRef.make(0));
-    for (let i = 0; i < SR_N; i++) await run(ref.set(i));
+  bench("perfect SubscriptionRef.set (single fiber)", async () => {
+    await run(
+      eff(function* () {
+        const ref = yield* SubscriptionRef.make(0);
+        for (let i = 0; i < SR_N; i++) yield* ref.set(i);
+      }) as any,
+    );
   });
 
-  bench("perfect Ref.set (no notification)", async () => {
-    const ref = await run(Ref.make(0));
-    for (let i = 0; i < SR_N; i++) await run(ref.set(i));
+  bench("perfect Ref.set (no notification, single fiber)", async () => {
+    await run(
+      eff(function* () {
+        const ref = yield* Ref.make(0);
+        for (let i = 0; i < SR_N; i++) yield* ref.set(i);
+      }) as any,
+    );
   });
 });
 
