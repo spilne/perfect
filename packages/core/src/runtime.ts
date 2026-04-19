@@ -25,7 +25,7 @@ type Reject = (cause: Cause) => void
 //   { ok: true, value }   — completed sync with a value
 //   { ok: false, cause }  — completed sync with a cause
 //   null                  — needs the fiber runtime (Async, Fork, Race, nested All, etc.)
-function evalSync(
+export function evalSync(
   node: Suspend,
   ctx: Context,
 ): { ok: true; value: any } | { ok: false; cause: Cause } | null {

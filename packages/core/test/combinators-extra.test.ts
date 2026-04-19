@@ -111,20 +111,11 @@ describe("repeatUntil", () => {
   })
 
   test("fails with RepeatTimeoutError when maxAttempts is hit", async () => {
+    // Use real time with tiny delays — simpler and less flaky than TestClock drain.
     const poller = sync(() => 0) as any
-    const c = new TestClock()
-    const promise = run(
-      provide(
-        repeatUntil(poller, { until: (n: number) => n > 0, intervalMs: 50, maxAttempts: 3 }),
-        Clock,
-        c,
-      ) as any,
-    )
-    await new Promise((r) => setTimeout(r, 0))
-    c.advance(50); await new Promise((r) => setTimeout(r, 0))
-    c.advance(50); await new Promise((r) => setTimeout(r, 0))
-
-    await expect(promise).rejects.toEqual(
+    await expect(
+      run(repeatUntil(poller, { until: (n: number) => n > 0, intervalMs: 1, maxAttempts: 3 }) as any),
+    ).rejects.toEqual(
       expect.objectContaining({ _tag: "RepeatTimeoutError", reason: "maxAttempts" }),
     )
   })
