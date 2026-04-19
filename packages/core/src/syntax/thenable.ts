@@ -10,10 +10,9 @@
 // roughly 10× faster than spawning a fresh fiber per await (but still 10×
 // slower than composed .flatMap because the microtask hop is unavoidable).
 
-import { type Eff, Suspend } from "../eff";
+import { type Eff, Suspend, Op } from "../eff";
 import { Cause } from "../cause";
-import { emptyContext } from "../service";
-import { evalSync, run } from "../runtime";
+import { run } from "../runtime";
 import { PROMISE_THUNK, PROMISE_ON_REJECT } from "../constructors";
 
 declare module "../eff" {
@@ -46,13 +45,15 @@ Suspend.prototype.then = function (this: Suspend, onFulfilled?: any, onRejected?
     );
   }
 
-  // Fast path: evaluate purely-synchronous effects without the fiber runtime.
-  const syncResult = evalSync(this as any, emptyContext);
-  if (syncResult !== null) {
-    return syncResult.ok
-      ? Promise.resolve(syncResult.value).then(onFulfilled, onRejected)
-      : Promise.reject(Cause.squash(syncResult.cause)).then(onFulfilled, onRejected);
+  // Fast path: literal Op.Succeed / Op.Fail leaves only. Running evalSync on
+  // richer effects might execute Op.Sync callbacks then bail on async, leaking
+  // side effects into the run() fall-through which re-executes them.
+  if (this.op === Op.Succeed) {
+    return Promise.resolve(this.a).then(onFulfilled, onRejected);
   }
-  // Needs fiber runtime (Async/Fork/Race/All/etc.)
+  if (this.op === Op.Fail) {
+    return Promise.reject(Cause.squash(this.a)).then(onFulfilled, onRejected);
+  }
+  // Anything richer (Sync/FlatMap/Async/Fork/...) goes through the fiber runtime.
   return run(this as any).then(onFulfilled, onRejected);
 };

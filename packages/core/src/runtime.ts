@@ -888,6 +888,17 @@ function startFiberPromise<A, T>(
 }
 
 export function run<A>(eff: Eff<A, any>, scheduler?: Scheduler): Promise<A> {
+  // Fast-path: only literal Op.Succeed / Op.Fail leaves. Same restriction
+  // as Op.All's fast-path — running evalSync on anything richer might
+  // execute Op.Sync callbacks and then bail on a downstream async op,
+  // leaking side effects that the slow path then re-runs.
+  const node = eff as any;
+  if (node.op === Op.Succeed) {
+    return Promise.resolve(node.a);
+  }
+  if (node.op === Op.Fail) {
+    return Promise.reject(Cause.squash(node.a));
+  }
   return startFiberPromise<A, A>(eff, scheduler, (r, resolve, reject) => {
     if (r.ok) resolve(r.value);
     else reject(Cause.squash(r.cause));
@@ -933,14 +944,16 @@ export function runFiber<A>(eff: Eff<A, any>, scheduler?: Scheduler): Fiber<A> {
  * but always returns a Promise.
  */
 export function runExit<A>(eff: Eff<A, any>, scheduler?: Scheduler): Promise<Exit<unknown, A>> {
-  // Fast-path: pure effects skip the fiber runtime entirely.
-  const syncResult = evalSync(eff as any, emptyContext);
-  if (syncResult !== null) {
-    return Promise.resolve(
-      syncResult.ok
-        ? { _tag: "Success" as const, value: syncResult.value }
-        : { _tag: "Failure" as const, cause: syncResult.cause },
-    );
+  // Fast-path: literal Op.Succeed / Op.Fail leaves only. Same restriction as
+  // run() and Op.All — running evalSync on richer effects might execute
+  // Op.Sync callbacks then bail on async, leaking side effects into a
+  // slow-path re-run.
+  const node = eff as any;
+  if (node.op === Op.Succeed) {
+    return Promise.resolve({ _tag: "Success" as const, value: node.a });
+  }
+  if (node.op === Op.Fail) {
+    return Promise.resolve({ _tag: "Failure" as const, cause: node.a });
   }
   return startFiberPromise<A, Exit<unknown, A>>(eff, scheduler, (r, resolve) => {
     resolve(r.ok ? { _tag: "Success", value: r.value } : { _tag: "Failure", cause: r.cause });
@@ -977,20 +990,24 @@ export function runSafe<A>(
   opts: { catchDefects?: boolean } = {},
   scheduler?: Scheduler,
 ): Promise<{ data: A; error: null } | { data: null; error: unknown }> {
-  // Fast-path: pure effects skip the fiber runtime entirely.
-  const syncResult = evalSync(eff as any, emptyContext);
-  if (syncResult !== null) {
-    if (syncResult.ok) {
-      return Promise.resolve({ data: syncResult.value, error: null });
-    }
-    const typedFail = Cause.firstFail(syncResult.cause);
+  // Fast-path: literal Op.Succeed / Op.Fail leaves only. Same restriction as
+  // run() and Op.All — running evalSync on richer effects might execute
+  // Op.Sync callbacks then bail on async, leaking side effects into a
+  // slow-path re-run.
+  const node = eff as any;
+  if (node.op === Op.Succeed) {
+    return Promise.resolve({ data: node.a, error: null });
+  }
+  if (node.op === Op.Fail) {
+    const cause = node.a;
+    const typedFail = Cause.firstFail(cause);
     if (typedFail !== null) {
       return Promise.resolve({ data: null, error: typedFail.value });
     }
     if (opts.catchDefects) {
-      return Promise.resolve({ data: null, error: Cause.squash(syncResult.cause) });
+      return Promise.resolve({ data: null, error: Cause.squash(cause) });
     }
-    return Promise.reject(Cause.squash(syncResult.cause));
+    return Promise.reject(Cause.squash(cause));
   }
   return startFiberPromise<A, { data: A; error: null } | { data: null; error: unknown }>(
     eff,
