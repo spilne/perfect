@@ -322,11 +322,7 @@ function runFiberLoop(fiber: Fiber): void {
         let failed = false
 
         for (let i = 0; i < len; i++) {
-          const child = new Fiber()
-          child.current = effects[i]
-          child.context = savedCtx
-          child.scheduler = fiber.scheduler
-          fiber.addChild(child)
+          const child = makeChild(fiber, effects[i], savedCtx)
 
           child.onComplete((result) => {
             if (failed) return
@@ -339,7 +335,6 @@ function runFiberLoop(fiber: Fiber): void {
               }
             } else {
               failed = true
-              // interrupt siblings
               for (const c of fiber.children) if (c !== child) c.interrupt()
               fiber.current = new Suspend(Op.Fail, result.cause, null)
               fiber.state = FiberState.Ready
@@ -347,22 +342,14 @@ function runFiberLoop(fiber: Fiber): void {
             }
           })
 
-          child.state = FiberState.Ready
-          fiber.scheduler.schedule(() => runFiberLoop(child))
+          runChild(child)
         }
         return
       }
 
       case Op.Fork: {
-        const child = new Fiber()
-        child.current = cur.a
-        child.context = context
-        child.scheduler = fiber.scheduler
-        fiber.addChild(child)
-
-        child.state = FiberState.Ready
-        fiber.scheduler.schedule(() => runFiberLoop(child))
-
+        const child = makeChild(fiber, cur.a, context)
+        runChild(child)
         cur = child
         continue loop
       }
@@ -376,12 +363,8 @@ function runFiberLoop(fiber: Fiber): void {
         const children: Fiber[] = []
 
         for (let i = 0; i < effects.length; i++) {
-          const child = new Fiber()
-          child.current = effects[i]
-          child.context = savedCtx
-          child.scheduler = fiber.scheduler
+          const child = makeChild(fiber, effects[i], savedCtx)
           children.push(child)
-          fiber.addChild(child)
 
           child.onComplete((result) => {
             if (settled) return
@@ -396,8 +379,7 @@ function runFiberLoop(fiber: Fiber): void {
             fiber.scheduler.schedule(() => runFiberLoop(fiber))
           })
 
-          child.state = FiberState.Ready
-          fiber.scheduler.schedule(() => runFiberLoop(child))
+          runChild(child)
         }
         return
       }
@@ -410,12 +392,7 @@ function runFiberLoop(fiber: Fiber): void {
         fiber.context = context
         const savedCtx = context
 
-        const child = new Fiber()
-        child.current = body
-        child.context = savedCtx
-        child.scheduler = fiber.scheduler
-        // link so parent interrupt propagates into the body
-        fiber.addChild(child)
+        const child = makeChild(fiber, body, savedCtx)
 
         const resume = (result: { ok: true; value: any } | { ok: false; cause: Cause }) => {
           const cont = () => {
@@ -430,9 +407,7 @@ function runFiberLoop(fiber: Fiber): void {
         }
 
         child.onComplete(resume)
-
-        child.state = FiberState.Ready
-        fiber.scheduler.schedule(() => runFiberLoop(child))
+        runChild(child)
         return
       }
 
@@ -465,12 +440,8 @@ function runFiberLoop(fiber: Fiber): void {
         fiber.context = context
         const savedCtx = context
 
-        const child = new Fiber()
-        child.current = body
-        child.context = savedCtx
-        child.scheduler = fiber.scheduler
+        const child = makeChild(fiber, body, savedCtx)
         child.scope = scope
-        fiber.addChild(child)
 
         const resume = (result: { ok: true; value: any } | { ok: false; cause: Cause }) => {
           const closer = scope.close()
@@ -486,9 +457,7 @@ function runFiberLoop(fiber: Fiber): void {
         }
 
         child.onComplete(resume)
-
-        child.state = FiberState.Ready
-        fiber.scheduler.schedule(() => runFiberLoop(child))
+        runChild(child)
         return
       }
 
@@ -511,13 +480,8 @@ function runFiberLoop(fiber: Fiber): void {
       }
 
       case Op.ForkDaemon: {
-        const child = new Fiber()
-        child.current = cur.a
-        child.context = context
-        child.scheduler = fiber.scheduler
-        // NOT addChild — daemons outlive their parent
-        child.state = FiberState.Ready
-        fiber.scheduler.schedule(() => runFiberLoop(child))
+        const child = makeChild(fiber, cur.a, context, /* structured */ false)
+        runChild(child)
         cur = child
         continue loop
       }
@@ -609,19 +573,18 @@ function stepInline(
         return
       }
       default: {
-        // for ops we can't inline (Fork, All, etc.), delegate to fiber runtime
-        const child = new Fiber()
-        child.current = cur
+        // Ops we can't inline (Fork, All, etc.) — delegate to the fiber runtime.
+        // No structured parent relationship here; the fiber is orphan.
+        const child = bootstrapFiber(cur, parentFiber?.scheduler)
         child.context = context
-        child.scheduler = parentFiber?.scheduler ?? getDefaultScheduler()
         child.onComplete((result) => {
-          if (result.ok) {
-            stepInline(new Suspend(Op.Succeed, result.value, null), context, k, resolve, reject, parentFiber)
-          } else {
-            stepInline(new Suspend(Op.Fail, result.cause, null), context, k, resolve, reject, parentFiber)
-          }
+          stepInline(
+            result.ok
+              ? new Suspend(Op.Succeed, result.value, null)
+              : new Suspend(Op.Fail, result.cause, null),
+            context, k, resolve, reject, parentFiber,
+          )
         })
-        child.state = FiberState.Ready
         child.scheduler.schedule(() => runFiberLoop(child))
         return
       }
@@ -631,20 +594,51 @@ function stepInline(
 
 // ── Public API ─────────────────────────────────��───────────────────
 
-export function run<A>(eff: Eff<A, any>, scheduler?: Scheduler): Promise<A> {
-  return new Promise<A>((resolve, reject) => {
-    const fiber = new Fiber<A>()
-    fiber.current = eff
-    fiber.context = emptyContext
-    fiber.scheduler = scheduler ?? getDefaultScheduler()
+// Allocate + bootstrap a fiber ready to be scheduled. Shared by every runner.
+function bootstrapFiber<A>(eff: Eff<A, any>, scheduler?: Scheduler): Fiber<A> {
+  const fiber = new Fiber<A>()
+  fiber.current = eff
+  fiber.context = emptyContext
+  fiber.scheduler = scheduler ?? getDefaultScheduler()
+  fiber.state = FiberState.Ready
+  return fiber
+}
 
-    fiber.onComplete((result) => {
-      if (result.ok) resolve(result.value)
-      else reject(Cause.squash(result.cause))
-    })
+// Create a child fiber — used by every op that spawns (All, Fork, Race,
+// Ensuring, Scoped, ForkDaemon, stepInline fallback). Doesn't schedule;
+// caller attaches onComplete/scope/etc., then calls runChild(child).
+function makeChild(parent: Fiber, eff: any, context: Context, structured = true): Fiber {
+  const child = new Fiber()
+  child.current = eff
+  child.context = context
+  child.scheduler = parent.scheduler
+  if (structured) parent.addChild(child)
+  return child
+}
 
-    fiber.state = FiberState.Ready
+function runChild(child: Fiber): void {
+  child.state = FiberState.Ready
+  child.scheduler.schedule(() => runFiberLoop(child))
+}
+
+// Start a bootstrapped fiber and wrap its completion in a Promise. Callers
+// decide how to map the FiberResult into the Promise outcome.
+function startFiberPromise<A, T>(
+  eff: Eff<A, any>,
+  scheduler: Scheduler | undefined,
+  settle: (r: { ok: true; value: A } | { ok: false; cause: Cause }, resolve: (v: T) => void, reject: (e: any) => void) => void,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const fiber = bootstrapFiber(eff, scheduler)
+    fiber.onComplete((r) => settle(r, resolve, reject))
     fiber.scheduler.schedule(() => runFiberLoop(fiber))
+  })
+}
+
+export function run<A>(eff: Eff<A, any>, scheduler?: Scheduler): Promise<A> {
+  return startFiberPromise<A, A>(eff, scheduler, (r, resolve, reject) => {
+    if (r.ok) resolve(r.value)
+    else reject(Cause.squash(r.cause))
   })
 }
 
@@ -654,41 +648,23 @@ export function runSync<A>(eff: Eff<A, never>): A {
   let done = false
 
   const scheduler = new SyncScheduler()
-  const fiber = new Fiber<A>()
-  fiber.current = eff
-  fiber.context = emptyContext
-  fiber.scheduler = scheduler
-
+  const fiber = bootstrapFiber(eff, scheduler)
   fiber.onComplete((r) => {
     done = true
     if (r.ok) result = r.value
     else error = r.cause
   })
-
-  fiber.state = FiberState.Ready
   scheduler.schedule(() => runFiberLoop(fiber))
   scheduler.flush()
 
-  if (!done) {
-    throw new Error("runSync: effect did not complete synchronously")
-  }
-
-  if (error !== undefined) {
-    throw Cause.squash(error)
-  }
-
+  if (!done) throw new Error("runSync: effect did not complete synchronously")
+  if (error !== undefined) throw Cause.squash(error)
   return result as A
 }
 
 export function runFiber<A>(eff: Eff<A, any>, scheduler?: Scheduler): Fiber<A> {
-  const fiber = new Fiber<A>()
-  fiber.current = eff
-  fiber.context = emptyContext
-  fiber.scheduler = scheduler ?? getDefaultScheduler()
-
-  fiber.state = FiberState.Ready
+  const fiber = bootstrapFiber(eff, scheduler)
   fiber.scheduler.schedule(() => runFiberLoop(fiber))
-
   return fiber
 }
 
@@ -698,25 +674,29 @@ export function runFiber<A>(eff: Eff<A, any>, scheduler?: Scheduler): Fiber<A> {
  *
  * Use this when you want to pattern-match on success vs every flavour of
  * failure (typed error, defect, interrupt) and inspect the full Cause tree.
+ *
+ * Fast-path: purely-synchronous effects (no Async/Fork/Race/etc.) resolve
+ * via evalSync without spawning a fiber. Side effects run eagerly during
+ * the runExit() call, not on the next microtask — same behaviour as runSync
+ * but always returns a Promise.
  */
 export function runExit<A>(
   eff: Eff<A, any>,
   scheduler?: Scheduler,
 ): Promise<Exit<unknown, A>> {
-  return new Promise((resolve) => {
-    const fiber = new Fiber<A>()
-    fiber.current = eff
-    fiber.context = emptyContext
-    fiber.scheduler = scheduler ?? getDefaultScheduler()
-
-    fiber.onComplete((r) => {
-      resolve(r.ok
-        ? { _tag: "Success", value: r.value }
-        : { _tag: "Failure", cause: r.cause })
-    })
-
-    fiber.state = FiberState.Ready
-    fiber.scheduler.schedule(() => runFiberLoop(fiber))
+  // Fast-path: pure effects skip the fiber runtime entirely.
+  const syncResult = evalSync(eff as any, emptyContext)
+  if (syncResult !== null) {
+    return Promise.resolve(
+      syncResult.ok
+        ? { _tag: "Success" as const, value: syncResult.value }
+        : { _tag: "Failure" as const, cause: syncResult.cause },
+    )
+  }
+  return startFiberPromise<A, Exit<unknown, A>>(eff, scheduler, (r, resolve) => {
+    resolve(r.ok
+      ? { _tag: "Success", value: r.value }
+      : { _tag: "Failure", cause: r.cause })
   })
 }
 
@@ -750,28 +730,32 @@ export function runSafe<A>(
   opts: { catchDefects?: boolean } = {},
   scheduler?: Scheduler,
 ): Promise<{ data: A; error: null } | { data: null; error: unknown }> {
-  return new Promise((resolve, reject) => {
-    const fiber = new Fiber<A>()
-    fiber.current = eff
-    fiber.context = emptyContext
-    fiber.scheduler = scheduler ?? getDefaultScheduler()
-
-    fiber.onComplete((r) => {
+  // Fast-path: pure effects skip the fiber runtime entirely.
+  const syncResult = evalSync(eff as any, emptyContext)
+  if (syncResult !== null) {
+    if (syncResult.ok) {
+      return Promise.resolve({ data: syncResult.value, error: null })
+    }
+    const typedFail = Cause.firstFail(syncResult.cause)
+    if (typedFail !== null) {
+      return Promise.resolve({ data: null, error: typedFail.value })
+    }
+    if (opts.catchDefects) {
+      return Promise.resolve({ data: null, error: Cause.squash(syncResult.cause) })
+    }
+    return Promise.reject(Cause.squash(syncResult.cause))
+  }
+  return startFiberPromise<A, { data: A; error: null } | { data: null; error: unknown }>(
+    eff, scheduler, (r, resolve, reject) => {
       if (r.ok) return resolve({ data: r.value, error: null })
-
       const typedFail = Cause.firstFail(r.cause)
       if (typedFail !== null) {
         return resolve({ data: null, error: typedFail.value })
       }
-      // No typed error — only defects or interrupts in the cause.
       if (opts.catchDefects) {
         return resolve({ data: null, error: Cause.squash(r.cause) })
       }
-      // Throw through the Promise.
       reject(Cause.squash(r.cause))
-    })
-
-    fiber.state = FiberState.Ready
-    fiber.scheduler.schedule(() => runFiberLoop(fiber))
-  })
+    },
+  )
 }

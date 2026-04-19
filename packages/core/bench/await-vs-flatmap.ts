@@ -7,7 +7,7 @@
 // Run: bun packages/core/bench/await-vs-flatmap.ts
 
 import { group, bench, run as mitataRun } from "mitata"
-import { succeed, run, runSync, type Eff } from "../src"
+import { succeed, run, runSync, runSafe, runExit, type Eff } from "../src"
 
 // ── single-shot ────────────────────────────────────────────────────
 
