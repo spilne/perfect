@@ -45,15 +45,9 @@ Suspend.prototype.then = function (this: Suspend, onFulfilled?: any, onRejected?
     );
   }
 
-  // Fast path: literal Op.Succeed / Op.Fail leaves only. Running evalSync on
-  // richer effects might execute Op.Sync callbacks then bail on async, leaking
-  // side effects into the run() fall-through which re-executes them.
-  if (this.op === Op.Succeed) {
-    return Promise.resolve(this.a).then(onFulfilled, onRejected);
-  }
-  if (this.op === Op.Fail) {
-    return Promise.reject(Cause.squash(this.a)).then(onFulfilled, onRejected);
-  }
+  // Literal-leaf fast path — see runtime.ts top-of-file comment for rationale.
+  if (this.op === Op.Succeed) return Promise.resolve(this.a).then(onFulfilled, onRejected);
+  if (this.op === Op.Fail) return Promise.reject(Cause.squash(this.a)).then(onFulfilled, onRejected);
   // Anything richer (Sync/FlatMap/Async/Fork/...) goes through the fiber runtime.
   return run(this as any).then(onFulfilled, onRejected);
 };

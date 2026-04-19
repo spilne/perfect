@@ -12,7 +12,7 @@
 // Eff-typed contract; in-process by default. Distributed (Redis-backed,
 // shared-key dedup across processes) implementations live downstream.
 
-import { type Eff, type Throws, Suspend, Op } from "./eff";
+import { type Eff, type Throws } from "./eff";
 import { sync } from "./constructors";
 import { Cause } from "./cause";
 import { type Deferred, InProcessDeferred } from "./deferred";
@@ -52,23 +52,20 @@ class InProcessSingleflight implements Singleflight {
         const cleanup = sync(() => {
           this.flights.delete(key);
         });
-        const onSuccess = (value: A) =>
-          state.deferred.succeed(value).flatMap(() => cleanup.map(() => value));
-        const onCause = (cause: any) => {
-          // Surface as a typed failure on the deferred so followers can re-throw.
-          // For defects, squash to the underlying value.
-          const typedFail = Cause.firstFail ? Cause.firstFail(cause) : null;
-          const errVal = typedFail !== null ? typedFail.value : Cause.squash(cause);
-          return state.deferred
-            .fail(errVal as E)
-            .flatMap(() => cleanup)
-            .flatMap(() => new Suspend(Op.Fail, cause, null) as any);
-        };
-        return new Suspend(
-          Op.CatchAll,
-          new Suspend(Op.FlatMap, eff as any, (v: A) => onSuccess(v)),
-          (cause: any) => onCause(cause),
-        ) as any;
+        return (eff as any)
+          .flatMap((value: A) =>
+            state.deferred.succeed(value).flatMap(() => cleanup.map(() => value)),
+          )
+          .catchAllCause((cause: any) => {
+            // Surface as a typed failure on the deferred so followers can re-throw.
+            // For defects, squash to the underlying value.
+            const typedFail = Cause.firstFail(cause);
+            const errVal = typedFail !== null ? typedFail.value : Cause.squash(cause);
+            return state.deferred
+              .fail(errVal as E)
+              .flatMap(() => cleanup)
+              .flatMap(() => state.deferred.await);
+          }) as Eff<A, Throws<E>>;
       }) as Eff<A, Throws<E>>;
   }
 }
