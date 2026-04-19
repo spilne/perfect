@@ -13,6 +13,37 @@ class WorkerError {
   constructor(public message: string) {}
 }
 
+// Detect the number of CPU cores available for real parallelism.
+// Tries navigator (Bun/modern Node/browser), then Node's os module, then
+// falls back to 4 — matches what cats-effect / ZIO do on the JVM side.
+function detectCoreCount(): number {
+  const nav: any = typeof navigator !== "undefined" ? navigator : undefined
+  if (nav?.hardwareConcurrency) return nav.hardwareConcurrency
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const os = (globalThis as any).require?.("node:os") ?? require("node:os")
+    if (typeof os?.availableParallelism === "function") return os.availableParallelism()
+    if (typeof os?.cpus === "function") return os.cpus().length
+  } catch { /* not in a Node-like env */ }
+  return 4
+}
+
+/**
+ * Pool of Bun/Node Worker threads for CPU-bound parallelism.
+ *
+ * This is the ONLY place Perfect touches real OS threads. The fiber runtime
+ * itself is single-threaded (JS has no shared-memory threading available to
+ * effect interpreters — compare to cats-effect/ZIO which distribute fibers
+ * across an N-thread work-stealing pool on the JVM).
+ *
+ * Use WorkerPool when you have CPU-heavy pure functions to parallelise
+ * across cores. IO-bound work doesn't need this — the event loop handles
+ * that concurrently on one core.
+ *
+ * @example
+ *   const pool = await run(WorkerPool.make())  // auto-sizes to cpu count
+ *   const result = await run(pool.parMap(items, expensiveFn))
+ */
 export class WorkerPool {
   private workers: Worker[] = []
   private pending = new Map<number, PendingTask>()
@@ -22,9 +53,13 @@ export class WorkerPool {
 
   private constructor(private readonly size: number) {}
 
+  /**
+   * Create a pool. If `size` is omitted, defaults to the detected CPU count
+   * (navigator.hardwareConcurrency, or os.availableParallelism(), or 4).
+   */
   static make(size?: number): Eff<WorkerPool, never> {
     return sync(() => {
-      const poolSize = size ?? navigator?.hardwareConcurrency ?? 4
+      const poolSize = size ?? detectCoreCount()
       const pool = new WorkerPool(poolSize)
       const executorPath = new URL("./executor.ts", import.meta.url).href
 
