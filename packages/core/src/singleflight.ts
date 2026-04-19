@@ -13,7 +13,7 @@
 // shared-key dedup across processes) implementations live downstream.
 
 import { type Eff, type Throws, Suspend, Op } from "./eff";
-import { sync, yieldNow } from "./constructors";
+import { sync } from "./constructors";
 import { Cause } from "./cause";
 import { type Deferred, InProcessDeferred } from "./deferred";
 
@@ -34,13 +34,10 @@ class InProcessSingleflight implements Singleflight {
   private readonly flights = new Map<string, Deferred<unknown, unknown>>();
 
   do<A, E>(key: string, eff: Eff<A, Throws<E>>): Eff<A, Throws<E>> {
-    // yieldNow defeats the runtime's "fast path" for Op.All which would
-    // re-evaluate this sync block twice (once during fast-path probe, once
-    // on slow-path restart) — leaving stale leader registrations and a
-    // deadlocked follower. The yield forces the slow path, where the sync
-    // block runs exactly once per fiber.
-    return (yieldNow as any).flatMap(() =>
-      sync<LeaderOrFollower<A, E>>(() => {
+    // Atomic check + register in a single sync block. (Previously needed a
+    // yieldNow prefix to defeat Op.All's side-effect-pre-running fast path,
+    // but the runtime now restricts that fast path to literal Succeed only.)
+    return sync<LeaderOrFollower<A, E>>(() => {
         const existing = this.flights.get(key) as Deferred<A, E> | undefined;
         if (existing) return { kind: "follower", deferred: existing };
         // Construct InProcessDeferred directly — no nested runSync.
@@ -72,8 +69,7 @@ class InProcessSingleflight implements Singleflight {
           new Suspend(Op.FlatMap, eff as any, (v: A) => onSuccess(v)),
           (cause: any) => onCause(cause),
         ) as any;
-      }),
-    ) as Eff<A, Throws<E>>;
+      }) as Eff<A, Throws<E>>;
   }
 }
 

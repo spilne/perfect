@@ -12,7 +12,7 @@
 
 import { group, bench, run as mitataRun } from "mitata";
 import {
-  succeed, sync, run, runSync,
+  eff, succeed, sync, run, runSync,
   Ref, Deferred, Queue, Semaphore,
   CircuitBreaker, Singleflight, RateLimiter, Latch, Barrier,
   PubSub, SubscriptionRef,
@@ -98,10 +98,14 @@ group(`Deferred — make + succeed + await × ${N}`, () => {
 
 const Q_N = 500;
 group(`Queue — offer + take × ${Q_N}`, () => {
-  bench("perfect Queue (unbounded)", async () => {
-    const q = await run(Queue.unbounded<number>());
-    for (let i = 0; i < Q_N; i++) await run(q.offer(i));
-    for (let i = 0; i < Q_N; i++) await run(q.take());
+  bench("perfect Queue (unbounded, single fiber)", async () => {
+    await run(
+      eff(function* () {
+        const q = yield* Queue.unbounded<number>();
+        for (let i = 0; i < Q_N; i++) yield* q.offer(i);
+        for (let i = 0; i < Q_N; i++) yield* q.take();
+      }) as any,
+    );
   });
 
   bench("effect Queue (unbounded)", async () => {
