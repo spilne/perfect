@@ -5,7 +5,7 @@
 // receive `QueueClosed`; new offers fail; already-buffered values drain.
 
 import { type Eff, type Throws } from "./eff";
-import { succeed, fail, sync, async } from "./constructors";
+import { succeed, fail, sync, async, suspend } from "./constructors";
 
 export class QueueClosed {
   readonly _tag = "QueueClosed" as const;
@@ -53,28 +53,29 @@ class InProcessQueue<A> implements Queue<A> {
   constructor(private readonly capacity: number) {}
 
   offer(value: A): Eff<boolean, Throws<QueueClosed>> {
-    return async<boolean, QueueClosed>((resume) => {
-      if (this._closed) {
-        resume(fail(new QueueClosed()) as any);
-        return;
-      }
+    // Fast path: closed → fail; taker waiting → hand off; buffer has room → push.
+    // All sync. Only fall to async when blocking on capacity.
+    return suspend(() => {
+      if (this._closed) return fail(new QueueClosed()) as any;
       const taker = this.takers.shift();
       if (taker) {
         taker(succeed(value) as any);
-        resume(succeed(true) as any);
-        return;
+        return succeed(true) as any;
       }
       if (this.buffer.length < this.capacity) {
         this.buffer.push(value);
-        resume(succeed(true) as any);
-        return;
+        return succeed(true) as any;
       }
-      this.offerers.push({ value, resume: resume as any });
+      // Slow path: bounded queue is full — block until a taker arrives.
+      return async<boolean, QueueClosed>((resume) => {
+        this.offerers.push({ value, resume: resume as any });
+      }) as any;
     }) as any;
   }
 
   take(): Eff<A, Throws<QueueClosed>> {
-    return async<A, QueueClosed>((resume) => {
+    // Fast path: buffer has item → take; offerer waiting → take; closed → fail.
+    return suspend(() => {
       if (this.buffer.length > 0) {
         const item = this.buffer.shift()!;
         const offerer = this.offerers.shift();
@@ -82,20 +83,17 @@ class InProcessQueue<A> implements Queue<A> {
           this.buffer.push(offerer.value);
           offerer.resume(succeed(true) as any);
         }
-        resume(succeed(item) as any);
-        return;
-      }
-      if (this._closed) {
-        resume(fail(new QueueClosed()) as any);
-        return;
+        return succeed(item) as any;
       }
       const offerer = this.offerers.shift();
       if (offerer) {
         offerer.resume(succeed(true) as any);
-        resume(succeed(offerer.value) as any);
-        return;
+        return succeed(offerer.value) as any;
       }
-      this.takers.push(resume as any);
+      if (this._closed) return fail(new QueueClosed()) as any;
+      return async<A, QueueClosed>((resume) => {
+        this.takers.push(resume as any);
+      }) as any;
     }) as any;
   }
 

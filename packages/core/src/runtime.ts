@@ -423,31 +423,31 @@ function runFiberLoop(fiber: Fiber): void {
           continue loop;
         }
 
-        // Fast path: try to evaluate every child synchronously without spawning
-        // a fiber. evalSync returns null the moment it hits anything async-y
-        // (Async, Fork, Race, nested All, Ensuring, Scoped, AcqRel, GetScope,
-        // SetInterruptible, YieldNow, ForkDaemon).
-        const fastResults = new Array(len);
-        let fastOK = true;
-        let fastFail: Cause | null = null;
+        // Fast path: only safe when every child is a literal Op.Succeed.
+        //
+        // Earlier we ran evalSync on each child and bailed on the first async
+        // one — but evalSync executes side effects (Op.Sync callbacks, mutation
+        // inside Op.FlatMap continuations) that we can't roll back when the
+        // bail forces a slow-path restart. That doubled mutations and broke
+        // primitives like Queue, Singleflight, etc.
+        //
+        // Now we only fast-path the trivially safe case (literal pre-computed
+        // values — no callbacks, no mutation). Anything more complex goes to
+        // the slow path where each child runs in its own fiber.
+        let allSucceed = true;
         for (let i = 0; i < len; i++) {
-          const r = evalSync(effects[i] as Suspend, context);
-          if (r === null) {
-            fastOK = false;
+          const child = effects[i] as Suspend;
+          if (child.op !== Op.Succeed) {
+            allSucceed = false;
             break;
           }
-          if (!r.ok) {
-            fastFail = r.cause;
-            break;
-          }
-          fastResults[i] = r.value;
         }
-        if (fastOK) {
-          if (fastFail !== null) {
-            cur = new Suspend(Op.Fail, fastFail, null);
-          } else {
-            cur = fastResults;
+        if (allSucceed) {
+          const fastResults = new Array(len);
+          for (let i = 0; i < len; i++) {
+            fastResults[i] = (effects[i] as Suspend).a;
           }
+          cur = fastResults;
           continue loop;
         }
 
