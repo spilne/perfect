@@ -64,8 +64,20 @@ export { run, runSync, runFiber, runExit, runSafe } from "./runtime";
 export { Fiber } from "./fiber";
 export { Ref } from "./ref";
 export { Deferred } from "./deferred";
-export { Queue } from "./queue";
+export { Queue, QueueClosed, QueueShutdown } from "./queue";
 export { Semaphore } from "./semaphore";
+export { CircuitBreaker } from "./circuit-breaker";
+export type { CircuitState, CircuitOpen, CircuitBreakerOptions } from "./circuit-breaker";
+export { Latch } from "./latch";
+export { Barrier } from "./barrier";
+export { Singleflight } from "./singleflight";
+export { PubSub } from "./pubsub";
+export { SubscriptionRef } from "./subscription-ref";
+export { RateLimiter } from "./rate-limiter";
+export type {
+  RateLimitStrategy, RateLimitExceeded, RateLimiterOptions,
+} from "./rate-limiter";
+export { Throttle } from "./throttle";
 export { Schedule, retryWith, repeat } from "./schedule";
 export type { Scheduler } from "./scheduler";
 export { AsyncScheduler, BunScheduler, SyncScheduler, setDefaultScheduler } from "./scheduler";
