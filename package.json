@@ -8,6 +8,8 @@
     "test:transform": "cd packages/transform && bun test",
     "lint": "oxlint -c .oxlintrc.json packages/",
     "fmt": "oxfmt packages/",
+    "fmt:check": "oxfmt --check packages/",
+    "format": "bun run fmt",
     "bench": "cd packages/core && bun run bench/index.ts",
     "bench:vs-effect": "cd packages/core && bun run bench/vs-effect-ts.ts",
     "build:rust": "cd crates/perfect-transform && cargo build --release",
