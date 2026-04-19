@@ -883,7 +883,12 @@ function startFiberPromise<A, T>(
   return new Promise<T>((resolve, reject) => {
     const fiber = bootstrapFiber(eff, scheduler);
     fiber.onComplete((r) => settle(r, resolve, reject));
-    fiber.scheduler.schedule(() => runFiberLoop(fiber));
+    // Run the loop synchronously instead of going through scheduler.schedule.
+    // Saves one microtask hop. If the fiber completes inline, the onComplete
+    // listener fires synchronously and the Promise resolves on the next
+    // microtask anyway (per Promise spec). If the fiber suspends on an
+    // async op, runFiberLoop registers the resume callback and returns.
+    runFiberLoop(fiber);
   });
 }
 
@@ -906,6 +911,12 @@ export function run<A>(eff: Eff<A, any>, scheduler?: Scheduler): Promise<A> {
 }
 
 export function runSync<A>(eff: Eff<A, never>): A {
+  // Fast-path: literal Op.Succeed / Op.Fail leaves only. Skip the entire
+  // fiber/scheduler dance for the trivial case.
+  const node = eff as any;
+  if (node.op === Op.Succeed) return node.a as A;
+  if (node.op === Op.Fail) throw Cause.squash(node.a);
+
   let result: A | undefined;
   let error: Cause | undefined;
   let done = false;
