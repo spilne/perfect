@@ -29,6 +29,10 @@ export function async<A, E = never>(
   return new Suspend(Op.Async, register, null) as any;
 }
 
+// alias: fromPromise — same as tryPromise (matches the "from*" naming family).
+export const fromPromise: typeof tryPromise = (...args: any[]) =>
+  (tryPromise as any)(...args);
+
 export function tryPromise<A, E>(
   promise: () => Promise<A>,
   onReject: (e: unknown) => E,
@@ -120,13 +124,20 @@ export function raceFirst<A, S>(effects: Eff<A, S>[]): Eff<A, S> {
 }
 
 // Race two effects and wrap the winner in Either — tells you who won.
+// Accepts either positional args or a [left, right] tuple for consistency
+// with the array form used by race / raceFirst / raceAll.
+export function raceEither<A, S1, B, S2>(
+  effects: [Eff<A, S1>, Eff<B, S2>],
+): Eff<{ _tag: "Left"; left: A } | { _tag: "Right"; right: B }, S1 | S2>;
 export function raceEither<A, S1, B, S2>(
   left: Eff<A, S1>,
   right: Eff<B, S2>,
-): Eff<{ _tag: "Left"; left: A } | { _tag: "Right"; right: B }, S1 | S2> {
+): Eff<{ _tag: "Left"; left: A } | { _tag: "Right"; right: B }, S1 | S2>;
+export function raceEither(...args: any[]): any {
+  const [left, right] = Array.isArray(args[0]) ? args[0] : args;
   return race([
-    (left as any).map((a: A) => ({ _tag: "Left" as const, left: a })),
-    (right as any).map((b: B) => ({ _tag: "Right" as const, right: b })),
+    (left as any).map((a: any) => ({ _tag: "Left" as const, left: a })),
+    (right as any).map((b: any) => ({ _tag: "Right" as const, right: b })),
   ]) as any;
 }
 
