@@ -1,17 +1,28 @@
-import { type Eff, Suspend, Op } from "./eff";
-import { succeed, sync, async } from "./constructors";
-import { ensuring } from "./constructors";
+// Semaphore — counting semaphore with fair FIFO ordering.
+// Eff-typed contract; in-process implementation by default.
 
-export class Semaphore {
+import { type Eff } from "./eff";
+import { succeed, sync, async, ensuring } from "./constructors";
+
+export interface Semaphore {
+  /** Take one permit, blocking until available. */
+  acquire(): Eff<void, never>;
+  /** Return one permit, waking the next waiter (if any). */
+  release(): Eff<void, never>;
+  /** acquire → run → release. Release fires even on failure. */
+  withPermit<A, S>(eff: Eff<A, S>): Eff<A, S>;
+  /** acquire N → run → release N. Useful for weighted operations. */
+  withPermits<A, S>(n: number, eff: Eff<A, S>): Eff<A, S>;
+  /** Current available permits (for metrics/inspection). */
+  readonly available: Eff<number, never>;
+}
+
+class InProcessSemaphore implements Semaphore {
   private permits: number;
   private waiters: Array<() => void> = [];
 
-  private constructor(permits: number) {
+  constructor(permits: number) {
     this.permits = permits;
-  }
-
-  static make(permits: number): Eff<Semaphore, never> {
-    return sync(() => new Semaphore(permits));
   }
 
   acquire(): Eff<void, never> {
@@ -56,3 +67,9 @@ export class Semaphore {
     return sync(() => this.permits);
   }
 }
+
+export const Semaphore = {
+  make(permits: number): Eff<Semaphore, never> {
+    return sync(() => new InProcessSemaphore(permits));
+  },
+} as const;
