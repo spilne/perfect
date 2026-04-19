@@ -12,18 +12,24 @@ export type ScheduleDecision<Out> =
   | { readonly _tag: "Continue"; readonly delay: number; readonly output: Out; readonly state: any }
   | { readonly _tag: "Done"; readonly output: Out }
 
-export const Schedule = {
-  // ── Constructors ───────────────────────────────────────────────
-
-  forever: {
+// Counting schedule — forever-running, state counts attempts from 0, delay
+// computed from the current state. Basis for spaced/exponential/linear/forever.
+function counting(delay: (state: number) => number): Schedule<unknown, number> {
+  return {
     initial: 0,
-    step: (_input: unknown, state: number) => ({
-      _tag: "Continue" as const,
-      delay: 0,
+    step: (_input, state: number) => ({
+      _tag: "Continue",
+      delay: delay(state),
       output: state,
       state: state + 1,
     }),
-  } satisfies Schedule<unknown, number>,
+  }
+}
+
+export const Schedule = {
+  // ── Constructors ───────────────────────────────────────────────
+
+  forever: counting(() => 0) satisfies Schedule<unknown, number>,
 
   recurs(n: number): Schedule<unknown, number> {
     return {
@@ -44,27 +50,11 @@ export const Schedule = {
   } satisfies Schedule<unknown, undefined>,
 
   spaced(ms: number): Schedule<unknown, number> {
-    return {
-      initial: 0,
-      step: (_input, state: number) => ({
-        _tag: "Continue",
-        delay: ms,
-        output: state,
-        state: state + 1,
-      }),
-    }
+    return counting(() => ms)
   },
 
   exponential(base: number, factor = 2): Schedule<unknown, number> {
-    return {
-      initial: 0,
-      step: (_input, state: number) => ({
-        _tag: "Continue",
-        delay: base * Math.pow(factor, state),
-        output: state,
-        state: state + 1,
-      }),
-    }
+    return counting((state) => base * Math.pow(factor, state))
   },
 
   fixed(ms: number): Schedule<unknown, number> {
@@ -72,15 +62,7 @@ export const Schedule = {
   },
 
   linear(base: number): Schedule<unknown, number> {
-    return {
-      initial: 0,
-      step: (_input, state: number) => ({
-        _tag: "Continue",
-        delay: base * (state + 1),
-        output: state,
-        state: state + 1,
-      }),
-    }
+    return counting((state) => base * (state + 1))
   },
 
   // ── Combinators ────────────────────────────────────────────────
