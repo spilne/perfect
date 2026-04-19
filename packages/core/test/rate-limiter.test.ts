@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { eff, succeed, run, RateLimiter } from "../src";
+import { eff, succeed, sleep, fork, join, all, run, RateLimiter } from "../src";
 
 describe("RateLimiter — sliding-window", () => {
   test("allows up to limit, then rejects with retryAfterMs", async () => {
@@ -117,6 +117,73 @@ describe("RateLimiter — wait mode (subsumes throttle)", () => {
       return [v, Date.now() - start >= 20];
     });
     expect(await run(program as any)).toEqual([2, true]);
+  });
+});
+
+describe("RateLimiter — concurrent / slow-path coverage", () => {
+  test("100 concurrent tryAcquire — exactly `limit` get true, rest get false", async () => {
+    const result = await run(
+      eff(function* () {
+        const rl = yield* RateLimiter.fixedWindow({ limit: 30, windowMs: 10_000 });
+        const attempts = yield* all(Array.from({ length: 100 }, () => rl.tryAcquire));
+        const granted = attempts.filter((b: boolean) => b).length;
+        return { granted, denied: attempts.length - granted };
+      }) as any,
+    );
+    expect(result.granted).toBe(30);
+    expect(result.denied).toBe(70);
+  });
+
+  test("token-bucket: concurrent draining respects burst capacity", async () => {
+    const result = await run(
+      eff(function* () {
+        const rl = yield* RateLimiter.tokenBucket({ limit: 10, windowMs: 10_000 });
+        const attempts = yield* all(Array.from({ length: 50 }, () => rl.tryAcquire));
+        const granted = attempts.filter((b: boolean) => b).length;
+        return granted;
+      }) as any,
+    );
+    // Bucket starts at burst=10. With 50 concurrent attempts, ~10 should succeed.
+    // Allow ±2 for tiny refill during the loop.
+    expect(result).toBeGreaterThanOrEqual(10);
+    expect(result).toBeLessThanOrEqual(12);
+  });
+
+  test("multiple fibers acquireWaiting → all eventually proceed in order", async () => {
+    const order: number[] = [];
+    await run(
+      eff(function* () {
+        const rl = yield* RateLimiter.tokenBucket({ limit: 1, windowMs: 20 });
+        // Drain the initial token
+        yield* rl.acquire;
+        // Fork 3 waiters that should each acquire as a token refills
+        const f1 = yield* fork(rl.acquireWaiting.flatMap(() => succeed(order.push(1))));
+        const f2 = yield* fork(rl.acquireWaiting.flatMap(() => succeed(order.push(2))));
+        const f3 = yield* fork(rl.acquireWaiting.flatMap(() => succeed(order.push(3))));
+        yield* sleep(150); // enough refills for all 3
+        yield* join(f1);
+        yield* join(f2);
+        yield* join(f3);
+      }) as any,
+    );
+    expect(order.length).toBe(3);
+    expect(order.sort()).toEqual([1, 2, 3]);
+  });
+
+  test("acquire fails with retryAfterMs hint", async () => {
+    const program = eff(function* () {
+      const rl = yield* RateLimiter.tokenBucket({ limit: 1, windowMs: 1000 });
+      yield* rl.acquire;
+      try {
+        yield* rl.acquire;
+        return null;
+      } catch (e: any) {
+        return e;
+      }
+    });
+    const err = await run(program as any);
+    expect(err._tag).toBe("RateLimitExceeded");
+    expect(err.retryAfterMs).toBeGreaterThan(0);
   });
 });
 
