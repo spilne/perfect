@@ -169,12 +169,20 @@ export const Cause = {
     return new Error("Interrupted");
   },
 
+  /**
+   * Compact one-line representation. Useful for log lines.
+   *   Fail(boom)       — typed failure
+   *   Die(...)         — defect (uncaught throw)
+   *   Interrupt        — fiber cancellation
+   *   (a & b)          — parallel composite (Both branches failed)
+   *   (a ; b)          — sequential composite (Then composition)
+   */
   pretty: <E>(c: Cause<E>): string => {
     switch (c._tag) {
       case "Fail":
-        return `Fail(${String(c.error)})`;
+        return `Fail(${formatValue(c.error)})`;
       case "Die":
-        return `Die(${String(c.defect)})`;
+        return `Die(${formatValue(c.defect)})`;
       case "Interrupt":
         return "Interrupt";
       case "Both":
@@ -183,4 +191,51 @@ export const Cause = {
         return `(${Cause.pretty(c.left)} ; ${Cause.pretty(c.right)})`;
     }
   },
+
+  /**
+   * Multi-line indented representation with structure preserved. For
+   * human-readable error reports. Includes Error stack traces under Die.
+   */
+  prettyMultiline: <E>(c: Cause<E>): string => prettyMultilineInner(c, ""),
 } as const;
+
+function formatValue(v: unknown): string {
+  if (v instanceof Error) return `${v.name}: ${v.message}`;
+  if (v === null) return "null";
+  if (v === undefined) return "undefined";
+  if (typeof v === "object") {
+    try {
+      return JSON.stringify(v);
+    } catch {
+      return String(v);
+    }
+  }
+  return String(v);
+}
+
+function prettyMultilineInner<E>(c: Cause<E>, indent: string): string {
+  switch (c._tag) {
+    case "Fail":
+      return `${indent}Fail: ${formatValue(c.error)}`;
+    case "Die": {
+      const d = c.defect;
+      if (d instanceof Error && d.stack) {
+        const stack = d.stack.split("\n").map((l) => `${indent}  ${l}`).join("\n");
+        return `${indent}Die: ${d.name}: ${d.message}\n${stack}`;
+      }
+      return `${indent}Die: ${formatValue(d)}`;
+    }
+    case "Interrupt":
+      return `${indent}Interrupt`;
+    case "Both":
+    case "Then": {
+      const label = c._tag === "Both" ? "Both:" : "Then:";
+      const child = `${indent}      `;
+      return [
+        `${indent}${label}`,
+        `${indent}  ├── ${prettyMultilineInner(c.left, child).trimStart()}`,
+        `${indent}  └── ${prettyMultilineInner(c.right, child).trimStart()}`,
+      ].join("\n");
+    }
+  }
+}
