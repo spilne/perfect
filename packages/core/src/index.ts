@@ -49,6 +49,8 @@ export {
 } from "./combinators-extra";
 export { cached, cachedBy } from "./cache";
 export type { KeyedCache } from "./cache";
+export { CacheStore } from "./cache-store";
+export type { MemoryCacheStoreOptions } from "./cache-store";
 export type { RepeatTimeoutError } from "./combinators-extra";
 export { service, provide } from "./service";
 export type { ServiceTag } from "./service";
@@ -78,6 +80,10 @@ export type {
   RateLimitStrategy, RateLimitExceeded, RateLimiterOptions,
 } from "./rate-limiter";
 export { Throttle } from "./throttle";
+export { Duration, resolveMs } from "./duration";
+export type { DurationInput } from "./duration";
+export { Pool, PoolClosed } from "./pool";
+export type { PoolOptions } from "./pool";
 export { Schedule, retryWith, repeat } from "./schedule";
 export type { Scheduler } from "./scheduler";
 export { AsyncScheduler, BunScheduler, SyncScheduler, setDefaultScheduler } from "./scheduler";
