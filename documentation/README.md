@@ -28,6 +28,8 @@ console.log(await run(program)); // 42
 8. [Retry and schedule](./08-retry-and-schedule.md) — `RetryPolicy`, `Schedule`
 9. [Streams](./09-streams.md) — fused, lazy, effect-typed sequences
 10. [Testing](./10-testing.md) — `TestClock`, `TestRandom`, `TestConsole`
+11. [Resilience + Coordination Primitives](./11-resilience-and-coordination.md) — `CircuitBreaker`, `Singleflight`, `RateLimiter`, `Latch`, `Barrier`, `PubSub`, `SubscriptionRef`, `Pool`
+12. [Utilities](./12-utilities.md) — `Duration`, `CacheStore`
 
 ## Reference
 
