@@ -15,6 +15,12 @@ export function die(defect: unknown): Eff<never, never> {
   return new Suspend(Op.Fail, Cause.die(defect), null) as any;
 }
 
+/** Fail with a pre-existing Cause — useful for re-failing unchanged after
+ *  inspecting it, without `mapErrorCause`'s transformation step. */
+export function failCause<E = unknown>(cause: import("./cause").Cause<E>): Eff<never, any> {
+  return new Suspend(Op.Fail, cause, null) as any;
+}
+
 export function sync<A>(f: () => A): Eff<A, never> {
   return new Suspend(Op.Sync, f, null) as any;
 }

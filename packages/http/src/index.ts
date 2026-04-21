@@ -1,9 +1,11 @@
-// @perfect/http — Phases 1 & 2.
+// @perfect/http — Phases 1, 2 & 3.
 //
 // Roadmap in `docs/plan-http.md`.
 //   Phase 1: typed errors, transport, decoders, httpFetch*/httpRequest*
 //   Phase 2: AbstractHttpClient / DefaultHttpClient with withOverrides,
 //            middleware hooks, HttpClient service tag for Layer DI
+//   Phase 3: withRetry (transient errors), withRetryAll (outcome ADT),
+//            poll + pollWithBackoff, PollTimeoutError
 
 export {
   HttpNetworkError,
@@ -55,3 +57,9 @@ export type { HttpMiddleware, HttpRequestContext } from "./middleware";
 /** Service tag for Layer-based DI. Re-exported as `HttpClientService` to
  *  avoid clashing with the `HttpClient` interface type. */
 export { HttpClient as HttpClientService } from "./service";
+
+// ── Phase 3 ──────────────────────────────────────────────────────
+export { withRetry, withRetryAll, PipelineResult } from "./retry";
+export type { RetryOptions, RetryAllOptions } from "./retry";
+export { poll, pollWithBackoff, PollTimeoutError } from "./poll";
+export type { PollOptions, PollWithBackoffOptions } from "./poll";
