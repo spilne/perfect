@@ -68,11 +68,18 @@ export { withRetry, withRetryAll, PipelineResult } from "./retry";
 export type { RetryOptions, RetryAllOptions } from "./retry";
 
 // ── Phase 4 — streaming ──────────────────────────────────────────
+// One base (httpStream) + composable pipes (parseSSE, parseNDJSON), with
+// 4 thin wrappers (httpStreamText / Lines / NDJSON / SSE) for ergonomics.
+//
+//   httpStream(opts).through(Pipes.utf8Decode).through(Pipes.lines).through(parseSSE)
 export {
+  httpStream,
   httpStreamText,
   httpStreamLines,
   httpStreamNDJSON,
   httpStreamSSE,
+  parseSSE,
+  parseNDJSON,
 } from "./stream";
 export type { SSEvent } from "./stream";
 
