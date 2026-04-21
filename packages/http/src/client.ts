@@ -31,22 +31,28 @@ import {
 import { httpFetchOk, httpRequest, httpRequestText } from "./fetch";
 
 /** Options common to every request (no body). */
-export interface RequestOptions {
+export interface RequestOptions<E = string> {
   readonly headers?: Record<string, string>;
   readonly timeoutMs?: number;
   /** Label for metrics/logs — avoids high-cardinality raw URLs. */
   readonly tag?: string;
   readonly acceptStatus?: (status: number) => boolean;
+  /**
+   * Parse the body of non-OK responses into a typed `HttpStatusError<E>`.
+   * Parse failures fall back gracefully: `body` keeps the raw text and
+   * `parseError` is set. Use `HttpStatusError.isParsed(e)` to narrow.
+   */
+  readonly errorSchema?: ResponseParser<E>;
 }
 
 /** Adds body options for POST/PUT/PATCH/DELETE. */
-export interface RequestBodyOptions extends RequestOptions {
+export interface RequestBodyOptions<E = string> extends RequestOptions<E> {
   readonly json?: unknown;
   readonly body?: string | ArrayBuffer | ReadableStream | Blob | FormData;
 }
 
 /** Core request parameters consumed by `request(params)`. */
-export interface HttpRequestParams<T> {
+export interface HttpRequestParams<T, E = string> {
   readonly path: string | URL;
   readonly method: string;
   readonly schema: ResponseParser<T>;
@@ -56,6 +62,8 @@ export interface HttpRequestParams<T> {
   readonly timeoutMs?: number;
   readonly acceptStatus?: (status: number) => boolean;
   readonly tag?: string;
+  /** Parse non-OK response body into typed `HttpStatusError<E>`. */
+  readonly errorSchema?: ResponseParser<E>;
 }
 
 /** Identity parser — passes data through unchanged. Used by getJson/postJson. */
@@ -67,48 +75,54 @@ export const identityParser: ResponseParser<unknown> = {
 
 export interface HttpClient {
   // Convenience methods (validated)
-  get<T>(
+  get<T, E = string>(
     path: string | URL,
     schema: ResponseParser<T>,
-    options?: RequestOptions,
+    options?: RequestOptions<E>,
   ): Eff<T, Throws<HttpClientError>>;
-  post<T>(
+  post<T, E = string>(
     path: string | URL,
     schema: ResponseParser<T>,
-    options?: RequestBodyOptions,
+    options?: RequestBodyOptions<E>,
   ): Eff<T, Throws<HttpClientError>>;
-  put<T>(
+  put<T, E = string>(
     path: string | URL,
     schema: ResponseParser<T>,
-    options?: RequestBodyOptions,
+    options?: RequestBodyOptions<E>,
   ): Eff<T, Throws<HttpClientError>>;
-  patch<T>(
+  patch<T, E = string>(
     path: string | URL,
     schema: ResponseParser<T>,
-    options?: RequestBodyOptions,
+    options?: RequestBodyOptions<E>,
   ): Eff<T, Throws<HttpClientError>>;
-  delete<T>(
+  delete<T, E = string>(
     path: string | URL,
     schema: ResponseParser<T>,
-    options?: RequestBodyOptions,
+    options?: RequestBodyOptions<E>,
   ): Eff<T, Throws<HttpClientError>>;
 
   // Unvalidated convenience
-  getJson(path: string | URL, options?: RequestOptions): Eff<unknown, Throws<HttpClientError>>;
-  postJson(
+  getJson<E = string>(
     path: string | URL,
-    options?: RequestBodyOptions,
+    options?: RequestOptions<E>,
   ): Eff<unknown, Throws<HttpClientError>>;
-  getText(path: string | URL, options?: RequestOptions): Eff<string, Throws<HttpClientError>>;
+  postJson<E = string>(
+    path: string | URL,
+    options?: RequestBodyOptions<E>,
+  ): Eff<unknown, Throws<HttpClientError>>;
+  getText<E = string>(
+    path: string | URL,
+    options?: RequestOptions<E>,
+  ): Eff<string, Throws<HttpClientError>>;
 
   /** Get response + metadata. Decoder defaults to `binaryDecoder`. */
-  getResponse<T = ReadableStream<Uint8Array>>(
+  getResponse<T = ReadableStream<Uint8Array>, E = string>(
     path: string | URL,
-    options?: RequestOptions & { decoder?: ResponseDecoder<T> },
+    options?: RequestOptions<E> & { decoder?: ResponseDecoder<T> },
   ): Eff<HttpResponse<T>, Throws<HttpClientError>>;
 
   /** Low-level: pass the full params — everything else delegates here. */
-  request<T>(params: HttpRequestParams<T>): Eff<T, Throws<HttpClientError>>;
+  request<T, E = string>(params: HttpRequestParams<T, E>): Eff<T, Throws<HttpClientError>>;
 
   /** Return a new client with merged config. Headers spread-merge; others fall back. */
   withOverrides(overrides: Partial<HttpClientConfig>): HttpClient;
@@ -129,6 +143,13 @@ export interface HttpClientConfig {
   readonly transport?: HttpTransport;
   /** Default proxy for every request. */
   readonly proxy?: HttpProxyConfig;
+  /**
+   * Default error-body schema applied to every request. Per-request
+   * `errorSchema` (on `get`/`post`/`request`/etc.) overrides this.
+   * Typed as `ResponseParser<unknown>` so a single client can serve
+   * multiple APIs — narrow via your schema if you want `HttpStatusError<E>`.
+   */
+  readonly errorSchema?: ResponseParser<unknown>;
 }
 
 // ── AbstractHttpClient — shared convenience methods ────────────────
@@ -138,10 +159,10 @@ export interface HttpClientConfig {
  * `getText`, `getResponse`, and `withOverrides`.
  */
 export abstract class AbstractHttpClient implements HttpClient {
-  get<T>(
+  get<T, E = string>(
     path: string | URL,
     schema: ResponseParser<T>,
-    options?: RequestOptions,
+    options?: RequestOptions<E>,
   ): Eff<T, Throws<HttpClientError>> {
     return this.request({
       path,
@@ -151,13 +172,14 @@ export abstract class AbstractHttpClient implements HttpClient {
       timeoutMs: options?.timeoutMs,
       acceptStatus: options?.acceptStatus,
       tag: options?.tag,
+      errorSchema: options?.errorSchema,
     });
   }
 
-  post<T>(
+  post<T, E = string>(
     path: string | URL,
     schema: ResponseParser<T>,
-    options?: RequestBodyOptions,
+    options?: RequestBodyOptions<E>,
   ): Eff<T, Throws<HttpClientError>> {
     return this.request({
       path,
@@ -169,13 +191,14 @@ export abstract class AbstractHttpClient implements HttpClient {
       timeoutMs: options?.timeoutMs,
       acceptStatus: options?.acceptStatus,
       tag: options?.tag,
+      errorSchema: options?.errorSchema,
     });
   }
 
-  put<T>(
+  put<T, E = string>(
     path: string | URL,
     schema: ResponseParser<T>,
-    options?: RequestBodyOptions,
+    options?: RequestBodyOptions<E>,
   ): Eff<T, Throws<HttpClientError>> {
     return this.request({
       path,
@@ -187,13 +210,14 @@ export abstract class AbstractHttpClient implements HttpClient {
       timeoutMs: options?.timeoutMs,
       acceptStatus: options?.acceptStatus,
       tag: options?.tag,
+      errorSchema: options?.errorSchema,
     });
   }
 
-  patch<T>(
+  patch<T, E = string>(
     path: string | URL,
     schema: ResponseParser<T>,
-    options?: RequestBodyOptions,
+    options?: RequestBodyOptions<E>,
   ): Eff<T, Throws<HttpClientError>> {
     return this.request({
       path,
@@ -205,13 +229,14 @@ export abstract class AbstractHttpClient implements HttpClient {
       timeoutMs: options?.timeoutMs,
       acceptStatus: options?.acceptStatus,
       tag: options?.tag,
+      errorSchema: options?.errorSchema,
     });
   }
 
-  delete<T>(
+  delete<T, E = string>(
     path: string | URL,
     schema: ResponseParser<T>,
-    options?: RequestBodyOptions,
+    options?: RequestBodyOptions<E>,
   ): Eff<T, Throws<HttpClientError>> {
     return this.request({
       path,
@@ -223,12 +248,13 @@ export abstract class AbstractHttpClient implements HttpClient {
       timeoutMs: options?.timeoutMs,
       acceptStatus: options?.acceptStatus,
       tag: options?.tag,
+      errorSchema: options?.errorSchema,
     });
   }
 
-  getJson(
+  getJson<E = string>(
     path: string | URL,
-    options?: RequestOptions,
+    options?: RequestOptions<E>,
   ): Eff<unknown, Throws<HttpClientError>> {
     return this.request({
       path,
@@ -238,12 +264,13 @@ export abstract class AbstractHttpClient implements HttpClient {
       timeoutMs: options?.timeoutMs,
       acceptStatus: options?.acceptStatus,
       tag: options?.tag,
+      errorSchema: options?.errorSchema,
     });
   }
 
-  postJson(
+  postJson<E = string>(
     path: string | URL,
-    options?: RequestBodyOptions,
+    options?: RequestBodyOptions<E>,
   ): Eff<unknown, Throws<HttpClientError>> {
     return this.request({
       path,
@@ -255,20 +282,21 @@ export abstract class AbstractHttpClient implements HttpClient {
       timeoutMs: options?.timeoutMs,
       acceptStatus: options?.acceptStatus,
       tag: options?.tag,
+      errorSchema: options?.errorSchema,
     });
   }
 
-  abstract getText(
+  abstract getText<E = string>(
     path: string | URL,
-    options?: RequestOptions,
+    options?: RequestOptions<E>,
   ): Eff<string, Throws<HttpClientError>>;
 
-  abstract getResponse<T = ReadableStream<Uint8Array>>(
+  abstract getResponse<T = ReadableStream<Uint8Array>, E = string>(
     path: string | URL,
-    options?: RequestOptions & { decoder?: ResponseDecoder<T> },
+    options?: RequestOptions<E> & { decoder?: ResponseDecoder<T> },
   ): Eff<HttpResponse<T>, Throws<HttpClientError>>;
 
-  abstract request<T>(params: HttpRequestParams<T>): Eff<T, Throws<HttpClientError>>;
+  abstract request<T, E = string>(params: HttpRequestParams<T, E>): Eff<T, Throws<HttpClientError>>;
   abstract withOverrides(overrides: Partial<HttpClientConfig>): HttpClient;
 }
 
@@ -289,19 +317,20 @@ export class DefaultHttpClient extends AbstractHttpClient {
         : this.config.middleware,
       transport: overrides.transport ?? this.config.transport,
       proxy: overrides.proxy ?? this.config.proxy,
+      errorSchema: overrides.errorSchema ?? this.config.errorSchema,
     });
   }
 
   // ── Core ────────────────────────────────────────────────────────
 
-  request<T>(params: HttpRequestParams<T>): Eff<T, Throws<HttpClientError>> {
+  request<T, E = string>(params: HttpRequestParams<T, E>): Eff<T, Throws<HttpClientError>> {
     const url = this.resolveUrl(params.path);
     const context: HttpRequestContext = {
       method: params.method,
       url,
       tag: params.tag,
     };
-    const eff = httpRequest<T>({
+    const eff = httpRequest<T, E>({
       url,
       method: params.method,
       headers: this.mergeHeaders(params.headers),
@@ -310,43 +339,50 @@ export class DefaultHttpClient extends AbstractHttpClient {
       timeoutMs: params.timeoutMs ?? this.config.timeoutMs,
       schema: params.schema,
       acceptStatus: params.acceptStatus,
+      errorSchema: (params.errorSchema ?? this.config.errorSchema) as ResponseParser<E> | undefined,
       transport: this.config.transport,
       proxy: this.config.proxy,
     });
     return this.instrument(eff, context);
   }
 
-  getText(
+  getText<E = string>(
     path: string | URL,
-    options?: RequestOptions,
+    options?: RequestOptions<E>,
   ): Eff<string, Throws<HttpClientError>> {
     const url = this.resolveUrl(path);
     const context: HttpRequestContext = { method: "GET", url, tag: options?.tag };
-    const eff = httpRequestText({
+    const eff = httpRequestText<E>({
       url,
       method: "GET",
       headers: this.mergeHeaders(options?.headers),
       timeoutMs: options?.timeoutMs ?? this.config.timeoutMs,
       acceptStatus: options?.acceptStatus,
+      errorSchema: (options?.errorSchema ?? this.config.errorSchema) as
+        | ResponseParser<E>
+        | undefined,
       transport: this.config.transport,
       proxy: this.config.proxy,
     });
     return this.instrument(eff, context);
   }
 
-  getResponse<T = ReadableStream<Uint8Array>>(
+  getResponse<T = ReadableStream<Uint8Array>, E = string>(
     path: string | URL,
-    options?: RequestOptions & { decoder?: ResponseDecoder<T> },
+    options?: RequestOptions<E> & { decoder?: ResponseDecoder<T> },
   ): Eff<HttpResponse<T>, Throws<HttpClientError>> {
     const decoder = (options?.decoder ?? (binaryDecoder as unknown as ResponseDecoder<T>));
     const url = this.resolveUrl(path);
     const context: HttpRequestContext = { method: "GET", url, tag: options?.tag };
-    const inner = httpFetchOk({
+    const inner = httpFetchOk<E>({
       url,
       method: "GET",
       headers: this.mergeHeaders(options?.headers),
       timeoutMs: options?.timeoutMs ?? this.config.timeoutMs,
       acceptStatus: options?.acceptStatus,
+      errorSchema: (options?.errorSchema ?? this.config.errorSchema) as
+        | ResponseParser<E>
+        | undefined,
       transport: this.config.transport,
       proxy: this.config.proxy,
     })

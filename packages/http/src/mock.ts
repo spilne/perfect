@@ -204,7 +204,7 @@ export class MockHttpClient extends AbstractHttpClient {
     return this;
   }
 
-  request<T>(params: HttpRequestParams<T>): Eff<T, Throws<HttpClientError>> {
+  request<T, _E = string>(params: HttpRequestParams<T, _E>): Eff<T, Throws<HttpClientError>> {
     return suspend(() => {
       const path = typeof params.path === "string" ? params.path : params.path.toString();
       this.recordCall({
@@ -224,7 +224,10 @@ export class MockHttpClient extends AbstractHttpClient {
     });
   }
 
-  getText(path: string | URL, options?: RequestOptions): Eff<string, Throws<HttpClientError>> {
+  getText<_E = string>(
+    path: string | URL,
+    options?: RequestOptions<_E>,
+  ): Eff<string, Throws<HttpClientError>> {
     return suspend(() => {
       const p = typeof path === "string" ? path : path.toString();
       this.recordCall({
@@ -243,9 +246,9 @@ export class MockHttpClient extends AbstractHttpClient {
     });
   }
 
-  getResponse<T = ReadableStream<Uint8Array>>(
+  getResponse<T = ReadableStream<Uint8Array>, _E = string>(
     path: string | URL,
-    options?: RequestOptions & { decoder?: ResponseDecoder<T> },
+    options?: RequestOptions<_E> & { decoder?: ResponseDecoder<T> },
   ): Eff<HttpResponse<T>, Throws<HttpClientError>> {
     return suspend(() => {
       const p = typeof path === "string" ? path : path.toString();
