@@ -48,11 +48,22 @@ export function httpFetch(
 /**
  * Like `httpFetch` but rejects non-OK responses as `HttpStatusError`.
  * Override via `acceptStatus` (default: 200-299).
+ *
+ * If `errorSchema` is provided, the body of a non-OK response is parsed:
+ *   - JSON.parse + `errorSchema.safeParse` succeeds → `body: B`, `parsed: true`
+ *   - either step fails → `body: rawText`, `parsed: false`, `parseError` set
+ *
+ * The body always carries SOMETHING useful for diagnostics — parse failures
+ * never escalate to a separate error.
  */
-export function httpFetchOk(
-  options: HttpRequestOptions & WithTransport & { readonly acceptStatus?: AcceptStatus },
+export function httpFetchOk<E = string>(
+  options: HttpRequestOptions &
+    WithTransport & {
+      readonly acceptStatus?: AcceptStatus;
+      readonly errorSchema?: ResponseParser<E>;
+    },
 ): Eff<Response, Throws<HttpClientError>> {
-  const { acceptStatus = DEFAULT_ACCEPT, transport, ...rest } = options;
+  const { acceptStatus = DEFAULT_ACCEPT, transport, errorSchema, ...rest } = options;
   return httpFetch({ ...rest, transport }).flatMap(
     (response): Eff<Response, Throws<HttpClientError>> => {
       if (acceptStatus(response.status)) return succeed(response);
@@ -66,16 +77,45 @@ export function httpFetchOk(
             cause,
             message: `Failed to read error body from ${urlOf(rest.url)}`,
           }),
-      ).flatMap((body) =>
-        fail(
-          new HttpStatusError({
-            url: urlOf(rest.url),
+      ).flatMap((rawBody) => {
+        const url = urlOf(rest.url);
+        const message = `${rest.method ?? "GET"} ${url} returned ${response.status}`;
+        if (!errorSchema) {
+          return fail(
+            new HttpStatusError({ url, status: response.status, body: rawBody, message }),
+          ) as Eff<Response, Throws<HttpClientError>>;
+        }
+        // Try JSON.parse → schema.safeParse. Fall back to raw text on any failure.
+        let parseError: unknown;
+        try {
+          const json = JSON.parse(rawBody);
+          const result = errorSchema.safeParse(json);
+          if (result.success) {
+            return fail(
+              new HttpStatusError<E>({
+                url,
+                status: response.status,
+                body: result.data,
+                message,
+                parsed: true,
+              }),
+            ) as Eff<Response, Throws<HttpClientError>>;
+          }
+          parseError = result.error;
+        } catch (e) {
+          parseError = e;
+        }
+        return fail(
+          new HttpStatusError<E>({
+            url,
             status: response.status,
-            body,
-            message: `${rest.method ?? "GET"} ${urlOf(rest.url)} returned ${response.status}`,
+            body: rawBody,
+            message,
+            parsed: false,
+            parseError,
           }),
-        ) as Eff<Response, Throws<HttpClientError>>,
-      );
+        ) as Eff<Response, Throws<HttpClientError>>;
+      });
     },
   );
 }
@@ -88,16 +128,17 @@ export function httpFetchOk(
  *   const getUser = httpRequest({ url: "/u/1", schema: UserSchema });
  *   const user = await run(getUser);
  */
-export function httpRequest<T>(
+export function httpRequest<T, E = string>(
   options: HttpRequestOptions &
     WithTransport & {
       readonly acceptStatus?: AcceptStatus;
       readonly schema: ResponseParser<T>;
+      readonly errorSchema?: ResponseParser<E>;
     },
 ): Eff<T, Throws<HttpClientError>> {
   const { schema, ...rest } = options;
   const url = urlOf(options.url);
-  return httpFetchOk(rest)
+  return httpFetchOk<E>(rest)
     .flatMap((response): Eff<unknown, Throws<HttpClientError>> =>
       tryPromise(
         () => response.json(),
@@ -125,8 +166,12 @@ export function httpRequest<T>(
 // ── Unvalidated high-level variants ──────────────────────────────
 
 /** fetch → status → JSON (`unknown` — validate manually if you care). */
-export function httpRequestJson(
-  options: HttpRequestOptions & WithTransport & { readonly acceptStatus?: AcceptStatus },
+export function httpRequestJson<E = string>(
+  options: HttpRequestOptions &
+    WithTransport & {
+      readonly acceptStatus?: AcceptStatus;
+      readonly errorSchema?: ResponseParser<E>;
+    },
 ): Eff<unknown, Throws<HttpClientError>> {
   const url = urlOf(options.url);
   return httpFetchOk(options).flatMap((response) =>
@@ -143,8 +188,12 @@ export function httpRequestJson(
 }
 
 /** fetch → status → text. */
-export function httpRequestText(
-  options: HttpRequestOptions & WithTransport & { readonly acceptStatus?: AcceptStatus },
+export function httpRequestText<E = string>(
+  options: HttpRequestOptions &
+    WithTransport & {
+      readonly acceptStatus?: AcceptStatus;
+      readonly errorSchema?: ResponseParser<E>;
+    },
 ): Eff<string, Throws<HttpClientError>> {
   const url = urlOf(options.url);
   return httpFetchOk(options).flatMap((response) =>
