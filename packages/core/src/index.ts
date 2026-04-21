@@ -6,6 +6,7 @@ export type { Exit as ExitT } from "./exit";
 export {
   succeed,
   fail,
+  failCause,
   die,
   sync,
   suspend,
