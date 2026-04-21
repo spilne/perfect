@@ -22,6 +22,16 @@
         "mitata": "^1.0.34",
       },
     },
+    "packages/http": {
+      "name": "@perfect/http",
+      "version": "0.0.1",
+      "dependencies": {
+        "@perfect/core": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+      },
+    },
     "packages/swc-plugin": {
       "name": "@perfect/swc-plugin",
       "version": "0.0.1",
@@ -334,6 +344,8 @@
     "@oxlint/binding-win32-x64-msvc": ["@oxlint/binding-win32-x64-msvc@1.60.0", "", { "os": "win32", "cpu": "x64" }, "sha512-JOro4ZcfBLamJCyfURQmOQByoorgOdx3ZjAkSqnb/CyG/i+lN3KoV5LAgk5ZAW6DPq7/Cx7n23f8DuTWXTWgyQ=="],
 
     "@perfect/core": ["@perfect/core@workspace:packages/core"],
+
+    "@perfect/http": ["@perfect/http@workspace:packages/http"],
 
     "@perfect/swc-plugin": ["@perfect/swc-plugin@workspace:packages/swc-plugin"],
 

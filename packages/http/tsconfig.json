@@ -5,14 +5,12 @@
     "moduleResolution": "bundler",
     "strict": true,
     "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": false,
     "noEmit": true,
     "declaration": true,
     "declarationMap": true,
-    "sourceMap": true
+    "sourceMap": true,
+    "types": ["bun-types"]
   },
-  "references": [
-    { "path": "./packages/core" },
-    { "path": "./packages/transform" },
-    { "path": "./packages/http" }
-  ]
+  "include": ["src", "test"]
 }
