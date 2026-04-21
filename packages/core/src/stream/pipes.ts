@@ -4,6 +4,8 @@ import { Stream } from "./stream";
 import { Chunk } from "./chunk";
 import type { Pipe } from "./stream";
 
+const stripCR = (s: string): string => (s.endsWith("\r") ? s.slice(0, -1) : s);
+
 export const lines: Pipe<string, string> = (input) => {
   let buffer = "";
   return input
@@ -11,9 +13,14 @@ export const lines: Pipe<string, string> = (input) => {
       buffer += chunk;
       const parts = buffer.split("\n");
       buffer = parts.pop() ?? "";
-      return parts.length > 0 ? Stream.fromArray(parts) : Stream.empty();
+      if (parts.length === 0) return Stream.empty();
+      return Stream.fromArray(parts.map(stripCR));
     })
-    .concat(Stream.suspend(() => (buffer.length > 0 ? Stream.succeed(buffer) : Stream.empty())));
+    .concat(
+      Stream.suspend(() =>
+        buffer.length > 0 ? Stream.succeed(stripCR(buffer)) : Stream.empty(),
+      ),
+    );
 };
 
 export const csv: Pipe<string, string[]> = (input) =>
@@ -28,8 +35,20 @@ export const jsonl: Pipe<string, unknown> = (input) =>
     }
   });
 
-export const utf8Decode: Pipe<Uint8Array, string> = (input) =>
-  input.map((buf) => new TextDecoder().decode(buf));
+/**
+ * UTF-8 decode a Uint8Array stream, preserving multi-byte char boundaries
+ * across chunk splits (a single TextDecoder is shared with
+ * `{ stream: true }`).
+ */
+export const utf8Decode: Pipe<Uint8Array, string> = (input) => {
+  const decoder = new TextDecoder("utf-8");
+  return input
+    .map((buf) => decoder.decode(buf, { stream: true }))
+    .concat(Stream.suspend(() => {
+      const tail = decoder.decode();
+      return tail.length > 0 ? Stream.succeed(tail) : Stream.empty();
+    }));
+};
 
 export const utf8Encode: Pipe<string, Uint8Array> = (input) =>
   input.map((str) => new TextEncoder().encode(str));
