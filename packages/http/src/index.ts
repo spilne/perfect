@@ -6,6 +6,7 @@
 //            middleware hooks, HttpClient service tag for Layer DI
 //   Phase 3: withRetry (transient errors), withRetryAll (outcome ADT).
 //            For polling use core's .repeatUntil / .repeatUntilWithBackoff.
+//   Phase 4: httpStreamText / httpStreamLines / httpStreamNDJSON / httpStreamSSE
 
 export {
   HttpNetworkError,
@@ -64,3 +65,12 @@ export { HttpClient as HttpClientService } from "./service";
 // subsume the `poll` helper promin has separately.
 export { withRetry, withRetryAll, PipelineResult } from "./retry";
 export type { RetryOptions, RetryAllOptions } from "./retry";
+
+// ── Phase 4 — streaming ──────────────────────────────────────────
+export {
+  httpStreamText,
+  httpStreamLines,
+  httpStreamNDJSON,
+  httpStreamSSE,
+} from "./stream";
+export type { SSEvent } from "./stream";
