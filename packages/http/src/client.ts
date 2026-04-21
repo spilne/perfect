@@ -396,13 +396,27 @@ export class DefaultHttpClient extends AbstractHttpClient {
     return { ...(defaults ?? {}), ...(extra ?? {}) };
   }
 
-  /** Wrap an effect with middleware hooks + duration tracking. */
+  /** Wrap an effect with middleware hooks + duration tracking.
+   *
+   *  The SAME context object is passed to onRequest / onResponse / onError —
+   *  not a spread copy — so middleware can key per-request state off the
+   *  context reference (e.g. a WeakMap<HttpRequestContext, Span>). The
+   *  `durationMs` field is mutated on the existing context before
+   *  onResponse / onError fire.
+   */
   private instrument<A, E extends HttpClientError>(
     eff: Eff<A, Throws<E>>,
     context: HttpRequestContext,
   ): Eff<A, Throws<E>> {
     const middleware = this.config.middleware;
     if (!middleware || middleware.length === 0) return eff;
+    // Mutable twin of the context, shared across the lifecycle.
+    const mut = context as any as {
+      method: string;
+      url: string;
+      tag?: string;
+      durationMs: number;
+    };
     return sync(() => {
       for (const mw of middleware) mw.onRequest?.(context);
       return performance.now();
@@ -410,14 +424,14 @@ export class DefaultHttpClient extends AbstractHttpClient {
       (eff as any)
         .tap((_value: A) =>
           sync(() => {
-            const durationMs = performance.now() - start;
-            for (const mw of middleware) mw.onResponse?.({ ...context, durationMs });
+            mut.durationMs = performance.now() - start;
+            for (const mw of middleware) mw.onResponse?.(context as any);
           }),
         )
         .tapError((error: E) =>
           sync(() => {
-            const durationMs = performance.now() - start;
-            for (const mw of middleware) mw.onError?.({ ...context, durationMs }, error);
+            mut.durationMs = performance.now() - start;
+            for (const mw of middleware) mw.onError?.(context as any, error);
           }),
         ),
     ) as Eff<A, Throws<E>>;

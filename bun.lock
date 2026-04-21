@@ -32,6 +32,18 @@
         "@types/bun": "latest",
       },
     },
+    "packages/http-otel": {
+      "name": "@perfect/http-otel",
+      "version": "0.0.1",
+      "dependencies": {
+        "@opentelemetry/api": "^1.9.0",
+        "@perfect/core": "workspace:*",
+        "@perfect/http": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+      },
+    },
     "packages/swc-plugin": {
       "name": "@perfect/swc-plugin",
       "version": "0.0.1",
@@ -289,6 +301,8 @@
 
     "@nx/workspace": ["@nx/workspace@22.6.5", "", { "dependencies": { "@nx/devkit": "22.6.5", "@zkochan/js-yaml": "0.0.7", "chalk": "^4.1.0", "enquirer": "~2.3.6", "nx": "22.6.5", "picomatch": "4.0.4", "semver": "^7.6.3", "tslib": "^2.3.0", "yargs-parser": "21.1.1" } }, "sha512-/CZtv1ESSfZ1MVqSlCsmnBWysU1z5VdNlwANlqL6BV2X6RUHKDPVj4YuNPvCK+0LsqyzfJdUt3pcnBYxnT5TIg=="],
 
+    "@opentelemetry/api": ["@opentelemetry/api@1.9.1", "", {}, "sha512-gLyJlPHPZYdAk1JENA9LeHejZe1Ti77/pTeFm/nMXmQH/HFZlcS/O2XJB+L8fkbrNSqhdtlvjBVjxwUYanNH5Q=="],
+
     "@oxfmt/darwin-arm64": ["@oxfmt/darwin-arm64@0.26.0", "", { "os": "darwin", "cpu": "arm64" }, "sha512-AAGc+8CffkiWeVgtWf4dPfQwHEE5c/j/8NWH7VGVxxJRCZFdmWcqCXprvL2H6qZFewvDLrFbuSPRCqYCpYGaTQ=="],
 
     "@oxfmt/darwin-x64": ["@oxfmt/darwin-x64@0.26.0", "", { "os": "darwin", "cpu": "x64" }, "sha512-xFx5ijCTjw577wJvFlZEMmKDnp3HSCcbYdCsLRmC5i3TZZiDe9DEYh3P46uqhzj8BkEw1Vm1ZCWdl48aEYAzvQ=="],
@@ -346,6 +360,8 @@
     "@perfect/core": ["@perfect/core@workspace:packages/core"],
 
     "@perfect/http": ["@perfect/http@workspace:packages/http"],
+
+    "@perfect/http-otel": ["@perfect/http-otel@workspace:packages/http-otel"],
 
     "@perfect/swc-plugin": ["@perfect/swc-plugin@workspace:packages/swc-plugin"],
 
