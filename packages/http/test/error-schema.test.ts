@@ -1,7 +1,9 @@
 // Typed error-body parsing via `errorSchema`.
 //
-// Tests cover the full propagation path: fetch.ts → client.ts → HttpStatusError<B>,
-// including the graceful fallback when JSON or schema parsing fails.
+// Two outcomes per non-2xx response when `errorSchema` is provided:
+//   - body matches schema    → HttpStatusError<B> with body: B
+//   - body fails JSON/schema → HttpUnknownError with raw text + parseError
+// Without errorSchema, behaviour is unchanged: HttpStatusError<string>.
 
 import { describe, test, expect } from "bun:test";
 import {
@@ -18,13 +20,14 @@ import {
   type ResponseParser,
   DefaultHttpClient,
   HttpStatusError,
+  HttpUnknownError,
   httpFetchOk,
   httpRequest,
 } from "../src";
 
 class MockTransport implements HttpTransport {
   constructor(private readonly respond: () => Response | HttpClientError) {}
-  execute(options: HttpRequestOptions): Eff<Response, Throws<HttpClientError>> {
+  execute(_options: HttpRequestOptions): Eff<Response, Throws<HttpClientError>> {
     const r = this.respond();
     if (r instanceof Response) return succeed(r);
     return fail(r) as any;
@@ -32,12 +35,14 @@ class MockTransport implements HttpTransport {
 }
 
 interface ApiError {
-  code: string;
+  code: "NOT_FOUND" | "FORBIDDEN" | "RATE_LIMITED";
   detail: string;
 }
 const ApiErrorParser: ResponseParser<ApiError> = {
   safeParse: (d: any) =>
-    d && typeof d.code === "string" && typeof d.detail === "string"
+    d &&
+    (d.code === "NOT_FOUND" || d.code === "FORBIDDEN" || d.code === "RATE_LIMITED") &&
+    typeof d.detail === "string"
       ? { success: true, data: d as ApiError }
       : { success: false, error: "does not match ApiError" },
 };
@@ -52,12 +57,11 @@ const UserParser: ResponseParser<User> = {
       : { success: false, error: "bad" },
 };
 
-describe("httpFetchOk — errorSchema (typed error body)", () => {
-  test("non-2xx with JSON body matching schema → body typed + parsed:true", async () => {
-    const body = JSON.stringify({ code: "rate_limited", detail: "slow down" });
+describe("httpFetchOk — errorSchema → HttpStatusError<B>", () => {
+  test("non-2xx with matching JSON body → HttpStatusError<B> carries typed body", async () => {
     const t = new MockTransport(
       () =>
-        new Response(body, {
+        new Response(JSON.stringify({ code: "RATE_LIMITED", detail: "slow down" }), {
           status: 429,
           headers: { "content-type": "application/json" },
         }),
@@ -68,49 +72,50 @@ describe("httpFetchOk — errorSchema (typed error body)", () => {
     } catch (e) {
       caught = e as HttpStatusError<ApiError>;
     }
-    expect(caught).toBeDefined();
     expect(caught!._tag).toBe("HttpStatusError");
     expect(caught!.status).toBe(429);
-    expect(caught!.parsed).toBe(true);
-    // Type guard narrows body to ApiError
-    expect(HttpStatusError.isParsed<ApiError>(caught!)).toBe(true);
-    if (HttpStatusError.isParsed<ApiError>(caught!)) {
-      expect(caught!.body.code).toBe("rate_limited");
-      expect(caught!.body.detail).toBe("slow down");
-    }
-    expect(caught!.parseError).toBeUndefined();
+    // Body is typed — no narrowing needed.
+    expect(caught!.body.code).toBe("RATE_LIMITED");
+    expect(caught!.body.detail).toBe("slow down");
   });
+});
 
-  test("non-JSON body → parsed:false, raw body preserved, parseError set", async () => {
+describe("httpFetchOk — errorSchema mismatch → HttpUnknownError", () => {
+  test("non-JSON body → HttpUnknownError with raw text + parseError", async () => {
     const t = new MockTransport(() => new Response("<html>500</html>", { status: 500 }));
-    let caught: HttpStatusError<ApiError> | undefined;
+    let caught: HttpUnknownError | undefined;
     try {
       await run(httpFetchOk<ApiError>({ url: "/x", transport: t, errorSchema: ApiErrorParser }) as any);
     } catch (e) {
-      caught = e as HttpStatusError<ApiError>;
+      caught = e as HttpUnknownError;
     }
-    expect(caught!.parsed).toBe(false);
+    expect(caught!._tag).toBe("HttpUnknownError");
+    expect(caught!.status).toBe(500);
     expect(caught!.body).toBe("<html>500</html>");
     expect(caught!.parseError).toBeDefined();
-    expect(HttpStatusError.isParsed<ApiError>(caught!)).toBe(false);
+    expect(caught!.isRetryable).toBe(true); // 500 is retryable
   });
 
-  test("JSON body but schema rejects → parsed:false, raw kept, parseError set", async () => {
+  test("JSON body but schema rejects → HttpUnknownError with schema error", async () => {
     const t = new MockTransport(
       () => new Response(JSON.stringify({ unexpected: true }), { status: 400 }),
     );
-    let caught: HttpStatusError<ApiError> | undefined;
+    let caught: HttpUnknownError | undefined;
     try {
       await run(httpFetchOk<ApiError>({ url: "/x", transport: t, errorSchema: ApiErrorParser }) as any);
     } catch (e) {
-      caught = e as HttpStatusError<ApiError>;
+      caught = e as HttpUnknownError;
     }
-    expect(caught!.parsed).toBe(false);
-    expect(caught!.body).toBe('{"unexpected":true}'); // raw text
+    expect(caught!._tag).toBe("HttpUnknownError");
+    expect(caught!.status).toBe(400);
+    expect(caught!.body).toBe('{"unexpected":true}');
     expect(caught!.parseError).toBe("does not match ApiError");
+    expect(caught!.isRetryable).toBe(false); // 400 is not
   });
+});
 
-  test("no errorSchema → body is raw string, parsed:false, no parseError", async () => {
+describe("httpFetchOk — no errorSchema → unchanged behaviour", () => {
+  test("body is raw string, no escalation", async () => {
     const t = new MockTransport(() => new Response("plain text", { status: 500 }));
     let caught: HttpStatusError | undefined;
     try {
@@ -118,9 +123,8 @@ describe("httpFetchOk — errorSchema (typed error body)", () => {
     } catch (e) {
       caught = e as HttpStatusError;
     }
-    expect(caught!.parsed).toBe(false);
+    expect(caught!._tag).toBe("HttpStatusError");
     expect(caught!.body).toBe("plain text");
-    expect(caught!.parseError).toBeUndefined();
   });
 });
 
@@ -147,7 +151,7 @@ describe("httpRequest — errorSchema propagates", () => {
   test("error path: errorSchema parses body into HttpStatusError<ApiError>", async () => {
     const t = new MockTransport(
       () =>
-        new Response(JSON.stringify({ code: "forbidden", detail: "nope" }), {
+        new Response(JSON.stringify({ code: "FORBIDDEN", detail: "nope" }), {
           status: 403,
           headers: { "content-type": "application/json" },
         }),
@@ -166,10 +170,7 @@ describe("httpRequest — errorSchema propagates", () => {
       caught = e as HttpStatusError<ApiError>;
     }
     expect(caught!._tag).toBe("HttpStatusError");
-    expect(caught!.parsed).toBe(true);
-    if (HttpStatusError.isParsed<ApiError>(caught!)) {
-      expect(caught!.body.code).toBe("forbidden");
-    }
+    expect(caught!.body.code).toBe("FORBIDDEN");
   });
 });
 
@@ -177,8 +178,8 @@ describe("DefaultHttpClient — errorSchema per-request + client-level", () => {
   test("per-request errorSchema parses error body", async () => {
     const transport = new MockTransport(
       () =>
-        new Response(JSON.stringify({ code: "x", detail: "y" }), {
-          status: 400,
+        new Response(JSON.stringify({ code: "NOT_FOUND", detail: "y" }), {
+          status: 404,
           headers: { "content-type": "application/json" },
         }),
     );
@@ -189,17 +190,14 @@ describe("DefaultHttpClient — errorSchema per-request + client-level", () => {
     } catch (e) {
       caught = e as HttpStatusError<ApiError>;
     }
-    expect(caught!.parsed).toBe(true);
-    if (HttpStatusError.isParsed<ApiError>(caught!)) {
-      expect(caught!.body.code).toBe("x");
-      expect(caught!.body.detail).toBe("y");
-    }
+    expect(caught!.body.code).toBe("NOT_FOUND");
+    expect(caught!.body.detail).toBe("y");
   });
 
   test("client-level errorSchema applies to every request", async () => {
     const transport = new MockTransport(
       () =>
-        new Response(JSON.stringify({ code: "srv", detail: "boom" }), {
+        new Response(JSON.stringify({ code: "RATE_LIMITED", detail: "boom" }), {
           status: 503,
           headers: { "content-type": "application/json" },
         }),
@@ -211,10 +209,7 @@ describe("DefaultHttpClient — errorSchema per-request + client-level", () => {
     } catch (e) {
       caught = e as HttpStatusError<ApiError>;
     }
-    expect(caught!.parsed).toBe(true);
-    if (HttpStatusError.isParsed<ApiError>(caught!)) {
-      expect(caught!.body.code).toBe("srv");
-    }
+    expect(caught!.body.code).toBe("RATE_LIMITED");
   });
 
   test("per-request errorSchema overrides client-level default", async () => {
@@ -225,8 +220,6 @@ describe("DefaultHttpClient — errorSchema per-request + client-level", () => {
           headers: { "content-type": "application/json" },
         }),
     );
-    // Client default expects ApiError ({ code, detail }); per-request uses a
-    // permissive schema that accepts anything.
     const Permissive: ResponseParser<{ different: string }> = {
       safeParse: (d: any) =>
         d && typeof d.different === "string"
@@ -242,17 +235,14 @@ describe("DefaultHttpClient — errorSchema per-request + client-level", () => {
     } catch (e) {
       caught = e as HttpStatusError<{ different: string }>;
     }
-    expect(caught!.parsed).toBe(true);
-    if (HttpStatusError.isParsed<{ different: string }>(caught!)) {
-      expect(caught!.body.different).toBe("shape");
-    }
+    expect(caught!.body.different).toBe("shape");
   });
 
   test("client-level errorSchema carries through withOverrides", async () => {
     const transport = new MockTransport(
       () =>
-        new Response(JSON.stringify({ code: "a", detail: "b" }), {
-          status: 500,
+        new Response(JSON.stringify({ code: "NOT_FOUND", detail: "b" }), {
+          status: 404,
           headers: { "content-type": "application/json" },
         }),
     );
@@ -264,6 +254,21 @@ describe("DefaultHttpClient — errorSchema per-request + client-level", () => {
     } catch (e) {
       caught = e as HttpStatusError<ApiError>;
     }
-    expect(caught!.parsed).toBe(true);
+    expect(caught!.body.code).toBe("NOT_FOUND");
+  });
+
+  test("client-level errorSchema mismatch → HttpUnknownError", async () => {
+    const transport = new MockTransport(
+      () => new Response("<html>down</html>", { status: 502 }),
+    );
+    const client = new DefaultHttpClient({ transport, errorSchema: ApiErrorParser });
+    let caught: HttpUnknownError | undefined;
+    try {
+      await run(client.get<User, ApiError>("/u", UserParser));
+    } catch (e) {
+      caught = e as HttpUnknownError;
+    }
+    expect(caught!._tag).toBe("HttpUnknownError");
+    expect(caught!.body).toBe("<html>down</html>");
   });
 });

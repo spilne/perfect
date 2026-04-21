@@ -16,6 +16,7 @@ import {
   type HttpClientError,
   HttpParseError,
   HttpStatusError,
+  HttpUnknownError,
 } from "./errors";
 import { type ResponseParser } from "./response";
 import { type HttpRequestOptions, type HttpTransport, defaultTransport } from "./transport";
@@ -49,12 +50,13 @@ export function httpFetch(
  * Like `httpFetch` but rejects non-OK responses as `HttpStatusError`.
  * Override via `acceptStatus` (default: 200-299).
  *
- * If `errorSchema` is provided, the body of a non-OK response is parsed:
- *   - JSON.parse + `errorSchema.safeParse` succeeds → `body: B`, `parsed: true`
- *   - either step fails → `body: rawText`, `parsed: false`, `parseError` set
+ * If `errorSchema` is provided:
+ *   - JSON.parse + `errorSchema.safeParse` succeeds → `HttpStatusError<B>` with `body: B`
+ *   - either step fails → `HttpUnknownError` (carries raw body + parseError)
  *
- * The body always carries SOMETHING useful for diagnostics — parse failures
- * never escalate to a separate error.
+ * Without `errorSchema`, an unparseable error body still comes back as
+ * `HttpStatusError<string>` with the raw text — opt in to typed bodies
+ * by providing the schema.
  */
 export function httpFetchOk<E = string>(
   options: HttpRequestOptions &
@@ -85,7 +87,7 @@ export function httpFetchOk<E = string>(
             new HttpStatusError({ url, status: response.status, body: rawBody, message }),
           ) as Eff<Response, Throws<HttpClientError>>;
         }
-        // Try JSON.parse → schema.safeParse. Fall back to raw text on any failure.
+        // Try JSON.parse → schema.safeParse. Escalate to HttpUnknownError on failure.
         let parseError: unknown;
         try {
           const json = JSON.parse(rawBody);
@@ -97,7 +99,6 @@ export function httpFetchOk<E = string>(
                 status: response.status,
                 body: result.data,
                 message,
-                parsed: true,
               }),
             ) as Eff<Response, Throws<HttpClientError>>;
           }
@@ -106,13 +107,12 @@ export function httpFetchOk<E = string>(
           parseError = e;
         }
         return fail(
-          new HttpStatusError<E>({
+          new HttpUnknownError({
             url,
             status: response.status,
             body: rawBody,
-            message,
-            parsed: false,
             parseError,
+            message: `${message} (errorSchema did not match)`,
           }),
         ) as Eff<Response, Throws<HttpClientError>>;
       });
