@@ -4,8 +4,8 @@
 //   Phase 1: typed errors, transport, decoders, httpFetch*/httpRequest*
 //   Phase 2: AbstractHttpClient / DefaultHttpClient with withOverrides,
 //            middleware hooks, HttpClient service tag for Layer DI
-//   Phase 3: withRetry (transient errors), withRetryAll (outcome ADT),
-//            poll + pollWithBackoff, PollTimeoutError
+//   Phase 3: withRetry (transient errors), withRetryAll (outcome ADT).
+//            For polling use core's .repeatUntil / .repeatUntilWithBackoff.
 
 export {
   HttpNetworkError,
@@ -59,7 +59,8 @@ export type { HttpMiddleware, HttpRequestContext } from "./middleware";
 export { HttpClient as HttpClientService } from "./service";
 
 // ── Phase 3 ──────────────────────────────────────────────────────
+// withRetry = HTTP-aware transient retry; withRetryAll = full outcome ADT.
+// For polling use core's `.repeatUntil` / `.repeatUntilWithBackoff` — they
+// subsume the `poll` helper promin has separately.
 export { withRetry, withRetryAll, PipelineResult } from "./retry";
 export type { RetryOptions, RetryAllOptions } from "./retry";
-export { poll, pollWithBackoff, PollTimeoutError } from "./poll";
-export type { PollOptions, PollWithBackoffOptions } from "./poll";
