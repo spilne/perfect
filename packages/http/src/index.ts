@@ -7,6 +7,7 @@
 //   Phase 3: withRetry (transient errors), withRetryAll (outcome ADT).
 //            For polling use core's .repeatUntil / .repeatUntilWithBackoff.
 //   Phase 4: httpStreamText / httpStreamLines / httpStreamNDJSON / httpStreamSSE
+//   Phase 5: MockHttpClient — route-matched test double with call recording
 
 export {
   HttpNetworkError,
@@ -74,3 +75,7 @@ export {
   httpStreamSSE,
 } from "./stream";
 export type { SSEvent } from "./stream";
+
+// ── Phase 5 — test utilities ─────────────────────────────────────
+export { MockHttpClient, mockHttpClient } from "./mock";
+export type { RecordedCall, ResponseHandler } from "./mock";
