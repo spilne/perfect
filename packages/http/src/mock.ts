@@ -87,6 +87,7 @@ const HTTP_ERROR_TAGS: Record<HttpClientError["_tag"], true> = {
   HttpNetworkError: true,
   HttpTimeoutError: true,
   HttpStatusError: true,
+  HttpUnknownError: true,
   HttpParseError: true,
 };
 function isHttpClientError(value: unknown): value is HttpClientError {

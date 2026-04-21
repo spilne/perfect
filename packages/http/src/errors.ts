@@ -20,15 +20,15 @@ export class HttpTimeoutError extends TaggedError("HttpTimeoutError")<{
 }>() {}
 
 /**
- * Server returned a non-OK status code.
+ * Server returned a non-OK status code with a body of known shape.
  *
  * Generic over the body type. By default `body: string` (raw response text).
  * If you pass `errorSchema` to `httpRequest` / `httpFetchOk` / client methods,
- * the body is parsed through it:
- *   - parse success → `body: B`, `parsed: true`
- *   - parse failure → `body: string` (raw), `parsed: false`, `parseError` set
+ * the body is parsed through it and `body: B` reflects the typed shape.
  *
- * Use `HttpStatusError.isParsed(e)` as a type guard to narrow `e.body` to `B`.
+ * If parsing fails (bad JSON or schema mismatch), `HttpUnknownError` is
+ * raised instead — `HttpStatusError<B>` always carries a body of the typed
+ * shape, never a `string` fallback.
  */
 export class HttpStatusError<B = string> extends Error {
   static readonly _tag = "HttpStatusError" as const;
@@ -36,27 +36,18 @@ export class HttpStatusError<B = string> extends Error {
 
   readonly url: string;
   readonly status: number;
-  /** Parsed body (if `errorSchema` succeeded), else raw response text. */
-  readonly body: B | string;
-  /** True iff `errorSchema` was provided AND parsed successfully. */
-  readonly parsed: boolean;
-  /** Set when `errorSchema` was provided but parsing failed. */
-  readonly parseError?: unknown;
+  readonly body: B;
 
   constructor(props: {
     readonly url: string;
     readonly status: number;
-    readonly body: B | string;
+    readonly body: B;
     readonly message: string;
-    readonly parsed?: boolean;
-    readonly parseError?: unknown;
   }) {
     super(props.message);
     this.url = props.url;
     this.status = props.status;
     this.body = props.body;
-    this.parsed = props.parsed ?? false;
-    this.parseError = props.parseError;
     this.name = "HttpStatusError";
     Object.setPrototypeOf(this, new.target.prototype);
   }
@@ -73,12 +64,27 @@ export class HttpStatusError<B = string> extends Error {
   get isServerError(): boolean {
     return this.status >= 500;
   }
+}
 
-  /** Type guard: narrows `body` to the parsed type `B`. */
-  static isParsed<B>(
-    e: HttpStatusError<B>,
-  ): e is HttpStatusError<B> & { readonly body: B; readonly parsed: true } {
-    return e.parsed;
+/**
+ * Server returned a non-OK status but the response body did not match the
+ * provided `errorSchema`. Carries the raw text + the parse failure cause so
+ * callers can still log / inspect / fall back. Status is preserved so
+ * retry predicates can still classify by HTTP code.
+ *
+ * Only raised when `errorSchema` was opted into. Without it, an unparseable
+ * error body comes back as `HttpStatusError<string>` with the raw text.
+ */
+export class HttpUnknownError extends TaggedError("HttpUnknownError")<{
+  readonly url: string;
+  readonly status: number;
+  readonly body: string;
+  readonly parseError: unknown;
+  readonly message: string;
+}>() {
+  /** 5xx or 429 — retryable by default. */
+  get isRetryable(): boolean {
+    return this.status >= 500 || this.status === 429;
   }
 }
 
@@ -94,13 +100,16 @@ export type HttpClientError =
   | HttpNetworkError
   | HttpTimeoutError
   | HttpStatusError
+  | HttpUnknownError
   | HttpParseError;
 
 /**
- * Default "transient" predicate — retry 5xx, 429, timeouts, network errors.
+ * Default "transient" predicate — retry 5xx, 429, timeouts, network errors,
+ * including unknown-shape error responses with retryable status codes.
  * Caller bugs (4xx other than 429) and parse errors do NOT retry.
  */
 export const HTTP_RETRYABLE = (error: HttpClientError): boolean =>
   error._tag === "HttpTimeoutError" ||
   error._tag === "HttpNetworkError" ||
-  (error._tag === "HttpStatusError" && error.isRetryable);
+  (error._tag === "HttpStatusError" && error.isRetryable) ||
+  (error._tag === "HttpUnknownError" && error.isRetryable);

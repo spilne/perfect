@@ -13,6 +13,7 @@ export {
   HttpNetworkError,
   HttpTimeoutError,
   HttpStatusError,
+  HttpUnknownError,
   HttpParseError,
   HTTP_RETRYABLE,
 } from "./errors";
