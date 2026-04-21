@@ -137,19 +137,22 @@ export function retryAllCause<A, S>(
 
 // ── repeatUntil / repeatUntilWithBackoff ───────────────────────────────
 
-export interface RepeatTimeoutError {
+export interface RepeatTimeoutError<A = unknown> {
   readonly _tag: "RepeatTimeoutError";
   readonly reason: "maxAttempts" | "maxDuration";
   readonly attempts: number;
   readonly elapsedMs: number;
+  /** Last value observed (useful for diagnostics — "was this close to done?"). */
+  readonly lastResult: A;
 }
 
-function makeRepeatTimeout(
+function makeRepeatTimeout<A>(
   reason: RepeatTimeoutError["reason"],
   attempts: number,
   elapsedMs: number,
-): RepeatTimeoutError {
-  return { _tag: "RepeatTimeoutError", reason, attempts, elapsedMs };
+  lastResult: A,
+): RepeatTimeoutError<A> {
+  return { _tag: "RepeatTimeoutError", reason, attempts, elapsedMs, lastResult };
 }
 
 export function repeatUntil<A, S>(
@@ -160,19 +163,19 @@ export function repeatUntil<A, S>(
     maxAttempts?: number;
     maxDurationMs?: number;
   },
-): Eff<A, S | Throws<RepeatTimeoutError>> {
+): Eff<A, S | Throws<RepeatTimeoutError<A>>> {
   const { until, intervalMs = 1_000, maxAttempts = Infinity, maxDurationMs = Infinity } = opts;
   const startNow = new Suspend(Op.Sync, () => Date.now(), null) as Eff<number, never>;
 
-  function step(attempt: number, started: number): Eff<A, S | Throws<RepeatTimeoutError>> {
+  function step(attempt: number, started: number): Eff<A, S | Throws<RepeatTimeoutError<A>>> {
     return new Suspend(Op.FlatMap, eff as any, (value: A) => {
       if (until(value)) return succeed(value);
       const now = Date.now();
       const elapsed = now - started;
       if (attempt + 1 >= maxAttempts)
-        return fail(makeRepeatTimeout("maxAttempts", attempt + 1, elapsed));
+        return fail(makeRepeatTimeout("maxAttempts", attempt + 1, elapsed, value));
       if (elapsed >= maxDurationMs)
-        return fail(makeRepeatTimeout("maxDuration", attempt + 1, elapsed));
+        return fail(makeRepeatTimeout("maxDuration", attempt + 1, elapsed, value));
       return new Suspend(Op.FlatMap, sleep(intervalMs), () => step(attempt + 1, started)) as any;
     }) as any;
   }
@@ -189,7 +192,7 @@ export function repeatUntilWithBackoff<A, S>(
     maxAttempts?: number;
     maxDurationMs?: number;
   },
-): Eff<A, S | Throws<RepeatTimeoutError>> {
+): Eff<A, S | Throws<RepeatTimeoutError<A>>> {
   const {
     until,
     initialIntervalMs = 100,
@@ -204,15 +207,15 @@ export function repeatUntilWithBackoff<A, S>(
     attempt: number,
     currentInterval: number,
     started: number,
-  ): Eff<A, S | Throws<RepeatTimeoutError>> {
+  ): Eff<A, S | Throws<RepeatTimeoutError<A>>> {
     return new Suspend(Op.FlatMap, eff as any, (value: A) => {
       if (until(value)) return succeed(value);
       const now = Date.now();
       const elapsed = now - started;
       if (attempt + 1 >= maxAttempts)
-        return fail(makeRepeatTimeout("maxAttempts", attempt + 1, elapsed));
+        return fail(makeRepeatTimeout("maxAttempts", attempt + 1, elapsed, value));
       if (elapsed >= maxDurationMs)
-        return fail(makeRepeatTimeout("maxDuration", attempt + 1, elapsed));
+        return fail(makeRepeatTimeout("maxDuration", attempt + 1, elapsed, value));
       const nextInterval = Math.min(currentInterval * 2, maxIntervalMs);
       return new Suspend(Op.FlatMap, sleep(currentInterval), () =>
         step(attempt + 1, nextInterval, started),

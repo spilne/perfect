@@ -18,6 +18,11 @@ import {
 import { provide, type ServiceTag } from "../service";
 import { type RetryPolicy } from "../retry-policy";
 import { type Schedule, repeat, retryWith } from "../schedule";
+import {
+  repeatUntil,
+  repeatUntilWithBackoff,
+  type RepeatTimeoutError,
+} from "../combinators-extra";
 
 declare module "../eff" {
   interface Suspend {
@@ -58,6 +63,34 @@ declare module "../eff" {
       schedule: Schedule<any>,
       opts?: { while?: (e: any) => boolean },
     ): Eff<A, S>;
+    /**
+     * Re-run until `until(value)` returns true. Fixed interval between
+     * attempts. Caps via `maxAttempts` + `maxDurationMs`. Both caps produce
+     * a typed `RepeatTimeoutError<A>` carrying the last observed value.
+     */
+    repeatUntil<A, S>(
+      this: Eff<A, S>,
+      opts: {
+        until: (value: A) => boolean;
+        intervalMs?: number;
+        maxAttempts?: number;
+        maxDurationMs?: number;
+      },
+    ): Eff<A, S | Throws<RepeatTimeoutError<A>>>;
+    /**
+     * Like `repeatUntil` but the interval doubles each attempt (capped at
+     * `maxIntervalMs`). Use for polling flaky async APIs.
+     */
+    repeatUntilWithBackoff<A, S>(
+      this: Eff<A, S>,
+      opts: {
+        until: (value: A) => boolean;
+        initialIntervalMs?: number;
+        maxIntervalMs?: number;
+        maxAttempts?: number;
+        maxDurationMs?: number;
+      },
+    ): Eff<A, S | Throws<RepeatTimeoutError<A>>>;
     when<A, S>(this: Eff<A, S>, cond: () => boolean): Eff<A | undefined, S>;
     unless<A, S>(this: Eff<A, S>, cond: () => boolean): Eff<A | undefined, S>;
   }
@@ -137,6 +170,14 @@ Suspend.prototype.repeat = function (schedule: any) {
 
 Suspend.prototype.retryWith = function (schedule: any, opts?: any) {
   return retryWith(this as any, schedule, opts) as any;
+};
+
+Suspend.prototype.repeatUntil = function (opts: any) {
+  return repeatUntil(this as any, opts) as any;
+};
+
+Suspend.prototype.repeatUntilWithBackoff = function (opts: any) {
+  return repeatUntilWithBackoff(this as any, opts) as any;
 };
 
 Suspend.prototype.when = function (cond: any) {
