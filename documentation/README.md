@@ -30,6 +30,8 @@ console.log(await run(program)); // 42
 10. [Testing](./10-testing.md) — `TestClock`, `TestRandom`, `TestConsole`
 11. [Resilience + Coordination Primitives](./11-resilience-and-coordination.md) — `CircuitBreaker`, `Singleflight`, `RateLimiter`, `Latch`, `Barrier`, `PubSub`, `SubscriptionRef`, `Pool`
 12. [Utilities](./12-utilities.md) — `Duration`, `CacheStore`
+13. [HTTP](./13-http.md) — typed-effect HTTP client, retry, streaming, mock
+14. [HTTP — OpenTelemetry](./14-http-otel.md) — tracing middleware + W3C `traceparent` injection
 
 ## Reference
 
