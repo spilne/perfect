@@ -42,7 +42,19 @@ const program = eff(function* () {
   return yield* db.query("SELECT 1");
 });
 
-assertEq(runSync(program.with(AppLive)), "db:SELECT 1");
+assertEq(program.with(AppLive).runSync(), "db:SELECT 1");
+// <<< example
+
+// >>> example: layer-apply-flat
+// Same program, chainable form — .flatMap into each service, .with() the layer.
+const programFlat = Db.get.flatMap((db) =>
+  Logger.get.flatMap((log) => {
+    log.log("running");
+    return db.query("SELECT 1");
+  }),
+);
+
+assertEq(programFlat.with(AppLive).runSync(), "db:SELECT 1");
 // <<< example
 
 // >>> example: layer-chain
@@ -50,7 +62,7 @@ assertEq(runSync(program.with(AppLive)), "db:SELECT 1");
 const a = program.with(Layer.merge(DbLive, CacheLive, LoggerLive));
 const b = program.with(DbLive.and(CacheLive).and(LoggerLive));
 const c = program.with(DbLive).with(CacheLive).with(LoggerLive);
-assertEq([runSync(a), runSync(b), runSync(c)], ["db:SELECT 1", "db:SELECT 1", "db:SELECT 1"]);
+assertEq([a.runSync(), b.runSync(), c.runSync()], ["db:SELECT 1", "db:SELECT 1", "db:SELECT 1"]);
 // <<< example
 
 // >>> example: layer-scoped
@@ -67,7 +79,7 @@ const ScopedLogger = eff(function* () {
   return { Logger: logger };
 });
 
-await run(program.with(Layer.merge(DbLive, CacheLive, ScopedLogger)));
+await program.with(Layer.merge(DbLive, CacheLive, ScopedLogger)).run();
 assertEq(events, ["acquire", "log:running", "release"]);
 // <<< example
 
@@ -79,5 +91,5 @@ const FakeAll = succeed({
   Logger: { log: () => {} } as Logger,
 });
 
-assertEq(runSync(program.with(FakeAll)), "FAKE");
+assertEq(program.with(FakeAll).runSync(), "FAKE");
 // <<< example

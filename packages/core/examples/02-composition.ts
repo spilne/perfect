@@ -13,7 +13,7 @@ const program = succeed(10)
   .flatMap((x) => sync(() => x * 2)) // 22
   .map((x) => x.toString()); // "22"
 
-assertEq(runSync(program), "22");
+assertEq(program.runSync(), "22");
 // <<< example
 
 // >>> example: tap
@@ -23,12 +23,12 @@ const traced = succeed(42)
   .tap((x) => { seen = x; })
   .map((x) => x + 1);
 
-assertEq(runSync(traced), 43);
+assertEq(traced.runSync(), 43);
 assertEq(seen, 42);
 // <<< example
 
 // >>> example: zip
 // .zip — combine two effects sequentially into a tuple
 const pair = succeed("hello").zip(succeed("world"));
-assertEq(runSync(pair), ["hello", "world"]);
+assertEq(pair.runSync(), ["hello", "world"]);
 // <<< example

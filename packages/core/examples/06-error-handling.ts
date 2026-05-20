@@ -11,7 +11,7 @@ import { assertEq } from "./_assert";
 const program: Eff<string, never> = (fail("nope") as Eff<never, Throws<string>>)
   .catch((e) => succeed(`recovered: ${e}`));
 
-assertEq(runSync(program), "recovered: nope");
+assertEq(program.runSync(), "recovered: nope");
 // <<< example
 
 // >>> example: catch-tag
@@ -25,7 +25,7 @@ const safe = lookup(99)
   .catchTag("NotFound", (e) => succeed(`(missing ${e.id})`))
   .catchTag("Forbidden", () => succeed("(no access)"));
 
-assertEq(runSync(safe), "(missing 99)");
+assertEq(safe.runSync(), "(missing 99)");
 // <<< example
 
 // >>> example: catch-cause
@@ -34,7 +34,7 @@ const wild = (fail("boom") as Eff<never, Throws<string>>).catchAllCause((cause) 
   succeed(`cause: ${cause._tag}`),
 );
 
-assertEq(runSync(wild), "cause: Fail");
+assertEq(wild.runSync(), "cause: Fail");
 // <<< example
 
 // >>> example: tap-error
@@ -44,12 +44,12 @@ const observed = (fail("bad") as Eff<never, Throws<string>>)
   .tapError((e) => sync(() => { observedError = e; }) as any)
   .catch(() => succeed("ok"));
 
-assertEq(runSync(observed), "ok");
+assertEq(observed.runSync(), "ok");
 assertEq(observedError, "bad");
 // <<< example
 
 // >>> example: orelse
 // .orElse — if this effect fails, run another.
 const fallback = (fail("first") as Eff<never, Throws<string>>).orElse(() => succeed("second"));
-assertEq(await run(fallback), "second");
+assertEq(await fallback.run(), "second");
 // <<< example

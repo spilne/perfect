@@ -8,7 +8,7 @@ import { assertEq } from "./_assert";
 // >>> example: hello-sync
 // runSync — for purely synchronous programs (no Async, no Sleep, no Fork).
 const greet = succeed("hello, perfect");
-assertEq(runSync(greet), "hello, perfect");
+assertEq(greet.runSync(), "hello, perfect");
 // <<< example
 
 // >>> example: hello-generator
@@ -20,7 +20,7 @@ const program = eff(function* () {
   return a * b;
 });
 
-assertEq(await run(program), 42);
+assertEq(await program.run(), 42);
 // <<< example
 
 // >>> example: hello-flatmap
@@ -29,5 +29,5 @@ const composed = succeed(21)
   .flatMap((a) => succeed(a * 2))
   .map((b) => b + 0);
 
-assertEq(runSync(composed), 42);
+assertEq(composed.runSync(), 42);
 // <<< example
