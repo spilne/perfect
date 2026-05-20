@@ -33,44 +33,42 @@ const store = CacheStore.memory<string, number>({
   maxSize: 100,
 });
 
-await run(
-  eff(function* () {
-    yield* store.set("hits", 0);
-    yield* store.set("hits", 1);
-    const v = yield* store.get("hits");
-    assertEq(v, 1);
+await (eff(function* () {
+  yield* store.set("hits", 0);
+  yield* store.set("hits", 1);
+  const v = yield* store.get("hits");
+  assertEq(v, 1);
 
-    const present = yield* store.has("hits");
-    assertEq(present, true);
+  const present = yield* store.has("hits");
+  assertEq(present, true);
 
-    yield* store.delete("hits");
-    const after = yield* store.get("hits");
-    assertEq(after, undefined);
-  }) as any,
-);
+  yield* store.delete("hits");
+  const after = yield* store.get("hits");
+  assertEq(after, undefined);
+}) as any).run();
 // <<< example
 
 // >>> example: cache-store-ttl
 // Per-entry TTL overrides the store default.
 const ttlStore = CacheStore.memory<string, string>({ ttlMs: 60_000 });
 
-runSync(ttlStore.set("short", "expires-fast", 30)); // overrides default
-runSync(ttlStore.set("long", "stays-around"));      // uses default 60s
+ttlStore.set("short", "expires-fast", 30).runSync(); // overrides default
+ttlStore.set("long", "stays-around").runSync();      // uses default 60s
 
-assertEq(runSync(ttlStore.get("short")), "expires-fast");
+assertEq(ttlStore.get("short").runSync(), "expires-fast");
 await new Promise((r) => setTimeout(r, 40));
-assertEq(runSync(ttlStore.get("short")), undefined); // expired
-assertEq(runSync(ttlStore.get("long")), "stays-around");
+assertEq(ttlStore.get("short").runSync(), undefined); // expired
+assertEq(ttlStore.get("long").runSync(), "stays-around");
 // <<< example
 
 // >>> example: cache-store-lru
 // LRU eviction at maxSize.
 const lru = CacheStore.memory<string, number>({ maxSize: 3 });
-runSync(lru.set("a", 1));
-runSync(lru.set("b", 2));
-runSync(lru.set("c", 3));
-runSync(lru.get("a")); // touches "a" → most recent
-runSync(lru.set("d", 4)); // evicts "b" (now LRU), not "a"
-assertEq(runSync(lru.has("a")), true);
-assertEq(runSync(lru.has("b")), false);
+lru.set("a", 1).runSync();
+lru.set("b", 2).runSync();
+lru.set("c", 3).runSync();
+lru.get("a").runSync(); // touches "a" → most recent
+lru.set("d", 4).runSync(); // evicts "b" (now LRU), not "a"
+assertEq(lru.has("a").runSync(), true);
+assertEq(lru.has("b").runSync(), false);
 // <<< example

@@ -19,18 +19,16 @@ const rawCsv = [
 ];
 
 const kept: string[] = [];
-const top3RunningTotals = await run(
-  Stream.fromArray(rawCsv)
-    .map((line) => {
-      const [city, n] = line.split(",");
-      return { city, population: Number(n) } as Row;
-    })
-    .filter((r) => r.population >= 25_000_000) // pure filter
-    .tap((r) => { kept.push(r.city); }) // side effect, fused
-    .take(3) // short-circuit
-    .scan(0, (acc, r) => acc + r.population) // running total (includes seed)
-    .runCollect(),
-);
+const top3RunningTotals = await Stream.fromArray(rawCsv)
+  .map((line) => {
+    const [city, n] = line.split(",");
+    return { city, population: Number(n) } as Row;
+  })
+  .filter((r) => r.population >= 25_000_000) // pure filter
+  .tap((r) => { kept.push(r.city); }) // side effect, fused
+  .take(3) // short-circuit
+  .scan(0, (acc, r) => acc + r.population) // running total (includes seed)
+  .runCollect().run();
 
 assertEq(kept, ["tokyo", "delhi", "shanghai"]);
 assertEq(top3RunningTotals, [0, 37_000_000, 69_000_000, 97_000_000]);
@@ -39,10 +37,8 @@ assertEq(top3RunningTotals, [0, 37_000_000, 69_000_000, 97_000_000]);
 // >>> example: pipeline-foreach
 // runForEach for "do something per element, return when done".
 let count = 0;
-await run(
-  Stream.range(1, 11) // 1..10
-    .filter((n) => n % 2 === 0)
-    .runForEach((n) => succeed(void (count += n))),
-);
+await Stream.range(1, 11) // 1..10
+  .filter((n) => n % 2 === 0)
+  .runForEach((n) => succeed(void (count += n))).run();
 assertEq(count, 30); // 2 + 4 + 6 + 8 + 10
 // <<< example

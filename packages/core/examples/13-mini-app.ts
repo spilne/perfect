@@ -111,21 +111,17 @@ const AppLive = Layer.merge(DbLive, CacheLive, LoggerLive);
 // ── Run + assert ───────────────────────────────────────────────────
 
 // First call: cache miss + transient error + retry succeeds + caches result
-const result = await run(
-  getUser(7)
-    .catchTag("NotFound", (e) => succeed({ id: e.id, name: "(missing)" } as User))
-    .with(AppLive),
-);
+const result = await getUser(7)
+  .catchTag("NotFound", (e) => succeed({ id: e.id, name: "(missing)" } as User))
+  .with(AppLive).run();
 assertEq(result, { id: 7, name: "user-7-from-conn-1" });
 assertEq(dbCalls, 2); // 1st call failed transient, 2nd succeeded
 assertContains(logLines.join("|"), "cache miss 7");
 
 // Second call: cache hit, no extra db calls
-const cached = await run(
-  getUser(7)
-    .catch(() => succeed({ id: -1, name: "" } as User))
-    .with(AppLive),
-);
+const cached = await getUser(7)
+  .catch(() => succeed({ id: -1, name: "" } as User))
+  .with(AppLive).run();
 assertEq(cached, { id: 7, name: "user-7-from-conn-1" });
 assertContains(logLines.join("|"), "cache hit 7");
 

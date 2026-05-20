@@ -20,7 +20,7 @@ const useFile = sync(() => {
   .flatMap((file) => sync(() => file.read()))
   .scoped();
 
-assertEq(await run(useFile), "contents");
+assertEq(await useFile.run(), "contents");
 assertEq(events, ["opened", "closed"]);
 // <<< example
 
@@ -30,7 +30,7 @@ let cleanedUp = false;
 const tracked = succeed("done")
   .ensuring(sync(() => { cleanedUp = true; }));
 
-assertEq(await run(tracked), "done");
+assertEq(await tracked.run(), "done");
 assertEq(cleanedUp, true);
 // <<< example
 
@@ -40,7 +40,7 @@ let exitTag = "";
 const observed = succeed("ok")
   .onExit((exit) => sync(() => { exitTag = exit._tag; }));
 
-assertEq(await run(observed), "ok");
+assertEq(await observed.run(), "ok");
 assertEq(exitTag, "Success");
 // <<< example
 
@@ -58,6 +58,19 @@ const safe = scoped(
   }) as any,
 ).catch((e: any) => succeed(`recovered: ${e}`));
 
-assertEq(await run(safe as any), "recovered: crashed");
+assertEq(await (safe as any).run(), "recovered: crashed");
 assertEq(trace, ["acquire", "release"]);
+// <<< example
+
+// >>> example: release-on-failure-flat
+// Same guarantee, chainable form — .acquireRelease + .scoped + .catch.
+const traceFlat: string[] = [];
+const safeFlat = sync(() => { traceFlat.push("acquire"); })
+  .acquireRelease(() => sync(() => { traceFlat.push("release"); }))
+  .flatMap(() => fail("crashed") as Eff<never, Throws<string>>)
+  .scoped()
+  .catch((e) => succeed(`recovered: ${e}`));
+
+assertEq(await (safeFlat as any).run(), "recovered: crashed");
+assertEq(traceFlat, ["acquire", "release"]);
 // <<< example

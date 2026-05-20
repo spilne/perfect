@@ -28,7 +28,20 @@ const wired = provide(
   { greet: (name) => succeed(`hello, ${name}`) },
 );
 
-assertEq(runSync(wired), "hello, world");
+assertEq(wired.runSync(), "hello, world");
+// <<< example
+
+// >>> example: service-define-flat
+// Same program, chainable form: Greeter.get is an effect — flatMap into it.
+const programFlat = Greeter.get.flatMap((g) => g.greet("world"));
+
+const wiredFlat = provide(
+  programFlat,
+  Greeter,
+  { greet: (name) => succeed(`hello, ${name}`) },
+);
+
+assertEq(wiredFlat.runSync(), "hello, world");
 // <<< example
 
 // >>> example: service-multiple
@@ -53,6 +66,26 @@ const wired2 = provide(
   { log: (m) => captured.push(m) },
 );
 
-assertEq(runSync(wired2), "row:SELECT 1");
+assertEq(wired2.runSync(), "row:SELECT 1");
 assertEq(captured, ["querying"]);
+// <<< example
+
+// >>> example: service-multiple-flat
+// Multiple services in chainable form — nested .flatMap for each .get.
+const capturedFlat: string[] = [];
+const appFlat = Db.get.flatMap((db) =>
+  Logger.get.flatMap((log) => {
+    log.log("querying");
+    return db.query("SELECT 1");
+  }),
+);
+
+const wired2Flat = provide(
+  provide(appFlat, Db, { query: (s) => succeed(`row:${s}`) }),
+  Logger,
+  { log: (m) => capturedFlat.push(m) },
+);
+
+assertEq(wired2Flat.runSync(), "row:SELECT 1");
+assertEq(capturedFlat, ["querying"]);
 // <<< example

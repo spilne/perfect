@@ -14,7 +14,7 @@ const program = eff(function* () {
   return c * 2;
 });
 
-assertEq(runSync(program), 60);
+assertEq(program.runSync(), 60);
 // <<< example
 
 // >>> example: gen-trycatch
@@ -28,7 +28,7 @@ const safe = eff(function* () {
   }
 });
 
-assertEq(await run(safe as any), "caught: boom");
+assertEq(await (safe as any).run(), "caught: boom");
 // <<< example
 
 // >>> example: gen-flatten
@@ -42,5 +42,5 @@ const outer = eff(function* () {
   return inner;
 });
 
-assertEq(runSync(outer), 7);
+assertEq(outer.runSync(), 7);
 // <<< example

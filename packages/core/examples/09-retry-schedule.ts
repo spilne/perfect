@@ -17,8 +17,19 @@ const flaky: Eff<string, Throws<string>> = eff(function* () {
   return "ok";
 });
 
-assertEq(await run(flaky.retry({ times: 5, delay: 5 })), "ok");
+assertEq(await flaky.retry({ times: 5, delay: 5 }).run(), "ok");
 assertEq(calls, 3);
+// <<< example
+
+// >>> example: retry-config-flat
+// Same retry, chainable form — sync() + .flatMap, no generator.
+let callsFlat = 0;
+const flakyFlat: Eff<string, Throws<string>> = sync(() => ++callsFlat).flatMap((c) =>
+  c < 3 ? (fail("still failing") as Eff<never, Throws<string>>) : succeed("ok"),
+);
+
+assertEq(await flakyFlat.retry({ times: 5, delay: 5 }).run(), "ok");
+assertEq(callsFlat, 3);
 // <<< example
 
 // >>> example: retry-policy-fluent
@@ -35,7 +46,7 @@ const flaky2: Eff<string, Throws<string>> = eff(function* () {
   return "recovered";
 });
 
-assertEq(await run(flaky2.retry(policy)), "recovered");
+assertEq(await flaky2.retry(policy).run(), "recovered");
 assertEq(calls, 3);
 // <<< example
 
@@ -45,10 +56,9 @@ const probablyABug = sync(() => {
   throw new Error("this is a defect, not a typed failure");
 }) as any;
 
-const failed = await run(
-  probablyABug
-    .retry(RetryPolicy.recurs(3))
-    .catchAllCause((c: any) => succeed(`gave up: cause=${c._tag}`)),
-);
+const failed = await probablyABug
+  .retry(RetryPolicy.recurs(3))
+  .catchAllCause((c: any) => succeed(`gave up: cause=${c._tag}`))
+  .run();
 assertEq(failed, "gave up: cause=Die"); // no retries — defects don't retry
 // <<< example

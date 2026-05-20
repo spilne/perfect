@@ -30,44 +30,38 @@ assertEq(await fiber, 1000); // 1000ms elapsed in virtual time, ~0ms real
 // >>> example: test-random
 // TestRandom — seeded for reproducibility.
 const seeded = new TestRandom(42);
-const guess = await run(
-  provide(
-    eff(function* () {
-      const r = yield* Random.get;
-      return yield* r.nextInt(100);
-    }),
-    Random,
-    seeded,
-  ),
-);
+const guess = await provide(
+  eff(function* () {
+    const r = yield* Random.get;
+    return yield* r.nextInt(100);
+  }),
+  Random,
+  seeded,
+).run();
 // Deterministic output for seed=42 — re-running gives the same number.
-const second = await run(
-  provide(
-    eff(function* () {
-      const r = yield* Random.get;
-      return yield* r.nextInt(100);
-    }),
-    Random,
-    new TestRandom(42),
-  ),
-);
+const second = await provide(
+  eff(function* () {
+    const r = yield* Random.get;
+    return yield* r.nextInt(100);
+  }),
+  Random,
+  new TestRandom(42),
+).run();
 assertEq(guess, second);
 // <<< example
 
 // >>> example: test-console
 // TestConsole captures log output instead of writing to stdout.
 const captured = new TestConsole();
-await run(
-  provide(
-    eff(function* () {
-      const c = yield* Console.get;
-      yield* c.log("hello");
-      yield* c.log("world");
-      return undefined;
-    }),
-    Console,
-    captured,
-  ),
-);
+await provide(
+  eff(function* () {
+    const c = yield* Console.get;
+    yield* c.log("hello");
+    yield* c.log("world");
+    return undefined;
+  }),
+  Console,
+  captured,
+).run();
 assertEq(captured.logs(), ["hello", "world"]);
 // <<< example
