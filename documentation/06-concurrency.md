@@ -8,13 +8,15 @@ is interrupted, children are interrupted too.
 
 <!-- @embed packages/core/examples/07-concurrency.ts#fork-join -->
 ```ts
+import { succeed, sleep, join } from "@perfect/core";
+
 // .fork() spawns a fiber. join() awaits its result.
 const forkExample = sleep(10)
   .flatMap(() => succeed(42))
   .fork()
   .flatMap((fiber) => join(fiber));
 
-assertEq(await run(forkExample), 42);
+console.log(await forkExample.run()); // → 42
 ```
 <!-- @end -->
 
@@ -29,11 +31,13 @@ interrupted:
 
 <!-- @embed packages/core/examples/07-concurrency.ts#race-method -->
 ```ts
+import { succeed, sleep } from "@perfect/core";
+
 // .race(other) — fluent two-way race. First to succeed wins.
 const fast = sleep(10).flatMap(() => succeed("fast"));
 const slow = sleep(50).flatMap(() => succeed("slow"));
 
-assertEq(await run(fast.race(slow)), "fast");
+console.log(await fast.race(slow).run()); // → "fast"
 ```
 <!-- @end -->
 
@@ -41,15 +45,15 @@ For 3+ effects, use the variadic form:
 
 <!-- @embed packages/core/examples/07-concurrency.ts#race-variadic -->
 ```ts
+import { succeed, sleep, race } from "@perfect/core";
+
 // race([...]) — variadic form for 3+ effects.
-const winner = await run(
-  race([
-    sleep(30).flatMap(() => succeed("a")),
-    sleep(10).flatMap(() => succeed("b")),
-    sleep(20).flatMap(() => succeed("c")),
-  ]),
-);
-assertEq(winner, "b");
+const winner = await race([
+  sleep(30).flatMap(() => succeed("a")),
+  sleep(10).flatMap(() => succeed("b")),
+  sleep(20).flatMap(() => succeed("c")),
+]).run();
+console.log(winner); // → "b"
 ```
 <!-- @end -->
 
@@ -64,16 +68,16 @@ assertEq(winner, "b");
 
 <!-- @embed packages/core/examples/07-concurrency.ts#all-parallel -->
 ```ts
-// all() runs effects in parallel and collects their results.
-const results = await run(
-  all([
-    sleep(10).flatMap(() => succeed("a")),
-    sleep(20).flatMap(() => succeed("b")),
-    sleep(30).flatMap(() => succeed("c")),
-  ]),
-);
+import { succeed, sleep, all } from "@perfect/core";
 
-assertEq(results, ["a", "b", "c"]);
+// all() runs effects in parallel and collects their results.
+const results = await all([
+  sleep(10).flatMap(() => succeed("a")),
+  sleep(20).flatMap(() => succeed("b")),
+  sleep(30).flatMap(() => succeed("c")),
+]).run();
+
+console.log(results); // → ["a", "b", "c"]
 ```
 <!-- @end -->
 
@@ -81,18 +85,18 @@ assertEq(results, ["a", "b", "c"]);
 
 <!-- @embed packages/core/examples/07-concurrency.ts#all-object -->
 ```ts
-// all() also accepts an object — destructure named results.
-const { user, posts, friends } = await run(
-  all({
-    user: sleep(10).flatMap(() => succeed({ id: 7, name: "alice" })),
-    posts: sleep(20).flatMap(() => succeed([{ id: 1 }, { id: 2 }])),
-    friends: sleep(15).flatMap(() => succeed(["bob", "carol"])),
-  }),
-);
+import { succeed, sleep, all } from "@perfect/core";
 
-assertEq(user, { id: 7, name: "alice" });
-assertEq(posts, [{ id: 1 }, { id: 2 }]);
-assertEq(friends, ["bob", "carol"]);
+// all() also accepts an object — destructure named results.
+const { user, posts, friends } = await all({
+  user: sleep(10).flatMap(() => succeed({ id: 7, name: "alice" })),
+  posts: sleep(20).flatMap(() => succeed([{ id: 1 }, { id: 2 }])),
+  friends: sleep(15).flatMap(() => succeed(["bob", "carol"])),
+}).run();
+
+console.log(user); // → { id: 7, name: "alice" }
+console.log(posts); // → [{ id: 1 }, { id: 2 }]
+console.log(friends); // → ["bob", "carol"]
 ```
 <!-- @end -->
 

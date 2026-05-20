@@ -10,6 +10,8 @@ the sleep. Run with `provide(eff, Clock, testClock)`.
 
 <!-- @embed packages/core/examples/12-testing.ts#test-clock -->
 ```ts
+import { eff, sleep, provide, run, Clock, TestClock } from "@perfect/core";
+
 // TestClock gives virtual time — `sleep` doesn't wait, you advance manually.
 const clock = new TestClock();
 const program = eff(function* () {
@@ -21,7 +23,8 @@ const program = eff(function* () {
 const fiber = run(provide(program, Clock, clock));
 await tick(); // let the fiber register the sleep
 clock.advance(1000); // fire the sleep
-assertEq(await fiber, 1000); // 1000ms elapsed in virtual time, ~0ms real
+// 1000ms elapsed in virtual time, ~0ms real
+console.log(await fiber); // → 1000
 ```
 <!-- @end -->
 
@@ -44,30 +47,28 @@ Seeded PRNG for reproducibility:
 
 <!-- @embed packages/core/examples/12-testing.ts#test-random -->
 ```ts
+import { eff, provide, Random, TestRandom } from "@perfect/core";
+
 // TestRandom — seeded for reproducibility.
 const seeded = new TestRandom(42);
-const guess = await run(
-  provide(
-    eff(function* () {
-      const r = yield* Random.get;
-      return yield* r.nextInt(100);
-    }),
-    Random,
-    seeded,
-  ),
-);
+const guess = await provide(
+  eff(function* () {
+    const r = yield* Random.get;
+    return yield* r.nextInt(100);
+  }),
+  Random,
+  seeded,
+).run();
 // Deterministic output for seed=42 — re-running gives the same number.
-const second = await run(
-  provide(
-    eff(function* () {
-      const r = yield* Random.get;
-      return yield* r.nextInt(100);
-    }),
-    Random,
-    new TestRandom(42),
-  ),
-);
-assertEq(guess, second);
+const second = await provide(
+  eff(function* () {
+    const r = yield* Random.get;
+    return yield* r.nextInt(100);
+  }),
+  Random,
+  new TestRandom(42),
+).run();
+console.log(guess); // → second
 ```
 <!-- @end -->
 
@@ -80,21 +81,21 @@ Captures `log` / `warn` / `error` calls instead of writing to stdout:
 
 <!-- @embed packages/core/examples/12-testing.ts#test-console -->
 ```ts
+import { eff, provide, Console, TestConsole } from "@perfect/core";
+
 // TestConsole captures log output instead of writing to stdout.
 const captured = new TestConsole();
-await run(
-  provide(
-    eff(function* () {
-      const c = yield* Console.get;
-      yield* c.log("hello");
-      yield* c.log("world");
-      return undefined;
-    }),
-    Console,
-    captured,
-  ),
-);
-assertEq(captured.logs(), ["hello", "world"]);
+await provide(
+  eff(function* () {
+    const c = yield* Console.get;
+    yield* c.log("hello");
+    yield* c.log("world");
+    return undefined;
+  }),
+  Console,
+  captured,
+).run();
+console.log(captured.logs()); // → ["hello", "world"]
 ```
 <!-- @end -->
 

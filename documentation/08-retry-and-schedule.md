@@ -6,8 +6,13 @@ Retry transient failures with controlled backoff and jitter. Use the fluent
 
 ## Inline config
 
+:::: syntax-tabs
+
+::: syntax generator
 <!-- @embed packages/core/examples/09-retry-schedule.ts#retry-config -->
 ```ts
+import { eff, fail, type Eff, type Throws } from "@perfect/core";
+
 // Inline config form — quickest setup. Fluent .retry() method.
 let calls = 0;
 const flaky: Eff<string, Throws<string>> = eff(function* () {
@@ -16,10 +21,31 @@ const flaky: Eff<string, Throws<string>> = eff(function* () {
   return "ok";
 });
 
-assertEq(await run(flaky.retry({ times: 5, delay: 5 })), "ok");
-assertEq(calls, 3);
+console.log(await flaky.retry({ times: 5, delay: 5 }).run()); // → "ok"
+console.log(calls); // → 3
 ```
 <!-- @end -->
+
+:::
+
+::: syntax chainable
+<!-- @embed packages/core/examples/09-retry-schedule.ts#retry-config-flat -->
+```ts
+import { succeed, fail, sync, type Eff, type Throws } from "@perfect/core";
+
+// Same retry, chainable form — sync() + .flatMap, no generator.
+let callsFlat = 0;
+const flakyFlat: Eff<string, Throws<string>> = sync(() => ++callsFlat).flatMap((c) =>
+  c < 3 ? (fail("still failing") as Eff<never, Throws<string>>) : succeed("ok"),
+);
+
+console.log(await flakyFlat.retry({ times: 5, delay: 5 }).run()); // → "ok"
+console.log(callsFlat); // → 3
+```
+<!-- @end -->
+:::
+
+::::
 
 The config form takes:
 
@@ -37,6 +63,8 @@ For anything beyond trivial:
 
 <!-- @embed packages/core/examples/09-retry-schedule.ts#retry-policy-fluent -->
 ```ts
+import { eff, fail, RetryPolicy, type Eff, type Throws } from "@perfect/core";
+
 // Fluent builder — composable, expressive.
 calls = 0;
 const policy = RetryPolicy.exponential({ initial: 5, factor: 2 })
@@ -50,8 +78,8 @@ const flaky2: Eff<string, Throws<string>> = eff(function* () {
   return "recovered";
 });
 
-assertEq(await run(flaky2.retry(policy)), "recovered");
-assertEq(calls, 3);
+console.log(await flaky2.retry(policy).run()); // → "recovered"
+console.log(calls); // → 3
 ```
 <!-- @end -->
 
@@ -83,17 +111,19 @@ aren't, so a real bug doesn't loop forever.
 
 <!-- @embed packages/core/examples/09-retry-schedule.ts#retry-on-cause-only -->
 ```ts
+import { succeed, sync, RetryPolicy } from "@perfect/core";
+
 // Don't retry defects (real bugs) or interrupts — only typed failures.
 const probablyABug = sync(() => {
   throw new Error("this is a defect, not a typed failure");
 }) as any;
 
-const failed = await run(
-  probablyABug
-    .retry(RetryPolicy.recurs(3))
-    .catchAllCause((c: any) => succeed(`gave up: cause=${c._tag}`)),
-);
-assertEq(failed, "gave up: cause=Die"); // no retries — defects don't retry
+const failed = await probablyABug
+  .retry(RetryPolicy.recurs(3))
+  .catchAllCause((c: any) => succeed(`gave up: cause=${c._tag}`))
+  .run();
+// no retries — defects don't retry
+console.log(failed); // → "gave up: cause=Die"
 ```
 <!-- @end -->
 

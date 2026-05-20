@@ -19,6 +19,9 @@ bun add @perfect/http-otel @opentelemetry/api
 
 <!-- @embed packages/http-otel/examples/01-tracing.ts#tracing-success -->
 ```ts
+import { SpanKind, SpanStatusCode } from "@opentelemetry/api";
+import { DefaultHttpClient } from "@perfect/http";
+
 // tracingMiddleware starts a CLIENT span on every request, fills semantic
 // HTTP attributes (http.request.method, url.full, http.response.status_code,
 // http.response.duration_ms), and ends the span on result.
@@ -31,13 +34,13 @@ const client = new DefaultHttpClient({
 
 await run(client.get("/users/1", UserSchema, { tag: "user.lookup" }));
 
-assertEq(spans.length, 1);
-assertEq(spans[0]!.name, "GET https://api.example.com/users/1");
-assertEq(spans[0]!.kind, SpanKind.CLIENT);
-assertEq(spans[0]!.attributes["http.request.method"], "GET");
-assertEq(spans[0]!.attributes["http.route"], "user.lookup");
-assertEq(spans[0]!.status.code, SpanStatusCode.OK);
-assertEq(spans[0]!.ended, true);
+console.log(spans.length); // → 1
+console.log(spans[0]!.name); // → "GET https://api.example.com/users/1"
+console.log(spans[0]!.kind); // → SpanKind.CLIENT
+console.log(spans[0]!.attributes["http.request.method"]); // → "GET"
+console.log(spans[0]!.attributes["http.route"]); // → "user.lookup"
+console.log(spans[0]!.status.code); // → SpanStatusCode.OK
+console.log(spans[0]!.ended); // → true
 ```
 <!-- @end -->
 
@@ -48,6 +51,11 @@ The request `tag` (when provided to `client.get`/`post`/etc.) becomes
 
 <!-- @embed packages/http-otel/examples/01-tracing.ts#tracing-error -->
 ```ts
+import { SpanStatusCode } from "@opentelemetry/api";
+import { run } from "@perfect/core";
+import { DefaultHttpClient } from "@perfect/http";
+import { tracingMiddleware } from "@perfect/core";
+
 // On error, the span status flips to ERROR, http.response.status_code is
 // recorded, and error.type carries the typed error tag for filtering.
 const { tracer: t2, spans: errSpans } = inMemTracer();
@@ -58,10 +66,10 @@ const failing = new DefaultHttpClient({
 
 let caught: any;
 try { await run(failing.get("/u", UserSchema)); } catch (e) { caught = e; }
-assertEq(caught._tag, "HttpStatusError");
-assertEq(errSpans[0]!.status.code, SpanStatusCode.ERROR);
-assertEq(errSpans[0]!.attributes["http.response.status_code"], 503);
-assertEq(errSpans[0]!.attributes["error.type"], "HttpStatusError");
+console.log(caught._tag); // → "HttpStatusError"
+console.log(errSpans[0]!.status.code); // → SpanStatusCode.ERROR
+console.log(errSpans[0]!.attributes["http.response.status_code"]); // → 503
+console.log(errSpans[0]!.attributes["error.type"]); // → "HttpStatusError"
 ```
 <!-- @end -->
 
@@ -99,6 +107,8 @@ spans. Header redaction is pluggable.
 
 <!-- @embed packages/http-otel/examples/01-tracing.ts#tracing-redaction -->
 ```ts
+import { makeRedaction, redactHeaders } from "@perfect/core";
+
 // URL queries are stripped from url.full by default to keep span attributes
 // PII-free. Pass includeQuery: true to keep them. Header redaction is
 // pluggable via makeRedaction({ extra, override }) — defaults cover
@@ -108,9 +118,9 @@ const out = redactHeaders(
   { Authorization: "Bearer xyz", "X-Secret": "shh", "Content-Type": "application/json" },
   r,
 );
-assertEq(out.Authorization, "<redacted>");
-assertEq(out["X-Secret"], "<redacted>");
-assertEq(out["Content-Type"], "application/json");
+console.log(out.Authorization); // → "<redacted>"
+console.log(out["X-Secret"]); // → "<redacted>"
+console.log(out["Content-Type"]); // → "application/json"
 ```
 <!-- @end -->
 

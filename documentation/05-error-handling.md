@@ -15,11 +15,13 @@ There's also `Cause.Interrupt` for cooperative cancellation.
 
 <!-- @embed packages/core/examples/06-error-handling.ts#catch-typed -->
 ```ts
+import { succeed, fail, type Eff, type Throws } from "@perfect/core";
+
 // .catch handles any typed failure, removing Throws<E> from the type.
 const program: Eff<string, never> = (fail("nope") as Eff<never, Throws<string>>)
   .catch((e) => succeed(`recovered: ${e}`));
 
-assertEq(runSync(program), "recovered: nope");
+console.log(program.runSync()); // → "recovered: nope"
 ```
 <!-- @end -->
 
@@ -29,6 +31,8 @@ When your error is a discriminated union, handle one variant at a time:
 
 <!-- @embed packages/core/examples/06-error-handling.ts#catch-tag -->
 ```ts
+import { succeed, fail, type Eff, type Throws } from "@perfect/core";
+
 // .catchTag — handle one specific tagged error variant.
 type Err = { _tag: "NotFound"; id: number } | { _tag: "Forbidden" };
 
@@ -39,7 +43,7 @@ const safe = lookup(99)
   .catchTag("NotFound", (e) => succeed(`(missing ${e.id})`))
   .catchTag("Forbidden", () => succeed("(no access)"));
 
-assertEq(runSync(safe), "(missing 99)");
+console.log(safe.runSync()); // → "(missing 99)"
 ```
 <!-- @end -->
 
@@ -52,12 +56,14 @@ If you need to see defects and interrupts too, use `.catchAllCause`:
 
 <!-- @embed packages/core/examples/06-error-handling.ts#catch-cause -->
 ```ts
+import { succeed, fail, type Eff, type Throws } from "@perfect/core";
+
 // .catchAllCause — see the full Cause (Fail | Die | Interrupt | composites).
 const wild = (fail("boom") as Eff<never, Throws<string>>).catchAllCause((cause) =>
   succeed(`cause: ${cause._tag}`),
 );
 
-assertEq(runSync(wild), "cause: Fail");
+console.log(wild.runSync()); // → "cause: Fail"
 ```
 <!-- @end -->
 
@@ -77,14 +83,16 @@ assertEq(runSync(wild), "cause: Fail");
 
 <!-- @embed packages/core/examples/06-error-handling.ts#tap-error -->
 ```ts
+import { succeed, fail, sync, type Eff, type Throws } from "@perfect/core";
+
 // .tapError — observe a typed failure without handling it (re-fails).
 let observedError: string | null = null;
 const observed = (fail("bad") as Eff<never, Throws<string>>)
   .tapError((e) => sync(() => { observedError = e; }) as any)
   .catch(() => succeed("ok"));
 
-assertEq(runSync(observed), "ok");
-assertEq(observedError, "bad");
+console.log(observed.runSync()); // → "ok"
+console.log(observedError); // → "bad"
 ```
 <!-- @end -->
 
@@ -92,9 +100,11 @@ assertEq(observedError, "bad");
 
 <!-- @embed packages/core/examples/06-error-handling.ts#orelse -->
 ```ts
+import { succeed, fail, type Eff, type Throws } from "@perfect/core";
+
 // .orElse — if this effect fails, run another.
 const fallback = (fail("first") as Eff<never, Throws<string>>).orElse(() => succeed("second"));
-assertEq(await run(fallback), "second");
+console.log(await fallback.run()); // → "second"
 ```
 <!-- @end -->
 

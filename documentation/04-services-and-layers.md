@@ -9,8 +9,13 @@ tag, request the service inside a program. Provide it once at the edge.
 retrieves the implementation from context (and adds `Needs<T>` to the
 effect channel).
 
+:::: syntax-tabs
+
+::: syntax generator
 <!-- @embed packages/core/examples/04-services.ts#service-define -->
 ```ts
+import { eff, succeed, service, provide, type Eff } from "@perfect/core";
+
 // Define a service interface and a tag.
 interface Greeter {
   greet(name: string): Eff<string, never>;
@@ -30,15 +35,43 @@ const wired = provide(
   { greet: (name) => succeed(`hello, ${name}`) },
 );
 
-assertEq(runSync(wired), "hello, world");
+console.log(wired.runSync()); // → "hello, world"
 ```
 <!-- @end -->
+
+:::
+
+::: syntax chainable
+<!-- @embed packages/core/examples/04-services.ts#service-define-flat -->
+```ts
+import { succeed, provide } from "@perfect/core";
+
+// Same program, chainable form: Greeter.get is an effect — flatMap into it.
+const programFlat = Greeter.get.flatMap((g) => g.greet("world"));
+
+const wiredFlat = provide(
+  programFlat,
+  Greeter,
+  { greet: (name) => succeed(`hello, ${name}`) },
+);
+
+console.log(wiredFlat.runSync()); // → "hello, world"
+```
+<!-- @end -->
+:::
+
+::::
 
 Multiple services nest with `provide` — readable enough for one or two,
 ugly for three or more. That's where Layers come in:
 
+:::: syntax-tabs
+
+::: syntax generator
 <!-- @embed packages/core/examples/04-services.ts#service-multiple -->
 ```ts
+import { eff, succeed, service, provide, type Eff } from "@perfect/core";
+
 // Multiple services nest awkwardly with provide() — see Layer for the cure.
 interface Db { query(sql: string): Eff<string, never> }
 interface Logger { log(msg: string): void }
@@ -60,10 +93,40 @@ const wired2 = provide(
   { log: (m) => captured.push(m) },
 );
 
-assertEq(runSync(wired2), "row:SELECT 1");
-assertEq(captured, ["querying"]);
+console.log(wired2.runSync()); // → "row:SELECT 1"
+console.log(captured); // → ["querying"]
 ```
 <!-- @end -->
+
+:::
+
+::: syntax chainable
+<!-- @embed packages/core/examples/04-services.ts#service-multiple-flat -->
+```ts
+import { succeed, provide } from "@perfect/core";
+
+// Multiple services in chainable form — nested .flatMap for each .get.
+const capturedFlat: string[] = [];
+const appFlat = Db.get.flatMap((db) =>
+  Logger.get.flatMap((log) => {
+    log.log("querying");
+    return db.query("SELECT 1");
+  }),
+);
+
+const wired2Flat = provide(
+  provide(appFlat, Db, { query: (s) => succeed(`row:${s}`) }),
+  Logger,
+  { log: (m) => capturedFlat.push(m) },
+);
+
+console.log(wired2Flat.runSync()); // → "row:SELECT 1"
+console.log(capturedFlat); // → ["querying"]
+```
+<!-- @end -->
+:::
+
+::::
 
 ## Layers
 
@@ -72,6 +135,8 @@ type, no new constructors — reuse `succeed` / `eff` / `scoped`.
 
 <!-- @embed packages/core/examples/05-layers.ts#layer-build -->
 ```ts
+import { succeed } from "@perfect/core";
+
 // Build layers using existing constructors — succeed, eff, scoped.
 const DbLive = succeed({ Db: { query: (s: string) => succeed(`db:${s}`) } as Db });
 
@@ -91,11 +156,13 @@ Three equivalent chain styles. Pick whichever reads best at the call site:
 
 <!-- @embed packages/core/examples/05-layers.ts#layer-chain -->
 ```ts
+import { Layer } from "@perfect/core";
+
 // Three equivalent chain styles:
 const a = program.with(Layer.merge(DbLive, CacheLive, LoggerLive));
 const b = program.with(DbLive.and(CacheLive).and(LoggerLive));
 const c = program.with(DbLive).with(CacheLive).with(LoggerLive);
-assertEq([runSync(a), runSync(b), runSync(c)], ["db:SELECT 1", "db:SELECT 1", "db:SELECT 1"]);
+console.log([a.runSync(), b.runSync(), c.runSync()]); // → ["db:SELECT 1", "db:SELECT 1", "db:SELECT 1"]
 ```
 <!-- @end -->
 
@@ -104,8 +171,13 @@ assertEq([runSync(a), runSync(b), runSync(c)], ["db:SELECT 1", "db:SELECT 1", "d
 `.with(layer)` wraps the program in a `scoped` frame, runs the layer, installs
 the services, runs the program. Releases fire in LIFO order on exit.
 
+:::: syntax-tabs
+
+::: syntax generator
 <!-- @embed packages/core/examples/05-layers.ts#layer-apply -->
 ```ts
+import { eff, Layer } from "@perfect/core";
+
 // Compose horizontally with Layer.merge, apply with .with()
 const AppLive = Layer.merge(DbLive, CacheLive, LoggerLive);
 
@@ -116,9 +188,29 @@ const program = eff(function* () {
   return yield* db.query("SELECT 1");
 });
 
-assertEq(runSync(program.with(AppLive)), "db:SELECT 1");
+console.log(program.with(AppLive).runSync()); // → "db:SELECT 1"
 ```
 <!-- @end -->
+
+:::
+
+::: syntax chainable
+<!-- @embed packages/core/examples/05-layers.ts#layer-apply-flat -->
+```ts
+// Same program, chainable form — .flatMap into each service, .with() the layer.
+const programFlat = Db.get.flatMap((db) =>
+  Logger.get.flatMap((log) => {
+    log.log("running");
+    return db.query("SELECT 1");
+  }),
+);
+
+console.log(programFlat.with(AppLive).runSync()); // → "db:SELECT 1"
+```
+<!-- @end -->
+:::
+
+::::
 
 ### Resources
 
@@ -127,6 +219,8 @@ success, failure, or interrupt:
 
 <!-- @embed packages/core/examples/05-layers.ts#layer-scoped -->
 ```ts
+import { eff, sync, acquireRelease, Layer } from "@perfect/core";
+
 // Scoped layer: acquireRelease finalizers fire when the program exits.
 const events: string[] = [];
 const ScopedLogger = eff(function* () {
@@ -140,8 +234,8 @@ const ScopedLogger = eff(function* () {
   return { Logger: logger };
 });
 
-await run(program.with(Layer.merge(DbLive, CacheLive, ScopedLogger)));
-assertEq(events, ["acquire", "log:running", "release"]);
+await program.with(Layer.merge(DbLive, CacheLive, ScopedLogger)).run();
+console.log(events); // → ["acquire", "log:running", "release"]
 ```
 <!-- @end -->
 
@@ -151,6 +245,8 @@ Pass a different layer:
 
 <!-- @embed packages/core/examples/05-layers.ts#layer-test-swap -->
 ```ts
+import { succeed } from "@perfect/core";
+
 // Test-time swap is a one-liner — supply a different layer.
 const FakeAll = succeed({
   Db: { query: () => succeed("FAKE") } as Db,
@@ -158,7 +254,7 @@ const FakeAll = succeed({
   Logger: { log: () => {} } as Logger,
 });
 
-assertEq(runSync(program.with(FakeAll)), "FAKE");
+console.log(program.with(FakeAll).runSync()); // → "FAKE"
 ```
 <!-- @end -->
 
