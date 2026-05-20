@@ -40,9 +40,7 @@ const streamOf = (chunks: string[]): Response => {
 // httpStreamLines = bytes → utf8Decode → lines. Every emitted item is one
 // complete line (without the terminator).
 const linesT = new StubTransport(() => streamOf(["alpha\nbe", "ta\ngamma\n"]));
-const lines = await run(
-  httpStreamLines({ url: "/log", transport: linesT }).toArray(),
-);
+const lines = await httpStreamLines({ url: "/log", transport: linesT }).toArray().run();
 assertEq(lines, ["alpha", "beta", "gamma"]);
 // <<< example
 
@@ -56,9 +54,7 @@ const sseT = new StubTransport(
       "event: tick\ndata: 2\nid: m-2\n\n",
     ]),
 );
-const events = await run(
-  httpStreamSSE({ url: "/events", transport: sseT }).toArray(),
-);
+const events = await httpStreamSSE({ url: "/events", transport: sseT }).toArray().run();
 assertEq(events.length, 2);
 assertEq(events[0]!.event, "tick");
 assertEq(events[0]!.data, "1");
