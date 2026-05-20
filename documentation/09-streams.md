@@ -48,15 +48,15 @@ Lazy, fused, effect-typed sequences. Adjacent pure operators (`map` /
 
 <!-- @embed packages/core/examples/10-streams.ts#stream-collect -->
 ```ts
-// Build a stream from an array, transform, collect.
-const collected = await run(
-  Stream.fromArray([1, 2, 3, 4, 5])
-    .map((x) => x * 10)
-    .filter((x) => x > 20)
-    .runCollect(),
-);
+import { Stream } from "@perfect/core";
 
-assertEq(collected, [30, 40, 50]);
+// Build a stream from an array, transform, collect.
+const collected = await Stream.fromArray([1, 2, 3, 4, 5])
+  .map((x) => x * 10)
+  .filter((x) => x > 20)
+  .runCollect().run();
+
+console.log(collected); // → [30, 40, 50]
 ```
 <!-- @end -->
 
@@ -64,15 +64,15 @@ assertEq(collected, [30, 40, 50]);
 
 <!-- @embed packages/core/examples/10-streams.ts#stream-foreach -->
 ```ts
+import { Stream, succeed } from "@perfect/core";
+
 // runForEach — apply an effect per element, return when stream exhausts.
 const seen: number[] = [];
-await run(
-  Stream.range(1, 4).runForEach((n) => {
-    seen.push(n);
-    return succeed(undefined);
-  }),
-);
-assertEq(seen, [1, 2, 3]);
+await Stream.range(1, 4).runForEach((n) => {
+  seen.push(n);
+  return succeed(undefined);
+}).run();
+console.log(seen); // → [1, 2, 3]
 ```
 <!-- @end -->
 
@@ -80,9 +80,11 @@ assertEq(seen, [1, 2, 3]);
 
 <!-- @embed packages/core/examples/10-streams.ts#stream-mapchunks -->
 ```ts
+import { Stream } from "@perfect/core";
+
 // take(n) — short-circuit after n elements (lazy: never produces beyond).
-const first3 = await run(Stream.iterate(0, (n) => n + 1).take(3).runCollect());
-assertEq(first3, [0, 1, 2]);
+const first3 = await Stream.iterate(0, (n) => n + 1).take(3).runCollect().run();
+console.log(first3); // → [0, 1, 2]
 ```
 <!-- @end -->
 
@@ -90,6 +92,8 @@ assertEq(first3, [0, 1, 2]);
 
 <!-- @embed packages/core/examples/11-stream-pipeline.ts#pipeline-etl -->
 ```ts
+import { Stream } from "@perfect/core";
+
 // A small ETL: parse, filter, enrich, accumulate.
 type Row = { city: string; population: number };
 const rawCsv = [
@@ -101,21 +105,19 @@ const rawCsv = [
 ];
 
 const kept: string[] = [];
-const top3RunningTotals = await run(
-  Stream.fromArray(rawCsv)
-    .map((line) => {
-      const [city, n] = line.split(",");
-      return { city, population: Number(n) } as Row;
-    })
-    .filter((r) => r.population >= 25_000_000) // pure filter
-    .tap((r) => { kept.push(r.city); }) // side effect, fused
-    .take(3) // short-circuit
-    .scan(0, (acc, r) => acc + r.population) // running total (includes seed)
-    .runCollect(),
-);
+const top3RunningTotals = await Stream.fromArray(rawCsv)
+  .map((line) => {
+    const [city, n] = line.split(",");
+    return { city, population: Number(n) } as Row;
+  })
+  .filter((r) => r.population >= 25_000_000) // pure filter
+  .tap((r) => { kept.push(r.city); }) // side effect, fused
+  .take(3) // short-circuit
+  .scan(0, (acc, r) => acc + r.population) // running total (includes seed)
+  .runCollect().run();
 
-assertEq(kept, ["tokyo", "delhi", "shanghai"]);
-assertEq(top3RunningTotals, [0, 37_000_000, 69_000_000, 97_000_000]);
+console.log(kept); // → ["tokyo", "delhi", "shanghai"]
+console.log(top3RunningTotals); // → [0, 37_000_000, 69_000_000, 97_000_000]
 ```
 <!-- @end -->
 

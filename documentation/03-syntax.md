@@ -16,12 +16,14 @@ The lowest-level surface — chained method calls.
 
 <!-- @embed packages/core/examples/01-hello.ts#hello-flatmap -->
 ```ts
+import { succeed } from "@perfect/core";
+
 // The composed-flatMap form — fastest, but reads bottom-up for long chains.
 const composed = succeed(21)
   .flatMap((a) => succeed(a * 2))
   .map((b) => b + 0);
 
-assertEq(runSync(composed), 42);
+console.log(composed.runSync()); // → 42
 ```
 <!-- @end -->
 
@@ -33,6 +35,8 @@ The recommended default. Uses `yield*` to extract values from effects.
 
 <!-- @embed packages/core/examples/03-generator-syntax.ts#gen-basic -->
 ```ts
+import { eff, succeed, sync } from "@perfect/core";
+
 // Use yield* to extract values from effects. Looks like async/await.
 const program = eff(function* () {
   const a = yield* succeed(10);
@@ -41,7 +45,7 @@ const program = eff(function* () {
   return c * 2;
 });
 
-assertEq(runSync(program), 60);
+console.log(program.runSync()); // → 60
 ```
 <!-- @end -->
 
@@ -49,6 +53,8 @@ assertEq(runSync(program), 60);
 
 <!-- @embed packages/core/examples/03-generator-syntax.ts#gen-trycatch -->
 ```ts
+import { eff, fail, type Eff, type Throws } from "@perfect/core";
+
 // try/catch inside the generator catches typed failures (and defects).
 const safe = eff(function* () {
   try {
@@ -59,7 +65,7 @@ const safe = eff(function* () {
   }
 });
 
-assertEq(await run(safe as any), "caught: boom");
+console.log(await (safe as any).run()); // → "caught: boom"
 ```
 <!-- @end -->
 
