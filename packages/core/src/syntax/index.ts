@@ -6,5 +6,6 @@ import "./parallel";
 import "./fiber";
 import "./thenable";
 import "./generator";
+import "./runners";
 
 export { eff } from "./generator";
