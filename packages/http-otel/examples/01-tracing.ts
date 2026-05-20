@@ -114,7 +114,7 @@ const client = new DefaultHttpClient({
   middleware: [tracingMiddleware({ tracer })],
 });
 
-await run(client.get("/users/1", UserSchema, { tag: "user.lookup" }));
+await client.get("/users/1", UserSchema, { tag: "user.lookup" }).run();
 
 assertEq(spans.length, 1);
 assertEq(spans[0]!.name, "GET https://api.example.com/users/1");
@@ -135,7 +135,7 @@ const failing = new DefaultHttpClient({
 });
 
 let caught: any;
-try { await run(failing.get("/u", UserSchema)); } catch (e) { caught = e; }
+try { await failing.get("/u", UserSchema).run(); } catch (e) { caught = e; }
 assertEq(caught._tag, "HttpStatusError");
 assertEq(errSpans[0]!.status.code, SpanStatusCode.ERROR);
 assertEq(errSpans[0]!.attributes["http.response.status_code"], 503);

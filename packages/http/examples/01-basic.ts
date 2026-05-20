@@ -48,37 +48,31 @@ const UserSchema: ResponseParser<User> = {
 // >>> example: tier-1-raw
 // Tier 1 — raw Response. No status check, no parsing. Useful when you want
 // the headers / streaming body before deciding what to do with it.
-const tier1 = await run(
-  httpFetch({
-    url: "https://api/users/1",
-    transport: new StubTransport(() => json({ id: 1, name: "alice" })),
-  }),
-);
+const tier1 = await httpFetch({
+  url: "https://api/users/1",
+  transport: new StubTransport(() => json({ id: 1, name: "alice" })),
+}).run();
 assertEq(tier1.status, 200);
 // <<< example
 
 // >>> example: tier-2-status-check
 // Tier 2 — adds a status check. Non-2xx fails with HttpStatusError carrying
 // the response body for diagnostics.
-const tier2 = await run(
-  httpFetchOk({
-    url: "https://api/users/1",
-    transport: new StubTransport(() => json({ id: 1, name: "alice" })),
-  }),
-);
+const tier2 = await httpFetchOk({
+  url: "https://api/users/1",
+  transport: new StubTransport(() => json({ id: 1, name: "alice" })),
+}).run();
 assertEq(tier2.status, 200);
 // <<< example
 
 // >>> example: tier-3-validated
 // Tier 3 — full pipeline: fetch → status check → JSON → schema. Returns the
 // typed value directly; any step failing surfaces as a typed HttpClientError.
-const user = await run(
-  httpRequest({
-    url: "https://api/users/1",
-    schema: UserSchema,
-    transport: new StubTransport(() => json({ id: 1, name: "alice" })),
-  }),
-);
+const user = await httpRequest({
+  url: "https://api/users/1",
+  schema: UserSchema,
+  transport: new StubTransport(() => json({ id: 1, name: "alice" })),
+}).run();
 assertEq(user, { id: 1, name: "alice" });
 // <<< example
 
@@ -87,12 +81,10 @@ assertEq(user, { id: 1, name: "alice" });
 // 5xx/429 with .isRetryable.
 let caught: HttpStatusError | undefined;
 try {
-  await run(
-    httpFetchOk({
-      url: "https://api/users/1",
-      transport: new StubTransport(() => new Response("nope", { status: 404 })),
-    }) as any,
-  );
+  await (httpFetchOk({
+  url: "https://api/users/1",
+  transport: new StubTransport(() => new Response("nope", { status: 404 })),
+}) as any).run();
 } catch (e) {
   caught = e as HttpStatusError;
 }

@@ -19,17 +19,14 @@ tiers compose: pick the level of automation you need.
 
 <!-- @embed packages/http/examples/01-basic.ts#tier-1-raw -->
 ```ts
-import { run } from "@perfect/core";
 import { httpFetch } from "@perfect/core";
 
 // Tier 1 — raw Response. No status check, no parsing. Useful when you want
 // the headers / streaming body before deciding what to do with it.
-const tier1 = await run(
-  httpFetch({
-    url: "https://api/users/1",
-    transport: new StubTransport(() => json({ id: 1, name: "alice" })),
-  }),
-);
+const tier1 = await httpFetch({
+  url: "https://api/users/1",
+  transport: new StubTransport(() => json({ id: 1, name: "alice" })),
+}).run();
 console.log(tier1.status); // → 200
 ```
 <!-- @end -->
@@ -38,17 +35,14 @@ console.log(tier1.status); // → 200
 
 <!-- @embed packages/http/examples/01-basic.ts#tier-2-status-check -->
 ```ts
-import { run } from "@perfect/core";
 import { httpFetchOk } from "@perfect/core";
 
 // Tier 2 — adds a status check. Non-2xx fails with HttpStatusError carrying
 // the response body for diagnostics.
-const tier2 = await run(
-  httpFetchOk({
-    url: "https://api/users/1",
-    transport: new StubTransport(() => json({ id: 1, name: "alice" })),
-  }),
-);
+const tier2 = await httpFetchOk({
+  url: "https://api/users/1",
+  transport: new StubTransport(() => json({ id: 1, name: "alice" })),
+}).run();
 console.log(tier2.status); // → 200
 ```
 <!-- @end -->
@@ -57,18 +51,15 @@ console.log(tier2.status); // → 200
 
 <!-- @embed packages/http/examples/01-basic.ts#tier-3-validated -->
 ```ts
-import { run } from "@perfect/core";
 import { httpRequest } from "@perfect/core";
 
 // Tier 3 — full pipeline: fetch → status check → JSON → schema. Returns the
 // typed value directly; any step failing surfaces as a typed HttpClientError.
-const user = await run(
-  httpRequest({
-    url: "https://api/users/1",
-    schema: UserSchema,
-    transport: new StubTransport(() => json({ id: 1, name: "alice" })),
-  }),
-);
+const user = await httpRequest({
+  url: "https://api/users/1",
+  schema: UserSchema,
+  transport: new StubTransport(() => json({ id: 1, name: "alice" })),
+}).run();
 console.log(user); // → { id: 1, name: "alice" }
 ```
 <!-- @end -->
@@ -89,19 +80,16 @@ below for concrete adapters.
 
 <!-- @embed packages/http/examples/01-basic.ts#status-error -->
 ```ts
-import { run } from "@perfect/core";
 import { HttpStatusError, httpFetchOk } from "@perfect/core";
 
 // Non-OK responses become HttpStatusError. Discriminate on .status, retry
 // 5xx/429 with .isRetryable.
 let caught: HttpStatusError | undefined;
 try {
-  await run(
-    httpFetchOk({
-      url: "https://api/users/1",
-      transport: new StubTransport(() => new Response("nope", { status: 404 })),
-    }) as any,
-  );
+  await (httpFetchOk({
+  url: "https://api/users/1",
+  transport: new StubTransport(() => new Response("nope", { status: 404 })),
+}) as any).run();
 } catch (e) {
   caught = e as HttpStatusError;
 }
@@ -130,7 +118,7 @@ const client = new DefaultHttpClient({
   transport,
 });
 
-const user = await run(client.get("/users/1", UserSchema));
+const user = await client.get("/users/1", UserSchema).run();
 console.log(user); // → { id: 1, name: "alice" }
 console.log(transport.last!.url); // → "https://api.example.com/users/1"
 console.log(transport.last!.headers!.authorization); // → "Bearer xyz"
@@ -141,12 +129,10 @@ console.log(transport.last!.headers!.authorization); // → "Bearer xyz"
 
 <!-- @embed packages/http/examples/02-client.ts#client-overrides -->
 ```ts
-import { run } from "@perfect/core";
-
 // withOverrides returns a derived client. Headers spread-merge; everything
 // else falls back to the base when the override is undefined.
 const traced = client.withOverrides({ headers: { "x-trace": "t-123" } });
-await run(traced.get("/users/1", UserSchema));
+await traced.get("/users/1", UserSchema).run();
 assertContains(JSON.stringify(transport.last!.headers), "x-trace");
 assertContains(JSON.stringify(transport.last!.headers), "Bearer xyz"); // base header preserved
 ```
@@ -177,7 +163,7 @@ const observed = new DefaultHttpClient({
   transport: new StubTransport(() => json({ id: 2, name: "bob" })),
   middleware: [logging],
 });
-await run(observed.get("/users/2", UserSchema));
+await observed.get("/users/2", UserSchema).run();
 assertContains(calls.join("|"), "→ GET https://api.example.com/users/2");
 assertContains(calls.join("|"), "← GET");
 ```
@@ -193,7 +179,6 @@ status or reacting to thrown defects.
 
 <!-- @embed packages/http/examples/03-retry.ts#with-retry-default -->
 ```ts
-import { run } from "@perfect/core";
 import { DefaultHttpClient, withRetry } from "@perfect/core";
 
 // withRetry retries 5xx, 429, timeouts, and network errors with exponential
@@ -205,9 +190,7 @@ const t = new ScriptedTransport([
 ]);
 const client = new DefaultHttpClient({ transport: t });
 
-const user = await run(
-  withRetry(client.get("/u", UserSchema), { maxRetries: 3, baseDelayMs: 1 }),
-);
+const user = await withRetry(client.get("/u", UserSchema), { maxRetries: 3, baseDelayMs: 1 }).run();
 console.log(user); // → { id: 1, name: "alice" }
 console.log(t.attempts); // → 3
 ```
@@ -217,7 +200,6 @@ console.log(t.attempts); // → 3
 
 <!-- @embed packages/http/examples/03-retry.ts#with-retry-all -->
 ```ts
-import { run } from "@perfect/core";
 import { type ResponseParser, DefaultHttpClient, PipelineResult, withRetryAll } from "@perfect/core";
 
 // withRetryAll exposes the full PipelineResult ADT. Use it to retry on
@@ -238,14 +220,12 @@ const t2 = new ScriptedTransport([
 ]);
 const client2 = new DefaultHttpClient({ transport: t2 });
 
-const job = await run(
-  withRetryAll(client2.get("/job/123", JobSchema), {
-    maxRetries: 5,
-    baseDelayMs: 1,
-    shouldRetry: (r) =>
-      PipelineResult.isSuccess(r) ? r.value.state !== "done" : true,
-  }),
-);
+const job = await withRetryAll(client2.get("/job/123", JobSchema), {
+  maxRetries: 5,
+  baseDelayMs: 1,
+  shouldRetry: (r) =>
+    PipelineResult.isSuccess(r) ? r.value.state !== "done" : true,
+}).run();
 console.log(job); // → { state: "done", result: 42 }
 console.log(t2.attempts); // → 3
 ```
@@ -262,7 +242,6 @@ shape — no narrowing required.
 
 <!-- @embed packages/http/examples/04-error-schema.ts#error-schema-typed -->
 ```ts
-import { run } from "@perfect/core";
 import { type ResponseParser, DefaultHttpClient, HttpStatusError } from "@perfect/core";
 
 // Pass errorSchema and non-2xx JSON bodies are parsed into HttpStatusError<B>.
@@ -293,7 +272,7 @@ const client = new DefaultHttpClient({
 
 let caught: HttpStatusError<ApiError> | undefined;
 try {
-  await run(client.get<User, ApiError>("/u", UserSchema));
+  await client.get<User, ApiError>("/u", UserSchema).run();
 } catch (e) {
   caught = e as HttpStatusError<ApiError>;
 }
@@ -309,7 +288,6 @@ is raised instead — carries the raw text + parse cause + status code.
 
 <!-- @embed packages/http/examples/04-error-schema.ts#error-schema-mismatch -->
 ```ts
-import { run } from "@perfect/core";
 import { DefaultHttpClient, HttpUnknownError } from "@perfect/core";
 
 // When errorSchema is provided but the body doesn't match (bad JSON or
@@ -323,7 +301,7 @@ const broken = new DefaultHttpClient({
 
 let unknown: HttpUnknownError | undefined;
 try {
-  await run(broken.get<User, ApiError>("/u", UserSchema));
+  await broken.get<User, ApiError>("/u", UserSchema).run();
 } catch (e) {
   unknown = e as HttpUnknownError;
 }
@@ -350,22 +328,18 @@ Every other helper is a composition of this base + composable `Pipe`s
 
 <!-- @embed packages/http/examples/06-streaming.ts#stream-lines -->
 ```ts
-import { run } from "@perfect/core";
 import { httpStreamLines } from "@perfect/core";
 
 // httpStreamLines = bytes → utf8Decode → lines. Every emitted item is one
 // complete line (without the terminator).
 const linesT = new StubTransport(() => streamOf(["alpha\nbe", "ta\ngamma\n"]));
-const lines = await run(
-  httpStreamLines({ url: "/log", transport: linesT }).toArray(),
-);
+const lines = await httpStreamLines({ url: "/log", transport: linesT }).toArray().run();
 console.log(lines); // → ["alpha", "beta", "gamma"]
 ```
 <!-- @end -->
 
 <!-- @embed packages/http/examples/06-streaming.ts#stream-sse -->
 ```ts
-import { run } from "@perfect/core";
 import { httpStreamSSE } from "@perfect/core";
 
 // httpStreamSSE = lines → parseSSE. Server-Sent Events are emitted as
@@ -377,9 +351,7 @@ const sseT = new StubTransport(
       "event: tick\ndata: 2\nid: m-2\n\n",
     ]),
 );
-const events = await run(
-  httpStreamSSE({ url: "/events", transport: sseT }).toArray(),
-);
+const events = await httpStreamSSE({ url: "/events", transport: sseT }).toArray().run();
 console.log(events.length); // → 2
 console.log(events[0]!.event); // → "tick"
 console.log(events[0]!.data); // → "1"
@@ -404,14 +376,13 @@ route via `.on` / `.onFn` / `.onSequence` / `.respondWith`.
 
 <!-- @embed packages/http/examples/05-mock.ts#mock-basic -->
 ```ts
-import { run } from "@perfect/core";
 import { MockHttpClient } from "@perfect/core";
 
 // Set up route → response, run the program, assert what was called.
 const mock = new MockHttpClient();
 mock.on("GET", "/users/1", { id: 1, name: "alice" });
 
-const user = await run(mock.get("/users/1", UserSchema));
+const user = await mock.get("/users/1", UserSchema).run();
 console.log(user); // → { id: 1, name: "alice" }
 console.log(mock.calledTimes("GET", "/users/1")); // → 1
 ```
@@ -419,7 +390,6 @@ console.log(mock.calledTimes("GET", "/users/1")); // → 1
 
 <!-- @embed packages/http/examples/05-mock.ts#mock-failure -->
 ```ts
-import { run } from "@perfect/core";
 import { MockHttpClient } from "@perfect/core";
 
 // MockHttpClient.fail builds an HttpStatusError for use as a route response.
@@ -428,7 +398,7 @@ mock.on("GET", "/users/999", MockHttpClient.fail(404, "not found"));
 
 let caught: any;
 try {
-  await run(mock.get("/users/999", UserSchema));
+  await mock.get("/users/999", UserSchema).run();
 } catch (e) {
   caught = e;
 }
@@ -439,7 +409,6 @@ console.log(caught.status); // → 404
 
 <!-- @embed packages/http/examples/05-mock.ts#mock-sequence -->
 ```ts
-import { run } from "@perfect/core";
 import { MockHttpClient } from "@perfect/core";
 
 // onSequence consumes responses in order; the last item is reused after the
@@ -451,10 +420,10 @@ mock.onSequence("GET", "/u", [
 ]);
 
 let firstErr: any;
-try { await run(mock.get("/u", UserSchema)); } catch (e) { firstErr = e; }
+try { await mock.get("/u", UserSchema).run(); } catch (e) { firstErr = e; }
 console.log(firstErr.status); // → 503
 
-const second = await run(mock.get("/u", UserSchema));
+const second = await mock.get("/u", UserSchema).run();
 console.log(second); // → { id: 7, name: "after-retry" }
 ```
 <!-- @end -->
@@ -482,7 +451,6 @@ Pass the schema directly.
 <!-- @embed packages/http/examples/07-schema-libs.ts#zod-direct -->
 ```ts
 import { z } from "zod";
-import { run } from "@perfect/core";
 import { DefaultHttpClient } from "@perfect/core";
 
 // Zod schemas have .safeParse natively — they ARE ResponseParser<T> with no
@@ -494,7 +462,7 @@ const zodClient = new DefaultHttpClient({
   transport: new StubTransport(() => json({ id: 1, name: "alice" })),
 });
 
-const zodUser: ZodUser = await run(zodClient.get("/u/1", ZodUser));
+const zodUser: ZodUser = await zodClient.get("/u/1", ZodUser).run();
 console.log(zodUser); // → { id: 1, name: "alice" }
 ```
 <!-- @end -->
@@ -504,7 +472,6 @@ The same applies to `errorSchema`:
 <!-- @embed packages/http/examples/07-schema-libs.ts#zod-error-schema -->
 ```ts
 import { z } from "zod";
-import { run } from "@perfect/core";
 import { DefaultHttpClient, HttpStatusError } from "@perfect/core";
 
 // Same adapter-free integration works for errorSchema. Define your error
@@ -529,7 +496,7 @@ const errClient = new DefaultHttpClient({
 
 let caught: HttpStatusError<ApiError> | undefined;
 try {
-  await run(errClient.get<ZodUser, ApiError>("/u/1", ZodUser));
+  await errClient.get<ZodUser, ApiError>("/u/1", ZodUser).run();
 } catch (e) {
   caught = e as HttpStatusError<ApiError>;
 }
@@ -546,7 +513,6 @@ schema:
 <!-- @embed packages/http/examples/07-schema-libs.ts#valibot-adapter -->
 ```ts
 import * as v from "valibot";
-import { run } from "@perfect/core";
 import { type ResponseParser, DefaultHttpClient } from "@perfect/core";
 
 // Valibot uses safeParse(schema, input) — wrap it once with a tiny adapter
@@ -571,9 +537,7 @@ const valibotClient = new DefaultHttpClient({
   transport: new StubTransport(() => json({ id: 2, name: "bob" })),
 });
 
-const valibotUser: ValibotUser = await run(
-  valibotClient.get("/u/2", valibotParser(ValibotUser)),
-);
+const valibotUser: ValibotUser = await valibotClient.get("/u/2", valibotParser(ValibotUser)).run();
 console.log(valibotUser); // → { id: 2, name: "bob" }
 ```
 <!-- @end -->

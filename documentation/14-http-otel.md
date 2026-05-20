@@ -32,7 +32,7 @@ const client = new DefaultHttpClient({
   middleware: [tracingMiddleware({ tracer })],
 });
 
-await run(client.get("/users/1", UserSchema, { tag: "user.lookup" }));
+await client.get("/users/1", UserSchema, { tag: "user.lookup" }).run();
 
 console.log(spans.length); // → 1
 console.log(spans[0]!.name); // → "GET https://api.example.com/users/1"
@@ -52,7 +52,6 @@ The request `tag` (when provided to `client.get`/`post`/etc.) becomes
 <!-- @embed packages/http-otel/examples/01-tracing.ts#tracing-error -->
 ```ts
 import { SpanStatusCode } from "@opentelemetry/api";
-import { run } from "@perfect/core";
 import { DefaultHttpClient } from "@perfect/http";
 import { tracingMiddleware } from "@perfect/core";
 
@@ -65,7 +64,7 @@ const failing = new DefaultHttpClient({
 });
 
 let caught: any;
-try { await run(failing.get("/u", UserSchema)); } catch (e) { caught = e; }
+try { await failing.get("/u", UserSchema).run(); } catch (e) { caught = e; }
 console.log(caught._tag); // → "HttpStatusError"
 console.log(errSpans[0]!.status.code); // → SpanStatusCode.ERROR
 console.log(errSpans[0]!.attributes["http.response.status_code"]); // → 503

@@ -19,7 +19,7 @@ const UserSchema: ResponseParser<User> = {
 const mock = new MockHttpClient();
 mock.on("GET", "/users/1", { id: 1, name: "alice" });
 
-const user = await run(mock.get("/users/1", UserSchema));
+const user = await mock.get("/users/1", UserSchema).run();
 assertEq(user, { id: 1, name: "alice" });
 assertEq(mock.calledTimes("GET", "/users/1"), 1);
 // <<< example
@@ -31,7 +31,7 @@ mock.on("GET", "/users/999", MockHttpClient.fail(404, "not found"));
 
 let caught: any;
 try {
-  await run(mock.get("/users/999", UserSchema));
+  await mock.get("/users/999", UserSchema).run();
 } catch (e) {
   caught = e;
 }
@@ -49,9 +49,9 @@ mock.onSequence("GET", "/u", [
 ]);
 
 let firstErr: any;
-try { await run(mock.get("/u", UserSchema)); } catch (e) { firstErr = e; }
+try { await mock.get("/u", UserSchema).run(); } catch (e) { firstErr = e; }
 assertEq(firstErr.status, 503);
 
-const second = await run(mock.get("/u", UserSchema));
+const second = await mock.get("/u", UserSchema).run();
 assertEq(second, { id: 7, name: "after-retry" });
 // <<< example

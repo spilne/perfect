@@ -59,9 +59,7 @@ const t = new ScriptedTransport([
 ]);
 const client = new DefaultHttpClient({ transport: t });
 
-const user = await run(
-  withRetry(client.get("/u", UserSchema), { maxRetries: 3, baseDelayMs: 1 }),
-);
+const user = await withRetry(client.get("/u", UserSchema), { maxRetries: 3, baseDelayMs: 1 }).run();
 assertEq(user, { id: 1, name: "alice" });
 assertEq(t.attempts, 3);
 // <<< example
@@ -85,14 +83,12 @@ const t2 = new ScriptedTransport([
 ]);
 const client2 = new DefaultHttpClient({ transport: t2 });
 
-const job = await run(
-  withRetryAll(client2.get("/job/123", JobSchema), {
-    maxRetries: 5,
-    baseDelayMs: 1,
-    shouldRetry: (r) =>
-      PipelineResult.isSuccess(r) ? r.value.state !== "done" : true,
-  }),
-);
+const job = await withRetryAll(client2.get("/job/123", JobSchema), {
+  maxRetries: 5,
+  baseDelayMs: 1,
+  shouldRetry: (r) =>
+    PipelineResult.isSuccess(r) ? r.value.state !== "done" : true,
+}).run();
 assertEq(job, { state: "done", result: 42 });
 assertEq(t2.attempts, 3);
 // <<< example
