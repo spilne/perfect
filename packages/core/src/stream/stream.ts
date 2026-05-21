@@ -1181,36 +1181,11 @@ export class Stream<A, S = never> {
     );
   }
 
-  // ── Terminal operators (run the stream) ──────────────────────────
+  // ── Terminal operators ────────────────────────────────────────────
+  // Each materializes the stream into an `Eff`. Execute the result with
+  // `.run()` / `.runSync()` — e.g. `stream.map(f).toArray().run()`.
 
-  runCollect(): Eff<A[], S> {
-    return this.runFold<A[]>([], (acc, a) => {
-      acc.push(a);
-      return acc;
-    });
-  }
-
-  runDrain(): Eff<void, S> {
-    function go(stream: Stream<any, any>): Eff<void, any> {
-      return (stream.step as any).flatMap((s: Step<any>) => {
-        if (s._tag === "Done") return succeed(undefined);
-        return go(s.next);
-      });
-    }
-    return go(this) as any;
-  }
-
-  runForEach<S2>(f: (a: A) => Eff<void, S2>): Eff<void, S | S2> {
-    function go(stream: Stream<A, any>): Eff<void, any> {
-      return (stream.step as any).flatMap((s: Step<A>) => {
-        if (s._tag === "Done") return succeed(undefined);
-        return runChunkForEach(s.chunk, f).flatMap(() => go(s.next));
-      });
-    }
-    return go(this) as any;
-  }
-
-  runFold<B>(zero: B, f: (acc: B, a: A) => B): Eff<B, S> {
+  fold<B>(zero: B, f: (acc: B, a: A) => B): Eff<B, S> {
     function go(acc: B, stream: Stream<A, any>): Eff<B, any> {
       return (stream.step as any).flatMap((s: Step<A>) => {
         if (s._tag === "Done") return succeed(acc);
@@ -1221,29 +1196,52 @@ export class Stream<A, S = never> {
     return go(zero, this) as any;
   }
 
-  runHead(): Eff<A | undefined, S> {
+  toArray(): Eff<A[], S> {
+    return this.fold<A[]>([], (acc, a) => {
+      acc.push(a);
+      return acc;
+    });
+  }
+
+  drain(): Eff<void, S> {
+    function go(stream: Stream<any, any>): Eff<void, any> {
+      return (stream.step as any).flatMap((s: Step<any>) => {
+        if (s._tag === "Done") return succeed(undefined);
+        return go(s.next);
+      });
+    }
+    return go(this) as any;
+  }
+
+  forEach<S2>(f: (a: A) => Eff<void, S2>): Eff<void, S | S2> {
+    function go(stream: Stream<A, any>): Eff<void, any> {
+      return (stream.step as any).flatMap((s: Step<A>) => {
+        if (s._tag === "Done") return succeed(undefined);
+        return runChunkForEach(s.chunk, f).flatMap(() => go(s.next));
+      });
+    }
+    return go(this) as any;
+  }
+
+  head(): Eff<A | undefined, S> {
     return (this.step as any).map((s: Step<A>) => {
       if (s._tag === "Done") return undefined;
       return s.chunk.head();
     });
   }
 
-  runLast(): Eff<A | undefined, S> {
-    function go(last: A | undefined, stream: Stream<A, any>): Eff<A | undefined, any> {
+  last(): Eff<A | undefined, S> {
+    function go(lastSeen: A | undefined, stream: Stream<A, any>): Eff<A | undefined, any> {
       return (stream.step as any).flatMap((s: Step<A>) => {
-        if (s._tag === "Done") return succeed(last);
-        return go(s.chunk.last() ?? last, s.next);
+        if (s._tag === "Done") return succeed(lastSeen);
+        return go(s.chunk.last() ?? lastSeen, s.next);
       });
     }
     return go(undefined, this) as any;
   }
 
-  runCount(): Eff<number, S> {
-    return this.runFold(0, (n, _) => n + 1);
-  }
-
-  toArray(): Eff<A[], S> {
-    return this.runCollect();
+  count(): Eff<number, S> {
+    return this.fold(0, (n, _) => n + 1);
   }
 }
 

@@ -6,7 +6,7 @@ describe("Stream.parEvalMap", () => {
     const result = await run(
       Stream.of(3, 1, 2)
         .parEvalMap(3, (x) => sleep(x * 10).map(() => `done:${x}`) as any)
-        .runCollect(),
+        .toArray(),
     );
     expect(result).toEqual(["done:3", "done:1", "done:2"]);
   });
@@ -32,7 +32,7 @@ describe("Stream.parEvalMap", () => {
                 }),
               ) as any,
         )
-        .runCollect(),
+        .toArray(),
     );
 
     expect(result).toEqual([0, 10, 20, 30, 40, 50, 60, 70]);
@@ -45,7 +45,7 @@ describe("Stream.parEvalMapUnordered", () => {
     const result = await run(
       Stream.of(30, 10, 20)
         .parEvalMapUnordered(3, (x) => sleep(x).map(() => x) as any)
-        .runCollect(),
+        .toArray(),
     );
     // all values present, but order depends on completion time
     expect(result.sort()).toEqual([10, 20, 30]);
@@ -61,7 +61,7 @@ describe("Stream.groupWithin", () => {
       Stream.of(1, 2, 3, 4, 5)
         .grouped(2)
         .map((c) => c.toArray())
-        .runCollect(),
+        .toArray(),
     );
     expect(result).toEqual([[1, 2], [3, 4], [5]]);
   });
@@ -76,7 +76,7 @@ describe("Stream.groupWithin", () => {
         .groupWithin(2, 500)
         .map((c: any) => c.toArray())
         .take(2)
-        .runCollect(),
+        .toArray(),
     );
     expect(result[0]).toEqual([0, 1]);
     expect(result[1]).toEqual([2, 3]);
@@ -88,7 +88,7 @@ describe("Stream.groupWithin", () => {
         .groupWithin(100, 50) // size 100 won't be hit, timeout at 50ms
         .map((c) => c.toArray())
         .take(1)
-        .runCollect(),
+        .toArray(),
     );
     expect(result[0]).toEqual([1, 2, 3]);
   });
@@ -98,7 +98,7 @@ describe("Stream.debounce", () => {
   test("emits last value after silence", async () => {
     // emit 1,2,3 rapidly, then wait
     const s = Stream.of(1, 2, 3).debounce(30);
-    const result = await run(s.take(1).runCollect());
+    const result = await run(s.take(1).toArray());
     expect(result).toEqual([3]); // only last value after debounce
   });
 });
@@ -106,7 +106,7 @@ describe("Stream.debounce", () => {
 describe("Stream.throttle", () => {
   test("limits emission rate", async () => {
     const start = Date.now();
-    await run(Stream.of(1, 2, 3).throttle(30).runDrain());
+    await run(Stream.of(1, 2, 3).throttle(30).drain());
     const elapsed = Date.now() - start;
     expect(elapsed).toBeGreaterThanOrEqual(55); // ~60ms for 3 items at 30ms apart
   });
@@ -116,14 +116,14 @@ describe("Stream.merge", () => {
   test("merges two streams concurrently", async () => {
     const s1 = Stream.of(1, 2, 3);
     const s2 = Stream.of(10, 20, 30);
-    const result = await run(s1.merge(s2).runCollect());
+    const result = await run(s1.merge(s2).toArray());
     expect(result.sort((a, b) => a - b)).toEqual([1, 2, 3, 10, 20, 30]);
   });
 
   test("merge with different speeds", async () => {
     const fast = Stream.of(1, 2, 3);
     const slow = Stream.repeat(sleep(20).map(() => 99) as any).take(2);
-    const result = await run(fast.merge(slow).runCollect());
+    const result = await run(fast.merge(slow).toArray());
     expect(result).toContain(1);
     expect(result).toContain(99);
     expect(result.length).toBe(5);
@@ -133,14 +133,14 @@ describe("Stream.merge", () => {
 describe("Pipes", () => {
   test("lines pipe", async () => {
     const result = await run(
-      Stream.of("hello\nworld\n", "foo\nbar").through(Pipes.lines).runCollect(),
+      Stream.of("hello\nworld\n", "foo\nbar").through(Pipes.lines).toArray(),
     );
     expect(result).toEqual(["hello", "world", "foo", "bar"]);
   });
 
   test("csv pipe", async () => {
     const result = await run(
-      Stream.of("name,age\n", "alice,30\nbob,25\n").through(Pipes.csv).runCollect(),
+      Stream.of("name,age\n", "alice,30\nbob,25\n").through(Pipes.csv).toArray(),
     );
     expect(result).toEqual([
       ["name", "age"],
@@ -150,7 +150,7 @@ describe("Pipes", () => {
   });
 
   test("jsonl pipe", async () => {
-    const result = await run(Stream.of('{"a":1}\n{"b":2}\n').through(Pipes.jsonl).runCollect());
+    const result = await run(Stream.of('{"a":1}\n{"b":2}\n').through(Pipes.jsonl).toArray());
     expect(result).toEqual([{ a: 1 }, { b: 2 }]);
   });
 
@@ -159,7 +159,7 @@ describe("Pipes", () => {
       Stream.of(1, 2, 3, 4, 5)
         .through(Pipes.filter((x: number) => x % 2 === 0))
         .through(Pipes.mapPipe((x: number) => x * 10))
-        .runCollect(),
+        .toArray(),
     );
     expect(result).toEqual([20, 40]);
   });
@@ -185,7 +185,7 @@ describe("Stream realistic example", () => {
         .map((e) => e.value)
         .grouped(3)
         .map((chunk) => chunk.reduce(0, (a, b) => a + b))
-        .runCollect(),
+        .toArray(),
     );
 
     // clicks at indices: 0, 3, 6, 9, 12, 15, 18

@@ -11,15 +11,15 @@ import { assertEq } from "./_assert";
 const collected = await Stream.fromArray([1, 2, 3, 4, 5])
   .map((x) => x * 10)
   .filter((x) => x > 20)
-  .runCollect().run();
+  .toArray().run();
 
 assertEq(collected, [30, 40, 50]);
 // <<< example
 
 // >>> example: stream-foreach
-// runForEach — apply an effect per element, return when stream exhausts.
+// forEach — apply an effect per element, return when stream exhausts.
 const seen: number[] = [];
-await Stream.range(1, 4).runForEach((n) => {
+await Stream.range(1, 4).forEach((n) => {
   seen.push(n);
   return succeed(undefined);
 }).run();
@@ -28,6 +28,6 @@ assertEq(seen, [1, 2, 3]);
 
 // >>> example: stream-mapchunks
 // take(n) — short-circuit after n elements (lazy: never produces beyond).
-const first3 = await Stream.iterate(0, (n) => n + 1).take(3).runCollect().run();
+const first3 = await Stream.iterate(0, (n) => n + 1).take(3).toArray().run();
 assertEq(first3, [0, 1, 2]);
 // <<< example

@@ -10,7 +10,7 @@ describe("PubSub", () => {
       eff(function* () {
         const pubsub = yield* PubSub.unbounded<number>();
         const stream = yield* pubsub.subscribe;
-        const collector = yield* fork(stream.take(3).runCollect());
+        const collector = yield* fork(stream.take(3).toArray());
         yield* sleep(5);
         yield* pubsub.publish(1);
         yield* pubsub.publish(2);
@@ -28,9 +28,9 @@ describe("PubSub", () => {
         const a = yield* pubsub.subscribe;
         const b = yield* pubsub.subscribe;
         const c = yield* pubsub.subscribe;
-        const fA = yield* fork(a.take(2).runCollect());
-        const fB = yield* fork(b.take(2).runCollect());
-        const fC = yield* fork(c.take(2).runCollect());
+        const fA = yield* fork(a.take(2).toArray());
+        const fB = yield* fork(b.take(2).toArray());
+        const fC = yield* fork(c.take(2).toArray());
         yield* sleep(5);
         yield* pubsub.publish("x");
         yield* pubsub.publish("y");
@@ -64,7 +64,7 @@ describe("PubSub", () => {
       eff(function* () {
         const pubsub = yield* PubSub.unbounded<number>();
         const stream = yield* pubsub.subscribe;
-        const collector = yield* fork((stream.runCollect() as any).catch(() => succeed([])));
+        const collector = yield* fork((stream.toArray() as any).catch(() => succeed([])));
         yield* sleep(5);
         yield* pubsub.publish(1);
         yield* pubsub.publish(2);
@@ -114,7 +114,7 @@ describe("SubscriptionRef", () => {
       eff(function* () {
         const ref = yield* SubscriptionRef.make(0);
         const stream = yield* ref.changes;
-        const collector = yield* fork(stream.take(4).runCollect());
+        const collector = yield* fork(stream.take(4).toArray());
         yield* sleep(5);
         yield* ref.set(1);
         yield* ref.set(2);
@@ -131,8 +131,8 @@ describe("SubscriptionRef", () => {
         const ref = yield* SubscriptionRef.make("initial");
         const a = yield* ref.changes;
         const b = yield* ref.changes;
-        const fA = yield* fork(a.take(3).runCollect());
-        const fB = yield* fork(b.take(3).runCollect());
+        const fA = yield* fork(a.take(3).toArray());
+        const fB = yield* fork(b.take(3).toArray());
         yield* sleep(5);
         yield* ref.set("first");
         yield* ref.set("second");

@@ -62,21 +62,21 @@ describe("httpStreamText", () => {
       streamingResponse(["hello ", "world", "!"]),
     );
     const collected = await run(
-      httpStreamText({ url: "/x", transport }).runCollect(),
+      httpStreamText({ url: "/x", transport }).toArray(),
     );
     expect(collected.join("")).toBe("hello world!");
   });
 
   test("empty body closes the stream with no emits", async () => {
     const transport = new OneShotTransport(() => new Response(null));
-    const collected = await run(httpStreamText({ url: "/x", transport }).runCollect());
+    const collected = await run(httpStreamText({ url: "/x", transport }).toArray());
     expect(collected).toEqual([]);
   });
 
   test("HTTP 500 → typed HttpStatusError", async () => {
     const transport = new OneShotTransport(() => new Response("boom", { status: 500 }));
     await expect(
-      run(httpStreamText({ url: "/x", transport }).runCollect() as any),
+      run(httpStreamText({ url: "/x", transport }).toArray() as any),
     ).rejects.toMatchObject({ _tag: "HttpStatusError", status: 500 });
   });
 });
@@ -89,13 +89,13 @@ describe("httpStreamLines", () => {
     const transport = new OneShotTransport(() =>
       streamingResponse(["line one\r\nline ", "two\nline three\n", "tail"]),
     );
-    const lines = await run(httpStreamLines({ url: "/x", transport }).runCollect());
+    const lines = await run(httpStreamLines({ url: "/x", transport }).toArray());
     expect(lines).toEqual(["line one", "line two", "line three", "tail"]);
   });
 
   test("empty body → no lines", async () => {
     const transport = new OneShotTransport(() => new Response(""));
-    const lines = await run(httpStreamLines({ url: "/x", transport }).runCollect());
+    const lines = await run(httpStreamLines({ url: "/x", transport }).toArray());
     expect(lines).toEqual([]);
   });
 });
@@ -119,7 +119,7 @@ describe("httpStreamNDJSON", () => {
     ];
     const transport = new OneShotTransport(() => streamingResponse(body));
     const users = await run(
-      httpStreamNDJSON({ url: "/x", transport, schema: UserParser }).runCollect(),
+      httpStreamNDJSON({ url: "/x", transport, schema: UserParser }).toArray(),
     );
     expect(users).toEqual([
       { id: 1, name: "alice" },
@@ -133,7 +133,7 @@ describe("httpStreamNDJSON", () => {
       streamingResponse([`{"id":1,"name":"a"}\n\n\n{"id":2,"name":"b"}\n`]),
     );
     const users = await run(
-      httpStreamNDJSON({ url: "/x", transport, schema: UserParser }).runCollect(),
+      httpStreamNDJSON({ url: "/x", transport, schema: UserParser }).toArray(),
     );
     expect(users.length).toBe(2);
   });
@@ -143,7 +143,7 @@ describe("httpStreamNDJSON", () => {
       streamingResponse([`{"id":1,"name":"a"}\nnot json\n{"id":2,"name":"b"}\n`]),
     );
     await expect(
-      run(httpStreamNDJSON({ url: "/x", transport, schema: UserParser }).runCollect() as any),
+      run(httpStreamNDJSON({ url: "/x", transport, schema: UserParser }).toArray() as any),
     ).rejects.toMatchObject({ _tag: "HttpParseError" });
   });
 
@@ -152,7 +152,7 @@ describe("httpStreamNDJSON", () => {
       streamingResponse([`{"id":1,"name":"a"}\n{"wrong":"shape"}\n`]),
     );
     await expect(
-      run(httpStreamNDJSON({ url: "/x", transport, schema: UserParser }).runCollect() as any),
+      run(httpStreamNDJSON({ url: "/x", transport, schema: UserParser }).toArray() as any),
     ).rejects.toMatchObject({ _tag: "HttpParseError" });
   });
 });
@@ -168,7 +168,7 @@ describe("httpStreamSSE", () => {
       "\n",
     ];
     const transport = new OneShotTransport(() => streamingResponse(body));
-    const events = await run(httpStreamSSE({ url: "/x", transport }).runCollect());
+    const events = await run(httpStreamSSE({ url: "/x", transport }).toArray());
     expect(events).toEqual([
       { event: "message", data: "hello", id: undefined, retry: undefined },
       { event: "message", data: "world", id: undefined, retry: undefined },
@@ -184,7 +184,7 @@ describe("httpStreamSSE", () => {
       "\n",
     ];
     const transport = new OneShotTransport(() => streamingResponse(body));
-    const events = await run(httpStreamSSE({ url: "/x", transport }).runCollect());
+    const events = await run(httpStreamSSE({ url: "/x", transport }).toArray());
     expect(events.length).toBe(1);
     expect(events[0]!.event).toBe("msg");
     expect(events[0]!.data).toBe("line1\nline2\nline3");
@@ -199,7 +199,7 @@ describe("httpStreamSSE", () => {
       "\n",
     ];
     const transport = new OneShotTransport(() => streamingResponse(body));
-    const events = await run(httpStreamSSE({ url: "/x", transport }).runCollect());
+    const events = await run(httpStreamSSE({ url: "/x", transport }).toArray());
     expect(events[0]).toEqual({
       event: "ping",
       data: "hi",
@@ -211,7 +211,7 @@ describe("httpStreamSSE", () => {
   test("comment lines (starting with :) are ignored", async () => {
     const body = [": heartbeat\n", "data: real\n", "\n"];
     const transport = new OneShotTransport(() => streamingResponse(body));
-    const events = await run(httpStreamSSE({ url: "/x", transport }).runCollect());
+    const events = await run(httpStreamSSE({ url: "/x", transport }).toArray());
     expect(events.length).toBe(1);
     expect(events[0]!.data).toBe("real");
   });
@@ -220,7 +220,7 @@ describe("httpStreamSSE", () => {
     // No trailing blank line — server closed mid-event
     const body = ["data: orphan\n"];
     const transport = new OneShotTransport(() => streamingResponse(body));
-    const events = await run(httpStreamSSE({ url: "/x", transport }).runCollect());
+    const events = await run(httpStreamSSE({ url: "/x", transport }).toArray());
     expect(events.length).toBe(1);
     expect(events[0]!.data).toBe("orphan");
   });
@@ -234,7 +234,7 @@ describe("take(n) terminates early", () => {
       streamingResponse(["a\nb\nc\nd\ne\n"]),
     );
     const lines = await run(
-      httpStreamLines({ url: "/x", transport }).take(2).runCollect(),
+      httpStreamLines({ url: "/x", transport }).take(2).toArray(),
     );
     expect(lines).toEqual(["a", "b"]);
   });

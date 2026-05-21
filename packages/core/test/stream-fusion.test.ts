@@ -12,7 +12,7 @@ describe("Stream fusion — fusible operators", () => {
     const result = await run(
       Stream.of(1, 2, 3)
         .map((x) => x * 2)
-        .runCollect(),
+        .toArray(),
     );
     expect(result).toEqual([2, 4, 6]);
   });
@@ -22,7 +22,7 @@ describe("Stream fusion — fusible operators", () => {
       Stream.of(1, 2, 3)
         .map((x) => x + 1)
         .map((x) => x * 10)
-        .runCollect(),
+        .toArray(),
     );
     expect(result).toEqual([20, 30, 40]);
   });
@@ -35,7 +35,7 @@ describe("Stream fusion — fusible operators", () => {
         .map((x) => x - 3)
         .map((x) => x * 10)
         .map((x) => x + 1)
-        .runCollect(),
+        .toArray(),
     );
     expect(result).toEqual([11, 31, 51, 71, 91]);
   });
@@ -44,7 +44,7 @@ describe("Stream fusion — fusible operators", () => {
     const result = await run(
       Stream.of(1, 2, 3, 4, 5)
         .filter((x) => x > 3)
-        .runCollect(),
+        .toArray(),
     );
     expect(result).toEqual([4, 5]);
   });
@@ -53,7 +53,7 @@ describe("Stream fusion — fusible operators", () => {
     const result = await run(
       Stream.of(1, 2, 3, 4, 5)
         .filterMap((x) => (x % 2 === 0 ? x * 10 : undefined))
-        .runCollect(),
+        .toArray(),
     );
     expect(result).toEqual([20, 40]);
   });
@@ -64,7 +64,7 @@ describe("Stream fusion — fusible operators", () => {
       Stream.of(1, 2, 3)
         .tap((x) => effects.push(x))
         .map((x) => x * 2)
-        .runCollect(),
+        .toArray(),
     );
     expect(result).toEqual([2, 4, 6]);
     expect(effects).toEqual([1, 2, 3]);
@@ -76,7 +76,7 @@ describe("Stream fusion — fusible operators", () => {
         .map((x) => x * 2)
         .filter((x) => x > 5)
         .map((x) => x + 100)
-        .runCollect(),
+        .toArray(),
     );
     expect(result).toEqual([106, 108, 110, 112]);
   });
@@ -87,7 +87,7 @@ describe("Stream fusion — fusible operators", () => {
       Stream.of(10, 20, 30)
         .tap((x) => seen.push(x))
         .map((x) => x + 1)
-        .runCollect(),
+        .toArray(),
     );
     expect(seen).toEqual([10, 20, 30]);
   });
@@ -100,7 +100,7 @@ describe("Stream fusion — non-fusible ops flush the buffer", () => {
         .map((x) => x * 10)
         .filter((x) => x > 10)
         .take(2)
-        .runCollect(),
+        .toArray(),
     );
     expect(result).toEqual([20, 30]);
   });
@@ -110,7 +110,7 @@ describe("Stream fusion — non-fusible ops flush the buffer", () => {
       Stream.of(1, 2, 3, 4, 5)
         .map((x) => x * 10)
         .drop(2)
-        .runCollect(),
+        .toArray(),
     );
     expect(result).toEqual([30, 40, 50]);
   });
@@ -121,7 +121,7 @@ describe("Stream fusion — non-fusible ops flush the buffer", () => {
         .map((x) => x * 2)
         .grouped(2)
         .map((c) => c.toArray())
-        .runCollect(),
+        .toArray(),
     );
     expect(result).toEqual([[2, 4], [6, 8], [10]]);
   });
@@ -131,7 +131,7 @@ describe("Stream fusion — non-fusible ops flush the buffer", () => {
       Stream.of(1, 2, 3)
         .map((x) => x + 1)
         .flatMap((x) => Stream.of(x, x))
-        .runCollect(),
+        .toArray(),
     );
     expect(result).toEqual([2, 2, 3, 3, 4, 4]);
   });
@@ -141,7 +141,7 @@ describe("Stream fusion — non-fusible ops flush the buffer", () => {
       Stream.of(1, 2, 3, 4)
         .filter((x) => x % 2 === 0)
         .scan(0, (acc, a) => acc + a)
-        .runCollect(),
+        .toArray(),
     );
     expect(result).toEqual([0, 2, 6]);
   });
@@ -151,7 +151,7 @@ describe("Stream fusion — non-fusible ops flush the buffer", () => {
       Stream.of(1, 2, 3, 4)
         .filter((x) => x % 2 === 0)
         .zipWithIndex()
-        .runCollect(),
+        .toArray(),
     );
     expect(result).toEqual([
       [2, 0],
@@ -166,53 +166,53 @@ describe("Stream fusion — non-fusible ops flush the buffer", () => {
         .take(3) // non-fusible — flush [map]
         .map((x) => x + 100) // new fused
         .filter((x) => x > 102) // append to new fused
-        .runCollect(),
+        .toArray(),
     );
     expect(result).toEqual([104, 106]);
   });
 });
 
 describe("Stream fusion — terminals flush the buffer", () => {
-  test("runFold over a fused chain", async () => {
+  test("fold over a fused chain", async () => {
     const sum = await run(
       Stream.of(1, 2, 3, 4, 5)
         .filter((x) => x % 2 === 0)
         .map((x) => x * 10)
-        .runFold(0, (a, b) => a + b),
+        .fold(0, (a, b) => a + b),
     );
     expect(sum).toBe(60);
   });
 
-  test("runDrain flushes and consumes", async () => {
+  test("drain flushes and consumes", async () => {
     const seen: number[] = [];
     await run(
       Stream.of(1, 2, 3)
         .tap((x) => seen.push(x))
-        .runDrain(),
+        .drain(),
     );
     expect(seen).toEqual([1, 2, 3]);
   });
 
-  test("runCount after a fused chain", async () => {
+  test("count after a fused chain", async () => {
     const n = await run(
       Stream.of(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
         .filter((x) => x > 3)
         .map((x) => x * 2)
-        .runCount(),
+        .count(),
     );
     expect(n).toBe(7);
   });
 
-  test("runHead / runLast", async () => {
+  test("head / last", async () => {
     const head = await run(
       Stream.of(1, 2, 3)
         .map((x) => x * 10)
-        .runHead(),
+        .head(),
     );
     const last = await run(
       Stream.of(1, 2, 3)
         .map((x) => x * 10)
-        .runLast(),
+        .last(),
     );
     expect(head).toBe(10);
     expect(last).toBe(30);
@@ -228,7 +228,7 @@ describe("Stream fusion — correctness vs unfused", () => {
         .map((x) => x + 1)
         .filter((x) => x % 3 === 0)
         .map((x) => x * 2)
-        .runCollect(),
+        .toArray(),
     );
 
     // Reference: compute the same transformation without a stream.
@@ -247,7 +247,7 @@ describe("Stream fusion — correctness vs unfused", () => {
         .take(10)
         .filter((x) => x % 2 === 0)
         .map((x) => x * 5)
-        .runCollect(),
+        .toArray(),
     );
     expect(result).toEqual([0, 10, 20, 30, 40]);
   });
@@ -256,7 +256,7 @@ describe("Stream fusion — correctness vs unfused", () => {
     const result = await run(
       Stream.of(1, 2, 3)
         .filter(() => false)
-        .runCollect(),
+        .toArray(),
     );
     expect(result).toEqual([]);
   });
@@ -265,14 +265,14 @@ describe("Stream fusion — correctness vs unfused", () => {
     const result = await run(
       Stream.of(1, 2, 3, 4, 5)
         .filter((x) => x > 3, "drop")
-        .runCollect(),
+        .toArray(),
     );
     expect(result).toEqual([1, 2, 3]);
   });
 
   test("unNone drops null and undefined", async () => {
     const s: any = Stream.of(1, null, 2, undefined, 3);
-    const result = await run(s.unNone().runCollect());
+    const result = await run(s.unNone().toArray());
     expect(result).toEqual([1, 2, 3]);
   });
 
@@ -282,7 +282,7 @@ describe("Stream fusion — correctness vs unfused", () => {
       s
         .unNone()
         .map((x: number) => x * 10)
-        .runCollect(),
+        .toArray(),
     );
     expect(result).toEqual([10, 20, 30]);
   });

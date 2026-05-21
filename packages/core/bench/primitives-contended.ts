@@ -179,7 +179,7 @@ group("PubSub: 1 publisher + 10 subscribers + 200 messages", () => {
         const subs: any[] = [];
         for (let i = 0; i < 10; i++) {
           const stream = yield* ps.subscribe;
-          subs.push(yield* fork(stream.take(200).runDrain()));
+          subs.push(yield* fork(stream.take(200).drain()));
         }
         yield* sleep(1); // let subscribers register
         for (let i = 0; i < 200; i++) yield* ps.publish(i);
