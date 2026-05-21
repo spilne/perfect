@@ -105,9 +105,9 @@ await (eff(function* () {
   const subA = yield* pubsub.subscribe;
   const subB = yield* pubsub.subscribe;
   const subC = yield* pubsub.subscribe;
-  const fA = yield* fork(subA.take(3).runForEach((n) => sync(() => { seen[0]!.push(n); })));
-  const fB = yield* fork(subB.take(3).runForEach((n) => sync(() => { seen[1]!.push(n); })));
-  const fC = yield* fork(subC.take(3).runForEach((n) => sync(() => { seen[2]!.push(n); })));
+  const fA = yield* fork(subA.take(3).forEach((n) => sync(() => { seen[0]!.push(n); })));
+  const fB = yield* fork(subB.take(3).forEach((n) => sync(() => { seen[1]!.push(n); })));
+  const fC = yield* fork(subC.take(3).forEach((n) => sync(() => { seen[2]!.push(n); })));
   yield* sleep(5); // let subscribers register
   yield* pubsub.publish(1);
   yield* pubsub.publish(2);
@@ -126,7 +126,7 @@ const observed: string[] = [];
 await (eff(function* () {
   const config = yield* SubscriptionRef.make("v1");
   const stream = yield* config.changes;
-  const reader = yield* fork(stream.take(3).runForEach((v) => sync(() => { observed.push(v); })));
+  const reader = yield* fork(stream.take(3).forEach((v) => sync(() => { observed.push(v); })));
   yield* sleep(5);
   yield* config.set("v2");
   yield* config.update((v) => `${v}-patched`);

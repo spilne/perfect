@@ -38,9 +38,9 @@ Lazy, fused, effect-typed sequences. Adjacent pure operators (`map` /
 
 | | |
 |---|---|
-| `.runCollect()` | collect into `A[]` |
-| `.runDrain()` | run for side effects, return `void` |
-| `.runForEach(f)` | apply effect per element |
+| `.toArray()` | collect into `A[]` |
+| `.drain()` | run for side effects, return `void` |
+| `.forEach(f)` | apply effect per element |
 
 ## Examples
 
@@ -54,7 +54,7 @@ import { Stream } from "@perfect/core";
 const collected = await Stream.fromArray([1, 2, 3, 4, 5])
   .map((x) => x * 10)
   .filter((x) => x > 20)
-  .runCollect().run();
+  .toArray().run();
 
 console.log(collected); // → [30, 40, 50]
 ```
@@ -66,9 +66,9 @@ console.log(collected); // → [30, 40, 50]
 ```ts
 import { Stream, succeed } from "@perfect/core";
 
-// runForEach — apply an effect per element, return when stream exhausts.
+// forEach — apply an effect per element, return when stream exhausts.
 const seen: number[] = [];
-await Stream.range(1, 4).runForEach((n) => {
+await Stream.range(1, 4).forEach((n) => {
   seen.push(n);
   return succeed(undefined);
 }).run();
@@ -83,7 +83,7 @@ console.log(seen); // → [1, 2, 3]
 import { Stream } from "@perfect/core";
 
 // take(n) — short-circuit after n elements (lazy: never produces beyond).
-const first3 = await Stream.iterate(0, (n) => n + 1).take(3).runCollect().run();
+const first3 = await Stream.iterate(0, (n) => n + 1).take(3).toArray().run();
 console.log(first3); // → [0, 1, 2]
 ```
 <!-- @end -->
@@ -114,7 +114,7 @@ const top3RunningTotals = await Stream.fromArray(rawCsv)
   .tap((r) => { kept.push(r.city); }) // side effect, fused
   .take(3) // short-circuit
   .scan(0, (acc, r) => acc + r.population) // running total (includes seed)
-  .runCollect().run();
+  .toArray().run();
 
 console.log(kept); // → ["tokyo", "delhi", "shanghai"]
 console.log(top3RunningTotals); // → [0, 37_000_000, 69_000_000, 97_000_000]
@@ -137,8 +137,8 @@ const robust = flaky.retry(RetryPolicy.recurs(3));
 
 - **Streams are lazy.** Building a 10M-element stream costs nothing until
   you run it.
-- **`runForEach` doesn't collect.** If you need both side effects AND a
-  result, use `tap` + `runCollect`.
+- **`forEach` doesn't collect.** If you need both side effects AND a
+  result, use `tap` + `toArray`.
 - **Fusion stops at non-fusible ops.** `mapEffect`, `flatMap`, and `take`
   break the fused walk; expect a perf cliff if you mix them tight.
 

@@ -20,11 +20,11 @@ group(`single transform × ${N}`, () => {
   const addOne: Pipe<number, number> = (s) => s.map((x) => x + 1);
 
   bench("direct .map (baseline)", async () => {
-    await run(Stream.fromArray(arr).map((x) => x + 1).runDrain());
+    await run(Stream.fromArray(arr).map((x) => x + 1).drain());
   });
 
   bench(".through(pipe) wrapping .map", async () => {
-    await run(Stream.fromArray(arr).through(addOne).runDrain());
+    await run(Stream.fromArray(arr).through(addOne).drain());
   });
 });
 
@@ -37,7 +37,7 @@ group(`3 transforms chained × ${N}`, () => {
         .map((x) => x + 1)
         .map((x) => x * 2)
         .map((x) => x - 3)
-        .runDrain(),
+        .drain(),
     );
   });
 
@@ -45,7 +45,7 @@ group(`3 transforms chained × ${N}`, () => {
     const p1: Pipe<number, number> = (s) => s.map((x) => x + 1);
     const p2: Pipe<number, number> = (s) => s.map((x) => x * 2);
     const p3: Pipe<number, number> = (s) => s.map((x) => x - 3);
-    await run(Stream.fromArray(arr).through(p1).through(p2).through(p3).runDrain());
+    await run(Stream.fromArray(arr).through(p1).through(p2).through(p3).drain());
   });
 });
 
@@ -66,7 +66,7 @@ for (let i = 0; i < bytesBody.length; i += chunkSize) {
 group(`utf8Decode + lines: ${LINE_COUNT} lines in ${CHUNKS} Uint8Array chunks`, () => {
   bench("through(utf8Decode).through(lines) — pipe chain", async () => {
     const lines = await run(
-      Stream.fromArray(chunks).through(Pipes.utf8Decode).through(Pipes.lines).runCollect(),
+      Stream.fromArray(chunks).through(Pipes.utf8Decode).through(Pipes.lines).toArray(),
     );
     if (lines.length !== LINE_COUNT) throw new Error(`${lines.length} vs ${LINE_COUNT}`);
   });
@@ -90,13 +90,13 @@ group(`utf8Decode + lines: ${LINE_COUNT} lines in ${CHUNKS} Uint8Array chunks`, 
 group(`stacking .through N times (identity pipes) × ${N}`, () => {
   const identity: Pipe<number, number> = (s) => s.map((x) => x);
 
-  const run1 = (s: Stream<number>) => s.through(identity).runDrain();
+  const run1 = (s: Stream<number>) => s.through(identity).drain();
   const run4 = (s: Stream<number>) =>
-    s.through(identity).through(identity).through(identity).through(identity).runDrain();
+    s.through(identity).through(identity).through(identity).through(identity).drain();
   const run16 = (s: Stream<number>) => {
     let out: Stream<number> = s;
     for (let i = 0; i < 16; i++) out = out.through(identity);
-    return out.runDrain();
+    return out.drain();
   };
 
   bench("1 through", async () => {

@@ -4,7 +4,7 @@ import { Stream, RetryPolicy, succeed, fail, sync, run } from "../src";
 describe("Stream.retry", () => {
   test("happy-path: no failure → retry is a no-op", async () => {
     const result = await run(
-      Stream.of(1, 2, 3).retry(RetryPolicy.recurs(3)).runCollect(),
+      Stream.of(1, 2, 3).retry(RetryPolicy.recurs(3)).toArray(),
     );
     expect(result).toEqual([1, 2, 3]);
   });
@@ -20,14 +20,14 @@ describe("Stream.retry", () => {
       ),
     );
 
-    const result = await run(flaky.retry(RetryPolicy.recurs(5)).runCollect());
+    const result = await run(flaky.retry(RetryPolicy.recurs(5)).toArray());
     expect(result).toEqual([99]);
     expect(attempts).toBe(3);
   });
 
   test("retry exhaustion surfaces the last failure", async () => {
     const eternal = Stream.fromEffect(fail("boom") as any);
-    await expect(run(eternal.retry(RetryPolicy.recurs(2)).runCollect())).rejects.toBe("boom");
+    await expect(run(eternal.retry(RetryPolicy.recurs(2)).toArray())).rejects.toBe("boom");
   });
 
   test("retry uses the supplied policy.delay (RetryConfig form)", async () => {
@@ -41,7 +41,7 @@ describe("Stream.retry", () => {
     );
 
     const start = Date.now();
-    const result = await run(flaky.retry({ times: 5, delay: 5 }).runCollect());
+    const result = await run(flaky.retry({ times: 5, delay: 5 }).toArray());
     expect(result).toEqual([7]);
     expect(attempts).toBe(3);
     expect(Date.now() - start).toBeGreaterThanOrEqual(5);
@@ -55,7 +55,7 @@ describe("Stream.retry", () => {
         throw new Error("defect");
       }) as any,
     );
-    await expect(run(flaky.retry(RetryPolicy.recurs(3)).runCollect())).rejects.toBeInstanceOf(Error);
+    await expect(run(flaky.retry(RetryPolicy.recurs(3)).toArray())).rejects.toBeInstanceOf(Error);
     expect(attempts).toBe(1); // no retry on defect
   });
 });

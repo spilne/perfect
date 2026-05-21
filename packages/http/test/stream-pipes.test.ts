@@ -46,7 +46,7 @@ class OneShot implements HttpTransport {
 describe("httpStream + ad-hoc pipe composition", () => {
   test("httpStream gives raw Uint8Array chunks", async () => {
     const transport = new OneShot(() => streamingResponse(["hello ", "world"]));
-    const bytes = await run(httpStream({ url: "/x", transport }).runCollect());
+    const bytes = await run(httpStream({ url: "/x", transport }).toArray());
     const combined = new Uint8Array(bytes.reduce((n, b) => n + b.length, 0));
     let off = 0;
     for (const b of bytes) {
@@ -61,7 +61,7 @@ describe("httpStream + ad-hoc pipe composition", () => {
 
     // Named helper
     const viaHelper = await run(
-      httpStreamLines({ url: "/x", transport: make() }).runCollect(),
+      httpStreamLines({ url: "/x", transport: make() }).toArray(),
     );
 
     // Same pipeline, hand-composed
@@ -69,7 +69,7 @@ describe("httpStream + ad-hoc pipe composition", () => {
       httpStream({ url: "/x", transport: make() })
         .through(Pipes.utf8Decode)
         .through(Pipes.lines)
-        .runCollect(),
+        .toArray(),
     );
 
     expect(viaHelper).toEqual(viaPipes);
@@ -86,7 +86,7 @@ describe("httpStream + ad-hoc pipe composition", () => {
         .through(Pipes.utf8Decode)
         .through(Pipes.lines)
         .through(parseSSE)
-        .runCollect(),
+        .toArray(),
     );
     expect(events.length).toBe(1);
     expect(events[0]).toMatchObject({ event: "ping", data: "hi" });
@@ -106,7 +106,7 @@ describe("httpStream + ad-hoc pipe composition", () => {
         .through(Pipes.utf8Decode)
         .through(Pipes.lines)
         .through(parseNDJSON(parser))
-        .runCollect(),
+        .toArray(),
     );
     expect(rows).toEqual([{ n: 1 }, { n: 2 }, { n: 3 }]);
   });
@@ -119,7 +119,7 @@ describe("httpStream + ad-hoc pipe composition", () => {
       httpStreamText({ url: "/x", transport })
         .through(Pipes.lines)
         .take(2)
-        .runCollect(),
+        .toArray(),
     );
     expect(first2).toEqual(["a", "b"]);
   });

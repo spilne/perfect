@@ -28,7 +28,7 @@ group(`map × ${N}`, () => {
     pRun(
       PStream.fromArray(items)
         .map((x) => x * 2)
-        .runCollect(),
+        .toArray(),
     ));
 
   bench("effect Stream.map", async () =>
@@ -72,7 +72,7 @@ group(`chained map × 5 over ${N}`, () => {
         .map((x) => x - 1)
         .map((x) => (x / 3) | 0)
         .map((x) => x + 100)
-        .runCollect(),
+        .toArray(),
     ));
   bench("effect Stream chain", async () =>
     Effect.runPromise(
@@ -97,7 +97,7 @@ group(`map + filter × ${N}`, () => {
       PStream.fromArray(items)
         .map((x) => x * 2)
         .filter((x) => x % 3 === 0)
-        .runCollect(),
+        .toArray(),
     ));
 
   bench("effect Stream.map.filter", async () =>
@@ -125,7 +125,7 @@ const K = 100;
 group(`take(${K}) of ${N}`, () => {
   bench("Array.slice", () => items.slice(0, K));
 
-  bench("perfect Stream.take", async () => pRun(PStream.fromArray(items).take(K).runCollect()));
+  bench("perfect Stream.take", async () => pRun(PStream.fromArray(items).take(K).toArray()));
 
   bench("effect Stream.take", async () =>
     Effect.runPromise(EStream.fromIterable(items).pipe(EStream.take(K), EStream.runCollect)));
@@ -133,16 +133,16 @@ group(`take(${K}) of ${N}`, () => {
   bench("RxJS take", async () => lastValueFrom(rxFrom(items).pipe(rxTake(K), rxToArray())));
 });
 
-// ── 4. runFold (sum) × N ───────────────────────────────────────────
+// ── 4. fold (sum) × N ───────────────────────────────────────────
 
 group(`fold/sum × ${N}`, () => {
   bench("Array.reduce (baseline)", () => items.reduce((a, b) => a + b, 0));
 
-  bench("perfect Stream.runFold", async () =>
-    pRun(PStream.fromArray(items).runFold(0, (a, b) => a + b)));
+  bench("perfect Stream.fold", async () =>
+    pRun(PStream.fromArray(items).fold(0, (a, b) => a + b)));
 
   bench("effect Stream.runFold", async () =>
-    Effect.runPromise(EStream.fromIterable(items).pipe(EStream.runFold(0, (a, b) => a + b))));
+    Effect.runPromise(EStream.fromIterable(items).pipe(EStream.fold(0, (a, b) => a + b))));
 
   bench("RxJS scan + last", async () =>
     lastValueFrom(rxFrom(items).pipe(rxScan((a: number, b: number) => a + b, 0))));
@@ -153,7 +153,7 @@ group(`fold/sum × ${N}`, () => {
 group(`range(0, ${N}) → collect`, () => {
   bench("Array.from", () => Array.from({ length: N }, (_, i) => i));
 
-  bench("perfect Stream.range", async () => pRun(PStream.range(0, N).runCollect()));
+  bench("perfect Stream.range", async () => pRun(PStream.range(0, N).toArray()));
 
   bench("effect Stream.range", async () =>
     Effect.runPromise(EStream.range(0, N - 1).pipe(EStream.runCollect)));
@@ -171,7 +171,7 @@ group(`flatMap (× ${MID} of ${innerN})`, () => {
     pRun(
       PStream.fromArray(midItems)
         .flatMap((x) => PStream.fromArray([x, x + 1, x + 2]))
-        .runCollect(),
+        .toArray(),
     ));
 
   bench("effect Stream.flatMap", async () =>
@@ -201,7 +201,7 @@ group(`mapEffect(succeed) × 1000`, () => {
     pRun(
       PStream.fromArray(meItems)
         .evalMap((x: number) => pSucceed(x * 2))
-        .runCollect(),
+        .toArray(),
     ));
 
   bench("effect Stream.mapEffect", async () =>
@@ -265,7 +265,7 @@ group(`async iterator vs stream (${N} items)`, () => {
     pRun(
       PStream.fromArray(items)
         .map((x) => x * 2)
-        .runCollect(),
+        .toArray(),
     ));
 
   bench("async-iter map+filter", async () => asyncIterMapFilter(items));
@@ -274,15 +274,15 @@ group(`async iterator vs stream (${N} items)`, () => {
       PStream.fromArray(items)
         .map((x) => x * 2)
         .filter((x) => x % 3 === 0)
-        .runCollect(),
+        .toArray(),
     ));
 
   bench("async-iter take(100)", async () => asyncIterTake(items, 100));
-  bench("perfect Stream.take", async () => pRun(PStream.fromArray(items).take(100).runCollect()));
+  bench("perfect Stream.take", async () => pRun(PStream.fromArray(items).take(100).toArray()));
 
   bench("async-iter fold", async () => asyncIterFold(items));
-  bench("perfect Stream.runFold", async () =>
-    pRun(PStream.fromArray(items).runFold(0, (a, b) => a + b)));
+  bench("perfect Stream.fold", async () =>
+    pRun(PStream.fromArray(items).fold(0, (a, b) => a + b)));
 });
 
 // ── 9. backpressure: slow consumer, fast producer ──────────────────
@@ -320,7 +320,7 @@ group(`slow consumer × ${BP_N} (${SLOW_US}µs/item)`, () => {
     pRun(
       PStream.fromArray(src)
         .map(slowWork)
-        .runFold(0, (a, b) => a + b),
+        .fold(0, (a, b) => a + b),
     ));
 
   bench("RxJS slow consumer", async () =>

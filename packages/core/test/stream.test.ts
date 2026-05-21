@@ -52,31 +52,31 @@ describe("Chunk", () => {
 
 describe("Stream constructors", () => {
   test("empty", async () => {
-    expect(await run(Stream.empty().runCollect())).toEqual([]);
+    expect(await run(Stream.empty().toArray())).toEqual([]);
   });
 
   test("succeed", async () => {
-    expect(await run(Stream.succeed(42).runCollect())).toEqual([42]);
+    expect(await run(Stream.succeed(42).toArray())).toEqual([42]);
   });
 
   test("of", async () => {
-    expect(await run(Stream.of(1, 2, 3).runCollect())).toEqual([1, 2, 3]);
+    expect(await run(Stream.of(1, 2, 3).toArray())).toEqual([1, 2, 3]);
   });
 
   test("fromArray", async () => {
-    expect(await run(Stream.fromArray([10, 20, 30]).runCollect())).toEqual([10, 20, 30]);
+    expect(await run(Stream.fromArray([10, 20, 30]).toArray())).toEqual([10, 20, 30]);
   });
 
   test("fromEffect", async () => {
-    expect(await run(Stream.fromEffect(succeed(99)).runCollect())).toEqual([99]);
+    expect(await run(Stream.fromEffect(succeed(99)).toArray())).toEqual([99]);
   });
 
   test("fail", async () => {
-    await expect(run(Stream.fail("boom").runCollect())).rejects.toBe("boom");
+    await expect(run(Stream.fail("boom").toArray())).rejects.toBe("boom");
   });
 
   test("range", async () => {
-    expect(await run(Stream.range(0, 5).runCollect())).toEqual([0, 1, 2, 3, 4]);
+    expect(await run(Stream.range(0, 5).toArray())).toEqual([0, 1, 2, 3, 4]);
   });
 
   test("iterate", async () => {
@@ -84,7 +84,7 @@ describe("Stream constructors", () => {
       await run(
         Stream.iterate(1, (x) => x * 2)
           .take(5)
-          .runCollect(),
+          .toArray(),
       ),
     ).toEqual([1, 2, 4, 8, 16]);
   });
@@ -93,17 +93,17 @@ describe("Stream constructors", () => {
     const fibs = Stream.unfold([0, 1] as [number, number], ([a, b]) =>
       a > 20 ? null : [a, [b, a + b] as [number, number]],
     );
-    expect(await run(fibs.runCollect())).toEqual([0, 1, 1, 2, 3, 5, 8, 13]);
+    expect(await run(fibs.toArray())).toEqual([0, 1, 1, 2, 3, 5, 8, 13]);
   });
 
   test("repeatValue + take", async () => {
-    expect(await run(Stream.repeatValue("x").take(3).runCollect())).toEqual(["x", "x", "x"]);
+    expect(await run(Stream.repeatValue("x").take(3).toArray())).toEqual(["x", "x", "x"]);
   });
 
   test("repeat effect + take", async () => {
     let n = 0;
     const s = Stream.repeat(sync(() => ++n)).take(4);
-    expect(await run(s.runCollect())).toEqual([1, 2, 3, 4]);
+    expect(await run(s.toArray())).toEqual([1, 2, 3, 4]);
   });
 
   test("fromQueue", async () => {
@@ -113,7 +113,7 @@ describe("Stream constructors", () => {
         .flatMap(() => q.offer(2))
         .flatMap(() => q.offer(3))
         .flatMap(() => q.shutdown())
-        .flatMap(() => Stream.fromQueue(q).runCollect()),
+        .flatMap(() => Stream.fromQueue(q).toArray()),
     );
     expect(await run(program)).toEqual([1, 2, 3]);
   });
@@ -130,7 +130,7 @@ describe("Stream constructors", () => {
           log.push(`release:${r}`);
         }),
     );
-    expect(await run(s.runCollect())).toEqual(["conn"]);
+    expect(await run(s.toArray())).toEqual(["conn"]);
     expect(log).toEqual(["acquire", "release:conn"]);
   });
 });
@@ -141,7 +141,7 @@ describe("Stream transforms", () => {
       await run(
         Stream.of(1, 2, 3)
           .map((x) => x * 10)
-          .runCollect(),
+          .toArray(),
       ),
     ).toEqual([10, 20, 30]);
   });
@@ -151,27 +151,27 @@ describe("Stream transforms", () => {
       await run(
         Stream.of(1, 2, 3, 4, 5)
           .filter((x) => x % 2 === 0)
-          .runCollect(),
+          .toArray(),
       ),
     ).toEqual([2, 4]);
   });
 
   test("flatMap", async () => {
     const s = Stream.of(1, 2, 3).flatMap((x) => Stream.of(x, x * 10));
-    expect(await run(s.runCollect())).toEqual([1, 10, 2, 20, 3, 30]);
+    expect(await run(s.toArray())).toEqual([1, 10, 2, 20, 3, 30]);
   });
 
   test("evalMap", async () => {
     const s = Stream.of(1, 2, 3).evalMap((x) => succeed(x * 100));
-    expect(await run(s.runCollect())).toEqual([100, 200, 300]);
+    expect(await run(s.toArray())).toEqual([100, 200, 300]);
   });
 
   test("take", async () => {
-    expect(await run(Stream.of(1, 2, 3, 4, 5).take(3).runCollect())).toEqual([1, 2, 3]);
+    expect(await run(Stream.of(1, 2, 3, 4, 5).take(3).toArray())).toEqual([1, 2, 3]);
   });
 
   test("drop", async () => {
-    expect(await run(Stream.of(1, 2, 3, 4, 5).drop(2).runCollect())).toEqual([3, 4, 5]);
+    expect(await run(Stream.of(1, 2, 3, 4, 5).drop(2).toArray())).toEqual([3, 4, 5]);
   });
 
   test("takeWhile", async () => {
@@ -179,7 +179,7 @@ describe("Stream transforms", () => {
       await run(
         Stream.of(1, 2, 3, 4, 5)
           .takeWhile((x) => x < 4)
-          .runCollect(),
+          .toArray(),
       ),
     ).toEqual([1, 2, 3]);
   });
@@ -189,13 +189,13 @@ describe("Stream transforms", () => {
       await run(
         Stream.of(1, 2, 3)
           .scan(0, (a, b) => a + b)
-          .runCollect(),
+          .toArray(),
       ),
     ).toEqual([0, 1, 3, 6]);
   });
 
   test("zipWithIndex", async () => {
-    expect(await run(Stream.of("a", "b", "c").zipWithIndex().runCollect())).toEqual([
+    expect(await run(Stream.of("a", "b", "c").zipWithIndex().toArray())).toEqual([
       ["a", 0],
       ["b", 1],
       ["c", 2],
@@ -203,14 +203,14 @@ describe("Stream transforms", () => {
   });
 
   test("changes (deduplicate consecutive)", async () => {
-    expect(await run(Stream.of(1, 1, 2, 2, 2, 3, 1, 1).changes().runCollect())).toEqual([
+    expect(await run(Stream.of(1, 1, 2, 2, 2, 3, 1, 1).changes().toArray())).toEqual([
       1, 2, 3, 1,
     ]);
   });
 
   test("collect", async () => {
     const s = Stream.of(1, 2, 3, 4, 5).collect((x) => (x % 2 === 0 ? `even:${x}` : undefined));
-    expect(await run(s.runCollect())).toEqual(["even:2", "even:4"]);
+    expect(await run(s.toArray())).toEqual(["even:2", "even:4"]);
   });
 
   test("tap", async () => {
@@ -218,7 +218,7 @@ describe("Stream transforms", () => {
     await run(
       Stream.of(1, 2, 3)
         .tap((x) => log.push(x))
-        .runDrain(),
+        .drain(),
     );
     expect(log).toEqual([1, 2, 3]);
   });
@@ -228,7 +228,7 @@ describe("Stream transforms", () => {
       Stream.of(1, 2, 3, 4, 5)
         .grouped(2)
         .map((c) => c.toArray())
-        .runCollect(),
+        .toArray(),
     );
     expect(result).toEqual([[1, 2], [3, 4], [5]]);
   });
@@ -237,12 +237,12 @@ describe("Stream transforms", () => {
 describe("Stream combination", () => {
   test("concat", async () => {
     const s = Stream.of(1, 2).concat(Stream.of(3, 4));
-    expect(await run(s.runCollect())).toEqual([1, 2, 3, 4]);
+    expect(await run(s.toArray())).toEqual([1, 2, 3, 4]);
   });
 
   test("zip", async () => {
     const s = Stream.of(1, 2, 3).zip(Stream.of("a", "b", "c"));
-    expect(await run(s.runCollect())).toEqual([
+    expect(await run(s.toArray())).toEqual([
       [1, "a"],
       [2, "b"],
       [3, "c"],
@@ -251,7 +251,7 @@ describe("Stream combination", () => {
 
   test("zip stops at shorter", async () => {
     const s = Stream.of(1, 2, 3, 4).zip(Stream.of("a", "b"));
-    expect(await run(s.runCollect())).toEqual([
+    expect(await run(s.toArray())).toEqual([
       [1, "a"],
       [2, "b"],
     ]);
@@ -259,7 +259,7 @@ describe("Stream combination", () => {
 
   test("interleave", async () => {
     const s = Stream.of(1, 3, 5).interleave(Stream.of(2, 4, 6));
-    expect(await run(s.runCollect())).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(await run(s.toArray())).toEqual([1, 2, 3, 4, 5, 6]);
   });
 });
 
@@ -268,19 +268,19 @@ describe("Stream error handling", () => {
     const s = Stream.of(1, 2)
       .concat(Stream.fail("oops"))
       .catch(() => Stream.of(99));
-    expect(await run(s.runCollect())).toEqual([1, 2, 99]);
+    expect(await run(s.toArray())).toEqual([1, 2, 99]);
   });
 });
 
 describe("Stream terminals", () => {
-  test("runFold", async () => {
-    expect(await run(Stream.of(1, 2, 3).runFold(0, (a, b) => a + b))).toBe(6);
+  test("fold", async () => {
+    expect(await run(Stream.of(1, 2, 3).fold(0, (a, b) => a + b))).toBe(6);
   });
 
-  test("runForEach", async () => {
+  test("forEach", async () => {
     const log: number[] = [];
     await run(
-      Stream.of(1, 2, 3).runForEach((x) =>
+      Stream.of(1, 2, 3).forEach((x) =>
         sync(() => {
           log.push(x);
         }),
@@ -289,25 +289,25 @@ describe("Stream terminals", () => {
     expect(log).toEqual([1, 2, 3]);
   });
 
-  test("runHead", async () => {
-    expect(await run(Stream.of(1, 2, 3).runHead())).toBe(1);
-    expect(await run(Stream.empty().runHead())).toBeUndefined();
+  test("head", async () => {
+    expect(await run(Stream.of(1, 2, 3).head())).toBe(1);
+    expect(await run(Stream.empty().head())).toBeUndefined();
   });
 
-  test("runLast", async () => {
-    expect(await run(Stream.of(1, 2, 3).runLast())).toBe(3);
+  test("last", async () => {
+    expect(await run(Stream.of(1, 2, 3).last())).toBe(3);
   });
 
-  test("runCount", async () => {
-    expect(await run(Stream.of(1, 2, 3, 4, 5).runCount())).toBe(5);
+  test("count", async () => {
+    expect(await run(Stream.of(1, 2, 3, 4, 5).count())).toBe(5);
   });
 
-  test("runDrain", async () => {
+  test("drain", async () => {
     let count = 0;
     await run(
       Stream.of(1, 2, 3)
         .tap(() => count++)
-        .runDrain(),
+        .drain(),
     );
     expect(count).toBe(3);
   });
@@ -324,7 +324,7 @@ describe("Stream + services", () => {
 
     const program = Stream.of(1, 2, 3)
       .evalMap((id) => Db.get.flatMap((db) => db.query(id)))
-      .runCollect();
+      .toArray();
 
     const result = await run(provide(program, Db, { query: (id) => succeed(`row-${id}`) }));
     expect(result).toEqual(["row-1", "row-2", "row-3"]);
@@ -333,7 +333,7 @@ describe("Stream + services", () => {
 
 describe("Stream large / perf", () => {
   test("10K elements", async () => {
-    const sum = await run(Stream.range(0, 10_000).runFold(0, (a, b) => a + b));
+    const sum = await run(Stream.range(0, 10_000).fold(0, (a, b) => a + b));
     expect(sum).toBe(49_995_000);
   });
 
@@ -343,7 +343,7 @@ describe("Stream large / perf", () => {
         .filter((x) => x % 2 === 0)
         .map((x) => x * 3)
         .take(10)
-        .runCollect(),
+        .toArray(),
     );
     expect(result).toEqual([0, 6, 12, 18, 24, 30, 36, 42, 48, 54]);
   });

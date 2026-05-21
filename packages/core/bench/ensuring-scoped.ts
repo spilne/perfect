@@ -52,13 +52,13 @@ group("Stream with finalizer per emit", () => {
     run(
       Stream.fromArray(items)
         .map((x) => x + 1)
-        .runDrain(),
+        .drain(),
     ));
   bench("Stream + ensuring per element", async () =>
     run(
       Stream.fromArray(items)
         .map((x) => x + 1)
-        .runForEach((x) =>
+        .forEach((x) =>
           ensuring(
             succeed(x),
             sync(() => undefined),

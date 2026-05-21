@@ -10,7 +10,7 @@ describe("Stream.fromCallback", () => {
       emit(3);
       close();
     });
-    const result = await run(s.runCollect() as any);
+    const result = await run(s.toArray() as any);
     expect(result).toEqual([1, 2, 3]);
   });
 
@@ -26,7 +26,7 @@ describe("Stream.fromCallback", () => {
       }, 5);
       return () => clearInterval(id);
     });
-    const result = await run(s.runCollect() as any);
+    const result = await run(s.toArray() as any);
     expect(result).toEqual([1, 2, 3]);
   });
 
@@ -34,7 +34,7 @@ describe("Stream.fromCallback", () => {
     const s = Stream.fromCallback<number>((_emit, close) => {
       close();
     });
-    expect(await run(s.runCollect() as any)).toEqual([]);
+    expect(await run(s.toArray() as any)).toEqual([]);
   });
 
   test("overflow past bufferSize silently drops", async () => {
@@ -43,7 +43,7 @@ describe("Stream.fromCallback", () => {
       for (let i = 1; i <= 10; i++) emit(i);
       close();
     }, 3);
-    const result = await run(s.runCollect() as any);
+    const result = await run(s.toArray() as any);
     expect(result).toEqual([1, 2, 3]);
   });
 
@@ -57,7 +57,7 @@ describe("Stream.fromCallback", () => {
         cleanedUp = true;
       };
     });
-    await run(s.runCollect() as any);
+    await run(s.toArray() as any);
     expect(cleanedUp).toBe(true);
   });
 });
@@ -75,7 +75,7 @@ describe("Stream.fromEventEmitter", () => {
       ee.emit("end");
     }, 10);
 
-    const result = await run(stream.runCollect() as any);
+    const result = await run(stream.toArray() as any);
     expect(result).toEqual(["a", "b", "c"]);
   });
 
@@ -86,7 +86,7 @@ describe("Stream.fromEventEmitter", () => {
       ee.emit("tick", 1);
       ee.emit("close");
     }, 10);
-    expect(await run(stream.runCollect() as any)).toEqual([1]);
+    expect(await run(stream.toArray() as any)).toEqual([1]);
   });
 
   test("listener is removed on cleanup", async () => {
@@ -97,7 +97,7 @@ describe("Stream.fromEventEmitter", () => {
       ee.emit("data", 42);
       ee.emit("end");
     }, 10);
-    await run(stream.runCollect() as any);
+    await run(stream.toArray() as any);
     // After stream termination, all listeners should have been removed.
     expect(ee.listenerCount("data")).toBe(0);
     expect(ee.listenerCount("end")).toBe(0);
@@ -117,7 +117,7 @@ describe("Stream.async", () => {
         return undefined;
       }),
     );
-    expect(await run(s.runCollect() as any)).toEqual([1, 2]);
+    expect(await run(s.toArray() as any)).toEqual([1, 2]);
     expect(setup).toBe(1);
   });
 
@@ -133,7 +133,7 @@ describe("Stream.async", () => {
         };
       }),
     );
-    await run(s.runCollect() as any);
+    await run(s.toArray() as any);
     expect(cleaned).toBe(1);
   });
 });
