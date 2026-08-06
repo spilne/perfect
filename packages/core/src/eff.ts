@@ -72,7 +72,7 @@ export class Suspend {
 // At the type level: Eff<A, S> is a Suspend node.
 // At runtime: succeed(v) produces a Suspend(Op.Succeed, v) node too —
 // keeping one hidden class. The interpreter special-cases Op.Succeed.
-export type Eff<out A, out S = never> = Suspend & { readonly _A: A; readonly _S: S };
+export type Eff<A, S = never> = Suspend & { readonly _A: A; readonly _S: S };
 
 // ── Type-level helpers ─────────────────────────────────────────────
 export type InferValue<T> = T extends Eff<infer A, any> ? A : never;

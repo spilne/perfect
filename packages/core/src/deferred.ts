@@ -58,9 +58,16 @@ export class InProcessDeferred<A, E = never> implements Deferred<A, E> {
         resume(r.ok ? (succeed(r.value) as any) : (fail(r.error) as any));
         return;
       }
-      this.state.waiters.push((result) => {
+      let canceled = false;
+      const waiter = (result: DeferredResult<A, E>) => {
+        if (canceled) return;
+        canceled = true;
         resume(result.ok ? (succeed(result.value) as any) : (fail(result.error) as any));
-      });
+      };
+      this.state.waiters.push(waiter);
+      return () => {
+        canceled = true;
+      };
     }) as any;
   }
 

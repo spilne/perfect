@@ -21,8 +21,8 @@ export class Fiber<A = unknown> {
   result: FiberResult<A> | null = null;
   private listeners: Array<(result: FiberResult<A>) => void> = [];
   interruptHandle: (() => void) | null = null;
-  children: Fiber[] = [];
-  parent: Fiber | null = null;
+  children: Fiber<any>[] = [];
+  parent: Fiber<any> | null = null;
   scope: Scope | null = null;
 
   // interpreter state — saved when yielding
@@ -42,6 +42,11 @@ export class Fiber<A = unknown> {
     if (this.state === FiberState.Done) return;
     this.state = FiberState.Done;
     this.result = result;
+    if (this.parent) {
+      const index = this.parent.children.indexOf(this);
+      if (index >= 0) this.parent.children.splice(index, 1);
+      this.parent = null;
+    }
     // interrupt children on completion
     for (const child of this.children) child.interrupt();
     this.children.length = 0;
@@ -86,7 +91,7 @@ export class Fiber<A = unknown> {
   // runtime.ts circular import.
   _resume?: () => void;
 
-  addChild(child: Fiber): void {
+  addChild(child: Fiber<any>): void {
     this.children.push(child);
     child.parent = this;
   }

@@ -35,9 +35,12 @@ type UnionToIntersection<U> = (U extends any ? (x: U) => void : never) extends (
   ? I
   : never;
 
-type MergedServices<L extends readonly Layer<any, any>[]> = UnionToIntersection<
-  L[number] extends Eff<infer S, any> ? S : never
->;
+type MergedServices<L extends readonly Layer<any, any>[]> =
+  UnionToIntersection<L[number] extends Eff<infer S, any> ? S : never> extends infer S
+    ? S extends Record<string, any>
+      ? S
+      : Record<string, any>
+    : Record<string, any>;
 
 type MergedEffects<L extends readonly Layer<any, any>[]> =
   L[number] extends Eff<any, infer E> ? E : never;

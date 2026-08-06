@@ -52,8 +52,8 @@ const err2 = run(fail(new NotFound()));
 const err3 = run(UserRepo.get.flatMap((repo) => repo.find("1")));
 
 // Multiple missing services
-// @ts-expect-error
 const err4 = run(
+  // @ts-expect-error
   UserRepo.get.flatMap((repo) =>
     Logger.get.flatMap((log) => log.info("hello").flatMap(() => repo.find("1"))),
   ),

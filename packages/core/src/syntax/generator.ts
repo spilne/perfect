@@ -25,7 +25,7 @@ declare module "../eff" {
   }
 }
 
-(Suspend.prototype as any)[Symbol.iterator] = function* (this: Suspend) {
+(Suspend.prototype as any)[Symbol.iterator] = function* (this: Suspend): Generator<Suspend, any, any> {
   return yield this;
 };
 

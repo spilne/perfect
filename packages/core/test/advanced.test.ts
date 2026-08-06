@@ -82,6 +82,10 @@ describe("race", () => {
     const slow = delay(succeed("slow"), 50);
     await expect(run(race([failing, slow]))).rejects.toBe("oops");
   });
+
+  test("empty race fails instead of hanging", async () => {
+    await expect(run(race([]))).rejects.toThrow("race: empty input");
+  });
 });
 
 // ── Timeout ────────────────────────────────────────────────────────
@@ -315,5 +319,12 @@ describe("complex compositions", () => {
 
     const result = await run(program);
     expect(result.sort()).toEqual(["a", "b", "c"]);
+  });
+
+  test("caught all failure does not interrupt unrelated forked child", async () => {
+    const program = fork(sleep(10).as("survived")).flatMap((child) =>
+      all([fail("boom")]).catch(() => join(child)),
+    );
+    expect(await run(program)).toBe("survived");
   });
 });

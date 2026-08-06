@@ -1,9 +1,14 @@
 // Worker-side executor — this file runs INSIDE each worker thread
 // It receives tasks via postMessage and sends results back
 
-declare var self: Worker;
+type WorkerGlobal = {
+  onmessage: ((event: MessageEvent) => void | Promise<void>) | null;
+  postMessage(message: unknown): void;
+};
 
-self.onmessage = async (event: MessageEvent) => {
+const workerSelf = globalThis as unknown as WorkerGlobal;
+
+workerSelf.onmessage = async (event: MessageEvent) => {
   const { id, fnSource, arg } = event.data as {
     id: number;
     fnSource: string;
@@ -14,9 +19,9 @@ self.onmessage = async (event: MessageEvent) => {
     // reconstruct the function from source
     const fn = new Function("return " + fnSource)();
     const result = await fn(arg);
-    self.postMessage({ id, ok: true, value: result });
+    workerSelf.postMessage({ id, ok: true, value: result });
   } catch (error) {
-    self.postMessage({
+    workerSelf.postMessage({
       id,
       ok: false,
       error: error instanceof Error ? error.message : String(error),

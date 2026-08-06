@@ -1,4 +1,4 @@
-export type { Eff, Throws, Needs, InferValue, InferEffects } from "./eff";
+export type { Eff, Throws, Needs, InferValue, InferEffects, EffectCheck } from "./eff";
 export { Cause } from "./cause";
 export type { Cause as CauseT } from "./cause";
 export { Exit } from "./exit";

@@ -1,5 +1,5 @@
 import { Cause } from "./cause";
-import { type Eff, Suspend, Cont, Op } from "./eff";
+import { type Eff, type EffectCheck, Suspend, Cont, Op } from "./eff";
 import { type Context, emptyContext, mergeContexts } from "./service";
 import { Fiber, FiberState } from "./fiber";
 import { Scope } from "./scope";
@@ -42,7 +42,7 @@ export function evalSync(
   loop: while (true) {
     if (!(cur instanceof Suspend)) {
       while (k !== null) {
-        const frame = k;
+        const frame: Cont = k;
         k = frame.next;
         switch (frame.op) {
           case Op.FlatMap: {
@@ -145,7 +145,7 @@ export function evalSync(
   }
 }
 
-function runFiberLoop(fiber: Fiber): void {
+function runFiberLoop(fiber: Fiber<any>): void {
   if (fiber.state === FiberState.Done) return;
   fiber.state = FiberState.Running;
   fiber.opCount = 0;
@@ -181,7 +181,7 @@ function runFiberLoop(fiber: Fiber): void {
 
   loop: while (true) {
     // check interruption
-    if (fiber.state === FiberState.Done) {
+    if ((fiber.state as FiberState) === FiberState.Done) {
       return;
     }
 
@@ -458,9 +458,11 @@ function runFiberLoop(fiber: Fiber): void {
         const results = new Array(len);
         let remaining = len;
         let failed = false;
+        const children: Fiber<any>[] = [];
 
         for (let i = 0; i < len; i++) {
           const child = makeChild(fiber, effects[i], savedCtx);
+          children.push(child);
 
           child.onComplete((result) => {
             if (failed) return;
@@ -473,7 +475,7 @@ function runFiberLoop(fiber: Fiber): void {
               }
             } else {
               failed = true;
-              for (const c of fiber.children) if (c !== child) c.interrupt();
+              for (const c of children) if (c !== child) c.interrupt();
               fiber.current = new Suspend(Op.Fail, result.cause, null);
               fiber.state = FiberState.Ready;
               fiber.scheduler.schedule(() => runFiberLoop(fiber));
@@ -494,6 +496,10 @@ function runFiberLoop(fiber: Fiber): void {
 
       case Op.Race: {
         const effects = cur.a as Suspend[];
+        if (effects.length === 0) {
+          cur = new Suspend(Op.Fail, Cause.die(new Error("race: empty input")), null);
+          continue loop;
+        }
         fiber.stack = k;
         fiber.context = context;
         const savedCtx = context;
@@ -817,7 +823,7 @@ function stepInline(
       default: {
         // Ops we can't inline (Fork, All, etc.) — delegate to the fiber runtime.
         // No structured parent relationship here; the fiber is orphan.
-        const child = bootstrapFiber(cur, parentFiber?.scheduler);
+        const child = bootstrapFiber<any>(cur as Eff<any, any>, parentFiber?.scheduler);
         child.context = context;
         child.onComplete((result) => {
           stepInline(
@@ -871,7 +877,7 @@ function bootstrapFiber<A>(eff: Eff<A, any>, scheduler?: Scheduler): Fiber<A> {
 // Create a child fiber — used by every op that spawns (All, Fork, Race,
 // ForkDaemon, stepInline fallback). Doesn't schedule; caller attaches
 // onComplete/scope/etc., then calls runChild(child).
-function makeChild(parent: Fiber, eff: any, context: Context, structured = true): Fiber {
+function makeChild(parent: Fiber<any>, eff: any, context: Context, structured = true): Fiber<any> {
   const child = new Fiber();
   child.current = eff;
   child.context = context;
@@ -909,7 +915,7 @@ function startFiberPromise<A, T>(
   });
 }
 
-export function run<A>(eff: Eff<A, any>, scheduler?: Scheduler): Promise<A> {
+export function run<A, S>(eff: Eff<A, S> & EffectCheck<S>, scheduler?: Scheduler): Promise<A> {
   // Literal-leaf fast path — see top-of-file comment for rationale.
   const node = eff as any;
   if (node.op === Op.Succeed) return Promise.resolve(node.a);
@@ -931,7 +937,7 @@ export function runSync<A>(eff: Eff<A, never>): A {
   let done = false;
 
   const scheduler = new SyncScheduler();
-  const fiber = bootstrapFiber(eff, scheduler);
+  const fiber = bootstrapFiber<A>(eff as Eff<A, any>, scheduler);
   fiber.onComplete((r) => {
     done = true;
     if (r.ok) result = r.value;
@@ -945,8 +951,11 @@ export function runSync<A>(eff: Eff<A, never>): A {
   return result as A;
 }
 
-export function runFiber<A>(eff: Eff<A, any>, scheduler?: Scheduler): Fiber<A> {
-  const fiber = bootstrapFiber(eff, scheduler);
+export function runFiber<A, S>(
+  eff: Eff<A, S> & EffectCheck<S>,
+  scheduler?: Scheduler,
+): Fiber<A> {
+  const fiber = bootstrapFiber<A>(eff as Eff<A, any>, scheduler);
   fiber.scheduler.schedule(() => runFiberLoop(fiber));
   return fiber;
 }
