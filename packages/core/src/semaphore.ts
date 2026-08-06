@@ -19,7 +19,7 @@ export interface Semaphore {
 
 class InProcessSemaphore implements Semaphore {
   private permits: number;
-  private waiters: Array<() => void> = [];
+  private waiters: Array<{ canceled: boolean; resume: () => void }> = [];
 
   constructor(permits: number) {
     this.permits = permits;
@@ -32,18 +32,31 @@ class InProcessSemaphore implements Semaphore {
         resume(succeed(undefined) as any);
         return;
       }
-      this.waiters.push(() => {
-        this.permits--;
-        resume(succeed(undefined) as any);
-      });
+      const waiter = {
+        canceled: false,
+        resume: () => {
+          if (waiter.canceled) return;
+          waiter.canceled = true;
+          resume(succeed(undefined) as any);
+        },
+      };
+      this.waiters.push(waiter);
+      return () => {
+        waiter.canceled = true;
+      };
     }) as any;
   }
 
   release(): Eff<void, never> {
     return sync(() => {
       this.permits++;
-      const waiter = this.waiters.shift();
-      if (waiter) waiter();
+      while (this.waiters.length > 0) {
+        const waiter = this.waiters.shift()!;
+        if (waiter.canceled) continue;
+        this.permits--;
+        waiter.resume();
+        break;
+      }
     });
   }
 

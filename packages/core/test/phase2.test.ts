@@ -6,7 +6,9 @@ import {
   suspend,
   sleep,
   fork,
+  forkDaemon,
   join,
+  interrupt,
   all,
   ensuring,
   run,
@@ -155,6 +157,17 @@ describe("Queue", () => {
     );
     expect(await run(program)).toBe(2);
   });
+
+  test("interrupted take does not consume a later offer", async () => {
+    const program = Queue.unbounded<number>().flatMap((q) =>
+      forkDaemon(q.take()).flatMap((waiter) =>
+        sleep(1).flatMap(() =>
+          interrupt(waiter).flatMap(() => q.offer(123).flatMap(() => q.size)),
+        ),
+      ),
+    );
+    expect(await run(program)).toBe(1);
+  });
 });
 
 // ── Semaphore ──────────────────────────────────────────────────────
@@ -201,6 +214,17 @@ describe("Semaphore", () => {
   test("withPermit releases on failure", async () => {
     const program = Semaphore.make(1).flatMap((sem) =>
       sem.withPermit(fail("oops")).catch(() => sem.available),
+    );
+    expect(await run(program)).toBe(1);
+  });
+
+  test("interrupted acquire does not consume a later release", async () => {
+    const program = Semaphore.make(0).flatMap((sem) =>
+      forkDaemon(sem.acquire()).flatMap((waiter) =>
+        sleep(1).flatMap(() =>
+          interrupt(waiter).flatMap(() => sem.release().flatMap(() => sem.available)),
+        ),
+      ),
     );
     expect(await run(program)).toBe(1);
   });

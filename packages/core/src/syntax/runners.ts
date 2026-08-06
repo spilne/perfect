@@ -1,4 +1,4 @@
-import { type Eff, Suspend } from "../eff";
+import { type Eff, type EffectCheck, Suspend } from "../eff";
 import { run, runSync, runExit, runFiber } from "../runtime";
 import type { Scheduler } from "../scheduler";
 import type { Fiber } from "../fiber";
@@ -6,10 +6,10 @@ import type { Exit } from "../exit";
 
 declare module "../eff" {
   interface Suspend {
-    run<A>(this: Eff<A, any>, scheduler?: Scheduler): Promise<A>;
+    run<A, S>(this: Eff<A, S> & EffectCheck<S>, scheduler?: Scheduler): Promise<A>;
     runSync<A>(this: Eff<A, never>): A;
     runExit<A>(this: Eff<A, any>, scheduler?: Scheduler): Promise<Exit<unknown, A>>;
-    runFiber<A>(this: Eff<A, any>, scheduler?: Scheduler): Fiber<A>;
+    runFiber<A, S>(this: Eff<A, S> & EffectCheck<S>, scheduler?: Scheduler): Fiber<A>;
   }
 }
 

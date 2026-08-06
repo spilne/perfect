@@ -17,6 +17,9 @@ export type QueueShutdown = QueueClosed;
 
 type TakeResume<A> = (eff: Eff<A, Throws<QueueClosed>>) => void;
 type OfferResume = (eff: Eff<boolean, Throws<QueueClosed>>) => void;
+type TakeWaiter<A> = { canceled: boolean; resume: TakeResume<A> };
+type OfferWaiter<A> = { canceled: boolean; value: A; resume: OfferResume };
+type CloseWaiter = { canceled: boolean; resume: () => void };
 
 export interface Queue<A> {
   /** Push a value. Blocks if bounded and full. Fails with QueueClosed if closed. */
@@ -45,10 +48,10 @@ export interface Queue<A> {
 
 class InProcessQueue<A> implements Queue<A> {
   private buffer: A[] = [];
-  private takers: TakeResume<A>[] = [];
-  private offerers: Array<{ value: A; resume: OfferResume }> = [];
+  private takers: TakeWaiter<A>[] = [];
+  private offerers: Array<OfferWaiter<A>> = [];
   private _closed = false;
-  private closeWaiters: Array<() => void> = [];
+  private closeWaiters: Array<CloseWaiter> = [];
 
   constructor(private readonly capacity: number) {}
 
@@ -57,9 +60,9 @@ class InProcessQueue<A> implements Queue<A> {
     // All sync. Only fall to async when blocking on capacity.
     return suspend(() => {
       if (this._closed) return fail(new QueueClosed()) as any;
-      const taker = this.takers.shift();
+      const taker = this.nextTaker();
       if (taker) {
-        taker(succeed(value) as any);
+        taker.resume(succeed(value) as any);
         return succeed(true) as any;
       }
       if (this.buffer.length < this.capacity) {
@@ -68,7 +71,11 @@ class InProcessQueue<A> implements Queue<A> {
       }
       // Slow path: bounded queue is full — block until a taker arrives.
       return async<boolean, QueueClosed>((resume) => {
-        this.offerers.push({ value, resume: resume as any });
+        const offerer: OfferWaiter<A> = { canceled: false, value, resume: resume as any };
+        this.offerers.push(offerer);
+        return () => {
+          offerer.canceled = true;
+        };
       }) as any;
     }) as any;
   }
@@ -78,21 +85,25 @@ class InProcessQueue<A> implements Queue<A> {
     return suspend(() => {
       if (this.buffer.length > 0) {
         const item = this.buffer.shift()!;
-        const offerer = this.offerers.shift();
+        const offerer = this.nextOfferer();
         if (offerer) {
           this.buffer.push(offerer.value);
           offerer.resume(succeed(true) as any);
         }
         return succeed(item) as any;
       }
-      const offerer = this.offerers.shift();
+      const offerer = this.nextOfferer();
       if (offerer) {
         offerer.resume(succeed(true) as any);
         return succeed(offerer.value) as any;
       }
       if (this._closed) return fail(new QueueClosed()) as any;
       return async<A, QueueClosed>((resume) => {
-        this.takers.push(resume as any);
+        const taker: TakeWaiter<A> = { canceled: false, resume: resume as any };
+        this.takers.push(taker);
+        return () => {
+          taker.canceled = true;
+        };
       }) as any;
     }) as any;
   }
@@ -100,8 +111,8 @@ class InProcessQueue<A> implements Queue<A> {
   takeAll(): Eff<A[], never> {
     return sync(() => {
       const items = this.buffer.splice(0);
-      while (this.offerers.length > 0) {
-        const offerer = this.offerers.shift()!;
+      let offerer: OfferWaiter<A> | undefined;
+      while ((offerer = this.nextOfferer())) {
         items.push(offerer.value);
         offerer.resume(succeed(true) as any);
       }
@@ -135,9 +146,9 @@ class InProcessQueue<A> implements Queue<A> {
       this._closed = true;
       const takers = this.takers.splice(0);
       const offerers = this.offerers.splice(0);
-      for (const t of takers) t(fail(new QueueClosed()) as any);
-      for (const o of offerers) o.resume(fail(new QueueClosed()) as any);
-      for (const w of this.closeWaiters) w();
+      for (const t of takers) if (!t.canceled) t.resume(fail(new QueueClosed()) as any);
+      for (const o of offerers) if (!o.canceled) o.resume(fail(new QueueClosed()) as any);
+      for (const w of this.closeWaiters) if (!w.canceled) w.resume();
       this.closeWaiters.length = 0;
     });
   }
@@ -153,12 +164,41 @@ class InProcessQueue<A> implements Queue<A> {
         resume(succeed(undefined) as any);
         return;
       }
-      this.closeWaiters.push(() => resume(succeed(undefined) as any));
+      const waiter: CloseWaiter = {
+        canceled: false,
+        resume: () => resume(succeed(undefined) as any),
+      };
+      this.closeWaiters.push(waiter);
+      return () => {
+        waiter.canceled = true;
+      };
     }) as any;
   }
 
   get awaitShutdown(): Eff<void, never> {
     return this.awaitClose;
+  }
+
+  private nextTaker(): TakeWaiter<A> | undefined {
+    while (this.takers.length > 0) {
+      const taker = this.takers.shift()!;
+      if (!taker.canceled) {
+        taker.canceled = true;
+        return taker;
+      }
+    }
+    return undefined;
+  }
+
+  private nextOfferer(): OfferWaiter<A> | undefined {
+    while (this.offerers.length > 0) {
+      const offerer = this.offerers.shift()!;
+      if (!offerer.canceled) {
+        offerer.canceled = true;
+        return offerer;
+      }
+    }
+    return undefined;
   }
 }
 

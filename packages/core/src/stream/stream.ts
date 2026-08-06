@@ -746,7 +746,7 @@ export class Stream<A, S = never> {
           function go(s: Stream<A, any>): void {
             const stepEff = s.step as any;
             import("../runtime").then(({ run }) => {
-              run(stepEff).then(
+              (run(stepEff) as Promise<Step<A>>).then(
                 (step: Step<A>) => {
                   if (step._tag === "Done") {
                     markDone();
@@ -823,7 +823,7 @@ export class Stream<A, S = never> {
         function drainInput(stream: Stream<A, any>) {
           import("../runtime").then(({ run }) => {
             function go(s: Stream<A, any>): void {
-              run(s.step as any).then(
+              (run(s.step as any) as Promise<Step<A>>).then(
                 (step: Step<A>) => {
                   if (step._tag === "Done") {
                     inputDone = true;
@@ -856,7 +856,7 @@ export class Stream<A, S = never> {
               results.push({ done: false });
               running++;
 
-              run(f(items[i]!) as any).then(
+              (run(f(items[i]!) as any) as Promise<B>).then(
                 (value: B) => {
                   results[idx] = { value, done: true };
                   running--;
@@ -917,7 +917,7 @@ export class Stream<A, S = never> {
         function drainInput(stream: Stream<A, any>) {
           import("../runtime").then(({ run }) => {
             function go(s: Stream<A, any>): void {
-              run(s.step as any).then(
+              (run(s.step as any) as Promise<Step<A>>).then(
                 (step: Step<A>) => {
                   if (step._tag === "Done") {
                     inputDone = true;
@@ -944,7 +944,7 @@ export class Stream<A, S = never> {
                 return;
               }
               running++;
-              run(f(items[i]!) as any).then(
+              (run(f(items[i]!) as any) as Promise<B>).then(
                 (value: B) => {
                   buffer.push(value);
                   running--;
@@ -1020,7 +1020,7 @@ export class Stream<A, S = never> {
 
         import("../runtime").then(({ run }) => {
           function go(s: Stream<A, any>): void {
-            run(s.step as any).then(
+            (run(s.step as any) as Promise<Step<A>>).then(
               (step: Step<A>) => {
                 if (step._tag === "Done") {
                   inputDone = true;
@@ -1082,7 +1082,7 @@ export class Stream<A, S = never> {
 
         import("../runtime").then(({ run }) => {
           function go(s: Stream<A, any>): void {
-            run(s.step as any).then(
+            (run(s.step as any) as Promise<Step<A>>).then(
               (step: Step<A>) => {
                 if (step._tag === "Done") {
                   inputDone = true;
@@ -1147,9 +1147,9 @@ export class Stream<A, S = never> {
   }
 
   onFinalize<S2>(finalizer: Eff<void, S2>): Stream<A, S | S2> {
-    return new Stream(new Suspend(Op.Ensuring, this.step, finalizer) as any).mapContinuation(
+    return (new Stream(new Suspend(Op.Ensuring, this.step, finalizer) as any).mapContinuation(
       (next) => next.onFinalize(finalizer),
-    );
+    ) as any) as Stream<A, S | S2>;
   }
 
   /**

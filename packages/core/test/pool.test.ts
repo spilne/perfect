@@ -1,5 +1,17 @@
 import { describe, test, expect } from "bun:test";
-import { eff, succeed, sync, sleep, fork, join, all, run, Pool, type Eff } from "../src";
+import {
+  eff,
+  succeed,
+  sync,
+  sleep,
+  fork,
+  join,
+  interrupt,
+  all,
+  run,
+  Pool,
+  type Eff,
+} from "../src";
 
 interface FakeConn {
   id: number;
@@ -82,6 +94,24 @@ describe("Pool", () => {
     );
     // Both used the same conn (id=1) because A released before B started
     expect(order).toEqual(["A:1", "B:1"]);
+  });
+
+  test("interrupted waiter does not take the next released resource", async () => {
+    nextId = 0;
+    const result = await run(
+      eff(function* () {
+        const pool = yield* Pool.make({ acquire: makeConn, release: closeConn, size: 1 });
+        const holder = yield* fork(pool.use(() => sleep(20)));
+        const waiter = yield* fork(pool.use((c) => succeed(c.id)));
+        yield* sleep(1);
+        yield* interrupt(waiter);
+        yield* join(holder);
+        const idle = yield* pool.idle;
+        const inUse = yield* pool.inUse;
+        return { idle, inUse };
+      }) as any,
+    );
+    expect(result).toEqual({ idle: 1, inUse: 0 });
   });
 
   test("validate rejects bad resources, fresh acquired", async () => {

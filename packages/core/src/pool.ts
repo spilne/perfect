@@ -54,7 +54,7 @@ export interface Pool<R> {
 class InProcessPool<R> implements Pool<R> {
   private readonly idleList: R[] = [];
   private inUseCount = 0;
-  private waiters: Array<(r: R | PoolClosed) => void> = [];
+  private waiters: Array<{ canceled: boolean; resume: (r: R | PoolClosed) => void }> = [];
   private closed = false;
 
   constructor(private readonly opts: PoolOptions<R>) {}
@@ -84,7 +84,7 @@ class InProcessPool<R> implements Pool<R> {
       // Reject waiters
       const waiters = this.waiters.splice(0);
       const closedToken = new PoolClosed();
-      for (const w of waiters) w(closedToken);
+      for (const w of waiters) if (!w.canceled) w.resume(closedToken);
       // Snapshot idle for release
       const toRelease = this.idleList.splice(0);
       return toRelease;
@@ -131,14 +131,23 @@ class InProcessPool<R> implements Pool<R> {
       if (decision.kind === "create") return this.opts.acquire as any;
       // Wait for release
       return async<R, PoolClosed>((resume) => {
-        this.waiters.push((r: R | PoolClosed) => {
-          if (r instanceof PoolClosed) {
-            resume(fail(r) as any);
-          } else {
-            this.inUseCount++;
-            resume(sync(() => r) as any);
-          }
-        });
+        const waiter = {
+          canceled: false,
+          resume: (r: R | PoolClosed) => {
+            if (waiter.canceled) return;
+            waiter.canceled = true;
+            if (r instanceof PoolClosed) {
+              resume(fail(r) as any);
+            } else {
+              this.inUseCount++;
+              resume(sync(() => r) as any);
+            }
+          },
+        };
+        this.waiters.push(waiter);
+        return () => {
+          waiter.canceled = true;
+        };
       }) as any;
     }) as Eff<R, Throws<PoolClosed>>;
   }
@@ -151,9 +160,9 @@ class InProcessPool<R> implements Pool<R> {
         return r;
       }
       // Hand off to a waiter if any
-      const waiter = this.waiters.shift();
+      const waiter = this.nextWaiter();
       if (waiter) {
-        waiter(r);
+        waiter.resume(r);
         return null;
       }
       // No waiter: return to idle pool
@@ -163,6 +172,14 @@ class InProcessPool<R> implements Pool<R> {
       if (toRelease === null) return sync(() => undefined) as any;
       return this.opts.release(toRelease);
     }) as Eff<void, never>;
+  }
+
+  private nextWaiter(): { canceled: boolean; resume: (r: R | PoolClosed) => void } | undefined {
+    while (this.waiters.length > 0) {
+      const waiter = this.waiters.shift()!;
+      if (!waiter.canceled) return waiter;
+    }
+    return undefined;
   }
 }
 

@@ -12,6 +12,8 @@
   },
   "scripts": {
     "test": "bun test",
+    "typecheck": "tsc -p tsconfig.src.json --noEmit",
+    "typecheck:types": "tsc -p tsconfig.type-tests.json --noEmit",
     "bench": "bun run bench/index.ts"
   },
   "devDependencies": {
