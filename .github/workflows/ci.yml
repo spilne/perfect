@@ -18,15 +18,32 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  BUN_VERSION: latest
+  CARGO_TERM_COLOR: always
+
 jobs:
   typescript:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Cache Bun install cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock', 'package.json', 'packages/*/package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
 
       - run: bun install --frozen-lockfile
 
@@ -44,6 +61,7 @@ jobs:
 
   rust:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -51,28 +69,46 @@ jobs:
         with:
           targets: wasm32-wasip1
 
+      - name: Cache Rust build outputs
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            crates/perfect-transform -> target
+            crates/swc-plugin-perfect -> target
+
       - run: cargo test --locked
         working-directory: crates/perfect-transform
 
       - run: cargo test --locked
         working-directory: crates/swc-plugin-perfect
 
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
+      - run: cargo build --locked --release
+        working-directory: crates/perfect-transform
 
-      - run: bun run build:rust
+      - run: cargo build --locked --target wasm32-wasip1 --release
+        working-directory: crates/swc-plugin-perfect
 
-      - run: bun run build:swc
+      - run: mkdir -p packages/swc-plugin/dist
+
+      - run: cp crates/swc-plugin-perfect/target/wasm32-wasip1/release/swc_plugin_perfect.wasm packages/swc-plugin/dist/plugin.wasm
 
   performance:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Cache Bun install cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock', 'package.json', 'packages/*/package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
 
       - run: bun install --frozen-lockfile
 
