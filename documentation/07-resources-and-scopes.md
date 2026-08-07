@@ -135,6 +135,36 @@ scoped(
 // closes c, then b, then a
 ```
 
+## Finalizer failures
+
+Finalizer failures are not swallowed. Perfect preserves them in the `Cause`
+tree so diagnostics are deterministic:
+
+| body result | finalizer result | final outcome |
+|---|---|---|
+| success | success | original success |
+| success | failure/defect | finalizer failure |
+| failure | success | original failure |
+| failure | failure/defect | `Cause.Then(bodyCause, finalizerCause)` |
+
+That means `runExit` can distinguish "the program failed" from "the program
+failed, then cleanup also failed":
+
+```ts
+import { Cause, die, fail, runExit } from "@perfect/core";
+
+const exit = await fail("body")
+  .ensuring(die("release"))
+  .runExit();
+
+if (exit._tag === "Failure") {
+  console.log(Cause.pretty(exit.cause));
+  // → (Fail(body) ; Die(release))
+}
+```
+
+`scoped(acquireRelease(...))` follows the same rule when a scope closes.
+
 ## Scoped layers
 
 Layers can register finalizers via `acquireRelease` — they fire when the
@@ -156,6 +186,9 @@ program built with `.with(layer)` ends. See
   nowhere to register the finalizer.
 - **Release runs are uninterruptible.** If your release effect is slow, it
   will block scope exit. Make releases fast.
+- **Release failures are visible.** Handle them with `runExit`,
+  `.catchAllCause`, or `onExit` when cleanup failure is operationally
+  meaningful.
 - **`ensuring` doesn't acquire — just finalizes.** Use `acquireRelease` if
   you need acquire-then-release semantics.
 

@@ -127,6 +127,43 @@ import { uninterruptible } from "@perfect/core";
 const safe = uninterruptible(criticalCleanup);
 ```
 
+Interruption is cooperative. A fiber observes it when it is running in an
+interruptible region, resumes from an async boundary, or walks its
+continuation stack. Finalizers registered by `ensuring` / `scoped` still run
+during interruption, and async waiters unregister their interrupt handles so
+late callbacks do not resume a cancelled fiber.
+
+## Fiber status and supervision
+
+`Fiber` exposes lightweight diagnostics for tests and debugging:
+
+```ts
+import { addFiberSupervisor, sleep } from "@perfect/core";
+
+const stop = addFiberSupervisor({
+  onStart: (fiber) => console.log("start", fiber.status),
+  onFork: (_parent, child) => console.log("fork", child.snapshot()),
+  onInterrupt: (fiber) => console.log("interrupt", fiber.childCount),
+  onEnd: (fiber, result) => console.log("end", fiber.status, result.ok),
+});
+
+const fiber = await sleep(1_000).forkDaemon().run();
+console.log(fiber.snapshot());
+fiber.interrupt();
+stop();
+```
+
+Available fiber diagnostics:
+
+| | |
+|---|---|
+| `fiber.status` | `"ready"`, `"running"`, `"suspended"`, or `"done"` |
+| `fiber.interrupted` | true when interrupted or pending interruption |
+| `fiber.childCount` | number of structured children currently owned |
+| `fiber.snapshot()` | stable `{ status, interrupted, childCount }` object |
+| `fiber.childrenSnapshot()` | copy of currently owned child fibers |
+| `addFiberSupervisor(hooks)` | observe fiber start/fork/interrupt/end events |
+
 ## API summary
 
 | | |
@@ -144,6 +181,7 @@ const safe = uninterruptible(criticalCleanup);
 | `uninterruptible(eff)` | block interruption |
 | `interruptible(eff)` | restore interruptibility |
 | `yieldNow` | give other fibers a turn |
+| `addFiberSupervisor(hooks)` | attach diagnostic fiber lifecycle hooks |
 
 ## Pitfalls
 
@@ -151,6 +189,9 @@ const safe = uninterruptible(criticalCleanup);
 - **`race` takes an array** — `race([a, b])`, not `race(a, b)`.
 - **Daemons leak if you don't track them.** Hold onto the `Fiber` if you
   might need to cancel it.
+- **Supervisors are diagnostic hooks.** They should not contain application
+  logic; exceptions thrown by hooks are ignored so supervision cannot perturb
+  runtime semantics.
 
 ## Next
 

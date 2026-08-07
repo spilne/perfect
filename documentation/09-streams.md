@@ -33,6 +33,7 @@ Lazy, fused, effect-typed sequences. Adjacent pure operators (`map` /
 | `.drop(n)` | skip first n |
 | `.flatMap(f)` | flatten one stream per element |
 | `.mapEffect(f)` | map with an effect |
+| `.through(pipe)` | run a `Pipe<A, B>` stream-to-stream transformer |
 
 ## Run
 
@@ -41,6 +42,45 @@ Lazy, fused, effect-typed sequences. Adjacent pure operators (`map` /
 | `.toArray()` | collect into `A[]` |
 | `.drain()` | run for side effects, return `void` |
 | `.forEach(f)` | apply effect per element |
+| `.head()` | first element, or `undefined` |
+| `.last()` | last element, or `undefined` |
+| `.count()` | count emitted elements |
+| `.runSink(sink)` | run a reusable terminal postprocessor |
+
+## Pipes vs sinks
+
+`Pipe` and `Sink` solve different problems:
+
+| | |
+|---|---|
+| `Pipe<I, O, S>` | stream-to-stream transformation: `Stream<I> -> Stream<O>` |
+| `Sink<A, B, S>` | terminal postprocessor: `Stream<A> -> Eff<B, S>` |
+
+Use a pipe when more streaming should happen after the operation. Use a sink
+when you want one final value or side effect.
+
+```ts
+import { Stream, Pipes, Sinks } from "@perfect/core";
+
+const words = await Stream.fromArray(["a\nb", "\nc"])
+  .through(Pipes.lines)
+  .runSink(Sinks.collectAll())
+  .run();
+
+console.log(words); // → ["a", "b", "c"]
+```
+
+Built-in sinks:
+
+| | |
+|---|---|
+| `Sinks.collectAll<A>()` | collect all elements into `A[]` |
+| `Sinks.drain<A>()` | consume and discard |
+| `Sinks.forEach(f)` | effectful action per element |
+| `Sinks.fold(zero, f)` | fold to one value |
+| `Sinks.head<A>()` | first element |
+| `Sinks.last<A>()` | last element |
+| `Sinks.count<A>()` | element count |
 
 ## Examples
 
@@ -142,12 +182,45 @@ const flaky = Stream.suspend(() =>
 const robust = flaky.retry(RetryPolicy.recurs(3));
 ```
 
+## Resource safety
+
+Streams are lazy, so resources attached to a stream are released by terminal
+operators. `onFinalize(finalizer)` runs exactly once when the terminal effect
+finishes, fails, or stops early:
+
+```ts
+import { Stream, sync } from "@perfect/core";
+
+let finalized = 0;
+
+await Stream.fromArray([1, 2, 3])
+  .onFinalize(sync(() => {
+    finalized++;
+  }))
+  .take(1)
+  .drain()
+  .run();
+
+console.log(finalized); // → 1
+```
+
+Push-source bridges use the same mechanism. `Stream.fromCallback` and
+`Stream.fromEventEmitter` unregister their waiter/listeners when the consumer
+short-circuits with `take`, `head`, `runSink(Sinks.head())`, or any other
+terminal operation that stops before natural source completion.
+
+Parallel stream operators preserve failures. A failed upstream pull or failed
+`parEvalMap` mapper produces a failed stream pull with the original `Cause`
+rather than silently ending the stream.
+
 ## Pitfalls
 
 - **Streams are lazy.** Building a 10M-element stream costs nothing until
   you run it.
-- **`forEach` doesn't collect.** If you need both side effects AND a
-  result, use `tap` + `toArray`.
+- **`Pipe` is not terminal.** If you need a final value, use a terminal
+  operator or `runSink`.
+- **`forEach` doesn't collect.** If you need both side effects AND a result,
+  use `tap` + `toArray`, or write a custom `Sink`.
 - **Fusion stops at non-fusible ops.** `mapEffect`, `flatMap`, and `take`
   break the fused walk; expect a perf cliff if you mix them tight.
 

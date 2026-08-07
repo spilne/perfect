@@ -23,10 +23,10 @@ console.log(await run(program)); // 42
 3. [Syntax](./03-syntax.md) — generator vs `.flatMap` vs `eff($)` rewriter
 4. [Services and Layers](./04-services-and-layers.md) — typed dependency injection
 5. [Error handling](./05-error-handling.md) — `.catch`, `.catchTag`, `Cause`, defects vs failures
-6. [Concurrency](./06-concurrency.md) — fork, race, all, fibers
-7. [Resources and scopes](./07-resources-and-scopes.md) — `acquireRelease`, `scoped`, `ensuring`
+6. [Concurrency](./06-concurrency.md) — fork, race, all, fibers, supervision
+7. [Resources and scopes](./07-resources-and-scopes.md) — `acquireRelease`, `scoped`, finalizer causes
 8. [Retry and schedule](./08-retry-and-schedule.md) — `RetryPolicy`, `Schedule`
-9. [Streams](./09-streams.md) — fused, lazy, effect-typed sequences
+9. [Streams](./09-streams.md) — fused, lazy, effect-typed streams, pipes, sinks
 10. [Testing](./10-testing.md) — `TestClock`, `TestRandom`, `TestConsole`
 11. [Resilience + Coordination Primitives](./11-resilience-and-coordination.md) — `CircuitBreaker`, `Singleflight`, `RateLimiter`, `Latch`, `Barrier`, `PubSub`, `SubscriptionRef`, `Pool`
 12. [Utilities](./12-utilities.md) — `Duration`, `CacheStore`
