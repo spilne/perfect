@@ -75,12 +75,28 @@ Built-in sinks:
 | | |
 |---|---|
 | `Sinks.collectAll<A>()` | collect all elements into `A[]` |
+| `Sinks.collectN<A>(n)` | collect up to `n` elements, then stop |
 | `Sinks.drain<A>()` | consume and discard |
+| `Sinks.drainWith(eff)` | drain, then return another effect's result |
 | `Sinks.forEach(f)` | effectful action per element |
+| `Sinks.forEachWhile(f)` | run effectful predicate until it returns false |
 | `Sinks.fold(zero, f)` | fold to one value |
+| `Sinks.foldEffect(zero, f)` | effectful fold |
+| `Sinks.fromEffect(eff)` | ignore input and return an effect |
 | `Sinks.head<A>()` | first element |
 | `Sinks.last<A>()` | last element |
 | `Sinks.count<A>()` | element count |
+
+Sinks are composable values:
+
+```ts
+const sink = Sinks.fold(0, (acc: number, n: number) => acc + n)
+  .contramap((s: string) => s.length)
+  .map((n) => `total:${n}`);
+
+const result = await Stream.of("a", "bb").runSink(sink).run();
+console.log(result); // → "total:3"
+```
 
 ## Examples
 

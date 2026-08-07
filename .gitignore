@@ -12,6 +12,9 @@ bun.lockb
 # Nx cache
 .nx/
 
+# Performance reports
+.perf/
+
 # Transform artifacts
 *.~transformed.ts
 

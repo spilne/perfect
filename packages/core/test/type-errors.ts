@@ -49,6 +49,23 @@ const _ok5: Eff<[number, string], never> = all([succeed(1), succeed("two")] as c
 const _ok6: Eff<{ a: number; b: string }, never> = all({ a: succeed(1), b: succeed("two") });
 const _ok7: Eff<number[], never> = Stream.of(1, 2, 3).runSink(Sinks.collectAll());
 const _ok8: Eff<number | undefined, never> = Stream.of(1, 2, 3).runSink(Sinks.head());
+const _okSink1: Eff<number[], never> = Stream.of(1, 2, 3).runSink(Sinks.collectN(2));
+const _okSink2: Eff<number, never> = Stream.of(1, 2, 3).runSink(
+  Sinks.foldEffect(0, (acc, n) => succeed(acc + n)),
+);
+const _okSink3: Eff<void, never> = Stream.of(1, 2, 3).runSink(
+  Sinks.forEachWhile((n) => succeed(n < 2)),
+);
+const _okSink4: Eff<string, never> = Stream.of(1, 2, 3).runSink(Sinks.drainWith(succeed("done")));
+const _okSink5: Eff<number, never> = Stream.of(1, 2, 3).runSink(Sinks.fromEffect(succeed(42)));
+const _okSink6: Eff<string, never> = Stream.of("a", "bb").runSink(
+  Sinks.fold(0, (acc: number, n: number) => acc + n)
+    .contramap((s: string) => s.length)
+    .map((n) => `total:${n}`),
+);
+const _okLayerMemo: Eff<{ UserRepo: UserRepo }, never> = succeed({
+  UserRepo: { find: (id: string) => succeed(id) } as UserRepo,
+}).memoize();
 
 type Many =
   | Throws<NotFound>

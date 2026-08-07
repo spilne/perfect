@@ -59,7 +59,7 @@ export class Fiber<A = unknown> {
   result: FiberResult<A> | null = null;
   private listeners: Array<(result: FiberResult<A>) => void> = [];
   interruptHandle: (() => void) | null = null;
-  children: Fiber<any>[] = [];
+  private children: Fiber<any>[] = [];
   parent: Fiber<any> | null = null;
   scope: Scope | null = null;
 

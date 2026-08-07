@@ -1,5 +1,16 @@
 import { describe, test, expect } from "bun:test";
-import { eff, succeed, sync, acquireRelease, service, run, runSync, Layer, type Eff } from "../src";
+import {
+  eff,
+  succeed,
+  fail,
+  sync,
+  acquireRelease,
+  service,
+  run,
+  runSync,
+  Layer,
+  type Eff,
+} from "../src";
 
 interface Db {
   query(sql: string): Eff<string, never>;
@@ -159,6 +170,66 @@ describe("Layer", () => {
       return yield* succeed(123);
     });
     expect(runSync(program.with(Layer.merge()))).toBe(123);
+  });
+
+  test("memoize reuses one layer build within a scope", async () => {
+    let builds = 0;
+    const DbLive = sync(() => {
+      builds++;
+      return { Db: { query: (s: string) => succeed(`db:${builds}:${s}`) } as Db };
+    }).memoize();
+
+    const program = eff(function* () {
+      const db1 = yield* Db.get;
+      const a = yield* db1.query("a");
+      const db2 = yield* Db.get;
+      const b = yield* db2.query("b");
+      return [a, b];
+    });
+
+    const result = await run(program.with(Layer.merge(DbLive, DbLive)));
+
+    expect(result).toEqual(["db:1:a", "db:1:b"]);
+    expect(builds).toBe(1);
+  });
+
+  test("memoize is scoped, not global", async () => {
+    let builds = 0;
+    const DbLive = sync(() => {
+      builds++;
+      return { Db: { query: () => succeed(`db:${builds}`) } as Db };
+    }).memoize();
+    const program = eff(function* () {
+      const db = yield* Db.get;
+      return yield* db.query("x");
+    });
+
+    expect(await run(program.with(DbLive))).toBe("db:1");
+    expect(await run(program.with(DbLive))).toBe("db:2");
+    expect(builds).toBe(2);
+  });
+
+  test("failed dependency acquisition releases already acquired services", async () => {
+    const events: string[] = [];
+    const LoggerLive = eff(function* () {
+      const logger = yield* acquireRelease(
+        sync(() => {
+          events.push("acquire:logger");
+          return { log: (msg: string) => events.push(msg) } as Logger;
+        }),
+        () =>
+          sync(() => {
+            events.push("release:logger");
+          }),
+      );
+      return { Logger: logger };
+    });
+    const BrokenDb = fail("db unavailable") as Layer<{ Db: Db }, any>;
+
+    const program = succeed("unused").with(Layer.merge(LoggerLive, BrokenDb));
+
+    await expect(run(program)).rejects.toBe("db unavailable");
+    expect(events).toEqual(["acquire:logger", "release:logger"]);
   });
 
   // ── Chaining API ─────────────────────────────────────────────────

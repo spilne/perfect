@@ -216,4 +216,7 @@ group("sleep(0) chain × 50", () => {
   bench("effect runPromise + sleep(0) × 50", async () => Effect.runPromise(buildEffect()));
 });
 
-await run();
+await run({
+  colors: process.stdout.isTTY,
+  format: process.env.MITATA_FORMAT === "markdown" ? "markdown" : "mitata",
+});
