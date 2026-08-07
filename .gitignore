@@ -5,6 +5,7 @@ dist/
 # Rust
 target/
 Cargo.lock
+!crates/**/Cargo.lock
 
 # Bun
 bun.lockb

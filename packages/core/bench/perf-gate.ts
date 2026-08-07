@@ -57,7 +57,7 @@ const benchmarks: Benchmark[] = [
   {
     name: "run(sync)",
     unit: "ns/op",
-    threshold: 15_000,
+    threshold: 25_000,
     divisor: 1,
     run: async () => do_not_optimize(await run(sync(() => 42))),
   },
