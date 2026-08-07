@@ -12,12 +12,7 @@
 // timeout, race, etc. via Perfect's fluent API.
 
 import { type Eff, type Throws, fail, succeed, tryPromise } from "@perfect/core";
-import {
-  type HttpClientError,
-  HttpParseError,
-  HttpStatusError,
-  HttpUnknownError,
-} from "./errors";
+import { type HttpClientError, HttpParseError, HttpStatusError, HttpUnknownError } from "./errors";
 import { type ResponseParser } from "./response";
 import { type HttpRequestOptions, type HttpTransport, defaultTransport } from "./transport";
 
@@ -139,16 +134,17 @@ export function httpRequest<T, E = string>(
   const { schema, ...rest } = options;
   const url = urlOf(options.url);
   return httpFetchOk<E>(rest)
-    .flatMap((response): Eff<unknown, Throws<HttpClientError>> =>
-      tryPromise(
-        () => response.json(),
-        (cause): HttpClientError =>
-          new HttpParseError({
-            url,
-            cause,
-            message: `Failed to parse JSON from ${url}`,
-          }),
-      ),
+    .flatMap(
+      (response): Eff<unknown, Throws<HttpClientError>> =>
+        tryPromise(
+          () => response.json(),
+          (cause): HttpClientError =>
+            new HttpParseError({
+              url,
+              cause,
+              message: `Failed to parse JSON from ${url}`,
+            }),
+        ),
     )
     .flatMap((data): Eff<T, Throws<HttpClientError>> => {
       const result = schema.safeParse(data);

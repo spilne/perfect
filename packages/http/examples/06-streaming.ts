@@ -2,17 +2,11 @@
 //
 // Run: bun packages/http/examples/06-streaming.ts
 
-import {
-  type Eff,
-  type Throws,
-  succeed,
-  run,
-} from "@perfect/core";
+import { type Eff, type Throws, succeed } from "@perfect/core";
 import {
   type HttpClientError,
   type HttpRequestOptions,
   type HttpTransport,
-  type ResponseParser,
   httpStreamLines,
   httpStreamSSE,
 } from "../src";
@@ -47,12 +41,8 @@ assertEq(lines, ["alpha", "beta", "gamma"]);
 // >>> example: stream-sse
 // httpStreamSSE = lines → parseSSE. Server-Sent Events are emitted as
 // SSEvent objects with { event, data, id?, retry? }.
-const sseT = new StubTransport(
-  () =>
-    streamOf([
-      "event: tick\ndata: 1\n\n",
-      "event: tick\ndata: 2\nid: m-2\n\n",
-    ]),
+const sseT = new StubTransport(() =>
+  streamOf(["event: tick\ndata: 1\n\n", "event: tick\ndata: 2\nid: m-2\n\n"]),
 );
 const events = await httpStreamSSE({ url: "/events", transport: sseT }).toArray().run();
 assertEq(events.length, 2);

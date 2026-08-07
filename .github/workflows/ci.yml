@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    paths:
+      - "packages/**"
+      - "crates/**"
+      - "scripts/**"
+      - ".github/workflows/ci.yml"
+      - ".oxlintrc.json"
+      - "package.json"
+      - "bun.lock"
+      - "nx.json"
+      - "tsconfig.package.json"
+
+permissions:
+  contents: read
+
+jobs:
+  typescript:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install --frozen-lockfile
+
+      - run: bun run fmt:check
+
+      - run: bun run lint
+
+      - run: bun run typecheck
+
+      - run: bun test --recursive packages/
+
+      - run: bun run build:packages
+
+      - run: bun run smoke:packages
+
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip1
+
+      - run: cargo test
+        working-directory: crates/perfect-transform
+
+      - run: cargo test
+        working-directory: crates/swc-plugin-perfect
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun run build:rust
+
+      - run: bun run build:swc

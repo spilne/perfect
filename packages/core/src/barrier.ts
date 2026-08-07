@@ -30,11 +30,13 @@ class InProcessBarrier implements Barrier {
   ) {}
 
   get await(): Eff<void, never> {
-    return this.count.updateAndGet((n) => n + 1).flatMap((n) =>
-      n >= this.parties
-        ? (this.deferred.succeed(undefined).map(() => undefined) as Eff<void, never>)
-        : (this.deferred.await as Eff<void, never>),
-    ) as Eff<void, never>;
+    return this.count
+      .updateAndGet((n) => n + 1)
+      .flatMap((n) =>
+        n >= this.parties
+          ? (this.deferred.succeed(undefined).map(() => undefined) as Eff<void, never>)
+          : (this.deferred.await as Eff<void, never>),
+      ) as Eff<void, never>;
   }
 
   get arrived(): Eff<number, never> {

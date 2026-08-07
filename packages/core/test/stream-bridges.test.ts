@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { Stream, run, succeed, sleep, sync } from "../src";
+import { Stream, run, sync } from "../src";
 import { EventEmitter } from "node:events";
 
 describe("Stream.fromCallback", () => {
@@ -60,6 +60,20 @@ describe("Stream.fromCallback", () => {
     await run(s.toArray() as any);
     expect(cleanedUp).toBe(true);
   });
+
+  test("onFinalize runs exactly once for multi-pull streams", async () => {
+    let finalized = 0;
+    const s = Stream.fromArray([1, 2, 3])
+      .rechunk(1)
+      .onFinalize(
+        sync(() => {
+          finalized++;
+        }),
+      );
+
+    expect(await run(s.toArray() as any)).toEqual([1, 2, 3]);
+    expect(finalized).toBe(1);
+  });
 });
 
 describe("Stream.fromEventEmitter", () => {
@@ -99,6 +113,21 @@ describe("Stream.fromEventEmitter", () => {
     }, 10);
     await run(stream.toArray() as any);
     // After stream termination, all listeners should have been removed.
+    expect(ee.listenerCount("data")).toBe(0);
+    expect(ee.listenerCount("end")).toBe(0);
+    expect(ee.listenerCount("close")).toBe(0);
+  });
+
+  test("listener is removed when consumer stops early", async () => {
+    const ee = new EventEmitter();
+    const stream = Stream.fromEventEmitter<number>(ee, "data");
+
+    setTimeout(() => {
+      ee.emit("data", 1);
+      ee.emit("data", 2);
+    }, 10);
+
+    await run(stream.take(1).drain() as any);
     expect(ee.listenerCount("data")).toBe(0);
     expect(ee.listenerCount("end")).toBe(0);
     expect(ee.listenerCount("close")).toBe(0);

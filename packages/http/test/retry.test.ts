@@ -8,7 +8,6 @@ import {
   type HttpTransport,
   HttpNetworkError,
   HttpStatusError,
-  HttpParseError,
   withRetry,
   withRetryAll,
   PipelineResult,
@@ -79,10 +78,7 @@ describe("withRetry — HTTP-aware transient retry", () => {
   });
 
   test("custom `when` predicate overrides default", async () => {
-    const t = new ScriptedTransport([
-      new Response("", { status: 404 }),
-      new Response("ok"),
-    ]);
+    const t = new ScriptedTransport([new Response("", { status: 404 }), new Response("ok")]);
     const result = await run(
       withRetry(httpRequestText({ url: "/x", transport: t }), {
         baseDelayMs: 1,
@@ -96,10 +92,7 @@ describe("withRetry — HTTP-aware transient retry", () => {
 
 describe("withRetryAll — full outcome ADT", () => {
   test("default: retries errors, not success", async () => {
-    const t = new ScriptedTransport([
-      new Response("", { status: 503 }),
-      new Response("ok"),
-    ]);
+    const t = new ScriptedTransport([new Response("", { status: 503 }), new Response("ok")]);
     const result = await run(
       withRetryAll(httpRequestText({ url: "/x", transport: t }), { baseDelayMs: 1 }),
     );
@@ -120,14 +113,14 @@ describe("withRetryAll — full outcome ADT", () => {
     ]);
 
     // Use httpRequestText + JSON.parse to keep things simple here
-    const eff = (httpRequestText({ url: "/x", transport: t }) as any).map((s: string) =>
-      JSON.parse(s) as { status: string },
+    const eff = (httpRequestText({ url: "/x", transport: t }) as any).map(
+      (s: string) => JSON.parse(s) as { status: string },
     );
 
     const result = await run(
       withRetryAll(eff, {
         baseDelayMs: 1,
-        shouldRetry: (r) => PipelineResult.isSuccess(r) ? r.value.status !== "done" : true,
+        shouldRetry: (r) => (PipelineResult.isSuccess(r) ? r.value.status !== "done" : true),
       }) as any,
     );
     expect(result).toEqual({ status: "done" });

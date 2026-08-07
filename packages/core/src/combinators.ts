@@ -10,9 +10,8 @@ type AllEffects<T extends readonly Eff<any, any>[]> = InferEffects<T[number]>;
 type ObjValues<T extends Record<string, Eff<any, any>>> = {
   [K in keyof T]: T[K] extends Eff<infer A, any> ? A : never;
 };
-type ObjEffects<T extends Record<string, Eff<any, any>>> = T[keyof T] extends Eff<any, infer S>
-  ? S
-  : never;
+type ObjEffects<T extends Record<string, Eff<any, any>>> =
+  T[keyof T] extends Eff<any, infer S> ? S : never;
 
 /**
  * Run effects in parallel, collect results.

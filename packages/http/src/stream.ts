@@ -12,17 +12,8 @@
 // The 4 named wrappers (httpStreamText / Lines / NDJSON / SSE) are kept for
 // ergonomics — they just inline the pipe chain above.
 
-import {
-  type Throws,
-  type Pipe,
-  Stream,
-  sync,
-  Pipes,
-} from "@perfect/core";
-import {
-  type HttpClientError,
-  HttpParseError,
-} from "./errors";
+import { type Throws, type Pipe, Stream, sync, Pipes } from "@perfect/core";
+import { type HttpClientError, HttpParseError } from "./errors";
 import { type ResponseParser } from "./response";
 import { type HttpRequestOptions } from "./transport";
 import { type WithTransport } from "./fetch";
@@ -47,9 +38,7 @@ type StreamOptions = HttpRequestOptions &
  * Cancellation (via take / interrupt) cancels the underlying reader so
  * the TCP connection closes immediately.
  */
-export function httpStream(
-  opts: StreamOptions,
-): Stream<Uint8Array, Throws<HttpClientError>> {
+export function httpStream(opts: StreamOptions): Stream<Uint8Array, Throws<HttpClientError>> {
   return Stream.fromEffect(httpFetchOk(opts)).flatMap((response) =>
     Stream.async<Uint8Array, Throws<HttpClientError>>((emit, close) =>
       sync(() => {
@@ -192,16 +181,12 @@ export const parseSSE: Pipe<string, SSEvent> = (input) => {
 // ── Thin convenience wrappers ────────────────────────────────────
 
 /** Decoded text chunks (UTF-8, boundary-aware). */
-export function httpStreamText(
-  opts: StreamOptions,
-): Stream<string, Throws<HttpClientError>> {
+export function httpStreamText(opts: StreamOptions): Stream<string, Throws<HttpClientError>> {
   return httpStream(opts).through(Pipes.utf8Decode);
 }
 
 /** Line-buffered text (splits on `\n`, strips trailing `\r`). */
-export function httpStreamLines(
-  opts: StreamOptions,
-): Stream<string, Throws<HttpClientError>> {
+export function httpStreamLines(opts: StreamOptions): Stream<string, Throws<HttpClientError>> {
   return httpStream(opts).through(Pipes.utf8Decode).through(Pipes.lines);
 }
 
@@ -215,8 +200,6 @@ export function httpStreamNDJSON<T>(
 }
 
 /** Server-Sent Events. */
-export function httpStreamSSE(
-  opts: StreamOptions,
-): Stream<SSEvent, Throws<HttpClientError>> {
+export function httpStreamSSE(opts: StreamOptions): Stream<SSEvent, Throws<HttpClientError>> {
   return httpStreamLines(opts).through(parseSSE);
 }

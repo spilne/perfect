@@ -2,7 +2,7 @@
 //
 // Run: bun packages/core/examples/03-generator-syntax.ts
 
-import { eff, succeed, fail, sync, run, runSync, type Eff, type Throws } from "../src";
+import { eff, succeed, fail, sync, type Eff, type Throws } from "../src";
 import { assertEq } from "./_assert";
 
 // >>> example: gen-basic
@@ -21,7 +21,7 @@ assertEq(program.runSync(), 60);
 // try/catch inside the generator catches typed failures (and defects).
 const safe = eff(function* () {
   try {
-    yield* (fail("boom") as Eff<never, Throws<string>>);
+    yield* fail("boom") as Eff<never, Throws<string>>;
     return "unreachable";
   } catch (e) {
     return `caught: ${e}`;

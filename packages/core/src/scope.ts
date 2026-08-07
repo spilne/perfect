@@ -1,6 +1,6 @@
 import type { Eff } from "./eff";
 import { Suspend, Op } from "./eff";
-import { succeed, sync } from "./constructors";
+import { succeed } from "./constructors";
 
 export type Finalizer = () => Eff<void, never>;
 

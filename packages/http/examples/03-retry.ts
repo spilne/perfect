@@ -2,14 +2,7 @@
 //
 // Run: bun packages/http/examples/03-retry.ts
 
-import {
-  type Eff,
-  type Throws,
-  succeed,
-  fail,
-  sync,
-  run,
-} from "@perfect/core";
+import { type Eff, type Throws, sync } from "@perfect/core";
 import {
   type HttpClientError,
   type HttpRequestOptions,
@@ -22,7 +15,10 @@ import {
 } from "../src";
 import { assertEq } from "./_assert";
 
-interface User { id: number; name: string }
+interface User {
+  id: number;
+  name: string;
+}
 const UserSchema: ResponseParser<User> = {
   safeParse: (d: any) =>
     d && typeof d.id === "number" && typeof d.name === "string"
@@ -68,7 +64,10 @@ assertEq(t.attempts, 3);
 // withRetryAll exposes the full PipelineResult ADT. Use it to retry on
 // "not ready" success values (polling), thrown defects, or any combination
 // of HTTP errors. The shouldRetry predicate sees every outcome.
-interface JobStatus { state: "pending" | "done"; result?: number }
+interface JobStatus {
+  state: "pending" | "done";
+  result?: number;
+}
 const JobSchema: ResponseParser<JobStatus> = {
   safeParse: (d: any) =>
     d && (d.state === "pending" || d.state === "done")
@@ -86,8 +85,7 @@ const client2 = new DefaultHttpClient({ transport: t2 });
 const job = await withRetryAll(client2.get("/job/123", JobSchema), {
   maxRetries: 5,
   baseDelayMs: 1,
-  shouldRetry: (r) =>
-    PipelineResult.isSuccess(r) ? r.value.state !== "done" : true,
+  shouldRetry: (r) => (PipelineResult.isSuccess(r) ? r.value.state !== "done" : true),
 }).run();
 assertEq(job, { state: "done", result: 42 });
 assertEq(t2.attempts, 3);

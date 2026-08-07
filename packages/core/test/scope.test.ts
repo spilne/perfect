@@ -2,17 +2,16 @@ import { describe, test, expect } from "bun:test";
 import {
   succeed,
   fail,
+  die,
   sync,
   sleep,
   acquireRelease,
   scoped,
-  ensuring,
   fork,
   join,
-  all,
   run,
-  runSync,
-  Ref,
+  runExit,
+  Cause,
 } from "../src";
 
 describe("acquireRelease + scoped", () => {
@@ -105,6 +104,32 @@ describe("acquireRelease + scoped", () => {
     const program = scoped(managed.map((r) => `got:${r}`));
     expect(await run(program)).toBe("got:db");
     expect(log).toEqual(["acquired", "released:db"]);
+  });
+
+  test("release failure after scoped success becomes the scope failure", async () => {
+    const program = scoped(acquireRelease(succeed("resource"), () => die("release failed")));
+
+    const exit = await runExit(program);
+
+    expect(exit._tag).toBe("Failure");
+    if (exit._tag === "Failure") {
+      expect(Cause.pretty(exit.cause)).toBe("Die(release failed)");
+    }
+  });
+
+  test("release failure after scoped failure is sequentially composed", async () => {
+    const program = scoped(
+      acquireRelease(succeed("resource"), () => die("release failed")).flatMap(() =>
+        fail("body failed"),
+      ),
+    );
+
+    const exit = await runExit(program);
+
+    expect(exit._tag).toBe("Failure");
+    if (exit._tag === "Failure") {
+      expect(Cause.pretty(exit.cause)).toBe("(Fail(body failed) ; Die(release failed))");
+    }
   });
 });
 

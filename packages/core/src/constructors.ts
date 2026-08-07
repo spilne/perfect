@@ -36,8 +36,7 @@ export function async<A, E = never>(
 }
 
 // alias: fromPromise — same as tryPromise (matches the "from*" naming family).
-export const fromPromise: typeof tryPromise = (...args: any[]) =>
-  (tryPromise as any)(...args);
+export const fromPromise: typeof tryPromise = (...args: any[]) => (tryPromise as any)(...args);
 
 /**
  * Marker tagged on the Suspend returned by tryPromise/fromPromise so the

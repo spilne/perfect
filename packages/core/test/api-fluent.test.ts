@@ -4,13 +4,25 @@
 
 import { describe, test, expect } from "bun:test";
 import {
-  succeed, fail, sync, sleep, service, fromPromise, raceEither,
-  RetryPolicy, run, runSync, type Eff, type Throws,
+  succeed,
+  fail,
+  sync,
+  sleep,
+  service,
+  fromPromise,
+  raceEither,
+  RetryPolicy,
+  run,
+  runSync,
+  type Eff,
+  type Throws,
 } from "../src";
 
 describe("fluent API additions", () => {
   test(".provide(tag, impl) installs a service", () => {
-    interface Greeter { greet(n: string): Eff<string, never> }
+    interface Greeter {
+      greet(n: string): Eff<string, never>;
+    }
     const Greeter = service<Greeter>("Greeter");
     const program = Greeter.get.flatMap((g: Greeter) => g.greet("world"));
     const wired = program.provide(Greeter, { greet: (n) => succeed(`hello, ${n}`) });
@@ -19,11 +31,6 @@ describe("fluent API additions", () => {
 
   test(".retry(policy) retries typed failures", async () => {
     let calls = 0;
-    const flaky: Eff<string, Throws<string>> = sync(() => {
-      calls++;
-      if (calls < 3) throw "transient"; // becomes defect — won't retry
-      return "ok";
-    }) as any;
     // Use fail() to make it a typed failure that retry will catch
     const flakyTyped: Eff<string, Throws<string>> = sync(() => {
       calls++;
@@ -46,8 +53,17 @@ describe("fluent API additions", () => {
   test(".scoped() releases finalizers on exit", async () => {
     const events: string[] = [];
     const program = succeed(undefined)
-      .acquireRelease(() => sync(() => { events.push("released"); }))
-      .flatMap(() => sync(() => { events.push("body"); return "done"; }))
+      .acquireRelease(() =>
+        sync(() => {
+          events.push("released");
+        }),
+      )
+      .flatMap(() =>
+        sync(() => {
+          events.push("body");
+          return "done";
+        }),
+      )
       .scoped();
     const result = await run(program);
     expect(result).toBe("done");
@@ -75,7 +91,10 @@ describe("fluent API additions", () => {
   });
 
   test("fromPromise alias works the same as tryPromise", async () => {
-    const p = fromPromise(() => Promise.resolve(42), (e) => `err: ${e}`);
+    const p = fromPromise(
+      () => Promise.resolve(42),
+      (e) => `err: ${e}`,
+    );
     expect(await run(p)).toBe(42);
   });
 });

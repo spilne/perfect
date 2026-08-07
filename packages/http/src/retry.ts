@@ -42,8 +42,7 @@ export const PipelineResult = {
     error,
   }),
   thrown: <T = never>(error: unknown): PipelineResult<T> => ({ _tag: "thrown", error }),
-  isSuccess: <T>(r: PipelineResult<T>): r is { _tag: "success"; value: T } =>
-    r._tag === "success",
+  isSuccess: <T>(r: PipelineResult<T>): r is { _tag: "success"; value: T } => r._tag === "success",
   isHttpError: <T>(r: PipelineResult<T>): r is { _tag: "httpError"; error: HttpClientError } =>
     r._tag === "httpError",
   isThrown: <T>(r: PipelineResult<T>): r is { _tag: "thrown"; error: unknown } =>
@@ -113,9 +112,7 @@ export function withRetryAll<T>(
   const loop = (attempt: number, wait: number): Eff<T, Throws<HttpClientError>> =>
     (normalized as any).flatMap((r: PipelineResult<T>) => {
       if (!shouldRetry(r) || attempt >= maxRetries) return unwrap(r);
-      return (sleep(wait) as any).flatMap(() =>
-        loop(attempt + 1, Math.min(wait * 2, maxDelayMs)),
-      );
+      return (sleep(wait) as any).flatMap(() => loop(attempt + 1, Math.min(wait * 2, maxDelayMs)));
     }) as Eff<T, Throws<HttpClientError>>;
 
   return loop(0, baseDelayMs);

@@ -18,7 +18,6 @@ pub fn rewrite(source: &str) -> String {
     // then rewrite eff($) blocks
     let effs = find_eff_blocks(&result);
     offset = 0;
-    let result_copy = result.clone();
     for block in &effs {
         if let Some(desugared) = desugar_dollar(&block.stmts) {
             let start = (block.start as i64 + offset) as usize;

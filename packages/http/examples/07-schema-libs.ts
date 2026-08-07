@@ -7,12 +7,7 @@
 
 import { z } from "zod";
 import * as v from "valibot";
-import {
-  type Eff,
-  type Throws,
-  succeed,
-  run,
-} from "@perfect/core";
+import { type Eff, type Throws, succeed } from "@perfect/core";
 import {
   type HttpClientError,
   type HttpRequestOptions,
@@ -20,7 +15,6 @@ import {
   type ResponseParser,
   DefaultHttpClient,
   HttpStatusError,
-  HttpUnknownError,
 } from "../src";
 import { assertEq } from "./_assert";
 
@@ -56,15 +50,11 @@ assertEq(zodUser, { id: 1, name: "alice" });
 // >>> example: valibot-adapter
 // Valibot uses safeParse(schema, input) — wrap it once with a tiny adapter
 // so the result shape matches ResponseParser. Reusable for any valibot schema.
-function valibotParser<S extends v.GenericSchema>(
-  schema: S,
-): ResponseParser<v.InferOutput<S>> {
+function valibotParser<S extends v.GenericSchema>(schema: S): ResponseParser<v.InferOutput<S>> {
   return {
     safeParse: (data: unknown) => {
       const r = v.safeParse(schema, data);
-      return r.success
-        ? { success: true, data: r.output }
-        : { success: false, error: r.issues };
+      return r.success ? { success: true, data: r.output } : { success: false, error: r.issues };
     },
   };
 }

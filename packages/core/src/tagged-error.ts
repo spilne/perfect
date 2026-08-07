@@ -17,12 +17,12 @@
 //   fail(new NotFound({ id: 42 }));
 //   eff.catchTag("NotFound", (e) => succeed(`missing ${e.id}`));
 
-interface TaggedErrorClass<Tag extends string, Props> {
+export interface TaggedErrorClass<Tag extends string, Props> {
   new (props: Props): TaggedErrorInstance<Tag, Props>;
   readonly _tag: Tag;
 }
 
-type TaggedErrorInstance<Tag extends string, Props> = Error & Props & { readonly _tag: Tag };
+export type TaggedErrorInstance<Tag extends string, Props> = Error & Props & { readonly _tag: Tag };
 
 export function TaggedError<Tag extends string>(tag: Tag) {
   return <Props extends object = {}>(): TaggedErrorClass<Tag, Props> => {

@@ -2,7 +2,7 @@
 //
 // Run: bun packages/core/examples/15-duration-cache.ts
 
-import { eff, run, runSync, Duration, resolveMs, CacheStore } from "../src";
+import { eff, Duration, resolveMs, CacheStore } from "../src";
 import { assertEq } from "./_assert";
 
 // >>> example: duration-basics
@@ -33,19 +33,21 @@ const store = CacheStore.memory<string, number>({
   maxSize: 100,
 });
 
-await (eff(function* () {
-  yield* store.set("hits", 0);
-  yield* store.set("hits", 1);
-  const v = yield* store.get("hits");
-  assertEq(v, 1);
+await (
+  eff(function* () {
+    yield* store.set("hits", 0);
+    yield* store.set("hits", 1);
+    const v = yield* store.get("hits");
+    assertEq(v, 1);
 
-  const present = yield* store.has("hits");
-  assertEq(present, true);
+    const present = yield* store.has("hits");
+    assertEq(present, true);
 
-  yield* store.delete("hits");
-  const after = yield* store.get("hits");
-  assertEq(after, undefined);
-}) as any).run();
+    yield* store.delete("hits");
+    const after = yield* store.get("hits");
+    assertEq(after, undefined);
+  }) as any
+).run();
 // <<< example
 
 // >>> example: cache-store-ttl
@@ -53,7 +55,7 @@ await (eff(function* () {
 const ttlStore = CacheStore.memory<string, string>({ ttlMs: 60_000 });
 
 ttlStore.set("short", "expires-fast", 30).runSync(); // overrides default
-ttlStore.set("long", "stays-around").runSync();      // uses default 60s
+ttlStore.set("long", "stays-around").runSync(); // uses default 60s
 
 assertEq(ttlStore.get("short").runSync(), "expires-fast");
 await new Promise((r) => setTimeout(r, 40));

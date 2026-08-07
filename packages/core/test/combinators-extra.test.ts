@@ -3,9 +3,7 @@ import {
   succeed,
   fail,
   sync,
-  sleep,
   run,
-  runSync,
   trapError,
   validate,
   hedged,
@@ -88,12 +86,7 @@ describe("validate", () => {
 
 describe("hedged", () => {
   test("fastest replica wins", async () => {
-    const slow = sleep(60).flatMap(() => succeed("slow"));
-    let attempts = 0;
-    const work = sync(() => {
-      attempts++;
-      return "work";
-    }) as any;
+    const work = sync(() => "work") as any;
     // Any replica succeeds instantly → first one wins
     const race = hedged(work, { replicas: 3, staggerMs: 20 });
     expect(await run(race as any)).toBe("work");

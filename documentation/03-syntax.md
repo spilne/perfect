@@ -58,7 +58,7 @@ import { eff, fail, type Eff, type Throws } from "@perfect/core";
 // try/catch inside the generator catches typed failures (and defects).
 const safe = eff(function* () {
   try {
-    yield* (fail("boom") as Eff<never, Throws<string>>);
+    yield* fail("boom") as Eff<never, Throws<string>>;
     return "unreachable";
   } catch (e) {
     return `caught: ${e}`;

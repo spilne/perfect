@@ -1,5 +1,4 @@
 import { type Eff, Suspend, Op } from "../eff";
-import { succeed } from "../constructors";
 
 declare module "../eff" {
   interface Suspend {

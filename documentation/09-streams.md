@@ -54,7 +54,8 @@ import { Stream } from "@perfect/core";
 const collected = await Stream.fromArray([1, 2, 3, 4, 5])
   .map((x) => x * 10)
   .filter((x) => x > 20)
-  .toArray().run();
+  .toArray()
+  .run();
 
 console.log(collected); // → [30, 40, 50]
 ```
@@ -68,10 +69,12 @@ import { Stream, succeed } from "@perfect/core";
 
 // forEach — apply an effect per element, return when stream exhausts.
 const seen: number[] = [];
-await Stream.range(1, 4).forEach((n) => {
-  seen.push(n);
-  return succeed(undefined);
-}).run();
+await Stream.range(1, 4)
+  .forEach((n) => {
+    seen.push(n);
+    return succeed(undefined);
+  })
+  .run();
 console.log(seen); // → [1, 2, 3]
 ```
 <!-- @end -->
@@ -83,7 +86,10 @@ console.log(seen); // → [1, 2, 3]
 import { Stream } from "@perfect/core";
 
 // take(n) — short-circuit after n elements (lazy: never produces beyond).
-const first3 = await Stream.iterate(0, (n) => n + 1).take(3).toArray().run();
+const first3 = await Stream.iterate(0, (n) => n + 1)
+  .take(3)
+  .toArray()
+  .run();
 console.log(first3); // → [0, 1, 2]
 ```
 <!-- @end -->
@@ -111,10 +117,13 @@ const top3RunningTotals = await Stream.fromArray(rawCsv)
     return { city, population: Number(n) } as Row;
   })
   .filter((r) => r.population >= 25_000_000) // pure filter
-  .tap((r) => { kept.push(r.city); }) // side effect, fused
+  .tap((r) => {
+    kept.push(r.city);
+  }) // side effect, fused
   .take(3) // short-circuit
   .scan(0, (acc, r) => acc + r.population) // running total (includes seed)
-  .toArray().run();
+  .toArray()
+  .run();
 
 console.log(kept); // → ["tokyo", "delhi", "shanghai"]
 console.log(top3RunningTotals); // → [0, 37_000_000, 69_000_000, 97_000_000]

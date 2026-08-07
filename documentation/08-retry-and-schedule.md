@@ -17,7 +17,7 @@ import { eff, fail, type Eff, type Throws } from "@perfect/core";
 let calls = 0;
 const flaky: Eff<string, Throws<string>> = eff(function* () {
   calls++;
-  if (calls < 3) yield* (fail("still failing") as Eff<never, Throws<string>>);
+  if (calls < 3) yield* fail("still failing") as Eff<never, Throws<string>>;
   return "ok";
 });
 
@@ -74,7 +74,7 @@ const policy = RetryPolicy.exponential({ initial: 5, factor: 2 })
 
 const flaky2: Eff<string, Throws<string>> = eff(function* () {
   calls++;
-  if (calls < 3) yield* (fail("transient") as Eff<never, Throws<string>>);
+  if (calls < 3) yield* fail("transient") as Eff<never, Throws<string>>;
   return "recovered";
 });
 

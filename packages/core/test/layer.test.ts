@@ -1,19 +1,16 @@
 import { describe, test, expect } from "bun:test";
-import {
-  eff,
-  succeed,
-  sync,
-  acquireRelease,
-  service,
-  run,
-  runSync,
-  Layer,
-  type Eff,
-} from "../src";
+import { eff, succeed, sync, acquireRelease, service, run, runSync, Layer, type Eff } from "../src";
 
-interface Db { query(sql: string): Eff<string, never> }
-interface Cache { get(k: string): string | undefined; set(k: string, v: string): void }
-interface Logger { log(msg: string): void }
+interface Db {
+  query(sql: string): Eff<string, never>;
+}
+interface Cache {
+  get(k: string): string | undefined;
+  set(k: string, v: string): void;
+}
+interface Logger {
+  log(msg: string): void;
+}
 
 const Db = service<Db>("Db");
 const Cache = service<Cache>("Cache");
@@ -103,7 +100,10 @@ describe("Layer", () => {
           events.push("acquire");
           return { log: (m: string) => events.push(`log:${m}`) } as Logger;
         }),
-        () => sync(() => { events.push("release"); }),
+        () =>
+          sync(() => {
+            events.push("release");
+          }),
       );
       return { Logger: logger };
     });
@@ -141,7 +141,10 @@ describe("Layer", () => {
             events.push(`acq:${name}`);
             return name;
           }),
-          () => sync(() => { events.push(`rel:${name}`); }),
+          () =>
+            sync(() => {
+              events.push(`rel:${name}`);
+            }),
         );
         return { [name]: v } as Record<K, string>;
       });

@@ -7,7 +7,7 @@
 // Run: bun packages/core/bench/run-overhead.ts
 
 import { group, bench, run as mitataRun } from "mitata";
-import { succeed, sync, sleep, run, runSync, runExit, runSafe, tryPromise } from "../src";
+import { succeed, sync, run, runSync, tryPromise } from "../src";
 import { Effect } from "effect";
 
 const N = 1000;
@@ -33,11 +33,21 @@ group(`run() — N small calls`, () => {
 
   // Bare async (Promise bridge) — uses PROMISE_THUNK shortcut via thenable
   bench("perfect await tryPromise × N (shortcut)", async () => {
-    for (let i = 0; i < N; i++) await tryPromise(() => Promise.resolve(i), () => "err");
+    for (let i = 0; i < N; i++)
+      await tryPromise(
+        () => Promise.resolve(i),
+        () => "err",
+      );
   });
 
   bench("perfect run(tryPromise) × N (no shortcut)", async () => {
-    for (let i = 0; i < N; i++) await run(tryPromise(() => Promise.resolve(i), () => "err"));
+    for (let i = 0; i < N; i++)
+      await run(
+        tryPromise(
+          () => Promise.resolve(i),
+          () => "err",
+        ),
+      );
   });
 
   bench("baseline: await Promise.resolve × N", async () => {

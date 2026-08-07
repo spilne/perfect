@@ -40,9 +40,13 @@ class InProcessLatch implements Latch {
   }
 
   countDownBy(n: number): Eff<void, never> {
-    return this.count.updateAndGet((c) => Math.max(0, c - n)).flatMap((remaining) =>
-      remaining === 0 ? this.deferred.succeed(undefined).map(() => undefined) : succeed(undefined),
-    ) as Eff<void, never>;
+    return this.count
+      .updateAndGet((c) => Math.max(0, c - n))
+      .flatMap((remaining) =>
+        remaining === 0
+          ? this.deferred.succeed(undefined).map(() => undefined)
+          : succeed(undefined),
+      ) as Eff<void, never>;
   }
 
   get await(): Eff<void, never> {

@@ -1,17 +1,39 @@
 {
   "name": "@perfect/transform",
   "version": "0.0.1",
+  "license": "MIT",
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "type": "module",
-  "main": "src/rewrite.ts",
+  "main": "dist/rewrite.js",
+  "types": "dist/types/rewrite.d.ts",
   "exports": {
-    ".": "./src/rewrite.ts",
-    "./bun-plugin": "./src/bun-plugin.ts",
-    "./plugin": "./src/plugin.ts"
+    ".": {
+      "types": "./dist/types/rewrite.d.ts",
+      "default": "./dist/rewrite.js"
+    },
+    "./bun-plugin": {
+      "types": "./dist/types/bun-plugin.d.ts",
+      "default": "./dist/bun-plugin.js"
+    },
+    "./plugin": {
+      "types": "./dist/types/plugin.d.ts",
+      "default": "./dist/plugin.js"
+    },
+    "./preload": {
+      "types": "./dist/types/preload.d.ts",
+      "default": "./dist/preload.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
-    "test": "bun test"
+    "test": "bun test",
+    "typecheck": "tsc -p tsconfig.src.json --noEmit",
+    "build": "bun ../../scripts/build-package.ts ."
   },
-  "devDependencies": {
-    "@types/bun": "latest"
-  }
+  "devDependencies": {}
 }

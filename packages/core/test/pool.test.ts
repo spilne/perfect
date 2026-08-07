@@ -1,17 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import {
-  eff,
-  succeed,
-  sync,
-  sleep,
-  fork,
-  join,
-  interrupt,
-  all,
-  run,
-  Pool,
-  type Eff,
-} from "../src";
+import { eff, succeed, sync, sleep, fork, join, interrupt, run, Pool } from "../src";
 
 interface FakeConn {
   id: number;
@@ -65,11 +53,20 @@ describe("Pool", () => {
         const pool = yield* Pool.make({ acquire: makeConn, release: closeConn, size: 3 });
         const ids: number[] = [];
         // Three concurrent users — each holds for 30ms
-        const worker = pool.use((c) => sleep(30).flatMap(() => sync(() => { ids.push(c.id); return c.id; })));
+        const worker = pool.use((c) =>
+          sleep(30).flatMap(() =>
+            sync(() => {
+              ids.push(c.id);
+              return c.id;
+            }),
+          ),
+        );
         const f1 = yield* fork(worker);
         const f2 = yield* fork(worker);
         const f3 = yield* fork(worker);
-        yield* join(f1); yield* join(f2); yield* join(f3);
+        yield* join(f1);
+        yield* join(f2);
+        yield* join(f3);
         return ids.sort();
       }) as any,
     );
@@ -83,10 +80,20 @@ describe("Pool", () => {
       eff(function* () {
         const pool = yield* Pool.make({ acquire: makeConn, release: closeConn, size: 1 });
         const f1 = yield* fork(
-          pool.use((c) => sleep(30).flatMap(() => sync(() => { order.push(`A:${c.id}`); }))),
+          pool.use((c) =>
+            sleep(30).flatMap(() =>
+              sync(() => {
+                order.push(`A:${c.id}`);
+              }),
+            ),
+          ),
         );
         const f2 = yield* fork(
-          pool.use((c) => sync(() => { order.push(`B:${c.id}`); })),
+          pool.use((c) =>
+            sync(() => {
+              order.push(`B:${c.id}`);
+            }),
+          ),
         );
         yield* join(f1);
         yield* join(f2);
@@ -124,10 +131,11 @@ describe("Pool", () => {
           release: closeConn,
           size: 5,
           // First reuse fails validation, all subsequent pass
-          validate: (c: FakeConn) => sync(() => {
-            validationCalls++;
-            return validationCalls > 1; // first call returns false
-          }),
+          validate: (_c: FakeConn) =>
+            sync(() => {
+              validationCalls++;
+              return validationCalls > 1; // first call returns false
+            }),
         });
         // First use creates a fresh conn (id=1), no validate
         const id1 = yield* pool.use((c) => succeed(c.id));
@@ -146,7 +154,10 @@ describe("Pool", () => {
       eff(function* () {
         const pool = yield* Pool.make({
           acquire: makeConn,
-          release: (c: FakeConn) => sync(() => { released.push(c.id); }),
+          release: (c: FakeConn) =>
+            sync(() => {
+              released.push(c.id);
+            }),
           size: 3,
         });
         // Build 2 idle resources
@@ -172,7 +183,8 @@ describe("Pool", () => {
   });
 
   test("validates size >= 1", async () => {
-    expect(() => run(Pool.make({ acquire: makeConn, release: closeConn, size: 0 }) as any))
-      .toThrow(/size must be >= 1/);
+    expect(() => run(Pool.make({ acquire: makeConn, release: closeConn, size: 0 }) as any)).toThrow(
+      /size must be >= 1/,
+    );
   });
 });

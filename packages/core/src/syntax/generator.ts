@@ -25,7 +25,9 @@ declare module "../eff" {
   }
 }
 
-(Suspend.prototype as any)[Symbol.iterator] = function* (this: Suspend): Generator<Suspend, any, any> {
+(Suspend.prototype as any)[Symbol.iterator] = function* (
+  this: Suspend,
+): Generator<Suspend, any, any> {
   return yield this;
 };
 
@@ -38,11 +40,7 @@ export function eff<A, S = never>(fn: EffGenFn<A, S>): Eff<A, S> {
   );
 }
 
-function drive<A, S>(
-  gen: Generator<Eff<any, S>, A, any>,
-  input: any,
-  isError: boolean,
-): Eff<A, S> {
+function drive<A, S>(gen: Generator<Eff<any, S>, A, any>, input: any, isError: boolean): Eff<A, S> {
   let step: IteratorResult<Eff<any, S>, A>;
   try {
     step = isError ? gen.throw(input) : gen.next(input);

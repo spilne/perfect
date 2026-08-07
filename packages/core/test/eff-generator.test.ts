@@ -45,7 +45,7 @@ describe("eff(function*)", () => {
   test("try/catch catches typed failures", async () => {
     const program = eff(function* () {
       try {
-        yield* (fail("boom") as Eff<never, Throws<string>>);
+        yield* fail("boom") as Eff<never, Throws<string>>;
         return "unreachable";
       } catch (e) {
         return `caught:${e}`;
@@ -56,7 +56,7 @@ describe("eff(function*)", () => {
 
   test("uncaught failure propagates through generator", async () => {
     const program = eff(function* () {
-      yield* (fail("nope") as Eff<never, Throws<string>>);
+      yield* fail("nope") as Eff<never, Throws<string>>;
       return "unreachable";
     });
     await expect(run(program as any)).rejects.toBe("nope");

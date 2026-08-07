@@ -10,7 +10,6 @@
 // Built atop Ref<A> + PubSub<A>. Eff-typed contract; in-process by default.
 
 import { type Eff, type Throws } from "./eff";
-import { sync } from "./constructors";
 import { type Ref, Ref as RefNS } from "./ref";
 import { type PubSub, PubSub as PubSubNS } from "./pubsub";
 import { Stream } from "./stream";

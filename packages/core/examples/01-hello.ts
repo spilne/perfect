@@ -2,7 +2,7 @@
 //
 // Run: bun packages/core/examples/01-hello.ts
 
-import { eff, succeed, run, runSync } from "../src";
+import { eff, succeed } from "../src";
 import { assertEq } from "./_assert";
 
 // >>> example: hello-sync

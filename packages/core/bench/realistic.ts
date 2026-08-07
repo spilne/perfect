@@ -5,15 +5,10 @@ import {
   succeed,
   fail,
   sync,
-  sleep,
-  delay,
-  tryPromise,
   ensuring,
   retry,
   timeout,
   all,
-  fork,
-  join,
   service,
   provide,
   run,
@@ -36,12 +31,6 @@ interface Order {
   amount: number;
   status: string;
 }
-interface Invoice {
-  orderId: string;
-  amount: number;
-  sent: boolean;
-}
-
 class NotFound {
   readonly _tag = "NotFound" as const;
   constructor(
@@ -125,7 +114,7 @@ const sendInvoice = (user: User, order: Order) =>
         backoff: "exponential",
       })
         .flatMap(() => log.info(`Invoice sent for order ${order.id}`))
-        .catchTag("RateLimit", (e) =>
+        .catchTag("RateLimit", (_e) =>
           log.error(`Rate limited, giving up on ${order.id}`).as(undefined),
         ),
     ),

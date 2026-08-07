@@ -4,7 +4,7 @@
 //
 // Run: bun packages/core/examples/11-stream-pipeline.ts
 
-import { Stream, succeed, run } from "../src";
+import { Stream, succeed } from "../src";
 import { assertEq } from "./_assert";
 
 // >>> example: pipeline-etl
@@ -25,10 +25,13 @@ const top3RunningTotals = await Stream.fromArray(rawCsv)
     return { city, population: Number(n) } as Row;
   })
   .filter((r) => r.population >= 25_000_000) // pure filter
-  .tap((r) => { kept.push(r.city); }) // side effect, fused
+  .tap((r) => {
+    kept.push(r.city);
+  }) // side effect, fused
   .take(3) // short-circuit
   .scan(0, (acc, r) => acc + r.population) // running total (includes seed)
-  .toArray().run();
+  .toArray()
+  .run();
 
 assertEq(kept, ["tokyo", "delhi", "shanghai"]);
 assertEq(top3RunningTotals, [0, 37_000_000, 69_000_000, 97_000_000]);
@@ -39,6 +42,7 @@ assertEq(top3RunningTotals, [0, 37_000_000, 69_000_000, 97_000_000]);
 let count = 0;
 await Stream.range(1, 11) // 1..10
   .filter((n) => n % 2 === 0)
-  .forEach((n) => succeed(void (count += n))).run();
+  .forEach((n) => succeed(void (count += n)))
+  .run();
 assertEq(count, 30); // 2 + 4 + 6 + 8 + 10
 // <<< example

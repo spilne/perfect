@@ -60,9 +60,7 @@ class InProcessPool<R> implements Pool<R> {
   constructor(private readonly opts: PoolOptions<R>) {}
 
   use<A, S>(fn: (resource: R) => Eff<A, S>): Eff<A, S | Throws<PoolClosed>> {
-    return (this.acquireOne() as any).flatMap((r: R) =>
-      ensuring(fn(r), this.releaseOne(r)),
-    ) as any;
+    return (this.acquireOne() as any).flatMap((r: R) => ensuring(fn(r), this.releaseOne(r))) as any;
   }
 
   get inUse(): Eff<number, never> {

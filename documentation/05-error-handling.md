@@ -18,8 +18,9 @@ There's also `Cause.Interrupt` for cooperative cancellation.
 import { succeed, fail, type Eff, type Throws } from "@perfect/core";
 
 // .catch handles any typed failure, removing Throws<E> from the type.
-const program: Eff<string, never> = (fail("nope") as Eff<never, Throws<string>>)
-  .catch((e) => succeed(`recovered: ${e}`));
+const program: Eff<string, never> = (fail("nope") as Eff<never, Throws<string>>).catch((e) =>
+  succeed(`recovered: ${e}`),
+);
 
 console.log(program.runSync()); // → "recovered: nope"
 ```
@@ -88,7 +89,12 @@ import { succeed, fail, sync, type Eff, type Throws } from "@perfect/core";
 // .tapError — observe a typed failure without handling it (re-fails).
 let observedError: string | null = null;
 const observed = (fail("bad") as Eff<never, Throws<string>>)
-  .tapError((e) => sync(() => { observedError = e; }) as any)
+  .tapError(
+    (e) =>
+      sync(() => {
+        observedError = e;
+      }) as any,
+  )
   .catch(() => succeed("ok"));
 
 console.log(observed.runSync()); // → "ok"

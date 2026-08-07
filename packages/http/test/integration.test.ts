@@ -28,7 +28,9 @@ class ScriptedTransport implements HttpTransport {
       if (next === undefined) throw new Error("ScriptedTransport: script exhausted");
       return next;
     }).flatMap((next) =>
-      next instanceof Response ? succeed(next) : (fail(next) as Eff<Response, Throws<HttpClientError>>),
+      next instanceof Response
+        ? succeed(next)
+        : (fail(next) as Eff<Response, Throws<HttpClientError>>),
     );
   }
 }

@@ -29,11 +29,7 @@ const program = eff(function* () {
 });
 
 // Provide an implementation when running.
-const wired = provide(
-  program,
-  Greeter,
-  { greet: (name) => succeed(`hello, ${name}`) },
-);
+const wired = provide(program, Greeter, { greet: (name) => succeed(`hello, ${name}`) });
 
 console.log(wired.runSync()); // → "hello, world"
 ```
@@ -49,11 +45,7 @@ import { succeed, provide } from "@perfect/core";
 // Same program, chainable form: Greeter.get is an effect — flatMap into it.
 const programFlat = Greeter.get.flatMap((g) => g.greet("world"));
 
-const wiredFlat = provide(
-  programFlat,
-  Greeter,
-  { greet: (name) => succeed(`hello, ${name}`) },
-);
+const wiredFlat = provide(programFlat, Greeter, { greet: (name) => succeed(`hello, ${name}`) });
 
 console.log(wiredFlat.runSync()); // → "hello, world"
 ```
@@ -73,8 +65,12 @@ ugly for three or more. That's where Layers come in:
 import { eff, succeed, service, provide, type Eff } from "@perfect/core";
 
 // Multiple services nest awkwardly with provide() — see Layer for the cure.
-interface Db { query(sql: string): Eff<string, never> }
-interface Logger { log(msg: string): void }
+interface Db {
+  query(sql: string): Eff<string, never>;
+}
+interface Logger {
+  log(msg: string): void;
+}
 
 const Db = service<Db>("Db");
 const Logger = service<Logger>("Logger");
@@ -87,11 +83,9 @@ const app = eff(function* () {
   return yield* db.query("SELECT 1");
 });
 
-const wired2 = provide(
-  provide(app, Db, { query: (s) => succeed(`row:${s}`) }),
-  Logger,
-  { log: (m) => captured.push(m) },
-);
+const wired2 = provide(provide(app, Db, { query: (s) => succeed(`row:${s}`) }), Logger, {
+  log: (m) => captured.push(m),
+});
 
 console.log(wired2.runSync()); // → "row:SELECT 1"
 console.log(captured); // → ["querying"]
@@ -114,11 +108,9 @@ const appFlat = Db.get.flatMap((db) =>
   }),
 );
 
-const wired2Flat = provide(
-  provide(appFlat, Db, { query: (s) => succeed(`row:${s}`) }),
-  Logger,
-  { log: (m) => capturedFlat.push(m) },
-);
+const wired2Flat = provide(provide(appFlat, Db, { query: (s) => succeed(`row:${s}`) }), Logger, {
+  log: (m) => capturedFlat.push(m),
+});
 
 console.log(wired2Flat.runSync()); // → "row:SELECT 1"
 console.log(capturedFlat); // → ["querying"]
@@ -229,7 +221,10 @@ const ScopedLogger = eff(function* () {
       events.push("acquire");
       return { log: (m: string) => events.push(`log:${m}`) } as Logger;
     }),
-    () => sync(() => { events.push("release"); }),
+    () =>
+      sync(() => {
+        events.push("release");
+      }),
   );
   return { Logger: logger };
 });

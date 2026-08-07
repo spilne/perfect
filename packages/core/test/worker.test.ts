@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { succeed, sync, ensuring, run, WorkerPool } from "../src";
+import { sync, ensuring, run, WorkerPool } from "../src";
 
 describe("WorkerPool", () => {
   test("execute a pure function on a worker", async () => {

@@ -16,12 +16,24 @@ export class Duration {
 
   // ── Factories ─────────────────────────────────────────────────────
 
-  static millis(n: number): Duration { return new Duration(n); }
-  static seconds(n: number): Duration { return new Duration(n * 1000); }
-  static minutes(n: number): Duration { return new Duration(n * 60_000); }
-  static hours(n: number): Duration { return new Duration(n * 3_600_000); }
-  static days(n: number): Duration { return new Duration(n * 86_400_000); }
-  static weeks(n: number): Duration { return new Duration(n * 604_800_000); }
+  static millis(n: number): Duration {
+    return new Duration(n);
+  }
+  static seconds(n: number): Duration {
+    return new Duration(n * 1000);
+  }
+  static minutes(n: number): Duration {
+    return new Duration(n * 60_000);
+  }
+  static hours(n: number): Duration {
+    return new Duration(n * 3_600_000);
+  }
+  static days(n: number): Duration {
+    return new Duration(n * 86_400_000);
+  }
+  static weeks(n: number): Duration {
+    return new Duration(n * 604_800_000);
+  }
 
   /** Parse a string like `"5s"`, `"30m"`, `"2h"`, `"1d"`, `"1w"`. */
   static parse(s: string): Duration {
@@ -29,13 +41,20 @@ export class Duration {
     if (!match) throw new Error(`Duration.parse: invalid duration "${s}"`);
     const n = parseFloat(match[1]!);
     switch (match[2]) {
-      case "ms": return Duration.millis(n);
-      case "s":  return Duration.seconds(n);
-      case "m":  return Duration.minutes(n);
-      case "h":  return Duration.hours(n);
-      case "d":  return Duration.days(n);
-      case "w":  return Duration.weeks(n);
-      default: throw new Error(`Duration.parse: unknown unit "${match[2]}"`);
+      case "ms":
+        return Duration.millis(n);
+      case "s":
+        return Duration.seconds(n);
+      case "m":
+        return Duration.minutes(n);
+      case "h":
+        return Duration.hours(n);
+      case "d":
+        return Duration.days(n);
+      case "w":
+        return Duration.weeks(n);
+      default:
+        throw new Error(`Duration.parse: unknown unit "${match[2]}"`);
     }
   }
 
@@ -53,25 +72,51 @@ export class Duration {
 
   // ── Conversions ───────────────────────────────────────────────────
 
-  toMillis(): number { return this.ms; }
-  toSeconds(): number { return this.ms / 1000; }
-  toMinutes(): number { return this.ms / 60_000; }
-  toHours(): number { return this.ms / 3_600_000; }
-  toDays(): number { return this.ms / 86_400_000; }
+  toMillis(): number {
+    return this.ms;
+  }
+  toSeconds(): number {
+    return this.ms / 1000;
+  }
+  toMinutes(): number {
+    return this.ms / 60_000;
+  }
+  toHours(): number {
+    return this.ms / 3_600_000;
+  }
+  toDays(): number {
+    return this.ms / 86_400_000;
+  }
 
   // ── Arithmetic ────────────────────────────────────────────────────
 
-  plus(other: Duration): Duration { return new Duration(this.ms + other.ms); }
-  minus(other: Duration): Duration { return new Duration(this.ms - other.ms); }
-  times(factor: number): Duration { return new Duration(this.ms * factor); }
+  plus(other: Duration): Duration {
+    return new Duration(this.ms + other.ms);
+  }
+  minus(other: Duration): Duration {
+    return new Duration(this.ms - other.ms);
+  }
+  times(factor: number): Duration {
+    return new Duration(this.ms * factor);
+  }
 
   // ── Comparison ────────────────────────────────────────────────────
 
-  gt(other: Duration): boolean { return this.ms > other.ms; }
-  gte(other: Duration): boolean { return this.ms >= other.ms; }
-  lt(other: Duration): boolean { return this.ms < other.ms; }
-  lte(other: Duration): boolean { return this.ms <= other.ms; }
-  eq(other: Duration): boolean { return this.ms === other.ms; }
+  gt(other: Duration): boolean {
+    return this.ms > other.ms;
+  }
+  gte(other: Duration): boolean {
+    return this.ms >= other.ms;
+  }
+  lt(other: Duration): boolean {
+    return this.ms < other.ms;
+  }
+  lte(other: Duration): boolean {
+    return this.ms <= other.ms;
+  }
+  eq(other: Duration): boolean {
+    return this.ms === other.ms;
+  }
 
   // ── Display ───────────────────────────────────────────────────────
 

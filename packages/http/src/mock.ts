@@ -22,19 +22,8 @@
 // are standalone functions that read a `Response`, so you control the body
 // at the transport layer.
 
-import {
-  type Eff,
-  type Throws,
-  succeed,
-  fail,
-  sync,
-  suspend,
-} from "@perfect/core";
-import {
-  type HttpClientError,
-  HttpParseError,
-  HttpStatusError,
-} from "./errors";
+import { type Eff, type Throws, succeed, fail, suspend } from "@perfect/core";
+import { type HttpClientError, HttpParseError, HttpStatusError } from "./errors";
 import {
   AbstractHttpClient,
   type HttpClient,
@@ -42,11 +31,7 @@ import {
   type HttpRequestParams,
   type RequestOptions,
 } from "./client";
-import {
-  type HttpResponse,
-  type ResponseDecoder,
-  type ResponseParser,
-} from "./response";
+import { type HttpResponse, type ResponseDecoder, type ResponseParser } from "./response";
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -241,8 +226,7 @@ export class MockHttpClient extends AbstractHttpClient {
       const raw = entry
         ? this.resolveEntry(entry, this.calls[this.calls.length - 1]!)
         : this.defaultResponse;
-      if (isHttpClientError(raw))
-        return fail(raw) as Eff<string, Throws<HttpClientError>>;
+      if (isHttpClientError(raw)) return fail(raw) as Eff<string, Throws<HttpClientError>>;
       return succeed(typeof raw === "string" ? raw : JSON.stringify(raw));
     });
   }
@@ -263,8 +247,7 @@ export class MockHttpClient extends AbstractHttpClient {
       const raw = entry
         ? this.resolveEntry(entry, this.calls[this.calls.length - 1]!)
         : this.defaultResponse;
-      if (isHttpClientError(raw))
-        return fail(raw) as Eff<HttpResponse<T>, Throws<HttpClientError>>;
+      if (isHttpClientError(raw)) return fail(raw) as Eff<HttpResponse<T>, Throws<HttpClientError>>;
       return succeed<HttpResponse<T>>({
         status: 200,
         headers: new Headers(),
@@ -302,7 +285,7 @@ export class MockHttpClient extends AbstractHttpClient {
         return entry.fn(call);
       case "queue":
         // Mutating shift is fine — each mock is instance-scoped and tests are serial.
-        return entry.responses.length > 0 ? entry.responses.shift()! : entry.fallback ?? {};
+        return entry.responses.length > 0 ? entry.responses.shift()! : (entry.fallback ?? {});
     }
   }
 

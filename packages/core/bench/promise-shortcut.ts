@@ -15,12 +15,22 @@ group(`Promise bridging × ${N}`, () => {
 
   // With shortcut: thenable detects PROMISE_THUNK marker and skips fiber spawn.
   bench("await tryPromise(...) — bare (uses shortcut)", async () => {
-    for (let i = 0; i < N; i++) await tryPromise(() => Promise.resolve(i), () => "err");
+    for (let i = 0; i < N; i++)
+      await tryPromise(
+        () => Promise.resolve(i),
+        () => "err",
+      );
   });
 
   // Forced through run(): explicit fiber spawn (no shortcut benefit).
   bench("await run(tryPromise(...)) — forced fiber path", async () => {
-    for (let i = 0; i < N; i++) await run(tryPromise(() => Promise.resolve(i), () => "err"));
+    for (let i = 0; i < N; i++)
+      await run(
+        tryPromise(
+          () => Promise.resolve(i),
+          () => "err",
+        ),
+      );
   });
 });
 

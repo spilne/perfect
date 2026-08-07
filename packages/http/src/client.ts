@@ -8,19 +8,9 @@
 // The interface is `Eff`-typed so distributed / proxy / test implementations
 // drop in wherever an HttpClient is needed (typically via Layer).
 
-import {
-  type Eff,
-  type Throws,
-  type Needs,
-  succeed,
-  sync,
-} from "@perfect/core";
+import { type Eff, type Throws, succeed, sync } from "@perfect/core";
 import type { HttpClientError } from "./errors";
-import type {
-  HttpProxyConfig,
-  HttpRequestOptions,
-  HttpTransport,
-} from "./transport";
+import type { HttpProxyConfig, HttpTransport } from "./transport";
 import type { HttpMiddleware, HttpRequestContext } from "./middleware";
 import {
   type HttpResponse,
@@ -371,7 +361,7 @@ export class DefaultHttpClient extends AbstractHttpClient {
     path: string | URL,
     options?: RequestOptions<E> & { decoder?: ResponseDecoder<T> },
   ): Eff<HttpResponse<T>, Throws<HttpClientError>> {
-    const decoder = (options?.decoder ?? (binaryDecoder as unknown as ResponseDecoder<T>));
+    const decoder = options?.decoder ?? (binaryDecoder as unknown as ResponseDecoder<T>);
     const url = this.resolveUrl(path);
     const context: HttpRequestContext = { method: "GET", url, tag: options?.tag };
     const inner = httpFetchOk<E>({
@@ -385,9 +375,9 @@ export class DefaultHttpClient extends AbstractHttpClient {
         | undefined,
       transport: this.config.transport,
       proxy: this.config.proxy,
-    })
-      .flatMap((response) =>
-        (sync(() => ({
+    }).flatMap((response) =>
+      (
+        sync(() => ({
           status: response.status,
           headers: response.headers,
           contentType: response.headers.get("content-type"),
@@ -396,21 +386,22 @@ export class DefaultHttpClient extends AbstractHttpClient {
             return l === null ? null : Number(l);
           })(),
           response,
-        })) as any).flatMap((meta: any) =>
-          // Decoder returns a Promise — bridge via tryPromise
-          succeed(null).flatMap(() => {
-            return decodeResponse(meta.response, decoder).map(
-              (body: T): HttpResponse<T> => ({
-                status: meta.status,
-                headers: meta.headers,
-                contentType: meta.contentType,
-                contentLength: meta.contentLength,
-                body,
-              }),
-            );
-          }),
-        ),
-      ) as Eff<HttpResponse<T>, Throws<HttpClientError>>;
+        })) as any
+      ).flatMap((meta: any) =>
+        // Decoder returns a Promise — bridge via tryPromise
+        succeed(null).flatMap(() => {
+          return decodeResponse(meta.response, decoder).map(
+            (body: T): HttpResponse<T> => ({
+              status: meta.status,
+              headers: meta.headers,
+              contentType: meta.contentType,
+              contentLength: meta.contentLength,
+              body,
+            }),
+          );
+        }),
+      ),
+    ) as Eff<HttpResponse<T>, Throws<HttpClientError>>;
     return this.instrument(inner, context);
   }
 
@@ -429,7 +420,7 @@ export class DefaultHttpClient extends AbstractHttpClient {
   private mergeHeaders(extra?: Record<string, string>): Record<string, string> | undefined {
     const defaults = this.config.headers;
     if (!defaults && !extra) return undefined;
-    return { ...(defaults ?? {}), ...(extra ?? {}) };
+    return { ...defaults, ...extra };
   }
 
   /** Wrap an effect with middleware hooks + duration tracking.

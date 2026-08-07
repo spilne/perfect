@@ -137,7 +137,11 @@ impl PerfectTransformVisitor {
     }
 
     fn try_desugar_if(&self, stmt: &Stmt, all_stmts: &[Stmt], index: usize) -> Option<Expr> {
-        let if_stmt = if let Stmt::If(i) = stmt { i } else { return None };
+        let if_stmt = if let Stmt::If(i) = stmt {
+            i
+        } else {
+            return None;
+        };
 
         if !self.block_contains_dollar(&if_stmt.cons) {
             if let Some(alt) = &if_stmt.alt {
@@ -176,13 +180,20 @@ impl PerfectTransformVisitor {
         match stmt {
             Stmt::Block(b) => b.stmts.iter().any(|s| self.block_contains_dollar(s)),
             Stmt::Expr(e) => self.expr_contains_dollar(&e.expr),
-            Stmt::Return(r) => r.arg.as_ref().map_or(false, |e| self.expr_contains_dollar(e)),
+            Stmt::Return(r) => r
+                .arg
+                .as_ref()
+                .map_or(false, |e| self.expr_contains_dollar(e)),
             Stmt::Decl(Decl::Var(v)) => v.decls.iter().any(|d| {
-                d.init.as_ref().map_or(false, |e| self.expr_contains_dollar(e))
+                d.init
+                    .as_ref()
+                    .map_or(false, |e| self.expr_contains_dollar(e))
             }),
             Stmt::If(i) => {
                 self.block_contains_dollar(&i.cons)
-                    || i.alt.as_ref().map_or(false, |a| self.block_contains_dollar(a))
+                    || i.alt
+                        .as_ref()
+                        .map_or(false, |a| self.block_contains_dollar(a))
             }
             _ => false,
         }
@@ -203,9 +214,9 @@ impl PerfectTransformVisitor {
 
     fn desugar_block_as_eff(&self, stmt: &Stmt) -> Expr {
         match stmt {
-            Stmt::Block(b) => {
-                self.desugar_stmts(&b.stmts, 0).unwrap_or_else(|| self.make_succeed_undefined(b.span))
-            }
+            Stmt::Block(b) => self
+                .desugar_stmts(&b.stmts, 0)
+                .unwrap_or_else(|| self.make_succeed_undefined(b.span)),
             _ => {
                 let span = stmt_span(stmt);
                 self.desugar_stmts(std::slice::from_ref(stmt), 0)
@@ -290,7 +301,10 @@ impl PerfectTransformVisitor {
         Expr::Call(CallExpr {
             span,
             callee: Callee::Expr(Box::new(Expr::Ident(self.make_ident("succeed", span)))),
-            args: vec![ExprOrSpread { spread: None, expr: Box::new(expr) }],
+            args: vec![ExprOrSpread {
+                spread: None,
+                expr: Box::new(expr),
+            }],
             type_args: None,
             ctxt: Default::default(),
         })

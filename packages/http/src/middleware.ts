@@ -22,8 +22,5 @@ export interface HttpMiddleware {
   /** Fires on successful response (after parsing + validation). */
   onResponse?: (context: HttpRequestContext & { durationMs: number }) => void;
   /** Fires when the request fails at any stage. */
-  onError?: (
-    context: HttpRequestContext & { durationMs: number },
-    error: HttpClientError,
-  ) => void;
+  onError?: (context: HttpRequestContext & { durationMs: number }, error: HttpClientError) => void;
 }

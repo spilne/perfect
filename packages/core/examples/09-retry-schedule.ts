@@ -3,9 +3,7 @@
 //
 // Run: bun packages/core/examples/09-retry-schedule.ts
 
-import {
-  eff, succeed, fail, sync, RetryPolicy, run, type Eff, type Throws,
-} from "../src";
+import { eff, succeed, fail, sync, RetryPolicy, type Eff, type Throws } from "../src";
 import { assertEq } from "./_assert";
 
 // >>> example: retry-config
@@ -13,7 +11,7 @@ import { assertEq } from "./_assert";
 let calls = 0;
 const flaky: Eff<string, Throws<string>> = eff(function* () {
   calls++;
-  if (calls < 3) yield* (fail("still failing") as Eff<never, Throws<string>>);
+  if (calls < 3) yield* fail("still failing") as Eff<never, Throws<string>>;
   return "ok";
 });
 
@@ -42,7 +40,7 @@ const policy = RetryPolicy.exponential({ initial: 5, factor: 2 })
 
 const flaky2: Eff<string, Throws<string>> = eff(function* () {
   calls++;
-  if (calls < 3) yield* (fail("transient") as Eff<never, Throws<string>>);
+  if (calls < 3) yield* fail("transient") as Eff<never, Throws<string>>;
   return "recovered";
 });
 

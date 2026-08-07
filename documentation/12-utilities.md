@@ -78,19 +78,21 @@ const store = CacheStore.memory<string, number>({
   maxSize: 100,
 });
 
-await (eff(function* () {
-  yield* store.set("hits", 0);
-  yield* store.set("hits", 1);
-  const v = yield* store.get("hits");
-  console.log(v); // → 1
+await (
+  eff(function* () {
+    yield* store.set("hits", 0);
+    yield* store.set("hits", 1);
+    const v = yield* store.get("hits");
+    console.log(v); // → 1
 
-  const present = yield* store.has("hits");
-  console.log(present); // → true
+    const present = yield* store.has("hits");
+    console.log(present); // → true
 
-  yield* store.delete("hits");
-  const after = yield* store.get("hits");
-  console.log(after); // → undefined
-}) as any).run();
+    yield* store.delete("hits");
+    const after = yield* store.get("hits");
+    console.log(after); // → undefined
+  }) as any
+).run();
 ```
 <!-- @end -->
 
@@ -104,7 +106,7 @@ import { CacheStore } from "@perfect/core";
 const ttlStore = CacheStore.memory<string, string>({ ttlMs: 60_000 });
 
 ttlStore.set("short", "expires-fast", 30).runSync(); // overrides default
-ttlStore.set("long", "stays-around").runSync();      // uses default 60s
+ttlStore.set("long", "stays-around").runSync(); // uses default 60s
 
 console.log(ttlStore.get("short").runSync()); // → "expires-fast"
 await new Promise((r) => setTimeout(r, 40));

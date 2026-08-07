@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "emitDeclarationOnly": true,
+    "rootDir": "src",
+    "declarationDir": "dist/types",
+    "paths": {
+      "@perfect/core": ["../core/dist/types/index.d.ts"],
+      "@perfect/core/*": ["../core/dist/types/*"],
+      "@perfect/http": ["../http/dist/types/index.d.ts"],
+      "@perfect/http/*": ["../http/dist/types/*"]
+    }
+  },
+  "include": ["src"]
+}
