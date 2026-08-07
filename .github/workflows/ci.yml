@@ -86,6 +86,8 @@ jobs:
       - run: cargo build --locked --release
         working-directory: crates/perfect-transform
 
+      - run: rustup target add wasm32-wasip1
+
       - run: cargo build --locked --target wasm32-wasip1 --release
         working-directory: crates/swc-plugin-perfect
 
