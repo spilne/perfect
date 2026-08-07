@@ -19,6 +19,7 @@
 
 import { type Eff, type Needs, Suspend, Op } from "./eff";
 import { scoped } from "./constructors";
+import type { Scope } from "./scope";
 
 // ── Type alias ─────────────────────────────────────────────────────
 
@@ -74,6 +75,20 @@ export function merge<L extends readonly Layer<any, any>[]>(
   return acc;
 }
 
+export function memoize<Services extends Record<string, any>, E>(
+  layer: Layer<Services, E>,
+): Layer<Services, E> {
+  const cache = new WeakMap<Scope, Services>();
+  return new Suspend(Op.FlatMap, new Suspend(Op.GetScope, null, null), (scope: Scope) => {
+    const cached = cache.get(scope);
+    if (cached !== undefined) return new Suspend(Op.Succeed, cached, null);
+    return new Suspend(Op.FlatMap, layer, (services: Services) => {
+      cache.set(scope, services);
+      return new Suspend(Op.Succeed, services, null);
+    });
+  }) as any;
+}
+
 // ── .with() method ─────────────────────────────────────────────────
 
 declare module "./eff" {
@@ -110,6 +125,11 @@ declare module "./eff" {
       this: Layer<S1, E1>,
       inner: Layer<S2, E2>,
     ): Layer<S2, E1 | Exclude<E2, Needs<S1[keyof S1]>>>;
+
+    /**
+     * Memoize this layer once per active scope.
+     */
+    memoize<Services extends Record<string, any>, E>(this: Layer<Services, E>): Layer<Services, E>;
   }
 }
 
@@ -144,8 +164,13 @@ Suspend.prototype.provideTo = function (this: Suspend, inner: any): any {
   );
 };
 
+Suspend.prototype.memoize = function (this: Suspend): any {
+  return memoize(this as any);
+};
+
 // ── Namespace export ───────────────────────────────────────────────
 
 export const Layer = {
   merge,
+  memoize,
 } as const;

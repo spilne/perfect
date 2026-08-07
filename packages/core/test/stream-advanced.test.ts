@@ -118,6 +118,15 @@ describe("Stream.groupWithin", () => {
     );
     expect(result[0]).toEqual([1, 2, 3]);
   });
+
+  test("propagates upstream failures", async () => {
+    const exit = await runExit(Stream.fail("stream failed").groupWithin(2, 10).toArray());
+
+    expect(exit._tag).toBe("Failure");
+    if (exit._tag === "Failure") {
+      expect(Cause.pretty(exit.cause)).toBe("Fail(stream failed)");
+    }
+  });
 });
 
 describe("Stream.debounce", () => {
@@ -126,6 +135,15 @@ describe("Stream.debounce", () => {
     const s = Stream.of(1, 2, 3).debounce(30);
     const result = await run(s.take(1).toArray());
     expect(result).toEqual([3]); // only last value after debounce
+  });
+
+  test("propagates upstream failures", async () => {
+    const exit = await runExit(Stream.fail("stream failed").debounce(10).toArray());
+
+    expect(exit._tag).toBe("Failure");
+    if (exit._tag === "Failure") {
+      expect(Cause.pretty(exit.cause)).toBe("Fail(stream failed)");
+    }
   });
 });
 

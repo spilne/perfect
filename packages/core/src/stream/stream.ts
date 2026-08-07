@@ -781,10 +781,12 @@ export class Stream<A, S = never> {
         let done1 = false;
         let done2 = false;
         let failed: any = null;
+        let cancelled = false;
         const buffer: A[] = [];
         let waiting: ((s: Eff<Step<A>, any>) => void) | null = null;
 
         function deliver() {
+          if (cancelled) return;
           if (waiting && failed !== null) {
             const w = waiting;
             waiting = null;
@@ -812,17 +814,26 @@ export class Stream<A, S = never> {
         function rest(): Stream<A, any> {
           return new Stream(
             async<Step<A>>((resume2) => {
+              if (cancelled) return;
               waiting = resume2;
               deliver();
+              return () => {
+                cancelled = true;
+                waiting = null;
+                buffer.length = 0;
+              };
             }) as any,
           );
         }
 
         function drainOne(stream: Stream<A, any>, markDone: () => void) {
           function go(s: Stream<A, any>): void {
+            if (cancelled) return;
             const stepEff = s.step as any;
             import("../runtime").then(({ runExit }) => {
+              if (cancelled) return;
               runExit(stepEff).then((exit) => {
+                if (cancelled) return;
                 if (exit._tag === "Failure") {
                   failed = exit.cause;
                   markDone();
@@ -852,6 +863,11 @@ export class Stream<A, S = never> {
         });
         waiting = resume;
         deliver();
+        return () => {
+          cancelled = true;
+          waiting = null;
+          buffer.length = 0;
+        };
       }) as any,
     );
   }
@@ -866,11 +882,14 @@ export class Stream<A, S = never> {
         let running = 0;
         let inputDone = false;
         let failed: any = null;
+        let cancelled = false;
         let outputIndex = 0;
+        const slotTimers = new Set<ReturnType<typeof setTimeout>>();
         const results: Array<{ value?: B; done: boolean }> = [];
         let outputWaiting: ((s: Eff<Step<B>, any>) => void) | null = null;
 
         function tryOutput(): void {
+          if (cancelled) return;
           if (!outputWaiting) return;
           if (failed !== null) {
             const w = outputWaiting;
@@ -897,8 +916,15 @@ export class Stream<A, S = never> {
         function outputRest(): Stream<B, any> {
           return new Stream(
             async<Step<B>>((resume) => {
+              if (cancelled) return;
               outputWaiting = resume;
               tryOutput();
+              return () => {
+                cancelled = true;
+                outputWaiting = null;
+                for (const timer of slotTimers) clearTimeout(timer);
+                slotTimers.clear();
+              };
             }) as any,
           );
         }
@@ -906,7 +932,9 @@ export class Stream<A, S = never> {
         function drainInput(stream: Stream<A, any>) {
           import("../runtime").then(({ runExit }) => {
             function go(s: Stream<A, any>): void {
+              if (cancelled) return;
               runExit(s.step as any).then((exit) => {
+                if (cancelled) return;
                 if (exit._tag === "Failure") {
                   failed = exit.cause;
                   inputDone = true;
@@ -932,7 +960,11 @@ export class Stream<A, S = never> {
 
               if (running >= concurrency) {
                 // wait for a slot to free up
-                setTimeout(() => processItems(items, i, cont), 1);
+                const timer = setTimeout(() => {
+                  slotTimers.delete(timer);
+                  processItems(items, i, cont);
+                }, 1);
+                slotTimers.add(timer);
                 return;
               }
 
@@ -941,6 +973,7 @@ export class Stream<A, S = never> {
               running++;
 
               runExit(f(items[i]!) as any).then((exit) => {
+                if (cancelled) return;
                 if (exit._tag === "Failure") {
                   failed = exit.cause;
                   running--;
@@ -962,6 +995,12 @@ export class Stream<A, S = never> {
 
         drainInput(this);
         outputWaiting = outerResume;
+        return () => {
+          cancelled = true;
+          outputWaiting = null;
+          for (const timer of slotTimers) clearTimeout(timer);
+          slotTimers.clear();
+        };
       }) as any,
     );
   }
@@ -973,10 +1012,13 @@ export class Stream<A, S = never> {
         let running = 0;
         let inputDone = false;
         let failed: any = null;
+        let cancelled = false;
+        const slotTimers = new Set<ReturnType<typeof setTimeout>>();
         const buffer: B[] = [];
         let outputWaiting: ((s: Eff<Step<B>, any>) => void) | null = null;
 
         function deliver() {
+          if (cancelled) return;
           if (outputWaiting && failed !== null) {
             const w = outputWaiting;
             outputWaiting = null;
@@ -999,8 +1041,15 @@ export class Stream<A, S = never> {
         function rest(): Stream<B, any> {
           return new Stream(
             async<Step<B>>((resume) => {
+              if (cancelled) return;
               outputWaiting = resume;
               deliver();
+              return () => {
+                cancelled = true;
+                outputWaiting = null;
+                for (const timer of slotTimers) clearTimeout(timer);
+                slotTimers.clear();
+              };
             }) as any,
           );
         }
@@ -1008,7 +1057,9 @@ export class Stream<A, S = never> {
         function drainInput(stream: Stream<A, any>) {
           import("../runtime").then(({ runExit }) => {
             function go(s: Stream<A, any>): void {
+              if (cancelled) return;
               runExit(s.step as any).then((exit) => {
+                if (cancelled) return;
                 if (exit._tag === "Failure") {
                   failed = exit.cause;
                   inputDone = true;
@@ -1032,11 +1083,16 @@ export class Stream<A, S = never> {
                 return;
               }
               if (running >= concurrency) {
-                setTimeout(() => processItems(items, i, cont), 1);
+                const timer = setTimeout(() => {
+                  slotTimers.delete(timer);
+                  processItems(items, i, cont);
+                }, 1);
+                slotTimers.add(timer);
                 return;
               }
               running++;
               runExit(f(items[i]!) as any).then((exit) => {
+                if (cancelled) return;
                 if (exit._tag === "Failure") {
                   failed = exit.cause;
                   running--;
@@ -1057,6 +1113,12 @@ export class Stream<A, S = never> {
 
         drainInput(this);
         outputWaiting = outerResume;
+        return () => {
+          cancelled = true;
+          outputWaiting = null;
+          for (const timer of slotTimers) clearTimeout(timer);
+          slotTimers.clear();
+        };
       }) as any,
     );
   }
@@ -1069,13 +1131,22 @@ export class Stream<A, S = never> {
       async<Step<Chunk<A>>>((outerResume) => {
         let buffer: A[] = [];
         let inputDone = false;
+        let failed: any = null;
+        let cancelled = false;
         let timer: ReturnType<typeof setTimeout> | null = null;
         let outputWaiting: ((s: Eff<Step<Chunk<A>>, any>) => void) | null = null;
 
         function flush() {
+          if (cancelled) return;
           if (timer) {
             clearTimeout(timer);
             timer = null;
+          }
+          if (failed !== null && outputWaiting) {
+            const w = outputWaiting;
+            outputWaiting = null;
+            w(failCause(failed));
+            return;
           }
           if (buffer.length > 0 && outputWaiting) {
             const chunk = Chunk.single(Chunk.fromArray(buffer.splice(0)));
@@ -1095,6 +1166,7 @@ export class Stream<A, S = never> {
         }
 
         function resetTimer() {
+          if (cancelled) return;
           if (timer) clearTimeout(timer);
           timer = setTimeout(() => {
             timer = null;
@@ -1105,37 +1177,55 @@ export class Stream<A, S = never> {
         function rest(): Stream<Chunk<A>, any> {
           return new Stream(
             async<Step<Chunk<A>>>((resume) => {
+              if (cancelled) return;
               outputWaiting = resume;
               if (inputDone) flush();
+              return () => {
+                cancelled = true;
+                outputWaiting = null;
+                buffer.length = 0;
+                if (timer) clearTimeout(timer);
+                timer = null;
+              };
             }) as any,
           );
         }
 
-        import("../runtime").then(({ run }) => {
+        import("../runtime").then(({ runExit }) => {
           function go(s: Stream<A, any>): void {
-            (run(s.step as any) as Promise<Step<A>>).then(
-              (step: Step<A>) => {
-                if (step._tag === "Done") {
-                  inputDone = true;
-                  flush();
-                  return;
-                }
-                for (const item of step.chunk) buffer.push(item);
-                if (buffer.length >= maxSize) flush();
-                else if (!timer) resetTimer();
-                go(step.next);
-              },
-              () => {
+            if (cancelled) return;
+            runExit(s.step as any).then((exit) => {
+              if (cancelled) return;
+              if (exit._tag === "Failure") {
+                failed = exit.cause;
                 inputDone = true;
                 flush();
-              },
-            );
+                return;
+              }
+              const step = exit.value as Step<A>;
+              if (step._tag === "Done") {
+                inputDone = true;
+                flush();
+                return;
+              }
+              for (const item of step.chunk) buffer.push(item);
+              if (buffer.length >= maxSize) flush();
+              else if (!timer) resetTimer();
+              go(step.next);
+            });
           }
           resetTimer();
           go(self);
         });
 
         outputWaiting = outerResume;
+        return () => {
+          cancelled = true;
+          outputWaiting = null;
+          buffer.length = 0;
+          if (timer) clearTimeout(timer);
+          timer = null;
+        };
       }) as any,
     );
   }
@@ -1147,9 +1237,18 @@ export class Stream<A, S = never> {
         let latest: A | typeof SENTINEL = SENTINEL;
         let timer: ReturnType<typeof setTimeout> | null = null;
         let inputDone = false;
+        let failed: any = null;
+        let cancelled = false;
         let outputWaiting: ((s: Eff<Step<A>, any>) => void) | null = null;
 
         function deliver() {
+          if (cancelled) return;
+          if (outputWaiting && failed !== null) {
+            const w = outputWaiting;
+            outputWaiting = null;
+            w(failCause(failed));
+            return;
+          }
           if (outputWaiting && latest !== SENTINEL) {
             const val = latest as A;
             latest = SENTINEL;
@@ -1167,42 +1266,58 @@ export class Stream<A, S = never> {
         function rest(): Stream<A, any> {
           return new Stream(
             async<Step<A>>((resume) => {
+              if (cancelled) return;
               outputWaiting = resume;
               deliver();
+              return () => {
+                cancelled = true;
+                outputWaiting = null;
+                if (timer) clearTimeout(timer);
+                timer = null;
+              };
             }) as any,
           );
         }
 
-        import("../runtime").then(({ run }) => {
+        import("../runtime").then(({ runExit }) => {
           function go(s: Stream<A, any>): void {
-            (run(s.step as any) as Promise<Step<A>>).then(
-              (step: Step<A>) => {
-                if (step._tag === "Done") {
-                  inputDone = true;
-                  deliver();
-                  return;
-                }
-                const last = step.chunk.last();
-                if (last !== undefined) {
-                  latest = last;
-                  if (timer) clearTimeout(timer);
-                  timer = setTimeout(() => {
-                    timer = null;
-                    deliver();
-                  }, ms);
-                }
-                go(step.next);
-              },
-              () => {
+            if (cancelled) return;
+            runExit(s.step as any).then((exit) => {
+              if (cancelled) return;
+              if (exit._tag === "Failure") {
+                failed = exit.cause;
                 inputDone = true;
                 deliver();
-              },
-            );
+                return;
+              }
+              const step = exit.value as Step<A>;
+              if (step._tag === "Done") {
+                inputDone = true;
+                deliver();
+                return;
+              }
+              const last = step.chunk.last();
+              if (last !== undefined) {
+                latest = last;
+                if (timer) clearTimeout(timer);
+                timer = setTimeout(() => {
+                  timer = null;
+                  deliver();
+                }, ms);
+              }
+              go(step.next);
+            });
           }
           go(self);
         });
 
         outputWaiting = outerResume;
+        return () => {
+          cancelled = true;
+          outputWaiting = null;
+          if (timer) clearTimeout(timer);
+          timer = null;
+        };
       }) as any,
     );
   }

@@ -64,3 +64,26 @@ jobs:
       - run: bun run build:rust
 
       - run: bun run build:swc
+
+  performance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install --frozen-lockfile
+
+      - name: Generate performance report
+        run: bun run perf:report
+
+      - name: Run performance gate
+        run: bun run perf:gate
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: perf
+          path: .perf/

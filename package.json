@@ -1,7 +1,9 @@
 {
   "name": "perfect",
   "private": true,
-  "workspaces": ["packages/*"],
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "test": "bun test --recursive packages/",
     "test:core": "cd packages/core && bun test",
@@ -17,6 +19,8 @@
     "format": "bun run fmt",
     "bench": "cd packages/core && bun run bench/index.ts",
     "bench:vs-effect": "cd packages/core && bun run bench/vs-effect-ts.ts",
+    "perf:report": "cd packages/core && bun run bench/perf-report.ts",
+    "perf:gate": "cd packages/core && bun run bench/perf-gate.ts",
     "documentation:build": "bun documentation/build.ts",
     "documentation:check": "bun documentation/build.ts --check",
     "documentation:dev": "bun documentation/build.ts && vitepress dev documentation",

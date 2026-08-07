@@ -275,6 +275,23 @@ When one layer's services depend on another's, either:
 `.provideTo` consumes the outer layer's services (they don't appear in the
 result type); `merge` keeps both available.
 
+## Memoization
+
+Layers build each time they are applied unless you opt into memoization.
+Use `.memoize()` when a layer should be constructed at most once per active
+scope:
+
+```ts
+const DbLive = sync(() => ({ Db: openDb() })).memoize();
+
+const AppLive = Layer.merge(DbLive, DbLive);
+// DbLive builds once inside this `.with(...)` scope.
+await program.with(AppLive).run();
+```
+
+Memoization is scoped, not global. A second independent `program.with(DbLive)`
+run builds the layer again and owns its own finalizers.
+
 ## API summary
 
 | | |
@@ -285,6 +302,7 @@ result type); `merge` keeps both available.
 | `Layer.merge(...)` | horizontal: combine multiple layers |
 | `layer.and(other)` | fluent merge — chainable |
 | `layer.provideTo(inner)` | vertical: use this layer's outputs to satisfy inner's deps |
+| `layer.memoize()` | cache one layer build per active scope |
 | `eff.with(layer)` | apply a layer to a program (wraps in `scoped`) |
 
 ## Pitfalls
@@ -293,6 +311,9 @@ result type); `merge` keeps both available.
   `succeed({ Db: impl })` resolve to the same `Symbol.for("spilne/svc/Db")`.
 - **Never resolve a service inside a tight loop.** Get it once at the top of
   the block, reuse it. See the bench: per-step lookup is ~14× slower.
+- **Memoization is per scope.** Chained `.with(A).with(A)` creates nested
+  scopes; use `Layer.merge(A.memoize(), A.memoize())` or share the same
+  memoized layer inside one `.with(...)` when you want reuse.
 
 ## Next
 
