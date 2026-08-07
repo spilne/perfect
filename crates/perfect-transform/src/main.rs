@@ -10,7 +10,9 @@ fn main() {
         std::fs::read_to_string(&args[1]).expect("Failed to read file")
     } else {
         let mut buf = String::new();
-        io::stdin().read_to_string(&mut buf).expect("Failed to read stdin");
+        io::stdin()
+            .read_to_string(&mut buf)
+            .expect("Failed to read stdin");
         buf
     };
 

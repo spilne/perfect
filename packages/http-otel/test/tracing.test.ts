@@ -11,14 +11,7 @@ import {
   trace,
   ROOT_CONTEXT,
 } from "@opentelemetry/api";
-import {
-  type Eff,
-  type Throws,
-  succeed,
-  fail,
-  sync,
-  run,
-} from "@perfect/core";
+import { type Eff, type Throws, succeed, fail, sync, run } from "@perfect/core";
 import {
   type HttpClientError,
   type HttpRequestOptions,
@@ -53,7 +46,7 @@ function makeInMemTracer(): { tracer: Tracer; spans: RecordedSpan[] } {
       const record: RecordedSpan = {
         name,
         kind: options?.kind ?? SpanKind.INTERNAL,
-        attributes: { ...(options?.attributes ?? {}) },
+        attributes: { ...options?.attributes },
         status: { code: SpanStatusCode.UNSET },
         ended: false,
         exceptions: [],
@@ -68,16 +61,32 @@ function makeInMemTracer(): { tracer: Tracer; spans: RecordedSpan[] } {
           Object.assign(record.attributes, attrs);
           return span;
         },
-        addEvent() { return span; },
-        setStatus(s) { record.status = s; return span; },
-        updateName(n) { record.name = n; return span; },
-        end() { record.ended = true; },
-        isRecording() { return !record.ended; },
+        addEvent() {
+          return span;
+        },
+        setStatus(s) {
+          record.status = s;
+          return span;
+        },
+        updateName(n) {
+          record.name = n;
+          return span;
+        },
+        end() {
+          record.ended = true;
+        },
+        isRecording() {
+          return !record.ended;
+        },
         recordException(e: any) {
           record.exceptions.push({ name: e.name, message: e.message });
         },
-        addLink() { return span; },
-        addLinks() { return span; },
+        addLink() {
+          return span;
+        },
+        addLinks() {
+          return span;
+        },
         spanContext() {
           return {
             traceId: "0".repeat(32),
@@ -111,7 +120,10 @@ class StubTransport implements HttpTransport {
   }
 }
 
-interface User { id: number; name: string }
+interface User {
+  id: number;
+  name: string;
+}
 const UserParser: ResponseParser<User> = {
   safeParse: (d: any) =>
     d && typeof d.id === "number" && typeof d.name === "string"

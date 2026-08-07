@@ -1,7 +1,14 @@
 import { describe, test, expect } from "bun:test";
 import {
-  succeed, fail, sync, run, runSync, runExit,
-  Cause, TaggedError, type Eff, type Throws,
+  succeed,
+  fail,
+  sync,
+  run,
+  runSync,
+  Cause,
+  TaggedError,
+  type Eff,
+  type Throws,
 } from "../src";
 
 type AppErr =
@@ -24,10 +31,11 @@ describe(".catchTags — bulk handler", () => {
   });
 
   test("unhandled tags propagate", async () => {
-    const partial = (fail({ _tag: "Forbidden", reason: "x" } as AppErr) as Eff<never, Throws<AppErr>>)
-      .catchTags({
-        NotFound: (e) => succeed(`m${e.id}`),
-      });
+    const partial = (
+      fail({ _tag: "Forbidden", reason: "x" } as AppErr) as Eff<never, Throws<AppErr>>
+    ).catchTags({
+      NotFound: (e) => succeed(`m${e.id}`),
+    });
     await expect(run(partial as any)).rejects.toMatchObject({ _tag: "Forbidden" });
   });
 });
@@ -60,7 +68,9 @@ describe(".exit", () => {
   });
 
   test("Failure on defect", async () => {
-    const blowUp = sync(() => { throw new Error("oops"); }) as any;
+    const blowUp = sync(() => {
+      throw new Error("oops");
+    }) as any;
     const exit = await run(blowUp.exit());
     expect((exit as any)._tag).toBe("Failure");
     expect((exit as any).cause._tag).toBe("Die");
@@ -70,8 +80,16 @@ describe(".exit", () => {
 describe(".tapDefect", () => {
   test("observes defects only", async () => {
     let observed: unknown = null;
-    const program = (sync(() => { throw new Error("bug"); }) as any)
-      .tapDefect((d: unknown) => sync(() => { observed = d; }))
+    const program = (
+      sync(() => {
+        throw new Error("bug");
+      }) as any
+    )
+      .tapDefect((d: unknown) =>
+        sync(() => {
+          observed = d;
+        }),
+      )
       .catchAllCause(() => succeed("caught"));
     expect(await run(program as any)).toBe("caught");
     expect((observed as Error).message).toBe("bug");
@@ -80,7 +98,11 @@ describe(".tapDefect", () => {
   test("doesn't fire for typed failures", async () => {
     let observed: unknown = null;
     const program = (fail("typed") as any)
-      .tapDefect((d: unknown) => sync(() => { observed = d; }))
+      .tapDefect((d: unknown) =>
+        sync(() => {
+          observed = d;
+        }),
+      )
       .catch(() => succeed("ok"));
     expect(await run(program as any)).toBe("ok");
     expect(observed).toBeNull();
@@ -107,17 +129,15 @@ describe("Cause.pretty / prettyMultiline", () => {
     expect(Cause.pretty(Cause.fail("boom"))).toBe("Fail(boom)");
     expect(Cause.pretty(Cause.die("oops"))).toBe("Die(oops)");
     expect(Cause.pretty(Cause.interrupt())).toBe("Interrupt");
-    expect(Cause.pretty(Cause.both(Cause.fail("a"), Cause.fail("b"))))
-      .toBe("(Fail(a) & Fail(b))");
-    expect(Cause.pretty(Cause.then(Cause.fail("x"), Cause.die("y"))))
-      .toBe("(Fail(x) ; Die(y))");
+    expect(Cause.pretty(Cause.both(Cause.fail("a"), Cause.fail("b")))).toBe("(Fail(a) & Fail(b))");
+    expect(Cause.pretty(Cause.then(Cause.fail("x"), Cause.die("y")))).toBe("(Fail(x) ; Die(y))");
   });
 
   test("pretty: formats objects/Errors readably", () => {
-    expect(Cause.pretty(Cause.fail({ _tag: "NotFound", id: 7 })))
-      .toBe(`Fail(${JSON.stringify({ _tag: "NotFound", id: 7 })})`);
-    expect(Cause.pretty(Cause.die(new TypeError("nope"))))
-      .toBe("Die(TypeError: nope)");
+    expect(Cause.pretty(Cause.fail({ _tag: "NotFound", id: 7 }))).toBe(
+      `Fail(${JSON.stringify({ _tag: "NotFound", id: 7 })})`,
+    );
+    expect(Cause.pretty(Cause.die(new TypeError("nope")))).toBe("Die(TypeError: nope)");
   });
 
   test("prettyMultiline: structured indentation", () => {
@@ -156,8 +176,9 @@ describe("TaggedError class helper", () => {
 
   test("works with .catchTag narrowing", () => {
     const result = runSync(
-      (fail(new NotFound({ id: 7 })) as any)
-        .catchTag("NotFound", (e: NotFound) => succeed(`missing ${e.id}`)),
+      (fail(new NotFound({ id: 7 })) as any).catchTag("NotFound", (e: NotFound) =>
+        succeed(`missing ${e.id}`),
+      ),
     );
     expect(result).toBe("missing 7");
   });

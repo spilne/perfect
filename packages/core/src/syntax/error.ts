@@ -66,9 +66,7 @@ declare module "../eff" {
       S,
       E extends { readonly _tag: string },
       Handlers extends {
-        readonly [K in E["_tag"]]?: (
-          error: Extract<E, { readonly _tag: K }>,
-        ) => Eff<any, any>;
+        readonly [K in E["_tag"]]?: (error: Extract<E, { readonly _tag: K }>) => Eff<any, any>;
       },
     >(
       this: Eff<A, S | Throws<E>>,
@@ -77,9 +75,11 @@ declare module "../eff" {
       | A
       | (Handlers[keyof Handlers] extends ((e: any) => Eff<infer B, any>) | undefined ? B : never),
       | Exclude<S, Throws<E>>
-      | Throws<Exclude<E["_tag"], keyof Handlers> extends infer R extends string
-          ? Extract<E, { readonly _tag: R }>
-          : never>
+      | Throws<
+          Exclude<E["_tag"], keyof Handlers> extends infer R extends string
+            ? Extract<E, { readonly _tag: R }>
+            : never
+        >
       | (Handlers[keyof Handlers] extends ((e: any) => Eff<any, infer S2>) | undefined ? S2 : never)
     >;
 

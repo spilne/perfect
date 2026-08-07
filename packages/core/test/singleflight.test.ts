@@ -1,8 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import {
-  eff, succeed, fail, sync, sleep, fork, join, all, run,
-  Singleflight, type Eff, type Throws,
-} from "../src";
+import { succeed, fail, sync, sleep, all, run, Singleflight, type Eff, type Throws } from "../src";
 
 describe("Singleflight", () => {
   test("single call passes through", async () => {

@@ -6,13 +6,7 @@
 // Without errorSchema, behaviour is unchanged: HttpStatusError<string>.
 
 import { describe, test, expect } from "bun:test";
-import {
-  type Eff,
-  type Throws,
-  succeed,
-  fail,
-  run,
-} from "@perfect/core";
+import { type Eff, type Throws, succeed, fail, run } from "@perfect/core";
 import {
   type HttpClientError,
   type HttpRequestOptions,
@@ -68,7 +62,9 @@ describe("httpFetchOk — errorSchema → HttpStatusError<B>", () => {
     );
     let caught: HttpStatusError<ApiError> | undefined;
     try {
-      await run(httpFetchOk<ApiError>({ url: "/x", transport: t, errorSchema: ApiErrorParser }) as any);
+      await run(
+        httpFetchOk<ApiError>({ url: "/x", transport: t, errorSchema: ApiErrorParser }) as any,
+      );
     } catch (e) {
       caught = e as HttpStatusError<ApiError>;
     }
@@ -85,7 +81,9 @@ describe("httpFetchOk — errorSchema mismatch → HttpUnknownError", () => {
     const t = new MockTransport(() => new Response("<html>500</html>", { status: 500 }));
     let caught: HttpUnknownError | undefined;
     try {
-      await run(httpFetchOk<ApiError>({ url: "/x", transport: t, errorSchema: ApiErrorParser }) as any);
+      await run(
+        httpFetchOk<ApiError>({ url: "/x", transport: t, errorSchema: ApiErrorParser }) as any,
+      );
     } catch (e) {
       caught = e as HttpUnknownError;
     }
@@ -102,7 +100,9 @@ describe("httpFetchOk — errorSchema mismatch → HttpUnknownError", () => {
     );
     let caught: HttpUnknownError | undefined;
     try {
-      await run(httpFetchOk<ApiError>({ url: "/x", transport: t, errorSchema: ApiErrorParser }) as any);
+      await run(
+        httpFetchOk<ApiError>({ url: "/x", transport: t, errorSchema: ApiErrorParser }) as any,
+      );
     } catch (e) {
       caught = e as HttpUnknownError;
     }
@@ -258,9 +258,7 @@ describe("DefaultHttpClient — errorSchema per-request + client-level", () => {
   });
 
   test("client-level errorSchema mismatch → HttpUnknownError", async () => {
-    const transport = new MockTransport(
-      () => new Response("<html>down</html>", { status: 502 }),
-    );
+    const transport = new MockTransport(() => new Response("<html>down</html>", { status: 502 }));
     const client = new DefaultHttpClient({ transport, errorSchema: ApiErrorParser });
     let caught: HttpUnknownError | undefined;
     try {

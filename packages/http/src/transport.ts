@@ -17,7 +17,7 @@
 //      INSIDE the transport. Higher layers only handle "I have a Response,
 //      what now?"
 
-import { type Eff, type Throws, sync, tryPromise, acquireRelease, scoped } from "@perfect/core";
+import { type Eff, type Throws, sync, tryPromise, scoped } from "@perfect/core";
 import { HttpNetworkError, HttpTimeoutError, type HttpClientError } from "./errors";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -99,10 +99,7 @@ export class FetchTransport implements HttpTransport {
         .acquireRelease((c) => sync(() => c.abort()))
         .flatMap((controller) => {
           // Combine: our controller + timeout + optional external signal
-          const signals: AbortSignal[] = [
-            controller.signal,
-            AbortSignal.timeout(timeoutMs),
-          ];
+          const signals: AbortSignal[] = [controller.signal, AbortSignal.timeout(timeoutMs)];
           if (signal) signals.push(signal);
 
           // Bun supports `proxy` + `tls` in fetch; Node fetch does not (safely ignored there).

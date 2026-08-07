@@ -1,5 +1,5 @@
-import { type Eff, type Throws, Suspend, Op } from "./eff";
-import { succeed, fail, sync, sleep, suspend } from "./constructors";
+import { type Eff, Suspend, Op } from "./eff";
+import { succeed, sleep, suspend } from "./constructors";
 
 // A Schedule<In, Out> decides whether to continue and what delay to use.
 // Each step receives the input and returns either a delay + output, or done.

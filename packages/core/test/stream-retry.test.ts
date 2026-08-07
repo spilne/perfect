@@ -3,9 +3,7 @@ import { Stream, RetryPolicy, succeed, fail, sync, run } from "../src";
 
 describe("Stream.retry", () => {
   test("happy-path: no failure → retry is a no-op", async () => {
-    const result = await run(
-      Stream.of(1, 2, 3).retry(RetryPolicy.recurs(3)).toArray(),
-    );
+    const result = await run(Stream.of(1, 2, 3).retry(RetryPolicy.recurs(3)).toArray());
     expect(result).toEqual([1, 2, 3]);
   });
 
@@ -34,9 +32,7 @@ describe("Stream.retry", () => {
     let attempts = 0;
     const flaky = Stream.suspend(() =>
       Stream.fromEffect(
-        (sync(() => ++attempts) as any).flatMap((n: number) =>
-          n < 3 ? fail("nope") : succeed(7),
-        ),
+        (sync(() => ++attempts) as any).flatMap((n: number) => (n < 3 ? fail("nope") : succeed(7))),
       ),
     );
 

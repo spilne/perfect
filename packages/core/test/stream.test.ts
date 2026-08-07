@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { succeed, fail, sync, sleep, run, runSync, Queue, Ref, Stream, Chunk } from "../src";
+import { succeed, sync, run, Queue, Stream, Chunk } from "../src";
 
 describe("Chunk", () => {
   test("fromArray + toArray", () => {
@@ -203,9 +203,7 @@ describe("Stream transforms", () => {
   });
 
   test("changes (deduplicate consecutive)", async () => {
-    expect(await run(Stream.of(1, 1, 2, 2, 2, 3, 1, 1).changes().toArray())).toEqual([
-      1, 2, 3, 1,
-    ]);
+    expect(await run(Stream.of(1, 1, 2, 2, 2, 3, 1, 1).changes().toArray())).toEqual([1, 2, 3, 1]);
   });
 
   test("collect", async () => {

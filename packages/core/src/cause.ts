@@ -220,7 +220,10 @@ function prettyMultilineInner<E>(c: Cause<E>, indent: string): string {
     case "Die": {
       const d = c.defect;
       if (d instanceof Error && d.stack) {
-        const stack = d.stack.split("\n").map((l) => `${indent}  ${l}`).join("\n");
+        const stack = d.stack
+          .split("\n")
+          .map((l) => `${indent}  ${l}`)
+          .join("\n");
         return `${indent}Die: ${d.name}: ${d.message}\n${stack}`;
       }
       return `${indent}Die: ${formatValue(d)}`;

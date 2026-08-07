@@ -2,13 +2,7 @@
 //
 // Run: bun packages/http/examples/04-error-schema.ts
 
-import {
-  type Eff,
-  type Throws,
-  succeed,
-  fail,
-  run,
-} from "@perfect/core";
+import { type Eff, type Throws, succeed } from "@perfect/core";
 import {
   type HttpClientError,
   type HttpRequestOptions,
@@ -27,7 +21,10 @@ class StubTransport implements HttpTransport {
   }
 }
 
-interface User { id: number; name: string }
+interface User {
+  id: number;
+  name: string;
+}
 const UserSchema: ResponseParser<User> = {
   safeParse: (d: any) =>
     d && typeof d.id === "number" && typeof d.name === "string"
@@ -44,7 +41,9 @@ interface ApiError {
 }
 const ApiErrorSchema: ResponseParser<ApiError> = {
   safeParse: (d: any) =>
-    d && ["NOT_FOUND", "FORBIDDEN", "RATE_LIMITED"].includes(d?.code) && typeof d.detail === "string"
+    d &&
+    ["NOT_FOUND", "FORBIDDEN", "RATE_LIMITED"].includes(d?.code) &&
+    typeof d.detail === "string"
       ? { success: true, data: d }
       : { success: false, error: "not ApiError" },
 };

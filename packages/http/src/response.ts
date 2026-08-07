@@ -48,7 +48,9 @@ export const blobDecoder: ResponseDecoder<Blob> = (response) => response.blob();
  * wrap their validate call in `{ safeParse: (d) => ... }`.
  */
 export interface ResponseParser<T> {
-  safeParse(data: unknown):
+  safeParse(
+    data: unknown,
+  ):
     | { readonly success: true; readonly data: T }
     | { readonly success: false; readonly error: unknown };
 }

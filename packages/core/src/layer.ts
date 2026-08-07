@@ -59,10 +59,16 @@ export function merge<L extends readonly Layer<any, any>[]>(
   let acc: any = new Suspend(Op.Succeed, {}, null);
   for (const layer of layers) {
     const prev = acc;
-    acc = new Suspend(Op.FlatMap, prev, (accServices: any) =>
-      new Suspend(Op.FlatMap, layer, (layerServices: any) =>
-        new Suspend(Op.Succeed, { ...accServices, ...layerServices }, null),
-      ),
+    acc = new Suspend(
+      Op.FlatMap,
+      prev,
+      (accServices: any) =>
+        new Suspend(
+          Op.FlatMap,
+          layer,
+          (layerServices: any) =>
+            new Suspend(Op.Succeed, { ...accServices, ...layerServices }, null),
+        ),
     );
   }
   return acc;
@@ -117,8 +123,10 @@ function servicesToContext(services: Record<string, unknown>): Map<symbol, unkno
 
 Suspend.prototype.with = function (this: Suspend, layer: any): any {
   const program = this;
-  const body = new Suspend(Op.FlatMap, layer, (services: any) =>
-    new Suspend(Op.Provide, program, servicesToContext(services)),
+  const body = new Suspend(
+    Op.FlatMap,
+    layer,
+    (services: any) => new Suspend(Op.Provide, program, servicesToContext(services)),
   );
   return scoped(body as any);
 };
@@ -129,8 +137,10 @@ Suspend.prototype.and = function (this: Suspend, other: any): any {
 
 Suspend.prototype.provideTo = function (this: Suspend, inner: any): any {
   // Build outer, install its services into context, then build inner.
-  return new Suspend(Op.FlatMap, this, (outerServices: any) =>
-    new Suspend(Op.Provide, inner, servicesToContext(outerServices)),
+  return new Suspend(
+    Op.FlatMap,
+    this,
+    (outerServices: any) => new Suspend(Op.Provide, inner, servicesToContext(outerServices)),
   );
 };
 

@@ -6,9 +6,9 @@
 //   retry(eff, RetryPolicy.recurs(3).whenError(e => e._tag === "Transient"))
 //   retry(eff, RetryPolicy.spaced(1000).withTimeBudget(30_000).onRetry(d => Log.info(...)))
 
-import { type Eff, type Throws, Suspend, Op } from "./eff";
+import { type Eff, Suspend, Op } from "./eff";
 import { Cause } from "./cause";
-import { sleep, succeed, fail } from "./constructors";
+import { sleep, succeed } from "./constructors";
 import { Schedule, type RetryDetails } from "./schedule";
 
 // ── Public: RetryDetails passed to onRetry hooks ────────────────────

@@ -6,9 +6,22 @@
 
 import { group, bench, run as mitataRun } from "mitata";
 import {
-  eff, succeed, sync, sleep, fork, join, all, run,
-  Ref, Deferred, Queue, Semaphore,
-  CircuitBreaker, Singleflight, RateLimiter, Latch, Barrier, PubSub,
+  eff,
+  succeed,
+  sleep,
+  fork,
+  join,
+  all,
+  run,
+  Deferred,
+  Queue,
+  Semaphore,
+  CircuitBreaker,
+  Singleflight,
+  RateLimiter,
+  Latch,
+  Barrier,
+  PubSub,
 } from "../src";
 
 // ── Queue: producers + consumers ──────────────────────────────────
@@ -35,8 +48,14 @@ group("Queue: 4 producers × 250 + 4 consumers × 250 (bounded 8)", () => {
         const c2 = yield* fork(consumer);
         const c3 = yield* fork(consumer);
         const c4 = yield* fork(consumer);
-        yield* join(p1); yield* join(p2); yield* join(p3); yield* join(p4);
-        yield* join(c1); yield* join(c2); yield* join(c3); yield* join(c4);
+        yield* join(p1);
+        yield* join(p2);
+        yield* join(p3);
+        yield* join(p4);
+        yield* join(c1);
+        yield* join(c2);
+        yield* join(c3);
+        yield* join(c4);
       }) as any,
     );
   });
@@ -101,7 +120,11 @@ group("Singleflight: 100 callers / 5 distinct keys (20× dedup factor)", () => {
       eff(function* () {
         const sf = Singleflight.make();
         // Each call: key picked round-robin from 5; sleep then succeed
-        const work = (i: number) => sf.do(`k${i % 5}`, sleep(1).flatMap(() => succeed(i)));
+        const work = (i: number) =>
+          sf.do(
+            `k${i % 5}`,
+            sleep(1).flatMap(() => succeed(i)),
+          );
         yield* all(Array.from({ length: 100 }, (_, i) => work(i)));
       }) as any,
     );
@@ -119,10 +142,7 @@ group("Singleflight: 100 callers / 5 distinct keys (20× dedup factor)", () => {
 // ── RateLimiter: 100 concurrent tryAcquire ─────────────────────────
 
 group("RateLimiter: 100 concurrent tryAcquire (limit 30)", () => {
-  const benchStrat = (
-    name: string,
-    factory: (opts: { limit: number; windowMs: number }) => any,
-  ) =>
+  const benchStrat = (name: string, factory: (opts: { limit: number; windowMs: number }) => any) =>
     bench(name, async () => {
       await run(
         eff(function* () {

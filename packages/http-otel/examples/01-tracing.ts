@@ -11,13 +11,7 @@ import {
   SpanKind,
   SpanStatusCode,
 } from "@opentelemetry/api";
-import {
-  type Eff,
-  type Throws,
-  succeed,
-  fail,
-  run,
-} from "@perfect/core";
+import { type Eff, type Throws, succeed } from "@perfect/core";
 import {
   type HttpClientError,
   type HttpRequestOptions,
@@ -25,13 +19,8 @@ import {
   type ResponseParser,
   DefaultHttpClient,
 } from "@perfect/http";
-import {
-  defaultRedaction,
-  makeRedaction,
-  redactHeaders,
-  tracingMiddleware,
-} from "../src";
-import { assertEq, assertContains } from "./_assert";
+import { makeRedaction, redactHeaders, tracingMiddleware } from "../src";
+import { assertEq } from "./_assert";
 
 // ── In-memory tracer (so this runs without an OTel collector) ─────
 
@@ -50,22 +39,44 @@ function inMemTracer(): { tracer: Tracer; spans: RecordedSpan[] } {
       const rec: RecordedSpan = {
         name,
         kind: options?.kind ?? SpanKind.INTERNAL,
-        attributes: { ...(options?.attributes ?? {}) },
+        attributes: { ...options?.attributes },
         status: { code: SpanStatusCode.UNSET },
         ended: false,
       };
       spans.push(rec);
       const span: Span = {
-        setAttribute(k, v) { rec.attributes[k] = v; return span; },
-        setAttributes(a) { Object.assign(rec.attributes, a); return span; },
-        addEvent() { return span; },
-        setStatus(s) { rec.status = s; return span; },
-        updateName(n) { rec.name = n; return span; },
-        end() { rec.ended = true; },
-        isRecording() { return !rec.ended; },
+        setAttribute(k, v) {
+          rec.attributes[k] = v;
+          return span;
+        },
+        setAttributes(a) {
+          Object.assign(rec.attributes, a);
+          return span;
+        },
+        addEvent() {
+          return span;
+        },
+        setStatus(s) {
+          rec.status = s;
+          return span;
+        },
+        updateName(n) {
+          rec.name = n;
+          return span;
+        },
+        end() {
+          rec.ended = true;
+        },
+        isRecording() {
+          return !rec.ended;
+        },
         recordException() {},
-        addLink() { return span; },
-        addLinks() { return span; },
+        addLink() {
+          return span;
+        },
+        addLinks() {
+          return span;
+        },
         spanContext() {
           return { traceId: "0".repeat(32), spanId: "0".repeat(16), traceFlags: 0 } as SpanContext;
         },
@@ -95,7 +106,10 @@ const json = (body: unknown, status = 200): Response =>
     headers: { "content-type": "application/json" },
   });
 
-interface User { id: number; name: string }
+interface User {
+  id: number;
+  name: string;
+}
 const UserSchema: ResponseParser<User> = {
   safeParse: (d: any) =>
     d && typeof d.id === "number" && typeof d.name === "string"
@@ -135,7 +149,11 @@ const failing = new DefaultHttpClient({
 });
 
 let caught: any;
-try { await failing.get("/u", UserSchema).run(); } catch (e) { caught = e; }
+try {
+  await failing.get("/u", UserSchema).run();
+} catch (e) {
+  caught = e;
+}
 assertEq(caught._tag, "HttpStatusError");
 assertEq(errSpans[0]!.status.code, SpanStatusCode.ERROR);
 assertEq(errSpans[0]!.attributes["http.response.status_code"], 503);

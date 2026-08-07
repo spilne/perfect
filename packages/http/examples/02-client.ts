@@ -2,13 +2,7 @@
 //
 // Run: bun packages/http/examples/02-client.ts
 
-import {
-  type Eff,
-  type Throws,
-  succeed,
-  fail,
-  run,
-} from "@perfect/core";
+import { type Eff, type Throws, succeed } from "@perfect/core";
 import {
   type HttpClientError,
   type HttpMiddleware,
@@ -34,7 +28,10 @@ const json = (body: unknown, status = 200): Response =>
     headers: { "content-type": "application/json" },
   });
 
-interface User { id: number; name: string }
+interface User {
+  id: number;
+  name: string;
+}
 const UserSchema: ResponseParser<User> = {
   safeParse: (d: any) =>
     d && typeof d.id === "number" && typeof d.name === "string"

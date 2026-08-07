@@ -1,7 +1,7 @@
 // HttpClient as a Perfect service — Layer-based DI.
 
 import { describe, test, expect } from "bun:test";
-import { type Eff, type Throws, eff, succeed, fail, sync, run } from "@perfect/core";
+import { type Eff, type Throws, eff, succeed, sync, run } from "@perfect/core";
 import {
   DefaultHttpClient,
   type HttpClient,
@@ -19,7 +19,9 @@ class StubTransport implements HttpTransport {
   }
 }
 
-interface User { id: number }
+interface User {
+  id: number;
+}
 const UserParser: ResponseParser<User> = {
   safeParse: (d: any) =>
     d && typeof d.id === "number"
@@ -30,8 +32,11 @@ const UserParser: ResponseParser<User> = {
 describe("HttpClientService — Layer-based DI", () => {
   test("provide a DefaultHttpClient via succeed(), consume via Service.get", async () => {
     const liveClient: HttpClient = new DefaultHttpClient({
-      transport: new StubTransport(() =>
-        new Response(JSON.stringify({ id: 7 }), { headers: { "content-type": "application/json" } }),
+      transport: new StubTransport(
+        () =>
+          new Response(JSON.stringify({ id: 7 }), {
+            headers: { "content-type": "application/json" },
+          }),
       ),
     });
     const HttpClientLive = succeed({ HttpClient: liveClient });
@@ -48,7 +53,11 @@ describe("HttpClientService — Layer-based DI", () => {
   test("swap in a mock client for tests via a different layer", async () => {
     let called = 0;
     const mockClient: HttpClient = {
-      get: () => sync(() => { called++; return { id: 99 } as User; }) as any,
+      get: () =>
+        sync(() => {
+          called++;
+          return { id: 99 } as User;
+        }) as any,
       post: () => succeed(null) as any,
       put: () => succeed(null) as any,
       patch: () => succeed(null) as any,
@@ -56,7 +65,14 @@ describe("HttpClientService — Layer-based DI", () => {
       getJson: () => succeed(null) as any,
       postJson: () => succeed(null) as any,
       getText: () => succeed("mock") as any,
-      getResponse: () => succeed({ status: 200, headers: new Headers(), contentType: null, contentLength: null, body: null }) as any,
+      getResponse: () =>
+        succeed({
+          status: 200,
+          headers: new Headers(),
+          contentType: null,
+          contentLength: null,
+          body: null,
+        }) as any,
       request: () => succeed(null) as any,
       withOverrides: () => mockClient,
     };

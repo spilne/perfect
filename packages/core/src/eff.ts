@@ -1,5 +1,3 @@
-import type { Cause } from "./cause";
-
 // ── Brand ──────────────────────────────────────────────────────────
 const EFF_TAG: unique symbol = Symbol.for("spilne/eff");
 type EFF_TAG = typeof EFF_TAG;

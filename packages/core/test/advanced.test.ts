@@ -2,8 +2,8 @@ import { describe, test, expect } from "bun:test";
 import {
   succeed,
   fail,
+  die,
   sync,
-  async,
   fork,
   join,
   interrupt,
@@ -17,13 +17,13 @@ import {
   service,
   provide,
   run,
+  runExit,
   runSync,
-  runFiber,
+  Cause,
   Ref,
-  Fiber,
+  addFiberSupervisor,
   type Eff,
   type Throws,
-  type Needs,
 } from "../src";
 
 // ── Fiber ──────────────────────────────────────────────────────────
@@ -65,6 +65,42 @@ describe("fiber", () => {
       .fork()
       .flatMap((f) => join(f));
     expect(await run(program)).toBe(42);
+  });
+
+  test("structured child is interrupted and detached when parent completes", async () => {
+    const child = await run(fork(sleep(100)).flatMap((fiber) => succeed(fiber)));
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(child.snapshot()).toEqual({
+      status: "done",
+      interrupted: true,
+      childCount: 0,
+    });
+    expect(child.parent).toBeNull();
+  });
+
+  test("supervisor hooks observe start, fork, interrupt, and end", async () => {
+    const events: string[] = [];
+    const unsubscribe = addFiberSupervisor({
+      onStart: () => events.push("start"),
+      onFork: () => events.push("fork"),
+      onInterrupt: () => events.push("interrupt"),
+      onEnd: (_fiber, result) => events.push(result.ok ? "end:success" : "end:failure"),
+    });
+
+    try {
+      await run(fork(sleep(100)).flatMap(() => succeed("parent done")));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    } finally {
+      unsubscribe();
+    }
+
+    expect(events).toContain("start");
+    expect(events).toContain("fork");
+    expect(events).toContain("interrupt");
+    expect(events).toContain("end:success");
+    expect(events).toContain("end:failure");
   });
 });
 
@@ -138,6 +174,24 @@ describe("ensuring", () => {
     );
     expect(await run(eff)).toBe(42);
     expect(finalized).toBe(true);
+  });
+
+  test("finalizer failure after success becomes the effect failure", async () => {
+    const exit = await runExit(ensuring(succeed(42), die("release failed")));
+
+    expect(exit._tag).toBe("Failure");
+    if (exit._tag === "Failure") {
+      expect(Cause.pretty(exit.cause)).toBe("Die(release failed)");
+    }
+  });
+
+  test("finalizer failure after body failure is sequentially composed", async () => {
+    const exit = await runExit(ensuring(fail("body failed"), die("release failed")));
+
+    expect(exit._tag).toBe("Failure");
+    if (exit._tag === "Failure") {
+      expect(Cause.pretty(exit.cause)).toBe("(Fail(body failed) ; Die(release failed))");
+    }
   });
 });
 

@@ -42,7 +42,9 @@ describe("HttpClientError — tagged error classes", () => {
 
   test("HTTP_RETRYABLE — classifies transient vs permanent", () => {
     expect(HTTP_RETRYABLE(new HttpNetworkError({ url: "x", cause: null, message: "" }))).toBe(true);
-    expect(HTTP_RETRYABLE(new HttpTimeoutError({ url: "x", timeoutMs: 30, message: "" }))).toBe(true);
+    expect(HTTP_RETRYABLE(new HttpTimeoutError({ url: "x", timeoutMs: 30, message: "" }))).toBe(
+      true,
+    );
     expect(
       HTTP_RETRYABLE(new HttpStatusError({ url: "x", status: 503, body: "", message: "" })),
     ).toBe(true);

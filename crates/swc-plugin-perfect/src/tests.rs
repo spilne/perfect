@@ -1,6 +1,6 @@
 use crate::PerfectTransformVisitor;
 use swc_core::{
-    common::{sync::Lrc, FileName, SourceMap, Spanned, DUMMY_SP},
+    common::{sync::Lrc, FileName, SourceMap, DUMMY_SP},
     ecma::{
         ast::{CallExpr, Expr, Program},
         codegen::{text_writer::JsWriter, Config, Emitter},
@@ -47,7 +47,9 @@ fn assert_contains(src: &str, needle: &str) {
     assert!(
         out.contains(needle),
         "expected output to contain `{}`\n---- input ----\n{}\n---- output ----\n{}",
-        needle, src, out,
+        needle,
+        src,
+        out,
     );
 }
 
@@ -55,58 +57,52 @@ fn assert_contains(src: &str, needle: &str) {
 
 #[test]
 fn binds_an_identifier() {
-    assert_contains(
-        "eff(($) => { const x = $(e); return x })",
-        "e.flatMap(",
-    );
+    assert_contains("eff(($) => { const x = $(e); return x })", "e.flatMap(");
 }
 
 #[test]
 fn discards_a_bind() {
-    assert_contains(
-        "eff(($) => { $(log.info(\"hi\")); return 1 })",
-        ".flatMap(",
-    );
+    assert_contains("eff(($) => { $(log.info(\"hi\")); return 1 })", ".flatMap(");
 }
 
 #[test]
 fn last_discard_is_the_tail() {
     let out = transform("eff(($) => { $(e) })");
     // trailing `$(e)` at tail becomes the bare expression, not a succeed()
-    assert!(out.contains("eff") == false || out.contains("succeed(undefined)") == false,
-        "unexpected wrapping: {}", out);
+    assert!(
+        out.contains("eff") == false || out.contains("succeed(undefined)") == false,
+        "unexpected wrapping: {}",
+        out
+    );
 }
 
 #[test]
 fn return_expr_wraps_in_succeed() {
-    assert_contains(
-        "eff(($) => { return 42 })",
-        "succeed(42)",
-    );
+    assert_contains("eff(($) => { return 42 })", "succeed(42)");
 }
 
 #[test]
 fn return_dollar_unwraps() {
     let out = transform("eff(($) => { return $(e) })");
-    assert!(!out.contains("succeed"), "expected no succeed wrapper, got: {}", out);
+    assert!(
+        !out.contains("succeed"),
+        "expected no succeed wrapper, got: {}",
+        out
+    );
 }
 
 #[test]
 fn plain_statement_becomes_sync() {
-    assert_contains(
-        "eff(($) => { console.log('hi'); return 1 })",
-        "sync(",
-    );
+    assert_contains("eff(($) => { console.log('hi'); return 1 })", "sync(");
 }
 
 #[test]
 fn nested_eff_is_transformed() {
-    let out = transform(
-        "eff(($) => { const x = $(eff(($) => { return 1 })); return x })",
-    );
+    let out = transform("eff(($) => { const x = $(eff(($) => { return 1 })); return x })");
     assert!(
         out.matches("flatMap").count() >= 1 && out.contains("succeed(1)"),
-        "expected inner eff to be desugared: {}", out,
+        "expected inner eff to be desugared: {}",
+        out,
     );
 }
 
@@ -116,33 +112,41 @@ fn nested_eff_is_transformed() {
 fn object_destructuring_bind() {
     let out = transform("eff(($) => { const { a, b } = $(e); return a + b })");
     assert!(out.contains("flatMap") && out.contains("{"), "got: {}", out);
-    assert!(out.contains("a") && out.contains("b"), "destructured names missing: {}", out);
+    assert!(
+        out.contains("a") && out.contains("b"),
+        "destructured names missing: {}",
+        out
+    );
 }
 
 #[test]
 fn array_destructuring_bind() {
     let out = transform("eff(($) => { const [x, y] = $(e); return x + y })");
     assert!(out.contains("flatMap") && out.contains("["), "got: {}", out);
-    assert!(out.contains("[x, y]") || out.contains("[ x, y ]"), "array pattern missing: {}", out);
+    assert!(
+        out.contains("[x, y]") || out.contains("[ x, y ]"),
+        "array pattern missing: {}",
+        out
+    );
 }
 
 // ── control flow ───────────────────────────────────────────────────
 
 #[test]
 fn if_with_dollar_in_then_branch() {
-    let out = transform(
-        "eff(($) => { if (cond) { const x = $(e); return x } else { return 0 } })",
-    );
+    let out = transform("eff(($) => { if (cond) { const x = $(e); return x } else { return 0 } })");
     // expect a ternary between two effects
-    assert!(out.contains("?") && out.contains(":"), "expected ternary: {}", out);
+    assert!(
+        out.contains("?") && out.contains(":"),
+        "expected ternary: {}",
+        out
+    );
     assert!(out.contains("flatMap"), "expected flatMap: {}", out);
 }
 
 #[test]
 fn if_without_dollar_stays_as_sync() {
-    let out = transform(
-        "eff(($) => { if (cond) { log('a') } else { log('b') } return 1 })",
-    );
+    let out = transform("eff(($) => { if (cond) { log('a') } else { log('b') } return 1 })");
     // without $ inside branches, fall through to the sync(() => ...) path
     assert!(out.contains("sync("), "expected sync wrapping: {}", out);
 }
@@ -152,13 +156,21 @@ fn if_without_dollar_stays_as_sync() {
 #[test]
 fn expression_body_with_dollar() {
     let out = transform("eff(($) => $(e))");
-    assert!(!out.contains("succeed"), "expected bare expression: {}", out);
+    assert!(
+        !out.contains("succeed"),
+        "expected bare expression: {}",
+        out
+    );
 }
 
 #[test]
 fn expression_body_without_dollar_is_succeed() {
     let out = transform("eff(($) => 42)");
-    assert!(out.contains("succeed(42)"), "expected succeed wrapper: {}", out);
+    assert!(
+        out.contains("succeed(42)"),
+        "expected succeed wrapper: {}",
+        out
+    );
 }
 
 // ── source maps: generated nodes must have real spans ──────────────
@@ -211,7 +223,10 @@ fn generated_nodes_have_real_spans() {
     let flat_map = collector.0.iter().find(|(n, _)| n == "flatMap");
     let succeed = collector.0.iter().find(|(n, _)| n == "succeed");
 
-    assert!(flat_map.is_some(), "no flatMap call found — transform didn't run?");
+    assert!(
+        flat_map.is_some(),
+        "no flatMap call found — transform didn't run?"
+    );
     assert!(succeed.is_some(), "no succeed call found");
 
     assert!(
@@ -239,5 +254,8 @@ fn preserved_original_expressions_keep_their_spans() {
     let mut f = FindE(None);
     program.visit_with(&mut f);
     let span = f.0.expect("couldn't find `e`");
-    assert!(span != DUMMY_SP, "original `e` lost its span during transform");
+    assert!(
+        span != DUMMY_SP,
+        "original `e` lost its span during transform"
+    );
 }

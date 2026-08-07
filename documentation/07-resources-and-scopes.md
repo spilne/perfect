@@ -20,7 +20,11 @@ const useFile = sync(() => {
   events.push("opened");
   return { read: () => "contents" };
 })
-  .acquireRelease(() => sync(() => { events.push("closed"); }))
+  .acquireRelease(() =>
+    sync(() => {
+      events.push("closed");
+    }),
+  )
   .flatMap((file) => sync(() => file.read()))
   .scoped();
 
@@ -49,9 +53,12 @@ const safe = scoped(
   eff(function* () {
     yield* acquireRelease(
       sync(() => trace.push("acquire")),
-      () => sync(() => { trace.push("release"); }),
+      () =>
+        sync(() => {
+          trace.push("release");
+        }),
     );
-    yield* (fail("crashed") as Eff<never, Throws<string>>);
+    yield* fail("crashed") as Eff<never, Throws<string>>;
     return "unreachable";
   }) as any,
 ).catch((e: any) => succeed(`recovered: ${e}`));
@@ -70,8 +77,14 @@ import { succeed, fail, sync, type Eff, type Throws } from "@perfect/core";
 
 // Same guarantee, chainable form — .acquireRelease + .scoped + .catch.
 const traceFlat: string[] = [];
-const safeFlat = sync(() => { traceFlat.push("acquire"); })
-  .acquireRelease(() => sync(() => { traceFlat.push("release"); }))
+const safeFlat = sync(() => {
+  traceFlat.push("acquire");
+})
+  .acquireRelease(() =>
+    sync(() => {
+      traceFlat.push("release");
+    }),
+  )
   .flatMap(() => fail("crashed") as Eff<never, Throws<string>>)
   .scoped()
   .catch((e) => succeed(`recovered: ${e}`));
@@ -94,8 +107,11 @@ import { succeed, sync } from "@perfect/core";
 
 // .ensuring(finalizer) — fluent try/finally for any effect.
 let cleanedUp = false;
-const tracked = succeed("done")
-  .ensuring(sync(() => { cleanedUp = true; }));
+const tracked = succeed("done").ensuring(
+  sync(() => {
+    cleanedUp = true;
+  }),
+);
 
 console.log(await tracked.run()); // → "done"
 console.log(cleanedUp); // → true

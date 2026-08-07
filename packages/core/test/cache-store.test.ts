@@ -37,7 +37,7 @@ describe("CacheStore — memory", () => {
   test("per-entry ttlMs overrides default", async () => {
     const store = CacheStore.memory<string, number>({ ttlMs: 10_000 });
     runSync(store.set("short", 1, 30)); // expires fast
-    runSync(store.set("long", 2));      // uses default 10s
+    runSync(store.set("long", 2)); // uses default 10s
     expect(runSync(store.get("short"))).toBe(1);
     expect(runSync(store.get("long"))).toBe(2);
     await new Promise((r) => setTimeout(r, 40));

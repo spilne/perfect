@@ -2,7 +2,7 @@
 //
 // Run: bun packages/core/examples/07-concurrency.ts
 
-import { succeed, sleep, join, race, all, run } from "../src";
+import { succeed, sleep, join, race, all } from "../src";
 import { assertEq } from "./_assert";
 
 // >>> example: fork-join

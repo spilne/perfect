@@ -2,9 +2,7 @@ import { describe, test, expect } from "bun:test";
 import {
   succeed,
   fail,
-  die,
   sync,
-  async,
   sleep,
   fork,
   forkDaemon,
@@ -13,7 +11,6 @@ import {
   uninterruptible,
   interruptible,
   yieldNow,
-  race,
   raceEither,
   raceAll,
   timeoutFail,
@@ -21,7 +18,6 @@ import {
   onExit,
   ensuring,
   run,
-  runSync,
   Cause,
   Exit,
 } from "../src";

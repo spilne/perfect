@@ -12,7 +12,6 @@ import {
   runSync,
   type Eff,
   type Throws,
-  type Needs,
 } from "../src";
 
 describe("constructors", () => {

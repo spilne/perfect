@@ -1,7 +1,15 @@
 import { describe, test, expect } from "bun:test";
 import {
-  CircuitBreaker, succeed, fail, sync, sleep, fork, join, all, eff, run, runSync,
-  type Eff, type Throws,
+  CircuitBreaker,
+  succeed,
+  fail,
+  sync,
+  sleep,
+  all,
+  run,
+  runSync,
+  type Eff,
+  type Throws,
 } from "../src";
 
 describe("CircuitBreaker", () => {
@@ -119,9 +127,7 @@ describe("CircuitBreaker", () => {
 
   test("100 concurrent .protect calls (closed, all success) all pass", async () => {
     const cb = CircuitBreaker.make<string>({ failureThreshold: 100, resetTimeoutMs: 1000 });
-    const results = await run(
-      all(Array.from({ length: 100 }, (_, i) => cb.protect(succeed(i)))),
-    );
+    const results = await run(all(Array.from({ length: 100 }, (_, i) => cb.protect(succeed(i)))));
     expect(results.length).toBe(100);
     expect(cb.state).toBe("closed");
     expect(cb.failures).toBe(0);
@@ -176,9 +182,11 @@ describe("CircuitBreaker", () => {
   });
 
   test("validates options at make time", () => {
-    expect(() => CircuitBreaker.make({ failureThreshold: 0, resetTimeoutMs: 100 }))
-      .toThrow(/failureThreshold/);
-    expect(() => CircuitBreaker.make({ failureThreshold: 1, resetTimeoutMs: -1 }))
-      .toThrow(/resetTimeoutMs/);
+    expect(() => CircuitBreaker.make({ failureThreshold: 0, resetTimeoutMs: 100 })).toThrow(
+      /failureThreshold/,
+    );
+    expect(() => CircuitBreaker.make({ failureThreshold: 1, resetTimeoutMs: -1 })).toThrow(
+      /resetTimeoutMs/,
+    );
   });
 });

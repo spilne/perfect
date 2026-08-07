@@ -15,20 +15,14 @@ import {
   type HttpTransport,
   type RequestOptions,
   type ResponseParser,
-  HttpStatusError,
-  HttpNetworkError,
-  binaryDecoder,
   jsonDecoder,
   textDecoder,
-  httpRequest,
 } from "../src";
 
 /** Captures every request for assertion; returns canned responses. */
 class RecordingTransport implements HttpTransport {
   public calls: HttpRequestOptions[] = [];
-  constructor(
-    private readonly respond: (opts: HttpRequestOptions) => Response | HttpClientError,
-  ) {}
+  constructor(private readonly respond: (opts: HttpRequestOptions) => Response | HttpClientError) {}
   execute(options: HttpRequestOptions): Eff<Response, Throws<HttpClientError>> {
     return sync(() => {
       this.calls.push(options);
@@ -45,7 +39,10 @@ const json = (body: unknown, status = 200): Response =>
     headers: { "content-type": "application/json" },
   });
 
-interface User { id: number; name: string }
+interface User {
+  id: number;
+  name: string;
+}
 const UserParser: ResponseParser<User> = {
   safeParse: (d: any) =>
     d && typeof d.id === "number" && typeof d.name === "string"
@@ -163,7 +160,8 @@ describe("DefaultHttpClient — method coverage", () => {
 describe("DefaultHttpClient — getResponse + decoders", () => {
   test("defaults to binaryDecoder + populates metadata", async () => {
     const t = new RecordingTransport(
-      () => new Response("raw", { headers: { "content-type": "text/plain", "content-length": "3" } }),
+      () =>
+        new Response("raw", { headers: { "content-type": "text/plain", "content-length": "3" } }),
     );
     const c = new DefaultHttpClient({ transport: t });
     const r = await run(c.getResponse("/x"));
@@ -273,7 +271,9 @@ describe("AbstractHttpClient — minimal subclass", () => {
         body: undefined as any as T,
       }) as any;
     }
-    withOverrides() { return this; }
+    withOverrides() {
+      return this;
+    }
   }
 
   test("convenience methods delegate to request()", async () => {

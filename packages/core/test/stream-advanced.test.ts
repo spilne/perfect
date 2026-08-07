@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { succeed, sync, sleep, run, Stream, Chunk, Pipes } from "../src";
+import { sync, sleep, fail, run, runExit, Cause, Stream, Pipes } from "../src";
 
 describe("Stream.parEvalMap", () => {
   test("processes in parallel, preserves order", async () => {
@@ -38,6 +38,19 @@ describe("Stream.parEvalMap", () => {
     expect(result).toEqual([0, 10, 20, 30, 40, 50, 60, 70]);
     expect(maxConcurrent).toBeLessThanOrEqual(2);
   });
+
+  test("propagates mapper failures", async () => {
+    const exit = await runExit(
+      Stream.of(1, 2, 3)
+        .parEvalMap(2, (x) => (x === 2 ? fail("bad item") : sleep(1).map(() => x)) as any)
+        .toArray(),
+    );
+
+    expect(exit._tag).toBe("Failure");
+    if (exit._tag === "Failure") {
+      expect(Cause.pretty(exit.cause)).toBe("Fail(bad item)");
+    }
+  });
 });
 
 describe("Stream.parEvalMapUnordered", () => {
@@ -51,6 +64,19 @@ describe("Stream.parEvalMapUnordered", () => {
     expect(result.sort()).toEqual([10, 20, 30]);
     // fastest should come first
     expect(result[0]).toBe(10);
+  });
+
+  test("propagates mapper failures", async () => {
+    const exit = await runExit(
+      Stream.of(1, 2, 3)
+        .parEvalMapUnordered(2, (x) => (x === 2 ? fail("bad item") : sleep(1).map(() => x)) as any)
+        .toArray(),
+    );
+
+    expect(exit._tag).toBe("Failure");
+    if (exit._tag === "Failure") {
+      expect(Cause.pretty(exit.cause)).toBe("Fail(bad item)");
+    }
   });
 });
 

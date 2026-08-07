@@ -7,7 +7,7 @@
 // Run: bun packages/core/bench/await-vs-flatmap.ts
 
 import { group, bench, run as mitataRun } from "mitata";
-import { succeed, run, runSync, runSafe, runExit, type Eff } from "../src";
+import { succeed, run, runSync, type Eff } from "../src";
 
 // ── single-shot ────────────────────────────────────────────────────
 
@@ -50,7 +50,6 @@ for (const N of [10, 100, 1_000]) {
 // ── async effects (cant fast-path) ─────────────────────────────────
 
 group("async effect — fast-path bypassed", () => {
-  const sleepZero = (async (resolve: any) => setImmediate(() => resolve(succeed(42)))) as any;
   // sleep(0) actually goes through Op.Async — await eff will spawn a fiber
   bench("await sleep(0)+succeed  (async: fiber)", async () => {
     const { sleep } = await import("../src");

@@ -1,0 +1,10 @@
+{
+  "name": "@perfect/http",
+  "sourceRoot": "packages/http/src",
+  "targets": {
+    "build": {},
+    "test": {},
+    "lint": {},
+    "typecheck": {}
+  }
+}

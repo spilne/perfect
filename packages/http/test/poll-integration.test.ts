@@ -108,14 +108,12 @@ describe(".repeatUntil on client.getResponse — the async job pattern", () => {
           intervalMs: 1,
           maxAttempts: 3,
         })
-        .catchTag(
-          "RepeatTimeoutError",
-          (e: RepeatTimeoutError<HttpResponse<unknown>>) =>
-            succeed({
-              timedOut: true,
-              lastStatus: e.lastResult.status,
-              lastBody: e.lastResult.body,
-            }),
+        .catchTag("RepeatTimeoutError", (e: RepeatTimeoutError<HttpResponse<unknown>>) =>
+          succeed({
+            timedOut: true,
+            lastStatus: e.lastResult.status,
+            lastBody: e.lastResult.body,
+          }),
         ) as any,
     );
     expect(outcome).toEqual({

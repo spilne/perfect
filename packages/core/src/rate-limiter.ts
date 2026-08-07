@@ -88,15 +88,16 @@ function tryAcquireState(
     case "fixed-window": {
       const windowEnd = s.windowStart + windowMs;
       if (now >= windowEnd) {
-        return [
-          { _tag: "ok" },
-          { _tag: "fixed-window", windowStart: now, count: dryRun ? 0 : 1 },
-        ];
+        return [{ _tag: "ok" }, { _tag: "fixed-window", windowStart: now, count: dryRun ? 0 : 1 }];
       }
       if (s.count < limit) {
         return [
           { _tag: "ok" },
-          { _tag: "fixed-window", windowStart: s.windowStart, count: dryRun ? s.count : s.count + 1 },
+          {
+            _tag: "fixed-window",
+            windowStart: s.windowStart,
+            count: dryRun ? s.count : s.count + 1,
+          },
         ];
       }
       return [{ _tag: "rejected", retryAfterMs: windowEnd - now }, s];

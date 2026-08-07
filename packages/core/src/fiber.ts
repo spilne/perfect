@@ -1,5 +1,5 @@
-import type { Cause } from "./cause";
-import { type Eff, type Cont, Suspend, Op } from "./eff";
+import { Cause } from "./cause";
+import { type Cont, Suspend, Op } from "./eff";
 import type { Exit } from "./exit";
 import type { Context } from "./service";
 import { type Scheduler, getDefaultScheduler } from "./scheduler";
@@ -15,6 +15,44 @@ export const enum FiberState {
 export type FiberResult<A> =
   | { readonly ok: true; readonly value: A }
   | { readonly ok: false; readonly cause: Cause };
+
+export type FiberStatus = "ready" | "running" | "suspended" | "done";
+
+export interface FiberSnapshot {
+  readonly status: FiberStatus;
+  readonly interrupted: boolean;
+  readonly childCount: number;
+}
+
+export interface FiberSupervisor {
+  onStart?(fiber: Fiber<any>): void;
+  onFork?(parent: Fiber<any>, child: Fiber<any>): void;
+  onInterrupt?(fiber: Fiber<any>): void;
+  onEnd?(fiber: Fiber<any>, result: FiberResult<any>): void;
+}
+
+const supervisors = new Set<FiberSupervisor>();
+
+export function addFiberSupervisor(supervisor: FiberSupervisor): () => void {
+  supervisors.add(supervisor);
+  return () => {
+    supervisors.delete(supervisor);
+  };
+}
+
+function notify(fn: (supervisor: FiberSupervisor) => void): void {
+  for (const supervisor of supervisors) {
+    try {
+      fn(supervisor);
+    } catch {
+      // Supervision is diagnostic-only and must not perturb fiber semantics.
+    }
+  }
+}
+
+export function notifyFiberStart(fiber: Fiber<any>): void {
+  notify((supervisor) => supervisor.onStart?.(fiber));
+}
 
 export class Fiber<A = unknown> {
   state = FiberState.Ready;
@@ -42,6 +80,7 @@ export class Fiber<A = unknown> {
     if (this.state === FiberState.Done) return;
     this.state = FiberState.Done;
     this.result = result;
+    this.interruptHandle = null;
     if (this.parent) {
       const index = this.parent.children.indexOf(this);
       if (index >= 0) this.parent.children.splice(index, 1);
@@ -50,6 +89,7 @@ export class Fiber<A = unknown> {
     // interrupt children on completion
     for (const child of this.children) child.interrupt();
     this.children.length = 0;
+    notify((supervisor) => supervisor.onEnd?.(this, result));
     for (const listener of this.listeners) listener(result);
     this.listeners.length = 0;
   }
@@ -64,6 +104,7 @@ export class Fiber<A = unknown> {
 
   interrupt(): void {
     if (this.state === FiberState.Done) return;
+    notify((supervisor) => supervisor.onInterrupt?.(this));
     if (!this.interruptible) {
       this.interruptPending = true;
       return;
@@ -94,6 +135,41 @@ export class Fiber<A = unknown> {
   addChild(child: Fiber<any>): void {
     this.children.push(child);
     child.parent = this;
+    notify((supervisor) => supervisor.onFork?.(this, child));
+  }
+
+  get status(): FiberStatus {
+    switch (this.state) {
+      case FiberState.Ready:
+        return "ready";
+      case FiberState.Running:
+        return "running";
+      case FiberState.Suspended:
+        return "suspended";
+      case FiberState.Done:
+        return "done";
+    }
+  }
+
+  get interrupted(): boolean {
+    if (this.interruptPending) return true;
+    return this.result?.ok === false ? Cause.hasInterrupt(this.result.cause) : false;
+  }
+
+  get childCount(): number {
+    return this.children.length;
+  }
+
+  childrenSnapshot(): readonly Fiber<any>[] {
+    return this.children.slice();
+  }
+
+  snapshot(): FiberSnapshot {
+    return {
+      status: this.status,
+      interrupted: this.interrupted,
+      childCount: this.childCount,
+    };
   }
 
   // Await completion and resolve with an Exit — never rejects.

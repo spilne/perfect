@@ -10,14 +10,25 @@
 // Run: bun packages/core/examples/13-mini-app.ts
 
 import {
-  eff, succeed, fail, sync, acquireRelease, RetryPolicy,
-  service, run, Layer, type Eff, type Throws,
+  eff,
+  succeed,
+  fail,
+  sync,
+  acquireRelease,
+  RetryPolicy,
+  service,
+  Layer,
+  type Eff,
+  type Throws,
 } from "../src";
 import { assertEq, assertContains } from "./_assert";
 
 // ── Service contracts ──────────────────────────────────────────────
 
-interface User { id: number; name: string }
+interface User {
+  id: number;
+  name: string;
+}
 
 type DbErr = { _tag: "NotFound"; id: number } | { _tag: "Transient" };
 
@@ -25,8 +36,13 @@ interface Db {
   findUser(id: number): Eff<User, Throws<DbErr>>;
   close(): Eff<void, never>;
 }
-interface Cache { get(k: string): User | undefined; set(k: string, v: User): void }
-interface Logger { log(msg: string): Eff<void, never> }
+interface Cache {
+  get(k: string): User | undefined;
+  set(k: string, v: User): void;
+}
+interface Logger {
+  log(msg: string): Eff<void, never>;
+}
 
 const Db = service<Db>("Db");
 const Cache = service<Cache>("Cache");
@@ -72,7 +88,10 @@ const DbLive = eff(function* () {
       dbEvents.push("connect");
       return { id: 1 };
     }),
-    () => sync(() => { dbEvents.push("disconnect"); }),
+    () =>
+      sync(() => {
+        dbEvents.push("disconnect");
+      }),
   );
   return {
     Db: {
@@ -80,10 +99,10 @@ const DbLive = eff(function* () {
         return eff(function* () {
           dbCalls++;
           if (dbCalls === 1) {
-            yield* (fail({ _tag: "Transient" }) as Eff<never, Throws<DbErr>>);
+            yield* fail({ _tag: "Transient" }) as Eff<never, Throws<DbErr>>;
           }
           if (id === 0) {
-            yield* (fail({ _tag: "NotFound", id }) as Eff<never, Throws<DbErr>>);
+            yield* fail({ _tag: "NotFound", id }) as Eff<never, Throws<DbErr>>;
           }
           return { id, name: `user-${id}-from-conn-${conn.id}` };
         }) as Eff<User, Throws<DbErr>>;
@@ -103,7 +122,12 @@ const CacheLive = succeed({
 
 const logLines: string[] = [];
 const LoggerLive = succeed({
-  Logger: { log: (m: string) => sync(() => { logLines.push(m); }) } as Logger,
+  Logger: {
+    log: (m: string) =>
+      sync(() => {
+        logLines.push(m);
+      }),
+  } as Logger,
 });
 
 const AppLive = Layer.merge(DbLive, CacheLive, LoggerLive);
@@ -113,7 +137,8 @@ const AppLive = Layer.merge(DbLive, CacheLive, LoggerLive);
 // First call: cache miss + transient error + retry succeeds + caches result
 const result = await getUser(7)
   .catchTag("NotFound", (e) => succeed({ id: e.id, name: "(missing)" } as User))
-  .with(AppLive).run();
+  .with(AppLive)
+  .run();
 assertEq(result, { id: 7, name: "user-7-from-conn-1" });
 assertEq(dbCalls, 2); // 1st call failed transient, 2nd succeeded
 assertContains(logLines.join("|"), "cache miss 7");
@@ -121,7 +146,8 @@ assertContains(logLines.join("|"), "cache miss 7");
 // Second call: cache hit, no extra db calls
 const cached = await getUser(7)
   .catch(() => succeed({ id: -1, name: "" } as User))
-  .with(AppLive).run();
+  .with(AppLive)
+  .run();
 assertEq(cached, { id: 7, name: "user-7-from-conn-1" });
 assertContains(logLines.join("|"), "cache hit 7");
 

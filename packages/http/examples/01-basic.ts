@@ -2,13 +2,7 @@
 //
 // Run: bun packages/http/examples/01-basic.ts
 
-import {
-  type Eff,
-  type Throws,
-  succeed,
-  fail,
-  run,
-} from "@perfect/core";
+import { type Eff, type Throws, succeed, fail } from "@perfect/core";
 import {
   type HttpClientError,
   type HttpRequestOptions,
@@ -37,7 +31,10 @@ const json = (body: unknown, status = 200): Response =>
     headers: { "content-type": "application/json" },
   });
 
-interface User { id: number; name: string }
+interface User {
+  id: number;
+  name: string;
+}
 const UserSchema: ResponseParser<User> = {
   safeParse: (d: any) =>
     d && typeof d.id === "number" && typeof d.name === "string"
@@ -81,10 +78,12 @@ assertEq(user, { id: 1, name: "alice" });
 // 5xx/429 with .isRetryable.
 let caught: HttpStatusError | undefined;
 try {
-  await (httpFetchOk({
-  url: "https://api/users/1",
-  transport: new StubTransport(() => new Response("nope", { status: 404 })),
-}) as any).run();
+  await (
+    httpFetchOk({
+      url: "https://api/users/1",
+      transport: new StubTransport(() => new Response("nope", { status: 404 })),
+    }) as any
+  ).run();
 } catch (e) {
   caught = e as HttpStatusError;
 }

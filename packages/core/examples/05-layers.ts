@@ -3,14 +3,18 @@
 //
 // Run: bun packages/core/examples/05-layers.ts
 
-import {
-  eff, succeed, sync, acquireRelease, service, run, runSync, Layer, type Eff,
-} from "../src";
+import { eff, succeed, sync, acquireRelease, service, Layer, type Eff } from "../src";
 import { assertEq } from "./_assert";
 
-interface Db { query(sql: string): Eff<string, never> }
-interface Cache { get(k: string): string | undefined }
-interface Logger { log(msg: string): void }
+interface Db {
+  query(sql: string): Eff<string, never>;
+}
+interface Cache {
+  get(k: string): string | undefined;
+}
+interface Logger {
+  log(msg: string): void;
+}
 
 const Db = service<Db>("Db");
 const Cache = service<Cache>("Cache");
@@ -74,7 +78,10 @@ const ScopedLogger = eff(function* () {
       events.push("acquire");
       return { log: (m: string) => events.push(`log:${m}`) } as Logger;
     }),
-    () => sync(() => { events.push("release"); }),
+    () =>
+      sync(() => {
+        events.push("release");
+      }),
   );
   return { Logger: logger };
 });

@@ -28,18 +28,10 @@ import {
   propagation,
 } from "@opentelemetry/api";
 import { type HttpMiddleware, type HttpRequestContext } from "@perfect/http";
-import type {
-  HttpClientError,
-  HttpRequestOptions,
-  HttpTransport,
-} from "@perfect/http";
+import type { HttpClientError, HttpRequestOptions, HttpTransport } from "@perfect/http";
 import { defaultTransport } from "@perfect/http";
 import { type Eff, type Throws } from "@perfect/core";
-import {
-  type RedactionPolicy,
-  defaultRedaction,
-  redactUrl,
-} from "./redact";
+import { type RedactionPolicy, defaultRedaction, redactUrl } from "./redact";
 
 const TRACER_NAME = "@perfect/http";
 
@@ -55,7 +47,6 @@ const TRACER_NAME = "@perfect/http";
 // approach: store span in a field on the context itself — but it's
 // readonly. Compromise: use a WeakMap keyed by the context reference.
 
-type ContextWithSpan = HttpRequestContext & { __otelSpan?: Span };
 const spanByContext = new WeakMap<HttpRequestContext, Span>();
 
 export interface TracingOptions {
@@ -78,8 +69,7 @@ export interface TracingOptions {
 export function tracingMiddleware(opts: TracingOptions = {}): HttpMiddleware {
   const tracer = opts.tracer ?? trace.getTracer(TRACER_NAME);
   const redaction = opts.redaction ?? defaultRedaction;
-  const makeName =
-    opts.spanName ?? ((ctx) => `${ctx.method} ${redactUrl(ctx.url)}`);
+  const makeName = opts.spanName ?? ((ctx) => `${ctx.method} ${redactUrl(ctx.url)}`);
 
   return {
     onRequest: (ctx) => {
@@ -151,7 +141,7 @@ export class TracingFetchTransport implements HttpTransport {
 
   execute(options: HttpRequestOptions): Eff<Response, Throws<HttpClientError>> {
     const inner = this.opts.inner ?? defaultTransport;
-    const carrier: Record<string, string> = { ...(options.headers ?? {}) };
+    const carrier: Record<string, string> = { ...options.headers };
     // Inject the current OTel context's trace headers into the outgoing request
     propagation.inject(otelContext.active(), carrier, {
       set: (h, k, v) => {

@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { succeed, fail, sync, sleep, run, runSync, Cause } from "../src";
+import { succeed, fail, sync, sleep, run, Cause } from "../src";
 
 describe("error combinators", () => {
   test("orDie turns a Fail into a defect", async () => {

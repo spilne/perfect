@@ -86,10 +86,12 @@ import { HttpStatusError, httpFetchOk } from "@perfect/core";
 // 5xx/429 with .isRetryable.
 let caught: HttpStatusError | undefined;
 try {
-  await (httpFetchOk({
-  url: "https://api/users/1",
-  transport: new StubTransport(() => new Response("nope", { status: 404 })),
-}) as any).run();
+  await (
+    httpFetchOk({
+      url: "https://api/users/1",
+      transport: new StubTransport(() => new Response("nope", { status: 404 })),
+    }) as any
+  ).run();
 } catch (e) {
   caught = e as HttpStatusError;
 }
@@ -205,7 +207,10 @@ import { type ResponseParser, DefaultHttpClient, PipelineResult, withRetryAll } 
 // withRetryAll exposes the full PipelineResult ADT. Use it to retry on
 // "not ready" success values (polling), thrown defects, or any combination
 // of HTTP errors. The shouldRetry predicate sees every outcome.
-interface JobStatus { state: "pending" | "done"; result?: number }
+interface JobStatus {
+  state: "pending" | "done";
+  result?: number;
+}
 const JobSchema: ResponseParser<JobStatus> = {
   safeParse: (d: any) =>
     d && (d.state === "pending" || d.state === "done")
@@ -223,8 +228,7 @@ const client2 = new DefaultHttpClient({ transport: t2 });
 const job = await withRetryAll(client2.get("/job/123", JobSchema), {
   maxRetries: 5,
   baseDelayMs: 1,
-  shouldRetry: (r) =>
-    PipelineResult.isSuccess(r) ? r.value.state !== "done" : true,
+  shouldRetry: (r) => (PipelineResult.isSuccess(r) ? r.value.state !== "done" : true),
 }).run();
 console.log(job); // → { state: "done", result: 42 }
 console.log(t2.attempts); // → 3
@@ -252,7 +256,9 @@ interface ApiError {
 }
 const ApiErrorSchema: ResponseParser<ApiError> = {
   safeParse: (d: any) =>
-    d && ["NOT_FOUND", "FORBIDDEN", "RATE_LIMITED"].includes(d?.code) && typeof d.detail === "string"
+    d &&
+    ["NOT_FOUND", "FORBIDDEN", "RATE_LIMITED"].includes(d?.code) &&
+    typeof d.detail === "string"
       ? { success: true, data: d }
       : { success: false, error: "not ApiError" },
 };
@@ -344,12 +350,8 @@ import { httpStreamSSE } from "@perfect/core";
 
 // httpStreamSSE = lines → parseSSE. Server-Sent Events are emitted as
 // SSEvent objects with { event, data, id?, retry? }.
-const sseT = new StubTransport(
-  () =>
-    streamOf([
-      "event: tick\ndata: 1\n\n",
-      "event: tick\ndata: 2\nid: m-2\n\n",
-    ]),
+const sseT = new StubTransport(() =>
+  streamOf(["event: tick\ndata: 1\n\n", "event: tick\ndata: 2\nid: m-2\n\n"]),
 );
 const events = await httpStreamSSE({ url: "/events", transport: sseT }).toArray().run();
 console.log(events.length); // → 2
@@ -414,13 +416,14 @@ import { MockHttpClient } from "@perfect/core";
 // onSequence consumes responses in order; the last item is reused after the
 // queue exhausts. Useful for simulating retry-then-succeed scenarios.
 mock.reset();
-mock.onSequence("GET", "/u", [
-  MockHttpClient.fail(503, "down"),
-  { id: 7, name: "after-retry" },
-]);
+mock.onSequence("GET", "/u", [MockHttpClient.fail(503, "down"), { id: 7, name: "after-retry" }]);
 
 let firstErr: any;
-try { await mock.get("/u", UserSchema).run(); } catch (e) { firstErr = e; }
+try {
+  await mock.get("/u", UserSchema).run();
+} catch (e) {
+  firstErr = e;
+}
 console.log(firstErr.status); // → 503
 
 const second = await mock.get("/u", UserSchema).run();
@@ -517,15 +520,11 @@ import { type ResponseParser, DefaultHttpClient } from "@perfect/core";
 
 // Valibot uses safeParse(schema, input) — wrap it once with a tiny adapter
 // so the result shape matches ResponseParser. Reusable for any valibot schema.
-function valibotParser<S extends v.GenericSchema>(
-  schema: S,
-): ResponseParser<v.InferOutput<S>> {
+function valibotParser<S extends v.GenericSchema>(schema: S): ResponseParser<v.InferOutput<S>> {
   return {
     safeParse: (data: unknown) => {
       const r = v.safeParse(schema, data);
-      return r.success
-        ? { success: true, data: r.output }
-        : { success: false, error: r.issues };
+      return r.success ? { success: true, data: r.output } : { success: false, error: r.issues };
     },
   };
 }

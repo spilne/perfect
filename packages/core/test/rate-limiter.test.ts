@@ -84,7 +84,9 @@ describe("RateLimiter — token-bucket", () => {
         yield* rl.acquire;
         const empty = yield* rl.tryAcquire;
         // Wait long enough for ~1 refill (100ms / 2 = 50ms per token)
-        yield* eff(function* () { yield* succeed(undefined); }); // no-op to anchor types
+        yield* eff(function* () {
+          yield* succeed(undefined);
+        }); // no-op to anchor types
         return empty;
       }) as any,
     );

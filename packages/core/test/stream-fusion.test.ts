@@ -5,7 +5,7 @@
 // Test structure borrowed from promin's optimized-stream-pipeline.test.ts.
 
 import { describe, test, expect } from "bun:test";
-import { Stream, run, succeed, sync } from "../src";
+import { Stream, run } from "../src";
 
 describe("Stream fusion — fusible operators", () => {
   test("map transforms each item", async () => {

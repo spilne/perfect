@@ -19,7 +19,9 @@ export function assertEq<T>(actual: T, expected: T, msg?: string): void {
 export function assertContains(actual: string, needle: string, msg?: string): void {
   if (!actual.includes(needle)) {
     const where = msg ? `: ${msg}` : "";
-    throw new Error(`assertion failed${where}\n  expected to contain: ${needle}\n  actual:              ${actual}`);
+    throw new Error(
+      `assertion failed${where}\n  expected to contain: ${needle}\n  actual:              ${actual}`,
+    );
   }
   console.log("✓ contains", JSON.stringify(needle));
 }

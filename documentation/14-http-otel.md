@@ -64,7 +64,11 @@ const failing = new DefaultHttpClient({
 });
 
 let caught: any;
-try { await failing.get("/u", UserSchema).run(); } catch (e) { caught = e; }
+try {
+  await failing.get("/u", UserSchema).run();
+} catch (e) {
+  caught = e;
+}
 console.log(caught._tag); // → "HttpStatusError"
 console.log(errSpans[0]!.status.code); // → SpanStatusCode.ERROR
 console.log(errSpans[0]!.attributes["http.response.status_code"]); // → 503

@@ -18,11 +18,7 @@ import {
 import { provide, type ServiceTag } from "../service";
 import { type RetryPolicy } from "../retry-policy";
 import { type Schedule, repeat, retryWith } from "../schedule";
-import {
-  repeatUntil,
-  repeatUntilWithBackoff,
-  type RepeatTimeoutError,
-} from "../combinators-extra";
+import { repeatUntil, repeatUntilWithBackoff, type RepeatTimeoutError } from "../combinators-extra";
 
 declare module "../eff" {
   interface Suspend {

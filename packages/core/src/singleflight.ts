@@ -38,35 +38,35 @@ class InProcessSingleflight implements Singleflight {
     // yieldNow prefix to defeat Op.All's side-effect-pre-running fast path,
     // but the runtime now restricts that fast path to literal Succeed only.)
     return sync<LeaderOrFollower<A, E>>(() => {
-        const existing = this.flights.get(key) as Deferred<A, E> | undefined;
-        if (existing) return { kind: "follower", deferred: existing };
-        // Construct InProcessDeferred directly — no nested runSync.
-        const deferred = new InProcessDeferred<A, E>();
-        this.flights.set(key, deferred as Deferred<unknown, unknown>);
-        return { kind: "leader", deferred };
-      }).flatMap((state): Eff<A, Throws<E>> => {
-        if (state.kind === "follower") return state.deferred.await;
-        // Leader: run eff, fan out via deferred, cleanup, return original outcome.
-        // Use catchAllCause so defects (uncaught throws → Cause.Die) and
-        // interrupts also settle the deferred — otherwise followers deadlock.
-        const cleanup = sync(() => {
-          this.flights.delete(key);
-        });
-        return (eff as any)
-          .flatMap((value: A) =>
-            state.deferred.succeed(value).flatMap(() => cleanup.map(() => value)),
-          )
-          .catchAllCause((cause: any) => {
-            // Surface as a typed failure on the deferred so followers can re-throw.
-            // For defects, squash to the underlying value.
-            const typedFail = Cause.firstFail(cause);
-            const errVal = typedFail !== null ? typedFail.value : Cause.squash(cause);
-            return state.deferred
-              .fail(errVal as E)
-              .flatMap(() => cleanup)
-              .flatMap(() => state.deferred.await);
-          }) as Eff<A, Throws<E>>;
-      }) as Eff<A, Throws<E>>;
+      const existing = this.flights.get(key) as Deferred<A, E> | undefined;
+      if (existing) return { kind: "follower", deferred: existing };
+      // Construct InProcessDeferred directly — no nested runSync.
+      const deferred = new InProcessDeferred<A, E>();
+      this.flights.set(key, deferred as Deferred<unknown, unknown>);
+      return { kind: "leader", deferred };
+    }).flatMap((state): Eff<A, Throws<E>> => {
+      if (state.kind === "follower") return state.deferred.await;
+      // Leader: run eff, fan out via deferred, cleanup, return original outcome.
+      // Use catchAllCause so defects (uncaught throws → Cause.Die) and
+      // interrupts also settle the deferred — otherwise followers deadlock.
+      const cleanup = sync(() => {
+        this.flights.delete(key);
+      });
+      return (eff as any)
+        .flatMap((value: A) =>
+          state.deferred.succeed(value).flatMap(() => cleanup.map(() => value)),
+        )
+        .catchAllCause((cause: any) => {
+          // Surface as a typed failure on the deferred so followers can re-throw.
+          // For defects, squash to the underlying value.
+          const typedFail = Cause.firstFail(cause);
+          const errVal = typedFail !== null ? typedFail.value : Cause.squash(cause);
+          return state.deferred
+            .fail(errVal as E)
+            .flatMap(() => cleanup)
+            .flatMap(() => state.deferred.await);
+        }) as Eff<A, Throws<E>>;
+    }) as Eff<A, Throws<E>>;
   }
 }
 

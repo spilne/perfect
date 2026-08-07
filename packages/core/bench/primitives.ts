@@ -12,10 +12,21 @@
 
 import { group, bench, run as mitataRun } from "mitata";
 import {
-  eff, succeed, sync, run, runSync,
-  Ref, Deferred, Queue, Semaphore,
-  CircuitBreaker, Singleflight, RateLimiter, Latch, Barrier,
-  PubSub, SubscriptionRef,
+  eff,
+  succeed,
+  run,
+  runSync,
+  Ref,
+  Deferred,
+  Queue,
+  Semaphore,
+  CircuitBreaker,
+  Singleflight,
+  RateLimiter,
+  Latch,
+  Barrier,
+  PubSub,
+  SubscriptionRef,
 } from "../src";
 import {
   Effect,
@@ -93,7 +104,9 @@ group(`Deferred — make + succeed + await × ${N}`, () => {
   bench("naive: Promise resolve + await", async () => {
     for (let i = 0; i < N; i++) {
       let resolve: (n: number) => void;
-      const p = new Promise<number>((r) => { resolve = r; });
+      const p = new Promise<number>((r) => {
+        resolve = r;
+      });
       resolve!(i);
       await p;
     }

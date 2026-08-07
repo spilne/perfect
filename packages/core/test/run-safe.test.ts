@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { succeed, fail, sync, run, runSafe, runExit, Exit, Cause } from "../src";
+import { succeed, fail, sync, runSafe, runExit, Exit, Cause } from "../src";
 
 describe("runExit", () => {
   test("success → Exit.Success", async () => {

@@ -5,7 +5,7 @@
 // After (frame per call): one Cont push, no allocations besides the frame.
 
 import { group, bench, run as mitataRun } from "mitata";
-import { ensuring, scoped, succeed, sync, run, runSync, Stream } from "../src";
+import { ensuring, scoped, succeed, sync, run, Stream } from "../src";
 
 // ── single-call cost ───────────────────────────────────────────────
 

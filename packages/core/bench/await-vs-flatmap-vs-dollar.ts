@@ -37,8 +37,18 @@
 
 import { group, bench, run as mitataRun } from "mitata";
 import {
-  eff, succeed, fail, sync, sleep, tryPromise, service, provide, run, runSync,
-  type Eff, type Throws, type Needs,
+  eff,
+  succeed,
+  fail,
+  sync,
+  sleep,
+  tryPromise,
+  service,
+  provide,
+  run,
+  runSync,
+  type Eff,
+  type Throws,
 } from "../src";
 import { rewriteEffBlocks } from "../../transform/src/rewrite";
 
@@ -98,7 +108,9 @@ group(`pure compute × ${N}`, () => {
   `;
   const dollarRewritten = rewriteEffBlocks(dollarSrc);
   const dollarFn = new Function(
-    "succeed", "sync", "run",
+    "succeed",
+    "sync",
+    "run",
     `return (async () => { ${dollarRewritten} })()`,
   );
   bench("eff($) syntax (compiled at load) → run", async () => dollarFn(succeed, sync, run));
@@ -181,7 +193,9 @@ group(`all-async sleep(0) × ${N_SMALL}`, () => {
 
 // ── 4. Service injection: lookup once vs per-step ─────────────────────
 
-interface Counter { add(n: number): Eff<number, never> }
+interface Counter {
+  add(n: number): Eff<number, never>;
+}
 const Counter = service<Counter>("Counter");
 const counterImpl: Counter = { add: (n: number) => succeed(n + 1) };
 
@@ -247,7 +261,11 @@ group("fail mid-chain + recover", () => {
   bench("await: try/catch around fail per step", async () => {
     let x = 0;
     for (let i = 0; i < N / 2; i++) x = await succeed(x + 1);
-    try { await fail("midway"); } catch { x = 999; }
+    try {
+      await fail("midway");
+    } catch {
+      x = 999;
+    }
     for (let i = 0; i < N / 2; i++) x = await succeed(x + 1);
     return x;
   });
@@ -266,7 +284,7 @@ group("fail mid-chain + recover", () => {
     let x = 0;
     for (let i = 0; i < N / 2; i++) x = yield* succeed(x + 1);
     try {
-      yield* (fail("midway") as Eff<never, Throws<string>>);
+      yield* fail("midway") as Eff<never, Throws<string>>;
     } catch {
       x = 999;
     }
@@ -301,8 +319,7 @@ group(`Eff wrapping promises vs plain promises × ${N}`, () => {
     return e;
   })();
   bench("Eff: composed flatMap + tryPromise(Promise.resolve)", async () =>
-    run(composedTryPromise as any),
-  );
+    run(composedTryPromise as any));
 
   // Plain Promise.then chain — what we're competing against
   bench("Promise: .then(Promise.resolve(...)) chain", async () => {

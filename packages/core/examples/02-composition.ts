@@ -2,7 +2,7 @@
 //
 // Run: bun packages/core/examples/02-composition.ts
 
-import { succeed, sync, runSync } from "../src";
+import { succeed, sync } from "../src";
 import { assertEq } from "./_assert";
 
 // >>> example: map-and-flatmap
@@ -20,7 +20,9 @@ assertEq(program.runSync(), "22");
 // .tap — observe a value without changing it (returns the same value)
 let seen = 0;
 const traced = succeed(42)
-  .tap((x) => { seen = x; })
+  .tap((x) => {
+    seen = x;
+  })
   .map((x) => x + 1);
 
 assertEq(traced.runSync(), 43);

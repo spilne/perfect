@@ -20,7 +20,11 @@ group(`single transform × ${N}`, () => {
   const addOne: Pipe<number, number> = (s) => s.map((x) => x + 1);
 
   bench("direct .map (baseline)", async () => {
-    await run(Stream.fromArray(arr).map((x) => x + 1).drain());
+    await run(
+      Stream.fromArray(arr)
+        .map((x) => x + 1)
+        .drain(),
+    );
   });
 
   bench(".through(pipe) wrapping .map", async () => {

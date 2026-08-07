@@ -7,14 +7,11 @@ import {
   delay,
   timeoutFail,
   forkDaemon,
-  awaitFiber,
   retry,
   provide,
   run,
-  Cause,
   Clock,
   TestClock,
-  Exit,
 } from "../src";
 
 // Helper: yield control so the fiber can advance to its next suspension point.

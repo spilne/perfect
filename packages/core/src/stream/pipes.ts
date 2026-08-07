@@ -17,9 +17,7 @@ export const lines: Pipe<string, string> = (input) => {
       return Stream.fromArray(parts.map(stripCR));
     })
     .concat(
-      Stream.suspend(() =>
-        buffer.length > 0 ? Stream.succeed(stripCR(buffer)) : Stream.empty(),
-      ),
+      Stream.suspend(() => (buffer.length > 0 ? Stream.succeed(stripCR(buffer)) : Stream.empty())),
     );
 };
 
@@ -44,10 +42,12 @@ export const utf8Decode: Pipe<Uint8Array, string> = (input) => {
   const decoder = new TextDecoder("utf-8");
   return input
     .map((buf) => decoder.decode(buf, { stream: true }))
-    .concat(Stream.suspend(() => {
-      const tail = decoder.decode();
-      return tail.length > 0 ? Stream.succeed(tail) : Stream.empty();
-    }));
+    .concat(
+      Stream.suspend(() => {
+        const tail = decoder.decode();
+        return tail.length > 0 ? Stream.succeed(tail) : Stream.empty();
+      }),
+    );
 };
 
 export const utf8Encode: Pipe<string, Uint8Array> = (input) =>

@@ -5,7 +5,7 @@
 //
 // Run: bun packages/core/examples/04-services.ts
 
-import { eff, succeed, service, provide, runSync, type Eff } from "../src";
+import { eff, succeed, service, provide, type Eff } from "../src";
 import { assertEq } from "./_assert";
 
 // >>> example: service-define
@@ -22,11 +22,7 @@ const program = eff(function* () {
 });
 
 // Provide an implementation when running.
-const wired = provide(
-  program,
-  Greeter,
-  { greet: (name) => succeed(`hello, ${name}`) },
-);
+const wired = provide(program, Greeter, { greet: (name) => succeed(`hello, ${name}`) });
 
 assertEq(wired.runSync(), "hello, world");
 // <<< example
@@ -35,19 +31,19 @@ assertEq(wired.runSync(), "hello, world");
 // Same program, chainable form: Greeter.get is an effect — flatMap into it.
 const programFlat = Greeter.get.flatMap((g) => g.greet("world"));
 
-const wiredFlat = provide(
-  programFlat,
-  Greeter,
-  { greet: (name) => succeed(`hello, ${name}`) },
-);
+const wiredFlat = provide(programFlat, Greeter, { greet: (name) => succeed(`hello, ${name}`) });
 
 assertEq(wiredFlat.runSync(), "hello, world");
 // <<< example
 
 // >>> example: service-multiple
 // Multiple services nest awkwardly with provide() — see Layer for the cure.
-interface Db { query(sql: string): Eff<string, never> }
-interface Logger { log(msg: string): void }
+interface Db {
+  query(sql: string): Eff<string, never>;
+}
+interface Logger {
+  log(msg: string): void;
+}
 
 const Db = service<Db>("Db");
 const Logger = service<Logger>("Logger");
@@ -60,11 +56,9 @@ const app = eff(function* () {
   return yield* db.query("SELECT 1");
 });
 
-const wired2 = provide(
-  provide(app, Db, { query: (s) => succeed(`row:${s}`) }),
-  Logger,
-  { log: (m) => captured.push(m) },
-);
+const wired2 = provide(provide(app, Db, { query: (s) => succeed(`row:${s}`) }), Logger, {
+  log: (m) => captured.push(m),
+});
 
 assertEq(wired2.runSync(), "row:SELECT 1");
 assertEq(captured, ["querying"]);
@@ -80,11 +74,9 @@ const appFlat = Db.get.flatMap((db) =>
   }),
 );
 
-const wired2Flat = provide(
-  provide(appFlat, Db, { query: (s) => succeed(`row:${s}`) }),
-  Logger,
-  { log: (m) => capturedFlat.push(m) },
-);
+const wired2Flat = provide(provide(appFlat, Db, { query: (s) => succeed(`row:${s}`) }), Logger, {
+  log: (m) => capturedFlat.push(m),
+});
 
 assertEq(wired2Flat.runSync(), "row:SELECT 1");
 assertEq(capturedFlat, ["querying"]);

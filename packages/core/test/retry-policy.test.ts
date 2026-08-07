@@ -4,21 +4,13 @@ import {
   fail,
   sync,
   retry,
-  runRetry,
   RetryPolicy,
-  provide,
   run,
-  Clock,
-  TestClock,
   Cause,
   Schedule,
   retryWith,
   type RetryDetails,
 } from "../src";
-
-const drain = async () => {
-  for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
-};
 
 describe("RetryPolicy — fluent builder", () => {
   test("recurs + withMaxRetries is the simple case", async () => {

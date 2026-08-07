@@ -1,11 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import {
-  binaryDecoder,
-  textDecoder,
-  jsonDecoder,
-  arrayBufferDecoder,
-  blobDecoder,
-} from "../src";
+import { binaryDecoder, textDecoder, jsonDecoder, arrayBufferDecoder, blobDecoder } from "../src";
 
 describe("response decoders", () => {
   test("textDecoder reads body as UTF-8 string", async () => {

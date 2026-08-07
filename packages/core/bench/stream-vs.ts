@@ -4,7 +4,7 @@
 
 import { group, bench, run } from "mitata";
 import { Stream as PStream, run as pRun, succeed as pSucceed } from "../src";
-import { Stream as EStream, Effect, Chunk as EChunk } from "effect";
+import { Stream as EStream, Effect } from "effect";
 import {
   from as rxFrom,
   map as rxMap,
@@ -138,8 +138,7 @@ group(`take(${K}) of ${N}`, () => {
 group(`fold/sum × ${N}`, () => {
   bench("Array.reduce (baseline)", () => items.reduce((a, b) => a + b, 0));
 
-  bench("perfect Stream.fold", async () =>
-    pRun(PStream.fromArray(items).fold(0, (a, b) => a + b)));
+  bench("perfect Stream.fold", async () => pRun(PStream.fromArray(items).fold(0, (a, b) => a + b)));
 
   bench("effect Stream.runFold", async () =>
     Effect.runPromise(EStream.fromIterable(items).pipe(EStream.fold(0, (a, b) => a + b))));
@@ -281,8 +280,7 @@ group(`async iterator vs stream (${N} items)`, () => {
   bench("perfect Stream.take", async () => pRun(PStream.fromArray(items).take(100).toArray()));
 
   bench("async-iter fold", async () => asyncIterFold(items));
-  bench("perfect Stream.fold", async () =>
-    pRun(PStream.fromArray(items).fold(0, (a, b) => a + b)));
+  bench("perfect Stream.fold", async () => pRun(PStream.fromArray(items).fold(0, (a, b) => a + b)));
 });
 
 // ── 9. backpressure: slow consumer, fast producer ──────────────────

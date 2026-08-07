@@ -1,8 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import {
-  eff, succeed, sleep, fork, join, run,
-  PubSub, SubscriptionRef,
-} from "../src";
+import { eff, succeed, sleep, fork, join, run, PubSub, SubscriptionRef } from "../src";
 
 describe("PubSub", () => {
   test("subscriber receives published messages", async () => {
@@ -37,7 +34,11 @@ describe("PubSub", () => {
         return [yield* join(fA), yield* join(fB), yield* join(fC)];
       }) as any,
     );
-    expect(result).toEqual([["x", "y"], ["x", "y"], ["x", "y"]]);
+    expect(result).toEqual([
+      ["x", "y"],
+      ["x", "y"],
+      ["x", "y"],
+    ]);
   });
 
   test("publish with no subscribers returns false", async () => {

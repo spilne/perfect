@@ -2,20 +2,11 @@
 // then assert on the Perfect Stream we get back.
 
 import { describe, test, expect } from "bun:test";
-import {
-  type Eff,
-  type Throws,
-  succeed,
-  fail,
-  sync,
-  sleep,
-  run,
-} from "@perfect/core";
+import { type Eff, type Throws, succeed, fail, sync, run } from "@perfect/core";
 import {
   type HttpClientError,
   type HttpRequestOptions,
   type HttpTransport,
-  type SSEvent,
   httpStreamText,
   httpStreamLines,
   httpStreamNDJSON,
@@ -58,12 +49,8 @@ class OneShotTransport implements HttpTransport {
 
 describe("httpStreamText", () => {
   test("emits decoded chunks as they arrive", async () => {
-    const transport = new OneShotTransport(() =>
-      streamingResponse(["hello ", "world", "!"]),
-    );
-    const collected = await run(
-      httpStreamText({ url: "/x", transport }).toArray(),
-    );
+    const transport = new OneShotTransport(() => streamingResponse(["hello ", "world", "!"]));
+    const collected = await run(httpStreamText({ url: "/x", transport }).toArray());
     expect(collected.join("")).toBe("hello world!");
   });
 
@@ -102,7 +89,10 @@ describe("httpStreamLines", () => {
 
 // ── httpStreamNDJSON ───────────────────────────────────────────────
 
-interface User { id: number; name: string }
+interface User {
+  id: number;
+  name: string;
+}
 const UserParser: ResponseParser<User> = {
   safeParse: (d: any) =>
     d && typeof d.id === "number" && typeof d.name === "string"
@@ -161,12 +151,7 @@ describe("httpStreamNDJSON", () => {
 
 describe("httpStreamSSE", () => {
   test("parses basic message events", async () => {
-    const body = [
-      "data: hello\n",
-      "\n",
-      "data: world\n",
-      "\n",
-    ];
+    const body = ["data: hello\n", "\n", "data: world\n", "\n"];
     const transport = new OneShotTransport(() => streamingResponse(body));
     const events = await run(httpStreamSSE({ url: "/x", transport }).toArray());
     expect(events).toEqual([
@@ -176,13 +161,7 @@ describe("httpStreamSSE", () => {
   });
 
   test("multi-line data joined with \\n per spec", async () => {
-    const body = [
-      "event: msg\n",
-      "data: line1\n",
-      "data: line2\n",
-      "data: line3\n",
-      "\n",
-    ];
+    const body = ["event: msg\n", "data: line1\n", "data: line2\n", "data: line3\n", "\n"];
     const transport = new OneShotTransport(() => streamingResponse(body));
     const events = await run(httpStreamSSE({ url: "/x", transport }).toArray());
     expect(events.length).toBe(1);
@@ -191,13 +170,7 @@ describe("httpStreamSSE", () => {
   });
 
   test("id + retry fields populate", async () => {
-    const body = [
-      "id: 42\n",
-      "retry: 5000\n",
-      "event: ping\n",
-      "data: hi\n",
-      "\n",
-    ];
+    const body = ["id: 42\n", "retry: 5000\n", "event: ping\n", "data: hi\n", "\n"];
     const transport = new OneShotTransport(() => streamingResponse(body));
     const events = await run(httpStreamSSE({ url: "/x", transport }).toArray());
     expect(events[0]).toEqual({
@@ -230,12 +203,8 @@ describe("httpStreamSSE", () => {
 
 describe("take(n) terminates early", () => {
   test("httpStreamLines.take(2) stops after 2 lines", async () => {
-    const transport = new OneShotTransport(() =>
-      streamingResponse(["a\nb\nc\nd\ne\n"]),
-    );
-    const lines = await run(
-      httpStreamLines({ url: "/x", transport }).take(2).toArray(),
-    );
+    const transport = new OneShotTransport(() => streamingResponse(["a\nb\nc\nd\ne\n"]));
+    const lines = await run(httpStreamLines({ url: "/x", transport }).take(2).toArray());
     expect(lines).toEqual(["a", "b"]);
   });
 });

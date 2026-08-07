@@ -4,8 +4,16 @@
 // Run: bun packages/core/examples/12-testing.ts
 
 import {
-  eff, sleep, provide, run,
-  Clock, TestClock, Random, TestRandom, Console, TestConsole,
+  eff,
+  sleep,
+  provide,
+  run,
+  Clock,
+  TestClock,
+  Random,
+  TestRandom,
+  Console,
+  TestConsole,
 } from "../src";
 import { assertEq } from "./_assert";
 

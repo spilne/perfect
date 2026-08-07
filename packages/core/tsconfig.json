@@ -10,7 +10,8 @@
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
-    "types": ["bun-types"]
+    "types": ["bun"],
+    "typeRoots": ["../../node_modules/@types"]
   },
   "include": ["src", "test", "bench"]
 }

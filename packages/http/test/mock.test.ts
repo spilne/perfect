@@ -1,12 +1,11 @@
 import { describe, test, expect } from "bun:test";
 import { run, succeed } from "@perfect/core";
-import {
-  MockHttpClient,
-  mockHttpClient,
-  type ResponseParser,
-} from "../src";
+import { MockHttpClient, mockHttpClient, type ResponseParser } from "../src";
 
-interface User { id: number; name: string }
+interface User {
+  id: number;
+  name: string;
+}
 const UserParser: ResponseParser<User> = {
   safeParse: (d: any) =>
     d && typeof d.id === "number" && typeof d.name === "string"
@@ -71,9 +70,9 @@ describe("MockHttpClient — .onFn dynamic handler", () => {
     const mock = new MockHttpClient().onFn("GET", "/flaky", (call) =>
       call.tag === "test" ? MockHttpClient.fail(500) : { id: 1, name: "ok" },
     );
-    await expect(
-      run(mock.get("/flaky", UserParser, { tag: "test" }) as any),
-    ).rejects.toMatchObject({ _tag: "HttpStatusError", status: 500 });
+    await expect(run(mock.get("/flaky", UserParser, { tag: "test" }) as any)).rejects.toMatchObject(
+      { _tag: "HttpStatusError", status: 500 },
+    );
     const ok = await run(mock.get("/flaky", UserParser));
     expect(ok.name).toBe("ok");
   });

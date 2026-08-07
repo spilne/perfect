@@ -88,7 +88,11 @@ pub fn find_eff_blocks(source: &str) -> Vec<EffBlock> {
     results
 }
 
-fn parse_for_comprehension(source: &str, start: usize, brace_start: usize) -> Option<ForComprehension> {
+fn parse_for_comprehension(
+    source: &str,
+    start: usize,
+    brace_start: usize,
+) -> Option<ForComprehension> {
     let brace_end = find_matching_brace(source, brace_start)?;
     let body = &source[brace_start + 1..brace_end];
 
@@ -100,7 +104,7 @@ fn parse_for_comprehension(source: &str, start: usize, brace_start: usize) -> Op
     }
     let ws_len = after.len() - trimmed.len();
     let yield_start = brace_end + 1 + ws_len + 5; // skip whitespace + "yield"
-    // skip whitespace after "yield"
+                                                  // skip whitespace after "yield"
     let expr_start = skip_whitespace(source.as_bytes(), yield_start);
     let yield_expr = extract_expression(source, expr_start)?;
     let end = expr_start + yield_expr.len();
@@ -147,7 +151,10 @@ fn parse_for_stmts(body: &str) -> Option<Vec<ForStmt>> {
         }
 
         // val x = expr
-        if trimmed.starts_with("val ") || trimmed.starts_with("let ") || trimmed.starts_with("const ") {
+        if trimmed.starts_with("val ")
+            || trimmed.starts_with("let ")
+            || trimmed.starts_with("const ")
+        {
             let rest = if trimmed.starts_with("val ") {
                 &trimmed[4..]
             } else if trimmed.starts_with("let ") {
@@ -197,7 +204,9 @@ fn parse_dollar_stmts(body: &str) -> Option<Vec<DollarStmt>> {
         }
 
         // const x = $(expr)
-        if (trimmed.starts_with("const ") || trimmed.starts_with("let ") || trimmed.starts_with("var "))
+        if (trimmed.starts_with("const ")
+            || trimmed.starts_with("let ")
+            || trimmed.starts_with("var "))
             && trimmed.contains("$(")
         {
             let eq_pos = trimmed.find('=')?;
@@ -313,7 +322,9 @@ fn find_matching_brace_bytes(bytes: &[u8], open: usize) -> Option<usize> {
 
 fn skip_whitespace(bytes: &[u8], start: usize) -> usize {
     let mut i = start;
-    while i < bytes.len() && (bytes[i] == b' ' || bytes[i] == b'\t' || bytes[i] == b'\n' || bytes[i] == b'\r') {
+    while i < bytes.len()
+        && (bytes[i] == b' ' || bytes[i] == b'\t' || bytes[i] == b'\n' || bytes[i] == b'\r')
+    {
         i += 1;
     }
     i

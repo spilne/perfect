@@ -3,13 +3,14 @@
 //
 // Run: bun packages/core/examples/06-error-handling.ts
 
-import { eff, succeed, fail, sync, run, runSync, type Eff, type Throws } from "../src";
+import { succeed, fail, sync, type Eff, type Throws } from "../src";
 import { assertEq } from "./_assert";
 
 // >>> example: catch-typed
 // .catch handles any typed failure, removing Throws<E> from the type.
-const program: Eff<string, never> = (fail("nope") as Eff<never, Throws<string>>)
-  .catch((e) => succeed(`recovered: ${e}`));
+const program: Eff<string, never> = (fail("nope") as Eff<never, Throws<string>>).catch((e) =>
+  succeed(`recovered: ${e}`),
+);
 
 assertEq(program.runSync(), "recovered: nope");
 // <<< example
@@ -41,7 +42,12 @@ assertEq(wild.runSync(), "cause: Fail");
 // .tapError — observe a typed failure without handling it (re-fails).
 let observedError: string | null = null;
 const observed = (fail("bad") as Eff<never, Throws<string>>)
-  .tapError((e) => sync(() => { observedError = e; }) as any)
+  .tapError(
+    (e) =>
+      sync(() => {
+        observedError = e;
+      }) as any,
+  )
   .catch(() => succeed("ok"));
 
 assertEq(observed.runSync(), "ok");

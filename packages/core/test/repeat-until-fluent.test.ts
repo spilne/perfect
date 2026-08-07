@@ -1,13 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import {
-  eff,
-  succeed,
-  sync,
-  run,
-  type RepeatTimeoutError,
-  type Eff,
-  type Throws,
-} from "../src";
+import { eff, succeed, sync, run, type RepeatTimeoutError, type Eff, type Throws } from "../src";
 
 describe(".repeatUntil — fluent", () => {
   test("succeeds when condition met", async () => {
@@ -59,7 +51,10 @@ describe(".repeatUntil — fluent", () => {
 
 describe(".catchTag narrows RepeatTimeoutError<A>", () => {
   test("handler sees lastResult typed as A", async () => {
-    interface Job { id: string; status: "pending" | "done" }
+    interface Job {
+      id: string;
+      status: "pending" | "done";
+    }
     const request: Eff<Job, Throws<never>> = succeed({
       id: "j1",
       status: "pending",

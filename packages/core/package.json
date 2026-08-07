@@ -1,23 +1,48 @@
 {
   "name": "@perfect/core",
   "version": "0.0.1",
+  "license": "MIT",
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "type": "module",
-  "main": "src/index.ts",
-  "types": "src/index.ts",
+  "sideEffects": false,
+  "main": "dist/index.js",
+  "types": "dist/types/index.d.ts",
   "exports": {
-    ".": "./src/index.ts",
-    "./stream": "./src/stream/index.ts",
-    "./syntax/*": "./src/syntax/*.ts",
-    "./worker": "./src/worker/index.ts"
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./stream": {
+      "types": "./dist/types/stream/index.d.ts",
+      "default": "./dist/stream/index.js"
+    },
+    "./syntax": {
+      "types": "./dist/types/syntax/index.d.ts",
+      "default": "./dist/syntax/index.js"
+    },
+    "./syntax/*": {
+      "types": "./dist/types/syntax/*.d.ts",
+      "default": "./dist/syntax/*.js"
+    },
+    "./worker": {
+      "types": "./dist/types/worker/index.d.ts",
+      "default": "./dist/worker/index.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "test": "bun test",
+    "build": "bun ../../scripts/build-package.ts .",
     "typecheck": "tsc -p tsconfig.src.json --noEmit",
     "typecheck:types": "tsc -p tsconfig.type-tests.json --noEmit",
     "bench": "bun run bench/index.ts"
   },
   "devDependencies": {
-    "@types/bun": "latest",
     "effect": "^3.21.0",
     "mitata": "^1.0.34"
   }

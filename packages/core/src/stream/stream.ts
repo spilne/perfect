@@ -7,14 +7,19 @@
 // Consumer drives: upstream only runs when downstream pulls.
 // Backpressure is structural — no buffering, no highWaterMark.
 
-import { type Eff, type Throws, type Needs, Suspend, Op } from "../eff";
+import { type Eff, type Throws, Suspend, Op } from "../eff";
 import {
-  succeed, fail, sync, suspend, async, sleep, fork, join,
+  succeed,
+  fail,
+  failCause,
+  sync,
+  suspend,
+  async,
+  sleep,
   retry as effRetry,
   type RetryConfig,
 } from "../constructors";
 import type { RetryPolicy } from "../retry-policy";
-import { all } from "../combinators";
 import { Chunk } from "./chunk";
 import { type FusibleOp, compileFused, hasFilterOps, SKIP } from "./fusion";
 
@@ -58,7 +63,10 @@ function fuseStep<A, S>(
     }
     // s.next.step triggers s.next's own flush (if it has _pending).
     // We then wrap its raw step with THIS compilation.
-    const nextStream = new Stream<A, any>(fuseStep(s.next.step, compiled, hasFilter));
+    const nextStream = new Stream<A, any>(
+      fuseStep(s.next.step, compiled, hasFilter),
+      s.next._finalizer,
+    );
     return { _tag: "Emit", chunk: out, next: nextStream };
   });
 }
@@ -68,9 +76,11 @@ export class Stream<A, S = never> {
   private _rawStep: Eff<Step<A>, S>;
   // Accumulated pure ops (map/filter/filterMap/tap) awaiting compilation.
   private _pending: FusibleOp[] = [];
+  _finalizer: Eff<void, any> | null;
 
-  constructor(step: Eff<Step<A>, S>) {
+  constructor(step: Eff<Step<A>, S>, finalizer: Eff<void, any> | null = null) {
     this._rawStep = step;
+    this._finalizer = finalizer;
   }
 
   /** The stream's step effect. Flushes any pending fused ops before returning. */
@@ -88,9 +98,24 @@ export class Stream<A, S = never> {
   /** Append a pure op to the fusion buffer; returns a new Stream sharing the
    *  raw step but with its own pending list. */
   private _withOp(op: FusibleOp): Stream<any, S> {
-    const s = new Stream<any, S>(this._rawStep);
+    const s = new Stream<any, S>(this._rawStep, this._finalizer);
     s._pending = this._pending.length === 0 ? [op] : [...this._pending, op];
     return s;
+  }
+
+  private _withFinalizer<S2>(finalizer: Eff<void, S2>): Stream<A, S | S2> {
+    const combined =
+      this._finalizer === null
+        ? finalizer
+        : (new Suspend(Op.Ensuring, this._finalizer, finalizer) as any);
+    const s = new Stream<A, any>(this._rawStep, combined as any);
+    s._pending = this._pending.slice();
+    return s as Stream<A, S | S2>;
+  }
+
+  private _finalize<B, S2>(eff: Eff<B, S2>): Eff<B, S2> {
+    if (this._finalizer === null) return eff;
+    return new Suspend(Op.Ensuring, eff, this._finalizer) as any;
   }
 
   // ── Constructors ─────────────────────────────────────────────────
@@ -130,7 +155,18 @@ export class Stream<A, S = never> {
   }
 
   static suspend<A, S>(f: () => Stream<A, S>): Stream<A, S> {
-    return new Stream(suspend(() => f().step));
+    let current: Stream<A, S> | null = null;
+    return new Stream(
+      suspend(() => {
+        current = f();
+        return current.step;
+      }),
+      suspend(() => {
+        const finalizer = current?._finalizer;
+        current = null;
+        return finalizer ?? succeed(undefined);
+      }),
+    );
   }
 
   static unfold<A, B>(seed: B, f: (b: B) => [A, B] | null): Stream<A, never> {
@@ -231,7 +267,14 @@ export class Stream<A, S = never> {
       const buffer: A[] = [];
       let closed = false;
       let cleanup: (() => void) | void;
+      let cleaned = false;
       let waiter: ((step: Step<A>) => void) | null = null;
+
+      const cleanupOnce = (): void => {
+        if (cleaned) return;
+        cleaned = true;
+        if (cleanup) cleanup();
+      };
 
       const pushEmit = (value: A): void => {
         if (closed) return;
@@ -250,7 +293,7 @@ export class Stream<A, S = never> {
         if (waiter !== null && buffer.length === 0) {
           const w = waiter;
           waiter = null;
-          if (cleanup) cleanup();
+          cleanupOnce();
           w(DONE);
         }
       };
@@ -268,14 +311,17 @@ export class Stream<A, S = never> {
                 return;
               }
               if (closed) {
-                if (cleanup) cleanup();
+                cleanupOnce();
                 resume(succeed(DONE));
                 return;
               }
               waiter = (step) => resume(succeed(step));
               // interrupt handle: drop the waiter so a late emit doesn't call into nothing
               return () => {
+                closed = true;
+                buffer.length = 0;
                 waiter = null;
+                cleanupOnce();
               };
             },
             null,
@@ -283,7 +329,7 @@ export class Stream<A, S = never> {
         );
       }
 
-      return next();
+      return next()._withFinalizer(sync(cleanupOnce));
     });
   }
 
@@ -338,6 +384,13 @@ export class Stream<A, S = never> {
         let closed = false;
         let waiter: ((step: Step<A>) => void) | null = null;
         let cleanup: (() => void) | void;
+        let cleaned = false;
+
+        const cleanupOnce = (): void => {
+          if (cleaned) return;
+          cleaned = true;
+          if (cleanup) cleanup();
+        };
 
         const pushEmit = (value: A) => {
           if (closed) return;
@@ -355,7 +408,7 @@ export class Stream<A, S = never> {
           if (waiter !== null && buffer.length === 0) {
             const w = waiter;
             waiter = null;
-            if (cleanup) cleanup();
+            cleanupOnce();
             w(DONE);
           }
         };
@@ -371,13 +424,16 @@ export class Stream<A, S = never> {
                   return;
                 }
                 if (closed) {
-                  if (cleanup) cleanup();
+                  cleanupOnce();
                   resume(succeed(DONE));
                   return;
                 }
                 waiter = (step) => resume(succeed(step));
                 return () => {
+                  closed = true;
+                  buffer.length = 0;
                   waiter = null;
+                  cleanupOnce();
                 };
               },
               null,
@@ -388,7 +444,7 @@ export class Stream<A, S = never> {
         return (register(pushEmit, pushClose) as any)
           .map((c: (() => void) | void) => {
             cleanup = c ?? undefined;
-            return next().step;
+            return next()._withFinalizer(sync(cleanupOnce)).step;
           })
           .flatMap((s: any) => s);
       }),
@@ -424,6 +480,7 @@ export class Stream<A, S = never> {
         if (s._tag === "Done") return DONE;
         return emit(f(s.chunk), s.next.mapChunks(f));
       }),
+      this._finalizer,
     );
   }
 
@@ -495,6 +552,7 @@ export class Stream<A, S = never> {
         if (s._tag === "Done") return succeed(DONE);
         return evalMapChunk(s.chunk, f).map((mapped: Chunk<B>) => emit(mapped, s.next.evalMap(f)));
       }),
+      this._finalizer,
     );
   }
 
@@ -505,7 +563,7 @@ export class Stream<A, S = never> {
   }
 
   take(n: number): Stream<A, S> {
-    if (n <= 0) return Stream.empty();
+    if (n <= 0) return new Stream(succeed(DONE), this._finalizer);
     return new Stream(
       (this.step as any).map((s: Step<A>) => {
         if (s._tag === "Done") return DONE;
@@ -514,6 +572,7 @@ export class Stream<A, S = never> {
         }
         return emit(s.chunk.take(n), Stream.empty());
       }),
+      this._finalizer,
     );
   }
 
@@ -529,6 +588,7 @@ export class Stream<A, S = never> {
           return emit(s.chunk.drop(n), s.next);
         })
         .flatMap((r: any) => (r instanceof Suspend ? r : succeed(r))),
+      this._finalizer,
     );
   }
 
@@ -543,6 +603,7 @@ export class Stream<A, S = never> {
         }
         return emit(Chunk.fromArray(taken), s.next.takeWhile(p));
       }),
+      this._finalizer,
     );
   }
 
@@ -562,6 +623,7 @@ export class Stream<A, S = never> {
           return emit(s.chunk.drop(dropCount), s.next);
         })
         .flatMap((r: any) => (r instanceof Suspend ? r : succeed(r))),
+      this._finalizer,
     );
   }
 
@@ -578,9 +640,10 @@ export class Stream<A, S = never> {
           }
           return emit(Chunk.fromArray(results), go(current, s.next));
         }),
+        stream._finalizer,
       );
     }
-    return new Stream(succeed(emit(Chunk.single(zero), go(zero, this))));
+    return new Stream(succeed(emit(Chunk.single(zero), go(zero, this))), this._finalizer);
   }
 
   tap(f: (a: A) => void): Stream<A, S> {
@@ -632,6 +695,7 @@ export class Stream<A, S = never> {
             return emit(Chunk.fromArray(groups), next);
           })
           .flatMap((r: any) => (r instanceof Suspend ? r : succeed(r))),
+        stream._finalizer,
       );
     }
     return go([], this);
@@ -651,6 +715,11 @@ export class Stream<A, S = never> {
           return emit(s.chunk, s.next.concat(that));
         })
         .flatMap((r: any) => (r instanceof Suspend ? r : succeed(r))),
+      this._finalizer === null
+        ? that._finalizer
+        : that._finalizer === null
+          ? this._finalizer
+          : (new Suspend(Op.Ensuring, this._finalizer, that._finalizer) as any),
     );
   }
 
@@ -711,10 +780,17 @@ export class Stream<A, S = never> {
       async<Step<A>>((resume) => {
         let done1 = false;
         let done2 = false;
+        let failed: any = null;
         const buffer: A[] = [];
         let waiting: ((s: Eff<Step<A>, any>) => void) | null = null;
 
         function deliver() {
+          if (waiting && failed !== null) {
+            const w = waiting;
+            waiting = null;
+            w(failCause(failed));
+            return;
+          }
           if (waiting && buffer.length > 0) {
             const chunk = Chunk.fromArray(buffer.splice(0));
             const w = waiting;
@@ -745,23 +821,24 @@ export class Stream<A, S = never> {
         function drainOne(stream: Stream<A, any>, markDone: () => void) {
           function go(s: Stream<A, any>): void {
             const stepEff = s.step as any;
-            import("../runtime").then(({ run }) => {
-              (run(stepEff) as Promise<Step<A>>).then(
-                (step: Step<A>) => {
-                  if (step._tag === "Done") {
-                    markDone();
-                    deliver();
-                    return;
-                  }
-                  for (const item of step.chunk) buffer.push(item);
-                  deliver();
-                  go(step.next);
-                },
-                () => {
+            import("../runtime").then(({ runExit }) => {
+              runExit(stepEff).then((exit) => {
+                if (exit._tag === "Failure") {
+                  failed = exit.cause;
                   markDone();
                   deliver();
-                },
-              );
+                  return;
+                }
+                const step = exit.value as Step<A>;
+                if (step._tag === "Done") {
+                  markDone();
+                  deliver();
+                  return;
+                }
+                for (const item of step.chunk) buffer.push(item);
+                deliver();
+                go(step.next);
+              });
             });
           }
           go(stream);
@@ -786,15 +863,21 @@ export class Stream<A, S = never> {
     // uses Deferred slots to maintain ordering
     return new Stream(
       async<Step<B>>((outerResume) => {
-        const slots: Array<{ resolve: (b: B) => void; promise: Promise<B> }> = [];
         let running = 0;
         let inputDone = false;
+        let failed: any = null;
         let outputIndex = 0;
         const results: Array<{ value?: B; done: boolean }> = [];
         let outputWaiting: ((s: Eff<Step<B>, any>) => void) | null = null;
 
         function tryOutput(): void {
           if (!outputWaiting) return;
+          if (failed !== null) {
+            const w = outputWaiting;
+            outputWaiting = null;
+            w(failCause(failed));
+            return;
+          }
           const ready: B[] = [];
           while (outputIndex < results.length && results[outputIndex]?.done) {
             ready.push(results[outputIndex]!.value!);
@@ -821,23 +904,24 @@ export class Stream<A, S = never> {
         }
 
         function drainInput(stream: Stream<A, any>) {
-          import("../runtime").then(({ run }) => {
+          import("../runtime").then(({ runExit }) => {
             function go(s: Stream<A, any>): void {
-              (run(s.step as any) as Promise<Step<A>>).then(
-                (step: Step<A>) => {
-                  if (step._tag === "Done") {
-                    inputDone = true;
-                    tryOutput();
-                    return;
-                  }
-                  const items = Array.from(step.chunk);
-                  processItems(items, 0, () => go(step.next));
-                },
-                () => {
+              runExit(s.step as any).then((exit) => {
+                if (exit._tag === "Failure") {
+                  failed = exit.cause;
                   inputDone = true;
                   tryOutput();
-                },
-              );
+                  return;
+                }
+                const step = exit.value as Step<A>;
+                if (step._tag === "Done") {
+                  inputDone = true;
+                  tryOutput();
+                  return;
+                }
+                const items = Array.from(step.chunk);
+                processItems(items, 0, () => go(step.next));
+              });
             }
 
             function processItems(items: A[], i: number, cont: () => void): void {
@@ -856,18 +940,18 @@ export class Stream<A, S = never> {
               results.push({ done: false });
               running++;
 
-              (run(f(items[i]!) as any) as Promise<B>).then(
-                (value: B) => {
-                  results[idx] = { value, done: true };
-                  running--;
-                  tryOutput();
-                },
-                () => {
+              runExit(f(items[i]!) as any).then((exit) => {
+                if (exit._tag === "Failure") {
+                  failed = exit.cause;
                   running--;
                   inputDone = true;
                   tryOutput();
-                },
-              );
+                  return;
+                }
+                results[idx] = { value: exit.value as B, done: true };
+                running--;
+                tryOutput();
+              });
 
               processItems(items, i + 1, cont);
             }
@@ -888,10 +972,17 @@ export class Stream<A, S = never> {
       async<Step<B>>((outerResume) => {
         let running = 0;
         let inputDone = false;
+        let failed: any = null;
         const buffer: B[] = [];
         let outputWaiting: ((s: Eff<Step<B>, any>) => void) | null = null;
 
         function deliver() {
+          if (outputWaiting && failed !== null) {
+            const w = outputWaiting;
+            outputWaiting = null;
+            w(failCause(failed));
+            return;
+          }
           if (outputWaiting && buffer.length > 0) {
             const chunk = Chunk.fromArray(buffer.splice(0));
             const w = outputWaiting;
@@ -915,23 +1006,24 @@ export class Stream<A, S = never> {
         }
 
         function drainInput(stream: Stream<A, any>) {
-          import("../runtime").then(({ run }) => {
+          import("../runtime").then(({ runExit }) => {
             function go(s: Stream<A, any>): void {
-              (run(s.step as any) as Promise<Step<A>>).then(
-                (step: Step<A>) => {
-                  if (step._tag === "Done") {
-                    inputDone = true;
-                    deliver();
-                    return;
-                  }
-                  const items = Array.from(step.chunk);
-                  processItems(items, 0, () => go(step.next));
-                },
-                () => {
+              runExit(s.step as any).then((exit) => {
+                if (exit._tag === "Failure") {
+                  failed = exit.cause;
                   inputDone = true;
                   deliver();
-                },
-              );
+                  return;
+                }
+                const step = exit.value as Step<A>;
+                if (step._tag === "Done") {
+                  inputDone = true;
+                  deliver();
+                  return;
+                }
+                const items = Array.from(step.chunk);
+                processItems(items, 0, () => go(step.next));
+              });
             }
 
             function processItems(items: A[], i: number, cont: () => void): void {
@@ -944,17 +1036,18 @@ export class Stream<A, S = never> {
                 return;
               }
               running++;
-              (run(f(items[i]!) as any) as Promise<B>).then(
-                (value: B) => {
-                  buffer.push(value);
+              runExit(f(items[i]!) as any).then((exit) => {
+                if (exit._tag === "Failure") {
+                  failed = exit.cause;
                   running--;
+                  inputDone = true;
                   deliver();
-                },
-                () => {
-                  running--;
-                  deliver();
-                },
-              );
+                  return;
+                }
+                buffer.push(exit.value as B);
+                running--;
+                deliver();
+              });
               processItems(items, i + 1, cont);
             }
 
@@ -1133,6 +1226,10 @@ export class Stream<A, S = never> {
     return pipe(this) as any;
   }
 
+  runSink<B, S2>(sink: { run(input: Stream<A, any>): Eff<B, S2> }): Eff<B, S | S2> {
+    return sink.run(this) as any;
+  }
+
   // ── Error handling ───────────────────────────────────────────────
 
   catch<B, S2>(handler: (error: any) => Stream<B, S2>): Stream<A | B, S2> {
@@ -1143,13 +1240,12 @@ export class Stream<A, S = never> {
           return emit(s.chunk, s.next.catch(handler));
         })
         .catch((e: any) => handler(e).step),
+      this._finalizer,
     );
   }
 
   onFinalize<S2>(finalizer: Eff<void, S2>): Stream<A, S | S2> {
-    return (new Stream(new Suspend(Op.Ensuring, this.step, finalizer) as any).mapContinuation(
-      (next) => next.onFinalize(finalizer),
-    ) as any) as Stream<A, S | S2>;
+    return this._withFinalizer(finalizer);
   }
 
   /**
@@ -1168,6 +1264,7 @@ export class Stream<A, S = never> {
           if (step._tag === "Done") return DONE;
           return emit(step.chunk, wrap(step.next));
         }),
+        s._finalizer,
       );
     return wrap(this);
   }
@@ -1178,6 +1275,7 @@ export class Stream<A, S = never> {
         if (s._tag === "Done") return DONE;
         return emit(s.chunk, f(s.next));
       }),
+      this._finalizer,
     );
   }
 
@@ -1193,7 +1291,7 @@ export class Stream<A, S = never> {
         return go(next, s.next);
       });
     }
-    return go(zero, this) as any;
+    return this._finalize(go(zero, this) as any) as any;
   }
 
   toArray(): Eff<A[], S> {
@@ -1210,7 +1308,7 @@ export class Stream<A, S = never> {
         return go(s.next);
       });
     }
-    return go(this) as any;
+    return this._finalize(go(this) as any) as any;
   }
 
   forEach<S2>(f: (a: A) => Eff<void, S2>): Eff<void, S | S2> {
@@ -1220,14 +1318,16 @@ export class Stream<A, S = never> {
         return runChunkForEach(s.chunk, f).flatMap(() => go(s.next));
       });
     }
-    return go(this) as any;
+    return this._finalize(go(this) as any) as any;
   }
 
   head(): Eff<A | undefined, S> {
-    return (this.step as any).map((s: Step<A>) => {
-      if (s._tag === "Done") return undefined;
-      return s.chunk.head();
-    });
+    return this._finalize(
+      (this.step as any).map((s: Step<A>) => {
+        if (s._tag === "Done") return undefined;
+        return s.chunk.head();
+      }) as any,
+    ) as any;
   }
 
   last(): Eff<A | undefined, S> {
@@ -1237,7 +1337,7 @@ export class Stream<A, S = never> {
         return go(s.chunk.last() ?? lastSeen, s.next);
       });
     }
-    return go(undefined, this) as any;
+    return this._finalize(go(undefined, this) as any) as any;
   }
 
   count(): Eff<number, S> {

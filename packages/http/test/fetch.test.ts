@@ -7,8 +7,6 @@ import {
   type HttpRequestOptions,
   type HttpClientError,
   type ResponseParser,
-  HttpStatusError,
-  HttpParseError,
   HttpNetworkError,
   httpFetch,
   httpFetchOk,
@@ -20,9 +18,7 @@ import {
 /** In-memory transport: returns a canned Response per call. */
 class MockTransport implements HttpTransport {
   public calls: HttpRequestOptions[] = [];
-  constructor(
-    private readonly respond: (opts: HttpRequestOptions) => Response | HttpClientError,
-  ) {}
+  constructor(private readonly respond: (opts: HttpRequestOptions) => Response | HttpClientError) {}
   execute(options: HttpRequestOptions): Eff<Response, Throws<HttpClientError>> {
     this.calls.push(options);
     const r = this.respond(options);
@@ -71,10 +67,10 @@ describe("httpFetchOk — fetch + status check", () => {
   });
 
   test("5xx fails with HttpStatusError carrying body + metadata", async () => {
-    const t = new MockTransport(
-      () => new Response("database down", { status: 503 }),
-    );
-    await expect(run(httpFetchOk({ url: "/x", method: "POST", transport: t }) as any)).rejects.toMatchObject({
+    const t = new MockTransport(() => new Response("database down", { status: 503 }));
+    await expect(
+      run(httpFetchOk({ url: "/x", method: "POST", transport: t }) as any),
+    ).rejects.toMatchObject({
       _tag: "HttpStatusError",
       status: 503,
       body: "database down",
@@ -92,15 +88,16 @@ describe("httpFetchOk — fetch + status check", () => {
 
   test("acceptStatus override lets you opt in to non-default success codes", async () => {
     const t = new MockTransport(() => new Response("nobody here", { status: 404 }));
-    const r = await run(
-      httpFetchOk({ url: "/x", transport: t, acceptStatus: (s) => s === 404 }),
-    );
+    const r = await run(httpFetchOk({ url: "/x", transport: t, acceptStatus: (s) => s === 404 }));
     expect(r.status).toBe(404);
   });
 });
 
 describe("httpRequest<T> — full pipeline with parser", () => {
-  interface User { id: number; name: string }
+  interface User {
+    id: number;
+    name: string;
+  }
   const UserParser: ResponseParser<User> = {
     safeParse: (d: any) =>
       d && typeof d.id === "number" && typeof d.name === "string"
