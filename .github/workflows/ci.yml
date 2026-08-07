@@ -51,10 +51,10 @@ jobs:
         with:
           targets: wasm32-wasip1
 
-      - run: cargo test
+      - run: cargo test --locked
         working-directory: crates/perfect-transform
 
-      - run: cargo test
+      - run: cargo test --locked
         working-directory: crates/swc-plugin-perfect
 
       - uses: oven-sh/setup-bun@v2
