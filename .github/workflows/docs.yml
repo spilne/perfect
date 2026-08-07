@@ -1,4 +1,4 @@
-name: Deploy documentation
+name: Documentation
 
 on:
   push:
@@ -13,15 +13,17 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
+  # Pages publishing is temporarily disabled.
+  # pages: write
+  # id-token: write
 
 concurrency:
-  group: pages
+  group: documentation
+  # group: pages
   cancel-in-progress: false
 
 jobs:
-  build:
+  check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -40,18 +42,20 @@ jobs:
       - name: Build site
         run: bun run documentation:build:html
 
-      - uses: actions/configure-pages@v5
+      # Pages publishing is temporarily disabled. Re-enable these steps and
+      # the deploy job below when documentation hosting should resume.
+      # - uses: actions/configure-pages@v5
+      #
+      # - uses: actions/upload-pages-artifact@v3
+      #   with:
+      #     path: documentation/.vitepress/dist
 
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: documentation/.vitepress/dist
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
+  # deploy:
+  #   needs: check
+  #   runs-on: ubuntu-latest
+  #   environment:
+  #     name: github-pages
+  #     url: ${{ steps.deployment.outputs.page_url }}
+  #   steps:
+  #     - id: deployment
+  #       uses: actions/deploy-pages@v4
