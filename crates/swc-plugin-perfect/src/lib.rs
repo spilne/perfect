@@ -2,10 +2,45 @@ use swc_core::{
     common::{Span, Spanned, DUMMY_SP},
     ecma::{
         ast::*,
-        visit::{VisitMut, VisitMutWith},
+        visit::{Visit, VisitMut, VisitMutWith, VisitWith},
     },
     plugin::{plugin_transform, proxies::TransformPluginProgramMetadata},
 };
+
+// Deep `$` detector — finds the special ident anywhere inside a node
+// (call arguments, binary expressions, nested callbacks, loop bodies, …).
+// Nested eff(($) => …) calls are already desugared by the time the outer
+// block is examined (children-first visit), so any `$` remaining in an
+// unsupported position would be emitted as a dangling identifier that
+// explodes at runtime. We refuse at build time instead.
+struct DollarFinder {
+    found: bool,
+}
+
+impl Visit for DollarFinder {
+    fn visit_ident(&mut self, n: &Ident) {
+        if &*n.sym == "$" {
+            self.found = true;
+        }
+    }
+}
+
+fn contains_dollar_deep<N: VisitWith<DollarFinder>>(node: &N) -> bool {
+    let mut finder = DollarFinder { found: false };
+    node.visit_with(&mut finder);
+    finder.found
+}
+
+fn contains_return(stmt: &Stmt) -> bool {
+    match stmt {
+        Stmt::Return(_) => true,
+        Stmt::Block(b) => b.stmts.iter().any(contains_return),
+        Stmt::If(i) => {
+            contains_return(&i.cons) || i.alt.as_deref().map_or(false, contains_return)
+        }
+        _ => false,
+    }
+}
 
 pub struct PerfectTransformVisitor;
 
@@ -72,12 +107,51 @@ impl PerfectTransformVisitor {
             if let Some(inner) = self.extract_dollar_from_expr(&ret_expr) {
                 return Some(inner);
             }
+            if contains_dollar_deep(&ret_expr) {
+                panic!(
+                    "@perfect/swc-plugin: unsupported $ usage in a return expression — only \
+                     `return $(expr)` or a plain `return expr` compile. Bind first: \
+                     `const x = $(expr); return f(x)`"
+                );
+            }
             let span = ret_expr.span();
             return Some(self.make_succeed(ret_expr, span));
         }
 
         if let Some(expr) = self.try_desugar_if(stmt, stmts, index) {
             return Some(expr);
+        }
+
+        // Pure declaration (no $) — must NOT be sync-wrapped as a statement:
+        // the binding would be scoped inside the sync arrow, invisible to
+        // the rest of the block. Compile each declarator to
+        // sync(() => init).flatMap((pat) => rest).
+        if let Stmt::Decl(Decl::Var(var_decl)) = stmt {
+            if !contains_dollar_deep(stmt) {
+                let rest = self.desugar_stmts(stmts, index + 1)?;
+                let mut acc = rest;
+                for decl in var_decl.decls.iter().rev() {
+                    let init_expr = decl
+                        .init
+                        .as_ref()
+                        .map(|e| (**e).clone())
+                        .unwrap_or_else(|| Expr::Ident(self.make_ident("undefined", stmt_span)));
+                    let sync_call = self.make_sync_expr(init_expr, stmt_span);
+                    acc = self.make_flat_map_pat(sync_call, decl.name.clone(), acc, stmt_span);
+                }
+                return Some(acc);
+            }
+        }
+
+        // From here down the statement is emitted inside sync(() => …) —
+        // any `$` still inside it would be a dangling identifier at runtime.
+        if contains_dollar_deep(stmt) {
+            panic!(
+                "@perfect/swc-plugin: unsupported $ usage inside eff(($) => …) — $ compiles only \
+                 in `const x = $(expr)`, bare `$(expr)`, `return $(expr)`, and if/else branches. \
+                 $ inside larger expressions, call arguments, loops, try/switch, or callbacks is \
+                 not supported: bind first (`const x = $(e)`) and use the plain value"
+            );
         }
 
         if let Stmt::Expr(expr_stmt) = stmt {
@@ -150,6 +224,28 @@ impl PerfectTransformVisitor {
                 }
             } else {
                 return None;
+            }
+        }
+
+        if contains_dollar_deep(&*if_stmt.test) {
+            panic!(
+                "@perfect/swc-plugin: $ inside an if condition is not supported — bind first: \
+                 `const c = $(cond); if (c) {{ … }}`"
+            );
+        }
+
+        // The branches compile to a ternary of effects and the CONTINUATION
+        // runs after either branch — an early `return` inside a branch would
+        // not skip the following statements. Refuse rather than miscompile.
+        if index + 1 < all_stmts.len() {
+            let has_return = contains_return(&if_stmt.cons)
+                || if_stmt.alt.as_deref().map_or(false, contains_return);
+            if has_return {
+                panic!(
+                    "@perfect/swc-plugin: `return` inside an if branch followed by more \
+                     statements is not supported (the return would not skip them) — make the \
+                     if/else the last statement, or restructure with a bound value"
+                );
             }
         }
 

@@ -259,3 +259,120 @@ fn preserved_original_expressions_keep_their_spans() {
         "original `e` lost its span during transform"
     );
 }
+
+// ── Diagnostics: unsupported $ shapes must fail the build ──────────
+
+#[test]
+#[should_panic(expected = "unsupported $ usage")]
+fn dollar_in_call_argument_panics() {
+    transform(r#"const p = eff(($) => { const x = f($(e)); return x; });"#);
+}
+
+#[test]
+#[should_panic(expected = "unsupported $ usage")]
+fn dollar_in_binary_expression_panics() {
+    transform(r#"const p = eff(($) => { const x = $(a()) + $(b()); return x; });"#);
+}
+
+#[test]
+#[should_panic(expected = "unsupported $ usage")]
+fn dollar_in_while_loop_panics() {
+    transform(r#"const p = eff(($) => { while (c) { $(e); } return 1; });"#);
+}
+
+#[test]
+#[should_panic(expected = "unsupported $ usage")]
+fn dollar_in_callback_panics() {
+    transform(r#"const p = eff(($) => { items.forEach((i) => $(handle(i))); return 1; });"#);
+}
+
+#[test]
+#[should_panic(expected = "unsupported $ usage in a return")]
+fn dollar_embedded_in_return_panics() {
+    transform(r#"const p = eff(($) => { return $(a()) + 1; });"#);
+}
+
+#[test]
+#[should_panic(expected = "$ inside an if condition")]
+fn dollar_in_if_condition_panics() {
+    transform(r#"const p = eff(($) => { if ($(check())) { $(e); } });"#);
+}
+
+#[test]
+#[should_panic(expected = "return` inside an if branch")]
+fn early_return_in_if_with_following_statements_panics() {
+    transform(r#"const p = eff(($) => { if (c) { return $(a); } $(b); return 2; });"#);
+}
+
+#[test]
+fn if_as_last_statement_with_return_still_compiles() {
+    let out = transform(r#"const p = eff(($) => { const x = $(a); if (x) { return $(b); } });"#);
+    assert!(out.contains("flatMap"));
+}
+
+#[test]
+fn nested_eff_dollar_does_not_false_positive() {
+    // inner eff is desugared first (children-first), so the outer block
+    // sees no dangling $
+    let out = transform(
+        r#"const p = eff(($) => { const x = $(succeed(1)); const y = eff(($) => { return $(succeed(2)); }); const z = $(y); return x + z; });"#,
+    );
+    assert!(out.contains("flatMap"));
+    assert!(!out.contains("eff(("));
+}
+
+// ── Differential fixture corpus ────────────────────────────────────
+// Same files the TS suite executes (packages/transform/test/fixtures).
+// The TS side proves runtime semantics; this side proves the SWC plugin
+// fully compiles the corpus — no residual eff(( or dangling $(.
+
+fn fixture_dir(sub: &str) -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../packages/transform/test/fixtures")
+        .join(sub)
+}
+
+fn assert_fully_compiled(path: &std::path::Path) {
+    let src = std::fs::read_to_string(path).expect("read fixture");
+    let out = transform(&src);
+    assert!(
+        !out.contains("eff(("),
+        "{}: eff(( survived the transform:\n{}",
+        path.display(),
+        out
+    );
+    assert!(
+        !out.contains("$("),
+        "{}: dangling $( in output:\n{}",
+        path.display(),
+        out
+    );
+}
+
+#[test]
+fn shared_fixture_corpus_fully_compiles() {
+    let dir = fixture_dir("shared");
+    let mut count = 0;
+    for entry in std::fs::read_dir(&dir).expect("fixtures/shared missing") {
+        let path = entry.unwrap().path();
+        if path.extension().map_or(false, |e| e == "ts") {
+            assert_fully_compiled(&path);
+            count += 1;
+        }
+    }
+    assert!(count >= 8, "expected the full shared corpus, found {}", count);
+}
+
+#[test]
+fn swc_only_fixture_corpus_fully_compiles() {
+    let dir = fixture_dir("swc-only");
+    let mut count = 0;
+    for entry in std::fs::read_dir(&dir).expect("fixtures/swc-only missing") {
+        let path = entry.unwrap().path();
+        if path.extension().map_or(false, |e| e == "ts") {
+            assert_fully_compiled(&path);
+            count += 1;
+        }
+    }
+    assert!(count >= 2, "expected the swc-only corpus, found {}", count);
+}
