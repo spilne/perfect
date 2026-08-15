@@ -53,7 +53,7 @@ The request `tag` (when provided to `client.get`/`post`/etc.) becomes
 ```ts
 import { SpanStatusCode } from "@opentelemetry/api";
 import { DefaultHttpClient } from "@perfect/http";
-import { tracingMiddleware } from "@perfect/core";
+import { tracingMiddleware } from "@perfect/http-otel";
 
 // On error, the span status flips to ERROR, http.response.status_code is
 // recorded, and error.type carries the typed error tag for filtering.
@@ -110,7 +110,7 @@ spans. Header redaction is pluggable.
 
 <!-- @embed packages/http-otel/examples/01-tracing.ts#tracing-redaction -->
 ```ts
-import { makeRedaction, redactHeaders } from "@perfect/core";
+import { makeRedaction, redactHeaders } from "@perfect/http-otel";
 
 // URL queries are stripped from url.full by default to keep span attributes
 // PII-free. Pass includeQuery: true to keep them. Header redaction is

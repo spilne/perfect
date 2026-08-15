@@ -41,6 +41,16 @@ export interface RequestBodyOptions<E = string> extends RequestOptions<E> {
   readonly body?: string | ArrayBuffer | ReadableStream | Blob | FormData;
 }
 
+/** Options for `postMultipart` — a file plus optional extra form fields. */
+export interface MultipartOptions<E = string> extends RequestOptions<E> {
+  /** The file to upload. */
+  readonly file: Blob | File;
+  /** Name of the form field for the file. Defaults to `"file"`. */
+  readonly fileField?: string;
+  /** Additional string fields to include in the multipart form. */
+  readonly fields?: Record<string, string>;
+}
+
 /** Core request parameters consumed by `request(params)`. */
 export interface HttpRequestParams<T, E = string> {
   readonly path: string | URL;
@@ -74,6 +84,11 @@ export interface HttpClient {
     path: string | URL,
     schema: ResponseParser<T>,
     options?: RequestBodyOptions<E>,
+  ): Eff<T, Throws<HttpClientError>>;
+  postMultipart<T, E = string>(
+    path: string | URL,
+    schema: ResponseParser<T>,
+    options: MultipartOptions<E>,
   ): Eff<T, Throws<HttpClientError>>;
   put<T, E = string>(
     path: string | URL,
@@ -182,6 +197,36 @@ export abstract class AbstractHttpClient implements HttpClient {
       acceptStatus: options?.acceptStatus,
       tag: options?.tag,
       errorSchema: options?.errorSchema,
+    });
+  }
+
+  /**
+   * POST a file (plus optional string fields) as `multipart/form-data`.
+   * The Content-Type header — including the boundary — is set by the
+   * runtime from the FormData body; don't set it manually.
+   */
+  postMultipart<T, E = string>(
+    path: string | URL,
+    schema: ResponseParser<T>,
+    options: MultipartOptions<E>,
+  ): Eff<T, Throws<HttpClientError>> {
+    const formData = new FormData();
+    formData.append(options.fileField ?? "file", options.file);
+    if (options.fields) {
+      for (const [key, value] of Object.entries(options.fields)) {
+        formData.append(key, value);
+      }
+    }
+    return this.request({
+      path,
+      method: "POST",
+      schema,
+      body: formData,
+      headers: options.headers,
+      timeoutMs: options.timeoutMs,
+      acceptStatus: options.acceptStatus,
+      tag: options.tag,
+      errorSchema: options.errorSchema,
     });
   }
 

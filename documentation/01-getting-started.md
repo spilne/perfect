@@ -7,6 +7,10 @@ five minutes.
 
 ## Install
 
+> **Pre-release**: the packages are not published to npm yet — clone the
+> repo and use the Bun workspace. The commands below describe the
+> post-publish shape.
+
 ```bash
 bun add @perfect/core
 ```
@@ -14,7 +18,8 @@ bun add @perfect/core
 Optional packages:
 
 ```bash
-bun add @perfect/transform   # SWC plugin for the eff(($) => …) sugar
+bun add @perfect/swc-plugin   # SWC WASM plugin — compiles eff(($) => …) in Next.js/Vite/SWC builds
+bun add @perfect/transform    # Bun-plugin rewriter — eff(($) => …) and for { x <- e } yield under Bun
 ```
 
 ## Your first program

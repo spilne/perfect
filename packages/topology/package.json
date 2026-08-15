@@ -1,9 +1,27 @@
 {
   "name": "@perfect/topology",
   "version": "0.0.1",
+  "description": "Stream topology engine on the Perfect runtime — windows, joins, stage planning, distributed runs.",
+  "keywords": [
+    "effect",
+    "joins",
+    "streaming",
+    "topology",
+    "windows"
+  ],
+  "homepage": "https://github.com/spilne/perfect#readme",
+  "bugs": {
+    "url": "https://github.com/spilne/perfect/issues"
+  },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/spilne/perfect.git",
+    "directory": "packages/topology"
+  },
   "files": [
     "dist",
+    "LICENSE",
     "README.md"
   ],
   "type": "module",

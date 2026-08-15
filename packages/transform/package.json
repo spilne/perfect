@@ -1,9 +1,26 @@
 {
   "name": "@perfect/transform",
   "version": "0.0.1",
+  "description": "Build-time compiler for Perfect's eff(($) => …) and for-comprehension syntaxes (Bun plugin).",
+  "keywords": [
+    "bun-plugin",
+    "effect",
+    "for-comprehension",
+    "transform"
+  ],
+  "homepage": "https://github.com/spilne/perfect#readme",
+  "bugs": {
+    "url": "https://github.com/spilne/perfect/issues"
+  },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/spilne/perfect.git",
+    "directory": "packages/transform"
+  },
   "files": [
     "dist",
+    "LICENSE",
     "README.md"
   ],
   "type": "module",

@@ -36,8 +36,14 @@ const ROOT = join(import.meta.dir, "..");
 const DOC_DIR = join(ROOT, "documentation");
 const CHECK_MODE = process.argv.includes("--check");
 
-const PACKAGE_NAME = "@perfect/core";
 const INTERNAL_IMPORT_RE = /^\.\.\/src(\/.*)?$/;
+
+// The package an embedded example belongs to — internal `../src` imports
+// rewrite to it (packages/http/examples → @perfect/http, etc.).
+function packageNameFor(file: string): string {
+  const m = file.match(/packages\/([\w-]+)\//);
+  return `@perfect/${m ? m[1] : "core"}`;
+}
 const SKIP_IMPORT_SOURCES = new Set(["./_assert", "../_assert"]);
 
 const EMBED_RE =
@@ -161,7 +167,7 @@ function identifiersIn(code: string): Set<string> {
   return set;
 }
 
-function renderImports(imports: ParsedImport[], body: string): string {
+function renderImports(imports: ParsedImport[], body: string, packageName: string): string {
   const used = identifiersIn(body);
   const lines: string[] = [];
 
@@ -169,7 +175,7 @@ function renderImports(imports: ParsedImport[], body: string): string {
     if (SKIP_IMPORT_SOURCES.has(imp.source)) continue;
 
     const source = INTERNAL_IMPORT_RE.test(imp.source)
-      ? PACKAGE_NAME + (imp.source.replace(INTERNAL_IMPORT_RE, "$1") || "")
+      ? packageName + (imp.source.replace(INTERNAL_IMPORT_RE, "$1") || "")
       : imp.source;
 
     const namedKept = imp.named.filter((n) => used.has(n.alias ?? n.name));
@@ -292,7 +298,7 @@ function extractRegion(file: string, region: string): string {
   const body = lines.map((l) => l.slice(minIndent)).join("\n");
 
   const imports = parseImports(src);
-  const importBlock = renderImports(imports, body);
+  const importBlock = renderImports(imports, body, packageNameFor(file));
   const renderedBody = rewriteAssertEq(body);
 
   return importBlock ? `${importBlock}\n\n${renderedBody}` : renderedBody;
