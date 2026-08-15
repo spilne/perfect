@@ -1,0 +1,10 @@
+{
+  "name": "@perfect/topology",
+  "sourceRoot": "packages/topology/src",
+  "targets": {
+    "build": {},
+    "test": {},
+    "lint": {},
+    "typecheck": {}
+  }
+}
