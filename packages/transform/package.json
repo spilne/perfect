@@ -35,5 +35,7 @@
     "typecheck": "tsc -p tsconfig.src.json --noEmit",
     "build": "bun ../../scripts/build-package.ts ."
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "@swc/core": "~1.15.47"
+  }
 }

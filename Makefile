@@ -1,4 +1,4 @@
-.PHONY: install test test-core test-transform lint fmt fmt-check typecheck build smoke bench bench-vs-effect perf-report perf-gate docs docs-check docs-dev docs-build docs-preview build-rust build-swc ci
+.PHONY: install test test-core test-transform lint fmt fmt-check typecheck build smoke bench bench-vs-effect perf-report perf-gate docs docs-check docs-dev docs-build docs-preview build-swc ci
 
 install:
 	bun install
@@ -56,9 +56,6 @@ docs-build:
 
 docs-preview:
 	bun run documentation:preview
-
-build-rust:
-	bun run build:rust
 
 build-swc:
 	bun run build:swc

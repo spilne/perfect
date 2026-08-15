@@ -1,5 +1,6 @@
 import { plugin } from "bun";
 import { rewriteEffBlocks } from "./rewrite";
+import { ensureCoreImports } from "./auto-import";
 
 plugin({
   name: "spilne-eff-transform",
@@ -12,7 +13,7 @@ plugin({
         return undefined;
       }
 
-      const transformed = rewriteEffBlocks(source);
+      const transformed = ensureCoreImports(source, rewriteEffBlocks(source));
       return {
         contents: transformed,
         loader: "ts",

@@ -12,69 +12,197 @@
 //
 //    Guards (`if cond`) are NOT supported — they'd require type-specific filter/fail. Use
 //    .filter() directly on the monad, or switch to eff($) for Eff-specific flow control.
+//
+// Design notes:
+// - All scanning happens against a MASK of the source (string literals and
+//   comments blanked to spaces, same length) so code-looking text inside
+//   strings is never rewritten. Original text is sliced for output.
+// - Regions are rewritten one at a time with a full restart between splices —
+//   no offset bookkeeping. Nested regions are handled by recursively
+//   rewriting a region's body text before parsing it.
+// - Anything involving `$` that the rewriter cannot compile THROWS a
+//   RewriteError instead of silently emitting code with a dangling `$`.
+
+export class RewriteError extends Error {
+  constructor(message: string, statement?: string) {
+    super(statement ? `${message}\n  in statement: ${statement}` : message);
+    this.name = "RewriteError";
+  }
+}
+
+const MAX_PASSES = 200;
 
 // ── Main entry ─────────────────────────────────────────────────────
 
 export function rewriteEffBlocks(source: string): string {
   let result = source;
-  result = rewriteForComprehensions(result);
-  result = rewriteDollarBlocks(result);
-  return result;
+  for (let pass = 0; pass < MAX_PASSES; pass++) {
+    const afterFor = rewriteOneForComprehension(result);
+    if (afterFor !== null) {
+      result = afterFor;
+      continue;
+    }
+    const afterDollar = rewriteOneDollarBlock(result);
+    if (afterDollar !== null) {
+      result = afterDollar;
+      continue;
+    }
+    return result;
+  }
+  throw new RewriteError("rewrite did not converge — nesting too deep or internal bug");
 }
 
-// ── For-comprehension: for { x <- e; if p } yield expr ─────────────
+// ── Masking ────────────────────────────────────────────────────────
+//
+// Same-length copy of the source with string-literal and comment contents
+// replaced by spaces. Template-literal interpolations are blanked too —
+// a comprehension inside `${…}` is not supported (documented limitation).
+// Regex literals are not recognized (the `/` division ambiguity needs a
+// parser); a `for {` inside a regex would be misdetected — vanishingly rare.
+
+function maskCode(source: string): string {
+  const out = source.split("");
+  let i = 0;
+  while (i < source.length) {
+    const ch = source[i]!;
+    if (ch === "/" && source[i + 1] === "/") {
+      while (i < source.length && source[i] !== "\n") {
+        out[i] = " ";
+        i++;
+      }
+      continue;
+    }
+    if (ch === "/" && source[i + 1] === "*") {
+      out[i] = " ";
+      out[i + 1] = " ";
+      i += 2;
+      while (i < source.length && !(source[i] === "*" && source[i + 1] === "/")) {
+        out[i] = " ";
+        i++;
+      }
+      if (i < source.length) {
+        out[i] = " ";
+        out[i + 1] = " ";
+        i += 2;
+      }
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") {
+      const end = skipString(source, i);
+      for (let j = i; j < end && j < source.length; j++) out[j] = " ";
+      i = end;
+      continue;
+    }
+    i++;
+  }
+  return out.join("");
+}
+
+function skipString(source: string, start: number): number {
+  const quote = source[start];
+  let i = start + 1;
+  while (i < source.length) {
+    if (source[i] === "\\") {
+      i += 2;
+      continue;
+    }
+    if (source[i] === quote) return i + 1;
+    if (quote === "`" && source[i] === "$" && source[i + 1] === "{") {
+      i = findMatchingBraceRaw(source, i + 1);
+      if (i === -1) return source.length;
+      i++;
+      continue;
+    }
+    i++;
+  }
+  return i;
+}
+
+// Brace matching over raw text (used only inside template interpolations).
+function findMatchingBraceRaw(source: string, openPos: number): number {
+  let depth = 1;
+  let i = openPos + 1;
+  while (i < source.length) {
+    const ch = source[i];
+    if (ch === '"' || ch === "'" || ch === "`") {
+      i = skipString(source, i);
+      continue;
+    }
+    if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) return i;
+    }
+    i++;
+  }
+  return -1;
+}
+
+// Brace matching over the MASK — strings/comments are already blanked.
+function findMatchingBrace(mask: string, openPos: number): number {
+  let depth = 1;
+  let i = openPos + 1;
+  while (i < mask.length) {
+    const ch = mask[i];
+    if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) return i;
+    }
+    i++;
+  }
+  return -1;
+}
+
+function lineOf(source: string, index: number): number {
+  return source.slice(0, index).split("\n").length;
+}
+
+// ── For-comprehension: for { x <- e } yield expr ───────────────────
 
 type ForStmt =
   | { kind: "bind"; varName: string; expr: string }
   | { kind: "bind_discard"; expr: string }
   | { kind: "let"; varName: string; expr: string };
 
-function rewriteForComprehensions(source: string): string {
-  let result = source;
-  let offset = 0;
-
-  // match: for { ... } yield expr
-  // but NOT: for ( — that's a JS for-loop
+// Rewrite the FIRST for-comprehension region found; null if none.
+function rewriteOneForComprehension(source: string): string | null {
+  const mask = maskCode(source);
   const pattern = /\bfor\s*\{/g;
   let match: RegExpExecArray | null;
 
-  while ((match = pattern.exec(source)) !== null) {
-    // check it's not inside a string or comment
-    const before = source.slice(Math.max(0, match.index - 1), match.index);
-    if (before === "." || before === "_") continue; // method call like x.for or _for
+  while ((match = pattern.exec(mask)) !== null) {
+    const before = mask.slice(Math.max(0, match.index - 1), match.index);
+    if (before === "." || before === "_") continue; // method/property like x.for
 
     const braceStart = match.index + match[0].length - 1;
-    const braceEnd = findMatchingBrace(source, braceStart);
+    const braceEnd = findMatchingBrace(mask, braceStart);
     if (braceEnd === -1) continue;
 
-    // look for `yield` after the closing brace
-    const afterBrace = source.slice(braceEnd + 1).match(/^\s*yield\s+/);
+    const afterBrace = mask.slice(braceEnd + 1).match(/^\s*yield\s+/);
     if (!afterBrace) continue; // not our for-comprehension
 
     const yieldStart = braceEnd + 1 + afterBrace[0].length;
-    // find the yield expression — goes until newline, semicolon, or closing paren/brace at depth 0
-    const yieldExpr = extractExpression(source, yieldStart);
+    const yieldExpr = extractExpression(source, mask, yieldStart);
     if (!yieldExpr) continue;
 
     const fullEnd = yieldStart + yieldExpr.length;
 
-    // parse the body between { }
-    const body = source.slice(braceStart + 1, braceEnd);
-    const stmts = parseForStatements(body);
+    // nested regions inside the body desugar first
+    const body = rewriteEffBlocks(source.slice(braceStart + 1, braceEnd));
+    const stmts = parseForStatements(body, lineOf(source, match.index));
     if (stmts.length === 0) continue;
 
-    const desugared = desugarForStatements(stmts, yieldExpr.trim());
+    const desugared = desugarForStatements(stmts, rewriteEffBlocks(yieldExpr.trim()));
     if (!desugared) continue;
 
-    result = result.slice(0, match.index + offset) + desugared + result.slice(fullEnd + offset);
-
-    offset += desugared.length - (fullEnd - match.index);
+    return source.slice(0, match.index) + desugared + source.slice(fullEnd);
   }
 
-  return result;
+  return null;
 }
 
-function parseForStatements(body: string): ForStmt[] {
+function parseForStatements(body: string, blockLine: number): ForStmt[] {
   const stmts: ForStmt[] = [];
   const lines = splitStatements(body.trim());
 
@@ -82,8 +210,8 @@ function parseForStatements(body: string): ForStmt[] {
     const trimmed = line.trim();
     if (!trimmed) continue;
 
-    // x <- expr  (bind)
-    const bindMatch = trimmed.match(/^(\w+)\s*<-\s*(.+)$/);
+    // x <- expr  (bind; multi-line RHS allowed)
+    const bindMatch = trimmed.match(/^(\w+)\s*<-\s*([\s\S]+)$/);
     if (bindMatch) {
       const varName = bindMatch[1]!;
       const expr = bindMatch[2]!.trim();
@@ -95,22 +223,34 @@ function parseForStatements(body: string): ForStmt[] {
       continue;
     }
 
-    // if <cond>  is no longer supported — guards are inherently type-specific.
-    // Silently skip so we don't silently mangle user code; the rewrite will abort below
-    // if no bind statements are parsed.
+    // guards are inherently type-specific — refuse loudly
     if (/^if\s+/.test(trimmed)) {
-      throw new Error(
-        `for-comprehension guards (if) are not supported: "${trimmed}".\n` +
+      throw new RewriteError(
+        `for-comprehension guards (if) are not supported (line ~${blockLine}): "${trimmed}".\n` +
           `Use .filter() on the monad directly, or switch to eff(($) => {}) for Eff-specific flow control.`,
       );
     }
 
-    // val x = expr  (let binding — pure, not effectful)
-    const letMatch = trimmed.match(/^(?:val|let|const)\s+(\w+)\s*=\s*(.+)$/);
+    // val x = expr  (pure let binding)
+    const letMatch = trimmed.match(/^(?:val|let|const)\s+(\w+)\s*=\s*([\s\S]+)$/);
     if (letMatch) {
       stmts.push({ kind: "let", varName: letMatch[1]!, expr: letMatch[2]!.trim() });
       continue;
     }
+
+    // a line mentioning <- that didn't parse is a bind we can't compile —
+    // dropping it would corrupt the program
+    if (maskCode(trimmed).includes("<-")) {
+      throw new RewriteError(
+        `unsupported bind pattern in for-comprehension (line ~${blockLine}) — only "name <- expr" binds are supported`,
+        trimmed,
+      );
+    }
+
+    throw new RewriteError(
+      `unsupported statement in for-comprehension (line ~${blockLine}) — expected "x <- e", "val x = e", or nothing`,
+      trimmed,
+    );
   }
 
   return stmts;
@@ -119,7 +259,6 @@ function parseForStatements(body: string): ForStmt[] {
 function desugarForStatements(stmts: ForStmt[], yieldExpr: string): string | null {
   if (stmts.length === 0) return null;
 
-  // Find the last effectful step; `let` is pure JS and doesn't count.
   let lastEffectfulIndex = -1;
   for (let i = stmts.length - 1; i >= 0; i--) {
     const k = stmts[i]!.kind;
@@ -165,17 +304,13 @@ function desugarForStatements(stmts: ForStmt[], yieldExpr: string): string | nul
   return desugar(0);
 }
 
-function extractExpression(source: string, start: number): string | null {
+// Expression boundary scan runs on the mask; text is sliced from the source.
+function extractExpression(source: string, mask: string, start: number): string | null {
   let i = start;
   let depth = 0;
 
-  while (i < source.length) {
-    const ch = source[i]!;
-
-    if (ch === '"' || ch === "'" || ch === "`") {
-      i = skipString(source, i);
-      continue;
-    }
+  while (i < mask.length) {
+    const ch = mask[i]!;
 
     if (ch === "(" || ch === "[" || ch === "{") {
       depth++;
@@ -200,44 +335,69 @@ function extractExpression(source: string, start: number): string | null {
 
 // ── Dollar-bind: eff(($) => { const x = $(e); return x }) ─────────
 
-function rewriteDollarBlocks(source: string): string {
-  let result = source;
-  let offset = 0;
+type DollarStmt =
+  | { kind: "bind"; pattern: string; expr: string }
+  | { kind: "let"; pattern: string; expr: string }
+  | { kind: "bind_discard"; expr: string }
+  | { kind: "return"; expr: string }
+  | { kind: "raw"; code: string };
 
+// Rewrite the FIRST eff(($) => { … }) region found; null if none.
+function rewriteOneDollarBlock(source: string): string | null {
+  const mask = maskCode(source);
   const pattern = /\beff\s*\(\s*\(\s*\$\s*\)\s*=>\s*\{/g;
   let match: RegExpExecArray | null;
 
-  while ((match = pattern.exec(source)) !== null) {
+  while ((match = pattern.exec(mask)) !== null) {
     const blockStart = match.index + match[0].length;
-    const blockEnd = findMatchingBrace(source, blockStart - 1);
+    const blockEnd = findMatchingBrace(mask, blockStart - 1);
     if (blockEnd === -1) continue;
 
-    const body = source.slice(blockStart, blockEnd);
-    const stmts = parseDollarStatements(body);
+    // the eff(...) call must close right after the body — skip whitespace
+    // to the `)` instead of assuming `})` adjacency
+    let closeParen = blockEnd + 1;
+    while (closeParen < mask.length && /\s/.test(mask[closeParen]!)) closeParen++;
+    if (mask[closeParen] !== ")") {
+      throw new RewriteError(
+        `expected ")" closing eff(($) => { … }) near line ${lineOf(source, blockEnd)} — ` +
+          `eff takes exactly one arrow argument`,
+      );
+    }
+    const fullEnd = closeParen + 1;
 
+    // nested regions inside the body desugar first
+    const body = rewriteEffBlocks(source.slice(blockStart, blockEnd));
+    const stmts = parseDollarStatements(body, lineOf(source, match.index));
     if (stmts.length === 0) continue;
 
     const desugared = desugarDollarStatements(stmts);
     if (!desugared) continue;
 
-    const fullStart = match.index;
-    const fullEnd = blockEnd + 2; // })
-
-    result = result.slice(0, fullStart + offset) + desugared + result.slice(fullEnd + offset);
-
-    offset += desugared.length - (fullEnd - fullStart);
+    return source.slice(0, match.index) + desugared + source.slice(fullEnd);
   }
 
-  return result;
+  return null;
 }
 
-type DollarStmt =
-  | { kind: "bind"; varName: string; expr: string }
-  | { kind: "bind_discard"; expr: string }
-  | { kind: "return"; expr: string }
-  | { kind: "raw"; code: string };
+function isBalanced(fragment: string): boolean {
+  const mask = maskCode(fragment);
+  let depth = 0;
+  for (const ch of mask) {
+    if (ch === "(" || ch === "[" || ch === "{") depth++;
+    else if (ch === ")" || ch === "]" || ch === "}") {
+      depth--;
+      if (depth < 0) return false;
+    }
+  }
+  return depth === 0;
+}
 
-function parseDollarStatements(body: string): DollarStmt[] {
+// Standalone `$` outside identifiers (template interpolations are masked out).
+function mentionsDollar(fragment: string): boolean {
+  return /(^|[^\w$])\$($|[^\w${])/.test(maskCode(fragment));
+}
+
+function parseDollarStatements(body: string, blockLine: number): DollarStmt[] {
   const stmts: DollarStmt[] = [];
   const lines = splitStatements(body.trim());
 
@@ -245,22 +405,81 @@ function parseDollarStatements(body: string): DollarStmt[] {
     const trimmed = line.trim();
     if (!trimmed) continue;
 
-    const bindMatch = trimmed.match(/^(?:const|let|var)\s+(\w+)\s*=\s*\$\((.+)\)\s*;?\s*$/);
-    if (bindMatch) {
-      stmts.push({ kind: "bind", varName: bindMatch[1]!, expr: bindMatch[2]!.trim() });
+    // const/let/var <pattern> = $(expr) — pattern may be an identifier,
+    // a destructuring pattern, or carry a type annotation; multi-line ok
+    const bindMatch = trimmed.match(
+      /^(?:const|let|var)\s+([\s\S]+?)\s*=\s*\$\(([\s\S]+)\)\s*;?\s*$/,
+    );
+    if (bindMatch && isBalanced(bindMatch[2]!) && !mentionsDollar(bindMatch[2]!)) {
+      stmts.push({ kind: "bind", pattern: bindMatch[1]!.trim(), expr: bindMatch[2]!.trim() });
       continue;
     }
 
-    const discardMatch = trimmed.match(/^\$\((.+)\)\s*;?\s*$/);
-    if (discardMatch) {
+    // bare $(expr) — discard the value
+    const discardMatch = trimmed.match(/^\$\(([\s\S]+)\)\s*;?\s*$/);
+    if (discardMatch && isBalanced(discardMatch[1]!) && !mentionsDollar(discardMatch[1]!)) {
       stmts.push({ kind: "bind_discard", expr: discardMatch[1]!.trim() });
       continue;
     }
 
-    const returnMatch = trimmed.match(/^return\s+(.+?)\s*;?\s*$/);
-    if (returnMatch) {
-      stmts.push({ kind: "return", expr: returnMatch[1]! });
+    // bare `return` / `return;`
+    if (/^return\s*;?\s*$/.test(trimmed)) {
+      stmts.push({ kind: "return", expr: "undefined" });
       continue;
+    }
+
+    const returnMatch = trimmed.match(/^return\s+([\s\S]+?)\s*;?\s*$/);
+    if (returnMatch) {
+      const expr = returnMatch[1]!;
+      const inner = expr.match(/^\$\(([\s\S]+)\)$/);
+      if (inner && isBalanced(inner[1]!) && !mentionsDollar(inner[1]!)) {
+        stmts.push({ kind: "return", expr });
+        continue;
+      }
+      if (mentionsDollar(expr)) {
+        throw new RewriteError(
+          `unsupported $ usage in return (line ~${blockLine}) — only "return $(expr)" or plain "return expr" are compiled. ` +
+            `Bind first: const x = $(expr); return f(x)`,
+          trimmed,
+        );
+      }
+      stmts.push({ kind: "return", expr });
+      continue;
+    }
+
+    // pure declaration (no $) — must NOT be sync-wrapped as a statement:
+    // the binding would be scoped inside the sync arrow, invisible to the
+    // rest of the block. Compile to sync(() => expr).flatMap((name) => rest).
+    const letMatch = trimmed.match(/^(?:const|let|var)\s+([\s\S]+?)\s*=\s*([\s\S]+?)\s*;?\s*$/);
+    if (letMatch && !mentionsDollar(letMatch[2]!)) {
+      const declMask = maskCode(letMatch[2]!);
+      let depth = 0;
+      let topComma = false;
+      for (const ch of declMask) {
+        if (ch === "(" || ch === "[" || ch === "{") depth++;
+        else if (ch === ")" || ch === "]" || ch === "}") depth--;
+        else if (ch === "," && depth === 0) topComma = true;
+      }
+      if (topComma) {
+        throw new RewriteError(
+          `multi-declarator statements are not supported inside eff(($) => …) (line ~${blockLine}) — split into separate const declarations`,
+          trimmed,
+        );
+      }
+      stmts.push({ kind: "let", pattern: letMatch[1]!.trim(), expr: letMatch[2]!.trim() });
+      continue;
+    }
+
+    // any other statement mentioning $ would be silently miscompiled —
+    // refuse with guidance instead
+    if (mentionsDollar(trimmed)) {
+      throw new RewriteError(
+        `unsupported $ usage in eff(($) => …) block (line ~${blockLine}) — $ is only compiled in ` +
+          `"const x = $(expr)", bare "$(expr)", and "return $(expr)". ` +
+          `For $ inside expressions or control flow, bind first (const x = $(e)) or use the ` +
+          `SWC plugin (@perfect/swc-plugin), which supports if/else.`,
+        trimmed,
+      );
     }
 
     stmts.push({ kind: "raw", code: trimmed });
@@ -279,11 +498,13 @@ function desugarDollarStatements(stmts: DollarStmt[]): string | null {
 
     switch (stmt.kind) {
       case "bind":
-        return `${stmt.expr}.flatMap((${stmt.varName}) => ${desugar(index + 1)})`;
+        return `${stmt.expr}.flatMap((${stmt.pattern}) => ${desugar(index + 1)})`;
+      case "let":
+        return `sync(() => (${stmt.expr})).flatMap((${stmt.pattern}) => ${desugar(index + 1)})`;
       case "bind_discard":
         return isLast ? stmt.expr : `${stmt.expr}.flatMap(() => ${desugar(index + 1)})`;
       case "return": {
-        const inner = stmt.expr.match(/^\$\((.+)\)$/);
+        const inner = stmt.expr.match(/^\$\(([\s\S]+)\)$/);
         return inner ? inner[1]! : `succeed(${stmt.expr})`;
       }
       case "raw":
@@ -294,96 +515,48 @@ function desugarDollarStatements(stmts: DollarStmt[]): string | null {
   return desugar(0);
 }
 
-// ── Shared utilities ───────────────────────────────────────────────
+// ── Statement splitting (mask-aware) ───────────────────────────────
 
-function findMatchingBrace(source: string, openPos: number): number {
-  let depth = 1;
-  let i = openPos + 1;
-  while (i < source.length && depth > 0) {
-    const ch = source[i];
-    if (ch === "{") depth++;
-    else if (ch === "}") depth--;
-    else if (ch === '"' || ch === "'" || ch === "`") {
-      i = skipString(source, i);
-      continue;
-    }
-    // skip single-line comments
-    else if (ch === "/" && source[i + 1] === "/") {
-      while (i < source.length && source[i] !== "\n") i++;
-      continue;
-    }
-    if (depth === 0) return i;
-    i++;
-  }
-  return -1;
-}
-
-function skipString(source: string, start: number): number {
-  const quote = source[start];
-  let i = start + 1;
-  while (i < source.length) {
-    if (source[i] === "\\") {
-      i += 2;
-      continue;
-    }
-    if (source[i] === quote) return i + 1;
-    if (quote === "`" && source[i] === "$" && source[i + 1] === "{") {
-      i = findMatchingBrace(source, i + 1);
-      if (i === -1) return source.length;
-      i++;
-      continue;
-    }
-    i++;
-  }
-  return i;
-}
-
-function splitStatements(body: string): string[] {
-  const stmts: string[] = [];
-  let current = "";
-  let depth = 0;
+// Line comments must not survive into statements — desugared output is
+// single-line, so a trailing `// …` would swallow the generated code.
+function stripLineComments(fragment: string): string {
+  let out = "";
   let i = 0;
-
-  while (i < body.length) {
-    const ch = body[i]!;
-
+  while (i < fragment.length) {
+    const ch = fragment[i]!;
     if (ch === '"' || ch === "'" || ch === "`") {
-      const end = skipString(body, i);
-      current += body.slice(i, end);
+      const end = skipString(fragment, i);
+      out += fragment.slice(i, end);
       i = end;
       continue;
     }
-
-    // skip single-line comments
-    if (ch === "/" && body[i + 1] === "/") {
-      while (i < body.length && body[i] !== "\n") i++;
+    if (ch === "/" && fragment[i + 1] === "/") {
+      while (i < fragment.length && fragment[i] !== "\n") i++;
       continue;
     }
-
-    if (ch === "(" || ch === "[" || ch === "{") {
-      depth++;
-      current += ch;
-      i++;
-      continue;
-    }
-    if (ch === ")" || ch === "]" || ch === "}") {
-      depth--;
-      current += ch;
-      i++;
-      continue;
-    }
-
-    if (depth === 0 && (ch === "\n" || ch === ";")) {
-      if (current.trim()) stmts.push(current.trim());
-      current = "";
-      i++;
-      continue;
-    }
-
-    current += ch;
+    out += ch;
     i++;
   }
+  return out;
+}
 
-  if (current.trim()) stmts.push(current.trim());
+function splitStatements(body: string): string[] {
+  const mask = maskCode(body);
+  const stmts: string[] = [];
+  let start = 0;
+  let depth = 0;
+
+  for (let i = 0; i < mask.length; i++) {
+    const ch = mask[i]!;
+    if (ch === "(" || ch === "[" || ch === "{") depth++;
+    else if (ch === ")" || ch === "]" || ch === "}") depth--;
+    else if (depth === 0 && (ch === "\n" || ch === ";")) {
+      const stmt = stripLineComments(body.slice(start, i)).trim();
+      if (stmt) stmts.push(stmt);
+      start = i + 1;
+    }
+  }
+  const last = stripLineComments(body.slice(start)).trim();
+  if (last) stmts.push(last);
   return stmts;
 }

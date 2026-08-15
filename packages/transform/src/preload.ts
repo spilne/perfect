@@ -1,5 +1,6 @@
 import { plugin } from "bun";
 import { rewriteEffBlocks } from "./rewrite";
+import { ensureCoreImports } from "./auto-import";
 
 await plugin({
   name: "perfect-for-comprehension",
@@ -13,7 +14,7 @@ await plugin({
       if (!source.includes("<-") && !source.includes("eff(($)")) {
         return undefined;
       }
-      const transformed = rewriteEffBlocks(source);
+      const transformed = ensureCoreImports(source, rewriteEffBlocks(source));
       return { contents: transformed, loader: "ts" };
     });
   },

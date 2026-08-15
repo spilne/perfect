@@ -11,6 +11,25 @@ const packages = [
   { dir: "packages/transform", imports: ["dist/rewrite.js", "dist/bun-plugin.js", "dist/plugin.js"] },
 ];
 
+// @perfect/swc-plugin ships a wasm artifact built by the Rust job — verify its
+// declared entrypoint exists when it has been built (the TS-only CI job runs
+// without a Rust toolchain, so absence is tolerated with a warning).
+{
+  const wasmPath = "packages/swc-plugin/dist/plugin.wasm";
+  try {
+    await access(wasmPath);
+    const { size } = await import("node:fs").then((fs) => fs.statSync(wasmPath));
+    if (size < 100_000) throw new Error(`@perfect/swc-plugin: ${wasmPath} suspiciously small (${size} bytes)`);
+    console.log(`ok  @perfect/swc-plugin wasm artifact (${(size / 1024).toFixed(0)} KiB)`);
+  } catch (e) {
+    if ((e as { code?: string }).code === "ENOENT") {
+      console.log("warn @perfect/swc-plugin wasm not built (run `bun run build:swc`) — skipping");
+    } else {
+      throw e;
+    }
+  }
+}
+
 for (const pkg of packages) {
   const packageJsonPath = join(pkg.dir, "package.json");
   const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8")) as {

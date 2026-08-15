@@ -74,19 +74,10 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
-            crates/perfect-transform -> target
             crates/swc-plugin-perfect -> target
 
       - run: cargo test --locked
-        working-directory: crates/perfect-transform
-
-      - run: cargo test --locked
         working-directory: crates/swc-plugin-perfect
-
-      - run: cargo build --locked --release
-        working-directory: crates/perfect-transform
-
-      - run: rustup target add wasm32-wasip1
 
       - run: cargo build --locked --target wasm32-wasip1 --release
         working-directory: crates/swc-plugin-perfect
@@ -94,6 +85,19 @@ jobs:
       - run: mkdir -p packages/swc-plugin/dist
 
       - run: cp crates/swc-plugin-perfect/target/wasm32-wasip1/release/swc_plugin_perfect.wasm packages/swc-plugin/dist/plugin.wasm
+
+      - name: Check wasm artifact
+        run: test -s packages/swc-plugin/dist/plugin.wasm && ls -la packages/swc-plugin/dist/plugin.wasm
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - run: bun install --frozen-lockfile
+
+      - name: Wasm e2e — fixture corpus through the real SWC pipeline
+        run: bun test test/swc-e2e.test.ts
+        working-directory: packages/transform
 
   performance:
     runs-on: ubuntu-latest

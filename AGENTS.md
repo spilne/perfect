@@ -13,7 +13,6 @@ packages/
   core/        Eff<A,S> runtime, fibers, scheduler, stream, concurrency primitives
   transform/   For-comprehension compiler (TS rewriter + Bun plugin)
 crates/
-  perfect-transform/     Rust CLI transformer (standalone binary)
   swc-plugin-perfect/    SWC WASM plugin (for Next.js/Vite)
 editors/
   zed/                   Zed editor extension (syntax highlighting)
@@ -49,6 +48,5 @@ bun test                          # all tests
 bun nx run @perfect/core:test     # core tests only
 bun nx run @perfect/core:lint     # lint core
 bun run bench                     # benchmarks
-bun run build:rust                # build Rust CLI transformer
 bun run build:swc                 # build SWC WASM plugin
 ```
