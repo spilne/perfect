@@ -1,6 +1,6 @@
 {
-  "name": "@perfect/http-otel",
-  "sourceRoot": "packages/http-otel/src",
+  "name": "@perfect/otel",
+  "sourceRoot": "packages/otel/src",
   "targets": {
     "build": {},
     "test": {},
