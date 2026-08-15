@@ -14,6 +14,8 @@
     { "path": "./packages/core" },
     { "path": "./packages/transform" },
     { "path": "./packages/http" },
-    { "path": "./packages/http-otel" }
+    { "path": "./packages/http-otel" },
+    { "path": "./packages/topology" },
+    { "path": "./packages/kafka" }
   ]
 }

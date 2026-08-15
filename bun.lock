@@ -45,9 +45,29 @@
         "@perfect/http": "workspace:*",
       },
     },
+    "packages/kafka": {
+      "name": "@perfect/kafka",
+      "version": "0.0.1",
+      "dependencies": {
+        "@perfect/core": "workspace:*",
+      },
+      "peerDependencies": {
+        "@confluentinc/kafka-javascript": "^1.9.0",
+      },
+      "optionalPeers": [
+        "@confluentinc/kafka-javascript",
+      ],
+    },
     "packages/swc-plugin": {
       "name": "@perfect/swc-plugin",
       "version": "0.0.1",
+    },
+    "packages/topology": {
+      "name": "@perfect/topology",
+      "version": "0.0.1",
+      "dependencies": {
+        "@perfect/core": "workspace:*",
+      },
     },
     "packages/transform": {
       "name": "@perfect/transform",
@@ -452,7 +472,11 @@
 
     "@perfect/http-otel": ["@perfect/http-otel@workspace:packages/http-otel"],
 
+    "@perfect/kafka": ["@perfect/kafka@workspace:packages/kafka"],
+
     "@perfect/swc-plugin": ["@perfect/swc-plugin@workspace:packages/swc-plugin"],
+
+    "@perfect/topology": ["@perfect/topology@workspace:packages/topology"],
 
     "@perfect/transform": ["@perfect/transform@workspace:packages/transform"],
 
