@@ -10,7 +10,11 @@ declare module "../eff" {
       f: (a: A, b: B) => C,
     ): Eff<C, S1 | S2>;
 
-    parMap<A, S1, B, S2>(this: Eff<A, S1>, that: Eff<B, S2>, f: (a: A, b: B) => C): Eff<C, S1 | S2>;
+    parMap<A, S1, B, S2, C>(
+      this: Eff<A, S1>,
+      that: Eff<B, S2>,
+      f: (a: A, b: B) => C,
+    ): Eff<C, S1 | S2>;
 
     parFlatMap<A, S1, B, S2, C, S3>(
       this: Eff<A, S1>,
@@ -19,8 +23,6 @@ declare module "../eff" {
     ): Eff<C, S1 | S2 | S3>;
   }
 }
-
-type C = any; // generic placeholder for declare module above
 
 // parZip: run both in parallel, collect results
 Suspend.prototype.parZip = function (that: any) {

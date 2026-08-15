@@ -19,61 +19,73 @@ export interface Semaphore {
 
 class InProcessSemaphore implements Semaphore {
   private permits: number;
-  private waiters: Array<{ canceled: boolean; resume: () => void }> = [];
+  // FIFO queue; each waiter wants `n` permits, granted atomically. New
+  // acquirers queue behind existing waiters even when permits are free, so
+  // a large request can't be starved by a stream of small ones.
+  private waiters: Array<{ n: number; done: boolean; resume: () => void }> = [];
 
   constructor(permits: number) {
     this.permits = permits;
   }
 
-  acquire(): Eff<void, never> {
+  private acquireMany(n: number): Eff<void, never> {
     return async<void>((resume) => {
-      if (this.permits > 0) {
-        this.permits--;
+      if (this.waiters.length === 0 && this.permits >= n) {
+        this.permits -= n;
         resume(succeed(undefined) as any);
         return;
       }
       const waiter = {
-        canceled: false,
+        n,
+        done: false,
         resume: () => {
-          if (waiter.canceled) return;
-          waiter.canceled = true;
+          if (waiter.done) return;
+          waiter.done = true;
           resume(succeed(undefined) as any);
         },
       };
       this.waiters.push(waiter);
       return () => {
-        waiter.canceled = true;
+        waiter.done = true;
       };
     }) as any;
   }
 
-  release(): Eff<void, never> {
-    return sync(() => {
-      this.permits++;
-      while (this.waiters.length > 0) {
-        const waiter = this.waiters.shift()!;
-        if (waiter.canceled) continue;
-        this.permits--;
-        waiter.resume();
-        break;
+  private releaseMany(n: number): void {
+    this.permits += n;
+    while (this.waiters.length > 0) {
+      const head = this.waiters[0]!;
+      if (head.done) {
+        this.waiters.shift();
+        continue;
       }
-    });
+      if (this.permits < head.n) break;
+      this.waiters.shift();
+      this.permits -= head.n;
+      head.resume();
+    }
+  }
+
+  acquire(): Eff<void, never> {
+    return this.acquireMany(1);
+  }
+
+  release(): Eff<void, never> {
+    return sync(() => this.releaseMany(1));
   }
 
   withPermit<A, S>(eff: Eff<A, S>): Eff<A, S> {
-    return this.acquire().flatMap(() => ensuring(eff, this.release())) as any;
+    return this.acquireMany(1).flatMap(() => ensuring(eff, this.release())) as any;
   }
 
   withPermits<A, S>(n: number, eff: Eff<A, S>): Eff<A, S> {
-    const acquireN = Array.from({ length: n }, () => this.acquire()).reduce<Eff<void, never>>(
-      (acc, a) => (acc as any).flatMap(() => a),
-      succeed(undefined),
-    );
-    const releaseN = Array.from({ length: n }, () => this.release()).reduce<Eff<void, never>>(
-      (acc, r) => (acc as any).flatMap(() => r),
-      succeed(undefined),
-    );
-    return acquireN.flatMap(() => ensuring(eff, releaseN)) as any;
+    if (n <= 0) return eff;
+    return this.acquireMany(n).flatMap(() =>
+      ensuring(
+        eff,
+        sync(() => this.releaseMany(n)),
+      ),
+    ) as any;
   }
 
   get available(): Eff<number, never> {

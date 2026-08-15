@@ -146,3 +146,43 @@ describe("SubscriptionRef", () => {
     ]);
   });
 });
+
+describe("PubSub subscriber cleanup", () => {
+  test("finished subscriber leaves the broadcast set", async () => {
+    const result = await run(
+      eff(function* () {
+        const pubsub = yield* PubSub.bounded<number>(4);
+        const stream = yield* pubsub.subscribe;
+        const collector = yield* fork(stream.take(2).toArray());
+        yield* sleep(5);
+        yield* pubsub.publish(1);
+        yield* pubsub.publish(2);
+        const vals = yield* join(collector);
+        yield* sleep(5);
+        const count = yield* pubsub.subscriberCount;
+        return { vals, count };
+      }) as any,
+    );
+    expect(result).toEqual({ vals: [1, 2], count: 0 });
+  });
+
+  test("publish does not block on an abandoned bounded subscriber", async () => {
+    const result = await run(
+      eff(function* () {
+        const pubsub = yield* PubSub.bounded<number>(1);
+        const stream = yield* pubsub.subscribe;
+        const collector = yield* fork(stream.take(1).toArray());
+        yield* sleep(5);
+        yield* pubsub.publish(1);
+        yield* join(collector);
+        yield* sleep(5);
+        // subscriber is gone — these must return immediately, not block on
+        // its full 1-slot queue
+        yield* pubsub.publish(2);
+        yield* pubsub.publish(3);
+        return "done";
+      }) as any,
+    );
+    expect(result).toBe("done");
+  }, 2000);
+});

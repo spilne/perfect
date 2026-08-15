@@ -296,8 +296,6 @@ function retryLegacy<A, S>(eff: Eff<A, S>, policy: RetryConfig): Eff<A, S> {
     timeBudgetMs = Infinity,
   } = policy;
 
-  const deadline = timeBudgetMs === Infinity ? Infinity : Date.now() + timeBudgetMs;
-
   function nextDelayMs(current: number): number {
     const base = backoff === "exponential" ? Math.min(current * 2, maxDelay) : current;
     if (!jitter) return base;
@@ -306,10 +304,17 @@ function retryLegacy<A, S>(eff: Eff<A, S>, policy: RetryConfig): Eff<A, S> {
     return Math.max(0, Math.min(maxDelay, Math.floor(base * factor)));
   }
 
-  function attempt(remaining: number, currentDelay: number): Eff<A, S> {
+  // Time budget reads the context Clock, and the deadline is anchored when
+  // the effect RUNS — not when retry() builds the description.
+  const clockNow: Eff<number, never> = new Suspend(
+    Op.FlatMap,
+    new Suspend(Op.GetCtx, CLOCK_KEY, null) as any,
+    (c: { now(): number }) => new Suspend(Op.Sync, () => c.now(), null),
+  ) as any;
+
+  function attempt(remaining: number, currentDelay: number, deadline: number): Eff<A, S> {
     return new Suspend(Op.CatchAll, eff, (cause: any) => {
       if (remaining <= 0) return new Suspend(Op.Fail, cause, null);
-      if (Date.now() >= deadline) return new Suspend(Op.Fail, cause, null);
 
       // Only retry typed failures. Defects / interrupts propagate immediately.
       const f = Cause.firstFail(cause);
@@ -320,11 +325,21 @@ function retryLegacy<A, S>(eff: Eff<A, S>, policy: RetryConfig): Eff<A, S> {
         return new Suspend(Op.Fail, cause, null);
       }
 
-      const waitEff = currentDelay > 0 ? sleep(currentDelay) : succeed(undefined);
-      const nextD = nextDelayMs(currentDelay);
-      return new Suspend(Op.FlatMap, waitEff, () => attempt(remaining - 1, nextD));
+      const retryNow = (): Suspend => {
+        const waitEff = currentDelay > 0 ? sleep(currentDelay) : succeed(undefined);
+        const nextD = nextDelayMs(currentDelay);
+        return new Suspend(Op.FlatMap, waitEff, () => attempt(remaining - 1, nextD, deadline));
+      };
+
+      if (deadline === Infinity) return retryNow();
+      return new Suspend(Op.FlatMap, clockNow, (now: number) =>
+        now >= deadline ? new Suspend(Op.Fail, cause, null) : retryNow(),
+      );
     }) as any;
   }
 
-  return attempt(times, baseDelay) as any;
+  if (timeBudgetMs === Infinity) return attempt(times, baseDelay, Infinity) as any;
+  return new Suspend(Op.FlatMap, clockNow, (start: number) =>
+    attempt(times, baseDelay, start + timeBudgetMs),
+  ) as any;
 }

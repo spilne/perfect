@@ -58,7 +58,13 @@ class InProcessPubSub<T> implements PubSub<T> {
     return QueueNS.bounded<T>(this.capacity).flatMap((q) =>
       sync(() => {
         this.subscribers.add(q);
-        return Stream.fromQueue(q) as Stream<T, Throws<QueueClosed>>;
+        // When the subscriber stream terminates (drained, failed, or
+        // abandoned early), leave the broadcast set and close the queue so
+        // blocked publishers wake up instead of waiting on a dead consumer.
+        const cleanup = sync(() => {
+          this.subscribers.delete(q);
+        }).flatMap(() => q.close());
+        return (Stream.fromQueue(q) as Stream<T, Throws<QueueClosed>>).onFinalize(cleanup);
       }),
     );
   }

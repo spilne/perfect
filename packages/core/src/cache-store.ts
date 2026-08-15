@@ -10,6 +10,7 @@
 
 import { type Eff } from "./eff";
 import { sync } from "./constructors";
+import { clockNow } from "./clock";
 
 export interface CacheStore<K, V> {
   /** Read a value. Returns `undefined` if missing or expired. */
@@ -49,10 +50,10 @@ class InMemoryCacheStore<K, V> implements CacheStore<K, V> {
   }
 
   get(key: K): Eff<V | undefined, never> {
-    return sync(() => {
+    return (clockNow as any).map((now: number) => {
       const entry = this.entries.get(key);
       if (!entry) return undefined;
-      if (Date.now() > entry.expiresAt) {
+      if (now > entry.expiresAt) {
         this.entries.delete(key);
         return undefined;
       }
@@ -64,9 +65,9 @@ class InMemoryCacheStore<K, V> implements CacheStore<K, V> {
   }
 
   set(key: K, value: V, ttlMs?: number): Eff<void, never> {
-    return sync(() => {
+    return (clockNow as any).map((now: number) => {
       const ttl = ttlMs ?? this.defaultTtl;
-      const expiresAt = ttl === Infinity ? Infinity : Date.now() + ttl;
+      const expiresAt = ttl === Infinity ? Infinity : now + ttl;
       this.entries.delete(key); // ensure insertion order = recency
       if (this.entries.size >= this.maxSize) {
         const oldest = this.entries.keys().next().value;
@@ -83,10 +84,10 @@ class InMemoryCacheStore<K, V> implements CacheStore<K, V> {
   }
 
   has(key: K): Eff<boolean, never> {
-    return sync(() => {
+    return (clockNow as any).map((now: number) => {
       const entry = this.entries.get(key);
       if (!entry) return false;
-      if (Date.now() > entry.expiresAt) {
+      if (now > entry.expiresAt) {
         this.entries.delete(key);
         return false;
       }

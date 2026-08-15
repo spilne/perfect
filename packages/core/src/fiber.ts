@@ -115,9 +115,11 @@ export class Fiber<A = unknown> {
     }
     // If the fiber has a non-empty continuation stack, inject a Fail(Interrupt)
     // and re-schedule — the interpreter loop walks the stack and fires any
-    // EnsuringFrame/ScopeFrame finalizers before completing.
-    // Otherwise (no frames to walk), complete directly.
-    if (this.stack !== null) {
+    // EnsuringFrame/ScopeFrame finalizers before completing. A fiber-level
+    // scope isn't represented by a stack frame, so it also forces the loop
+    // path — reject() closes it. Otherwise (nothing to finalize), complete
+    // directly.
+    if (this.stack !== null || (this.scope !== null && !this.scope.isClosed)) {
       this.current = new Suspend(Op.Fail, { _tag: "Interrupt" } as Cause, null);
       this.state = FiberState.Ready;
       // Avoid a circular import on runtime.ts by going through the scheduler;
