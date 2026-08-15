@@ -1,0 +1,143 @@
+// Queue-agnostic endpoint contracts — the "any queue" layer.
+//
+// Every messaging backend (Kafka, Redis Streams, in-memory, …) implements
+// these opt-in capability interfaces; consumers like StreamTopology require
+// only what they use (e.g. `Streamable & Acknowledgeable`). Ported from
+// promin's typeclasses/streamable.ts with StreamPipeline → Stream.
+//
+// Two queue shapes:
+//   log-shaped    (Kafka, Redis Streams, Kinesis): numeric offset per
+//                 partition, replayable — implements Partitionable /
+//                 Replayable / Checkpointable on top of the base three.
+//   broker-shaped (RabbitMQ, SQS, NATS core): opaque per-message ack token —
+//                 just Streamable + Sinkable + Acknowledgeable.
+
+import type { Stream } from "../stream";
+import type { Codec } from "./codec";
+
+// ── Streamable<T> — "I can produce a stream of T" ──────────────────
+
+export interface Streamable<T> {
+  subscribe(params?: { group?: string }): Stream<T, never>;
+  codec: Codec<T>;
+}
+
+export function isStreamable<T>(value: unknown): value is Streamable<T> {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    "subscribe" in value &&
+    typeof (value as any).subscribe === "function" &&
+    "codec" in value
+  );
+}
+
+// ── Sinkable<T> — "I can consume values of T" ──────────────────────
+
+export interface Sinkable<T> {
+  publish(value: T): Promise<void>;
+  codec: Codec<T>;
+}
+
+export function isSinkable<T>(value: unknown): value is Sinkable<T> {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    "publish" in value &&
+    typeof (value as any).publish === "function" &&
+    "codec" in value
+  );
+}
+
+// ── KeyedSinkable<T> — "I can route by key" ────────────────────────
+
+export interface KeyedSinkable<T> extends Sinkable<T> {
+  publish(value: T, params?: { key: string }): Promise<void>;
+}
+
+export function isKeyedSinkable<T>(value: unknown): value is KeyedSinkable<T> {
+  return isSinkable(value);
+}
+
+// ── Partitionable<T> — "I have partitions" ─────────────────────────
+
+export interface Partitionable<T> extends Streamable<T> {
+  partitions: number;
+  subscribe(params?: { group?: string; partitions?: number[] }): Stream<T, never>;
+}
+
+export function isPartitionable<T>(value: unknown): value is Partitionable<T> {
+  return (
+    isStreamable(value) && "partitions" in value && typeof (value as any).partitions === "number"
+  );
+}
+
+// ── Replayable<T> — "I can seek to a point in time" ────────────────
+
+export type Offset =
+  | { type: "earliest" }
+  | { type: "latest" }
+  | { type: "timestamp"; value: number }
+  | { type: "specific"; value: string };
+
+export interface Replayable<T> extends Streamable<T> {
+  subscribeFrom(params: { offset: Offset; group?: string }): Stream<T, never>;
+}
+
+export function isReplayable<T>(value: unknown): value is Replayable<T> {
+  return (
+    isStreamable(value) &&
+    "subscribeFrom" in value &&
+    typeof (value as any).subscribeFrom === "function"
+  );
+}
+
+// ── Acknowledgeable<T> — "I support manual ack/nack" ───────────────
+
+export interface Envelope<T> {
+  readonly value: T;
+  ack(): Promise<void>;
+  nack(): Promise<void>;
+  readonly metadata: Record<string, unknown>;
+}
+
+export interface Acknowledgeable<T> extends Streamable<T> {
+  subscribeAck(params?: { group?: string }): Stream<Envelope<T>, never>;
+}
+
+export function isAcknowledgeable<T>(value: unknown): value is Acknowledgeable<T> {
+  return (
+    isStreamable(value) &&
+    "subscribeAck" in value &&
+    typeof (value as any).subscribeAck === "function"
+  );
+}
+
+// ── Checkpointable<T> — "I can save/restore consumption position" ──
+
+export interface Checkpointable<T> extends Streamable<T> {
+  commitOffset(params: { group: string; offset: string }): Promise<void>;
+  getCommittedOffset(params: { group: string }): Promise<string | null>;
+}
+
+export function isCheckpointable<T>(value: unknown): value is Checkpointable<T> {
+  return (
+    isStreamable(value) &&
+    "commitOffset" in value &&
+    typeof (value as any).commitOffset === "function" &&
+    "getCommittedOffset" in value &&
+    typeof (value as any).getCommittedOffset === "function"
+  );
+}
+
+// ── ShuffleTransport — repartition channels for distributed runs ───
+//
+// Lives here (not in @perfect/kafka or @perfect/topology) to break the
+// dependency cycle: kafka IMPLEMENTS it, topology CONSUMES it.
+
+export interface ShuffleTransport<T = unknown> {
+  getOrCreateRepartitionChannel(params: { name: string; group: string; codec: Codec<T> }): Promise<{
+    source: Streamable<T> & Acknowledgeable<T>;
+    sink: KeyedSinkable<T>;
+  }>;
+}
