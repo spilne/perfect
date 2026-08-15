@@ -1144,6 +1144,79 @@ export class Stream<A, S = never> {
     ) as any;
   }
 
+  /**
+   * Decouple producer from consumer — a driver fiber prefetches up to
+   * `capacity` elements ahead into a bounded queue while the consumer is
+   * busy. Same driver/sentinel machinery as merge; the consumer drains
+   * whatever is buffered per pull, so chunking downstream reflects
+   * consumption timing.
+   */
+  buffer(capacity: number): Stream<A, S> {
+    const self = this;
+    const cap = Math.max(1, Math.floor(capacity));
+    type Slot = { _tag: "item"; value: A } | { _tag: "end" } | { _tag: "fail"; cause: Cause };
+
+    const drivers: Fiber<any>[] = [];
+
+    const setup: Eff<Step<A>, any> = (QueueNS.bounded<Slot>(cap) as any).flatMap(
+      (slots: Queue<Slot>) => {
+        const offerChunk = (items: A[], i: number, next: Stream<A, any>): Eff<void, any> =>
+          i >= items.length
+            ? drain(next)
+            : (slots.offer({ _tag: "item", value: items[i]! }) as any).flatMap(() =>
+                offerChunk(items, i + 1, next),
+              );
+
+        const drain = (s: Stream<A, any>): Eff<void, any> =>
+          (s.step as any).flatMap((step: Step<A>) =>
+            step._tag === "Done"
+              ? slots.offer({ _tag: "end" })
+              : offerChunk(Array.from(step.chunk), 0, step.next),
+          );
+
+        const driver = (drain(self) as any).catchAllCause((cause: Cause) =>
+          Cause.isInterruptedOnly(cause) ? failCause(cause) : slots.offer({ _tag: "fail", cause }),
+        );
+
+        // slot delivered after the values of a batch (driver stops offering
+        // after a sentinel, so a sentinel is always last in a drained batch)
+        let terminal: Slot | null = null;
+
+        const finish = (): Eff<Step<A>, any> =>
+          terminal!._tag === "fail" ? failCause((terminal as any).cause) : succeed(DONE);
+
+        const pull = (): Eff<Step<A>, any> => {
+          if (terminal !== null) return suspend(() => finish()) as any;
+          return (slots.take() as any).flatMap((first: Slot): any => {
+            if (first._tag !== "item") {
+              terminal = first;
+              return finish();
+            }
+            return (slots.takeAll() as any).flatMap((rest: Slot[]) => {
+              const values: A[] = [first.value];
+              for (const slot of rest) {
+                if (slot._tag === "item") values.push(slot.value);
+                else terminal = slot;
+              }
+              return succeed(
+                emit(Chunk.fromArray(values), new Stream(suspend(() => pull()) as any)),
+              );
+            });
+          });
+        };
+
+        return (fork(driver) as any).flatMap((fb: Fiber<any>) => {
+          drivers.push(fb);
+          return pull();
+        });
+      },
+    );
+
+    return new Stream<A, any>(suspend(() => setup) as any).onFinalize(
+      interruptAllEff(drivers),
+    ) as any;
+  }
+
   throttle(ms: number): Stream<A, S> {
     let lastEmit = 0;
     return this.evalMap(
