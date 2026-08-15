@@ -28,3 +28,6 @@ docs/
 
 # OS
 .DS_Store
+
+# swc compiled-plugin cache
+.swc/
