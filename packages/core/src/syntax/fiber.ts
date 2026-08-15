@@ -19,10 +19,12 @@ import { provide, type ServiceTag } from "../service";
 import { type RetryPolicy } from "../retry-policy";
 import { type Schedule, repeat, retryWith } from "../schedule";
 import { repeatUntil, repeatUntilWithBackoff, type RepeatTimeoutError } from "../combinators-extra";
+import { withSpan } from "../tracing";
 
 declare module "../eff" {
   interface Suspend {
     fork<A, S>(this: Eff<A, S>): Eff<Fiber<A>, never>;
+    withSpan<A, S>(this: Eff<A, S>, name: string, attributes?: Record<string, unknown>): Eff<A, S>;
     forkDaemon<A, S>(this: Eff<A, S>): Eff<Fiber<A>, never>;
     ensuring<A, S>(this: Eff<A, S>, finalizer: Eff<void, never>): Eff<A, S>;
     onExit<A, S, S2>(
@@ -91,6 +93,10 @@ declare module "../eff" {
     unless<A, S>(this: Eff<A, S>, cond: () => boolean): Eff<A | undefined, S>;
   }
 }
+
+Suspend.prototype.withSpan = function (name: string, attributes?: Record<string, unknown>) {
+  return withSpan(this as any, name, attributes) as any;
+};
 
 Suspend.prototype.fork = function () {
   return new Suspend(Op.Fork, this, null) as any;

@@ -7,6 +7,9 @@ import { type Scheduler, SyncScheduler, DEFAULT_BUDGET, getDefaultScheduler } fr
 import { Clock, realClock } from "./clock";
 import { Random, realRandom } from "./random";
 import { Console, realConsole } from "./console";
+import { Logger, defaultLogger, LOG_ANNOTATIONS_KEY } from "./logger";
+import { Tracer, noopTracer, CURRENT_SPAN_KEY, NO_SPAN } from "./tracing";
+import { Metrics, defaultMetricsRegistry } from "./metrics";
 import type { Exit } from "./exit";
 
 // Seed the default context once — real Clock/Random/Console are always
@@ -15,6 +18,11 @@ import type { Exit } from "./exit";
 if (!emptyContext.has(Clock.key)) emptyContext.set(Clock.key, realClock);
 if (!emptyContext.has(Random.key)) emptyContext.set(Random.key, realRandom);
 if (!emptyContext.has(Console.key)) emptyContext.set(Console.key, realConsole);
+if (!emptyContext.has(Logger.key)) emptyContext.set(Logger.key, defaultLogger);
+if (!emptyContext.has(LOG_ANNOTATIONS_KEY)) emptyContext.set(LOG_ANNOTATIONS_KEY, {});
+if (!emptyContext.has(Tracer.key)) emptyContext.set(Tracer.key, noopTracer);
+if (!emptyContext.has(CURRENT_SPAN_KEY)) emptyContext.set(CURRENT_SPAN_KEY, NO_SPAN);
+if (!emptyContext.has(Metrics.key)) emptyContext.set(Metrics.key, defaultMetricsRegistry);
 
 type Resolve = (value: any) => void;
 type Reject = (cause: Cause) => void;
