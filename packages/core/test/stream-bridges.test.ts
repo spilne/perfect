@@ -166,3 +166,38 @@ describe("Stream.async", () => {
     expect(cleaned).toBe(1);
   });
 });
+
+describe("Stream.async cleanup on normal completion", () => {
+  test("cleanup runs when a take(n) completes exactly on the nth emit", async () => {
+    let cleanedUp = false;
+
+    const s = Stream.async<number, never>((emit) => {
+      emit(1);
+      emit(2);
+      emit(3);
+      return sync(() => () => {
+        cleanedUp = true;
+      }) as any;
+    });
+
+    const result = await run((s as any).take(3).toArray());
+    expect(result).toEqual([1, 2, 3]);
+    expect(cleanedUp).toBe(true);
+  });
+
+  test("cleanup still runs exactly once when close() ends the stream", async () => {
+    let cleanups = 0;
+
+    const s = Stream.async<number, never>((emit, close) => {
+      emit(1);
+      close();
+      return sync(() => () => {
+        cleanups++;
+      }) as any;
+    });
+
+    const result = await run((s as any).toArray());
+    expect(result).toEqual([1]);
+    expect(cleanups).toBe(1);
+  });
+});

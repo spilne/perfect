@@ -410,7 +410,12 @@ export class Stream<A, S = never> {
     register: (emit: (value: A) => void, close: () => void) => Eff<(() => void) | void, S>,
     bufferSize = 1024,
   ): Stream<A, S> {
-    return new Stream(
+    // the finalizer lives on the OUTER stream (via onFinalize below) so
+    // terminals run it on normal completion too — inner `next()` streams'
+    // step effects would silently drop it
+    let activeCleanup: (() => void) | null = null;
+
+    const source = new Stream(
       (succeed(null) as any).flatMap(() => {
         const buffer: A[] = [];
         let closed = false;
@@ -423,6 +428,7 @@ export class Stream<A, S = never> {
           cleaned = true;
           if (cleanup) cleanup();
         };
+        activeCleanup = cleanupOnce;
 
         const pushEmit = (value: A) => {
           if (closed) return;
@@ -476,11 +482,20 @@ export class Stream<A, S = never> {
         return (register(pushEmit, pushClose) as any)
           .map((c: (() => void) | void) => {
             cleanup = c ?? undefined;
-            return next()._withFinalizer(sync(cleanupOnce)).step;
+            return next().step;
           })
           .flatMap((s: any) => s);
       }),
     );
+
+    return source.onFinalize(
+      suspend(() =>
+        sync(() => {
+          activeCleanup?.();
+          activeCleanup = null;
+        }),
+      ) as any,
+    ) as any;
   }
 
   static bracket<A, S>(acquire: Eff<A, S>, release: (a: A) => Eff<void, never>): Stream<A, S> {
