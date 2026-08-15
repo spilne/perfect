@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": false,
+    "noEmit": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "types": ["bun"],
+    "typeRoots": ["../../node_modules/@types"],
+    "paths": {
+      "@perfect/core": ["../core/src/index.ts"],
+      "@perfect/core/*": ["../core/src/*"],
+      "@perfect/http": ["../http/src/index.ts"],
+      "@perfect/http/*": ["../http/src/*"]
+    }
+  },
+  "include": ["src", "test"]
+}

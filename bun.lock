@@ -58,6 +58,14 @@
         "@confluentinc/kafka-javascript",
       ],
     },
+    "packages/otel": {
+      "name": "@perfect/otel",
+      "version": "0.0.1",
+      "dependencies": {
+        "@opentelemetry/api": "^1.9.0",
+        "@perfect/core": "workspace:*",
+      },
+    },
     "packages/swc-plugin": {
       "name": "@perfect/swc-plugin",
       "version": "0.0.1",
@@ -473,6 +481,8 @@
     "@perfect/http-otel": ["@perfect/http-otel@workspace:packages/http-otel"],
 
     "@perfect/kafka": ["@perfect/kafka@workspace:packages/kafka"],
+
+    "@perfect/otel": ["@perfect/otel@workspace:packages/otel"],
 
     "@perfect/swc-plugin": ["@perfect/swc-plugin@workspace:packages/swc-plugin"],
 
