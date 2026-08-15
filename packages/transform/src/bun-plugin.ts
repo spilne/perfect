@@ -1,20 +1,10 @@
 import { plugin } from "bun";
 import { rewriteEffBlocks } from "./rewrite";
 
-const RUST_BINARY = new URL(
-  "../../crates/perfect-transform/target/release/perfect-transform",
-  import.meta.url,
-).pathname;
-
-const useRust = await Bun.file(RUST_BINARY).exists();
-
-async function transformWithRust(source: string): Promise<string> {
-  const proc = Bun.spawn([RUST_BINARY, "-"], {
-    stdin: new Blob([source]),
-    stdout: "pipe",
-  });
-  return await new Response(proc.stdout).text();
-}
+// The Rust CLI transformer (crates/perfect-transform) is intentionally NOT
+// used here: its output diverges from the TS rewriter (guard handling, yield
+// desugaring), so silently preferring it when a local binary happens to be
+// built would change program semantics. One transformer, one behavior.
 
 plugin({
   name: "perfect-effect-transform",
@@ -27,9 +17,7 @@ plugin({
         return undefined;
       }
 
-      const transformed = useRust ? await transformWithRust(source) : rewriteEffBlocks(source);
-
-      return { contents: transformed, loader: "ts" };
+      return { contents: rewriteEffBlocks(source), loader: "ts" };
     });
   },
 });
