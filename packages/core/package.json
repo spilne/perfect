@@ -1,9 +1,29 @@
 {
   "name": "@perfect/core",
   "version": "0.0.1",
+  "description": "TypeScript effect runtime — Eff<A,S> with typed errors and dependencies, fibers, structured concurrency, pull-based streams, and messaging contracts.",
+  "keywords": [
+    "cats-effect",
+    "effect",
+    "fiber",
+    "stream",
+    "structured-concurrency",
+    "typescript",
+    "zio"
+  ],
+  "homepage": "https://github.com/spilne/perfect#readme",
+  "bugs": {
+    "url": "https://github.com/spilne/perfect/issues"
+  },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/spilne/perfect.git",
+    "directory": "packages/core"
+  },
   "files": [
     "dist",
+    "LICENSE",
     "README.md"
   ],
   "type": "module",

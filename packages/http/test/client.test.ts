@@ -288,3 +288,73 @@ describe("AbstractHttpClient — minimal subclass", () => {
     expect(calls[1]!.json).toEqual({ a: 1 });
   });
 });
+
+describe("postMultipart", () => {
+  test("builds FormData with file + fields and posts it", async () => {
+    const { run } = await import("@perfect/core");
+    const { DefaultHttpClient } = await import("../src");
+
+    const { sync: syncFn } = await import("@perfect/core");
+    let captured: { body?: unknown; method?: string; contentType?: string | undefined } = {};
+    const transport = {
+      execute: (options: any) =>
+        syncFn(() => {
+          captured = {
+            body: options.body,
+            method: options.method,
+            contentType: options.headers?.["content-type"],
+          };
+          return new Response(JSON.stringify({ ok: true }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }),
+    };
+
+    const client = new DefaultHttpClient({ baseUrl: "http://x", transport: transport as any });
+    const okParser = {
+      safeParse: (d: any) =>
+        d && d.ok === true
+          ? { success: true as const, data: d }
+          : { success: false as const, error: "bad" },
+    };
+
+    const result = await run(
+      client.postMultipart("/upload", okParser as any, {
+        file: new Blob(["hello"], { type: "text/plain" }),
+        fileField: "doc",
+        fields: { kind: "greeting" },
+      }) as any,
+    );
+
+    expect(result).toEqual({ ok: true });
+    expect(captured.method).toBe("POST");
+    expect(captured.body).toBeInstanceOf(FormData);
+    const fd = captured.body as FormData;
+    expect(fd.get("kind")).toBe("greeting");
+    expect(fd.get("doc")).toBeInstanceOf(Blob);
+    // content-type must NOT be manually set — runtime adds the boundary
+    expect(captured.contentType).toBeUndefined();
+  });
+
+  test("defaults the file field name to 'file'", async () => {
+    const { run } = await import("@perfect/core");
+    const { DefaultHttpClient, identityParser } = await import("../src");
+
+    const { sync: syncFn } = await import("@perfect/core");
+    let fd: FormData | undefined;
+    const transport = {
+      execute: (options: any) =>
+        syncFn(() => {
+          fd = options.body as FormData;
+          return new Response("{}", {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }),
+    };
+    const client = new DefaultHttpClient({ baseUrl: "http://x", transport: transport as any });
+    await run(client.postMultipart("/u", identityParser as any, { file: new Blob(["x"]) }) as any);
+    expect(fd!.get("file")).toBeInstanceOf(Blob);
+  });
+});

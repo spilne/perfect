@@ -1,9 +1,28 @@
 {
   "name": "@perfect/http",
   "version": "0.0.1",
+  "description": "HTTP client on the Perfect effect runtime — typed errors, retries, streaming (SSE/NDJSON), mockable transport.",
+  "keywords": [
+    "client",
+    "effect",
+    "fetch",
+    "http",
+    "ndjson",
+    "sse"
+  ],
+  "homepage": "https://github.com/spilne/perfect#readme",
+  "bugs": {
+    "url": "https://github.com/spilne/perfect/issues"
+  },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/spilne/perfect.git",
+    "directory": "packages/http"
+  },
   "files": [
     "dist",
+    "LICENSE",
     "README.md"
   ],
   "type": "module",

@@ -19,7 +19,7 @@ tiers compose: pick the level of automation you need.
 
 <!-- @embed packages/http/examples/01-basic.ts#tier-1-raw -->
 ```ts
-import { httpFetch } from "@perfect/core";
+import { httpFetch } from "@perfect/http";
 
 // Tier 1 — raw Response. No status check, no parsing. Useful when you want
 // the headers / streaming body before deciding what to do with it.
@@ -35,7 +35,7 @@ console.log(tier1.status); // → 200
 
 <!-- @embed packages/http/examples/01-basic.ts#tier-2-status-check -->
 ```ts
-import { httpFetchOk } from "@perfect/core";
+import { httpFetchOk } from "@perfect/http";
 
 // Tier 2 — adds a status check. Non-2xx fails with HttpStatusError carrying
 // the response body for diagnostics.
@@ -51,7 +51,7 @@ console.log(tier2.status); // → 200
 
 <!-- @embed packages/http/examples/01-basic.ts#tier-3-validated -->
 ```ts
-import { httpRequest } from "@perfect/core";
+import { httpRequest } from "@perfect/http";
 
 // Tier 3 — full pipeline: fetch → status check → JSON → schema. Returns the
 // typed value directly; any step failing surfaces as a typed HttpClientError.
@@ -80,7 +80,7 @@ below for concrete adapters.
 
 <!-- @embed packages/http/examples/01-basic.ts#status-error -->
 ```ts
-import { HttpStatusError, httpFetchOk } from "@perfect/core";
+import { HttpStatusError, httpFetchOk } from "@perfect/http";
 
 // Non-OK responses become HttpStatusError. Discriminate on .status, retry
 // 5xx/429 with .isRetryable.
@@ -108,7 +108,7 @@ and an optional `errorSchema`.
 
 <!-- @embed packages/http/examples/02-client.ts#client-basic -->
 ```ts
-import { DefaultHttpClient } from "@perfect/core";
+import { DefaultHttpClient } from "@perfect/http";
 
 // A client carries baseUrl, default headers, and a transport. Convenience
 // methods (.get/.post/.put/.patch/.delete) parse the response through a
@@ -149,7 +149,7 @@ tracing).
 
 <!-- @embed packages/http/examples/02-client.ts#client-middleware -->
 ```ts
-import { type HttpMiddleware, DefaultHttpClient } from "@perfect/core";
+import { type HttpMiddleware, DefaultHttpClient } from "@perfect/http";
 
 // Sync middleware hooks fire on every request — perfect for metrics or
 // request-id propagation. The same context object is passed to onRequest /
@@ -181,7 +181,7 @@ status or reacting to thrown defects.
 
 <!-- @embed packages/http/examples/03-retry.ts#with-retry-default -->
 ```ts
-import { DefaultHttpClient, withRetry } from "@perfect/core";
+import { DefaultHttpClient, withRetry } from "@perfect/http";
 
 // withRetry retries 5xx, 429, timeouts, and network errors with exponential
 // backoff. Caller bugs (4xx other than 429) and parse errors do NOT retry.
@@ -202,7 +202,7 @@ console.log(t.attempts); // → 3
 
 <!-- @embed packages/http/examples/03-retry.ts#with-retry-all -->
 ```ts
-import { type ResponseParser, DefaultHttpClient, PipelineResult, withRetryAll } from "@perfect/core";
+import { type ResponseParser, DefaultHttpClient, PipelineResult, withRetryAll } from "@perfect/http";
 
 // withRetryAll exposes the full PipelineResult ADT. Use it to retry on
 // "not ready" success values (polling), thrown defects, or any combination
@@ -246,7 +246,7 @@ shape — no narrowing required.
 
 <!-- @embed packages/http/examples/04-error-schema.ts#error-schema-typed -->
 ```ts
-import { type ResponseParser, DefaultHttpClient, HttpStatusError } from "@perfect/core";
+import { type ResponseParser, DefaultHttpClient, HttpStatusError } from "@perfect/http";
 
 // Pass errorSchema and non-2xx JSON bodies are parsed into HttpStatusError<B>.
 // e.body has the typed shape — no narrowing required.
@@ -294,7 +294,7 @@ is raised instead — carries the raw text + parse cause + status code.
 
 <!-- @embed packages/http/examples/04-error-schema.ts#error-schema-mismatch -->
 ```ts
-import { DefaultHttpClient, HttpUnknownError } from "@perfect/core";
+import { DefaultHttpClient, HttpUnknownError } from "@perfect/http";
 
 // When errorSchema is provided but the body doesn't match (bad JSON or
 // wrong shape), HttpUnknownError is raised instead. Carries the raw text
@@ -334,7 +334,7 @@ Every other helper is a composition of this base + composable `Pipe`s
 
 <!-- @embed packages/http/examples/06-streaming.ts#stream-lines -->
 ```ts
-import { httpStreamLines } from "@perfect/core";
+import { httpStreamLines } from "@perfect/http";
 
 // httpStreamLines = bytes → utf8Decode → lines. Every emitted item is one
 // complete line (without the terminator).
@@ -346,7 +346,7 @@ console.log(lines); // → ["alpha", "beta", "gamma"]
 
 <!-- @embed packages/http/examples/06-streaming.ts#stream-sse -->
 ```ts
-import { httpStreamSSE } from "@perfect/core";
+import { httpStreamSSE } from "@perfect/http";
 
 // httpStreamSSE = lines → parseSSE. Server-Sent Events are emitted as
 // SSEvent objects with { event, data, id?, retry? }.
@@ -378,7 +378,7 @@ route via `.on` / `.onFn` / `.onSequence` / `.respondWith`.
 
 <!-- @embed packages/http/examples/05-mock.ts#mock-basic -->
 ```ts
-import { MockHttpClient } from "@perfect/core";
+import { MockHttpClient } from "@perfect/http";
 
 // Set up route → response, run the program, assert what was called.
 const mock = new MockHttpClient();
@@ -392,7 +392,7 @@ console.log(mock.calledTimes("GET", "/users/1")); // → 1
 
 <!-- @embed packages/http/examples/05-mock.ts#mock-failure -->
 ```ts
-import { MockHttpClient } from "@perfect/core";
+import { MockHttpClient } from "@perfect/http";
 
 // MockHttpClient.fail builds an HttpStatusError for use as a route response.
 mock.reset();
@@ -411,7 +411,7 @@ console.log(caught.status); // → 404
 
 <!-- @embed packages/http/examples/05-mock.ts#mock-sequence -->
 ```ts
-import { MockHttpClient } from "@perfect/core";
+import { MockHttpClient } from "@perfect/http";
 
 // onSequence consumes responses in order; the last item is reused after the
 // queue exhausts. Useful for simulating retry-then-succeed scenarios.
@@ -454,7 +454,7 @@ Pass the schema directly.
 <!-- @embed packages/http/examples/07-schema-libs.ts#zod-direct -->
 ```ts
 import { z } from "zod";
-import { DefaultHttpClient } from "@perfect/core";
+import { DefaultHttpClient } from "@perfect/http";
 
 // Zod schemas have .safeParse natively — they ARE ResponseParser<T> with no
 // adapter. Pass the schema directly to client.get / httpRequest / etc.
@@ -475,7 +475,7 @@ The same applies to `errorSchema`:
 <!-- @embed packages/http/examples/07-schema-libs.ts#zod-error-schema -->
 ```ts
 import { z } from "zod";
-import { DefaultHttpClient, HttpStatusError } from "@perfect/core";
+import { DefaultHttpClient, HttpStatusError } from "@perfect/http";
 
 // Same adapter-free integration works for errorSchema. Define your error
 // envelope as a Zod schema, pass it as errorSchema, and HttpStatusError<B>
@@ -516,7 +516,7 @@ schema:
 <!-- @embed packages/http/examples/07-schema-libs.ts#valibot-adapter -->
 ```ts
 import * as v from "valibot";
-import { type ResponseParser, DefaultHttpClient } from "@perfect/core";
+import { type ResponseParser, DefaultHttpClient } from "@perfect/http";
 
 // Valibot uses safeParse(schema, input) — wrap it once with a tiny adapter
 // so the result shape matches ResponseParser. Reusable for any valibot schema.

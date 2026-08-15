@@ -9,8 +9,18 @@
     "swc-plugin",
     "typescript"
   ],
+  "homepage": "https://github.com/spilne/perfect#readme",
+  "bugs": {
+    "url": "https://github.com/spilne/perfect/issues"
+  },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/spilne/perfect.git",
+    "directory": "packages/swc-plugin"
+  },
   "files": [
+    "LICENSE",
     "README.md",
     "dist/plugin.wasm"
   ],

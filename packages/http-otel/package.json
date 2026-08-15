@@ -1,9 +1,26 @@
 {
   "name": "@perfect/http-otel",
   "version": "0.0.1",
+  "description": "OpenTelemetry tracing middleware and W3C trace propagation for @perfect/http.",
+  "keywords": [
+    "effect",
+    "http",
+    "opentelemetry",
+    "tracing"
+  ],
+  "homepage": "https://github.com/spilne/perfect#readme",
+  "bugs": {
+    "url": "https://github.com/spilne/perfect/issues"
+  },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/spilne/perfect.git",
+    "directory": "packages/http-otel"
+  },
   "files": [
     "dist",
+    "LICENSE",
     "README.md"
   ],
   "type": "module",

@@ -42,6 +42,7 @@ export type {
   HttpRequestParams,
   RequestOptions,
   RequestBodyOptions,
+  MultipartOptions,
 } from "./client";
 export type { HttpMiddleware, HttpRequestContext } from "./middleware";
 /** Service tag for Layer-based DI. Re-exported as `HttpClientService` to

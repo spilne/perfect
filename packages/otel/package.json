@@ -1,10 +1,26 @@
 {
   "name": "@perfect/otel",
   "version": "0.0.1",
-  "description": "OpenTelemetry bridge for @perfect/core observability: Tracer and metrics export.",
+  "description": "OpenTelemetry bridge for @perfect/core observability — Tracer spans and metrics export.",
+  "keywords": [
+    "effect",
+    "metrics",
+    "opentelemetry",
+    "tracing"
+  ],
+  "homepage": "https://github.com/spilne/perfect#readme",
+  "bugs": {
+    "url": "https://github.com/spilne/perfect/issues"
+  },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/spilne/perfect.git",
+    "directory": "packages/otel"
+  },
   "files": [
     "dist",
+    "LICENSE",
     "README.md"
   ],
   "type": "module",

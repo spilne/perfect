@@ -6,8 +6,8 @@
 //   - @confluentinc/kafka-javascript (kafkajs-compatible)
 //   - @platformatic/kafka (independent classes with stream-based consumer)
 //
-// The interface is stream-native: consumers return async iterables rather
-// than requiring subscribe() + run({ eachMessage }) callbacks.
+// The consumer interface is callback-based (kafkajs-style): subscribe()
+// then run({ eachMessage }); KafkaTopic adapts it to perfect Streams.
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------

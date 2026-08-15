@@ -1,9 +1,27 @@
 {
   "name": "@perfect/kafka",
   "version": "0.0.1",
+  "description": "Kafka backend for @perfect/core's connect contracts — offset-safe parallel commits, injected driver interface.",
+  "keywords": [
+    "consumer",
+    "effect",
+    "kafka",
+    "offsets",
+    "streaming"
+  ],
+  "homepage": "https://github.com/spilne/perfect#readme",
+  "bugs": {
+    "url": "https://github.com/spilne/perfect/issues"
+  },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/spilne/perfect.git",
+    "directory": "packages/kafka"
+  },
   "files": [
     "dist",
+    "LICENSE",
     "README.md"
   ],
   "type": "module",
