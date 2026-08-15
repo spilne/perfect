@@ -182,3 +182,84 @@ describe("scheduler interleaving", () => {
     expect(childRan).toBe(false);
   });
 });
+
+describe("acquireRelease without scoped()", () => {
+  test("release runs at fiber completion on success", async () => {
+    const log: string[] = [];
+
+    const program = acquireRelease(
+      sync(() => {
+        log.push("acquire");
+        return "res";
+      }),
+      (r) =>
+        sync(() => {
+          log.push(`release:${r}`);
+        }),
+    ).map((r) => `used:${r}`);
+
+    expect(await run(program)).toBe("used:res");
+    expect(log).toEqual(["acquire", "release:res"]);
+  });
+
+  test("release runs at fiber completion on failure", async () => {
+    const log: string[] = [];
+
+    const program = acquireRelease(
+      sync(() => {
+        log.push("acquire");
+        return "conn";
+      }),
+      (r) =>
+        sync(() => {
+          log.push(`release:${r}`);
+        }),
+    ).flatMap(() => fail("boom"));
+
+    await expect(run(program)).rejects.toBe("boom");
+    expect(log).toEqual(["acquire", "release:conn"]);
+  });
+
+  test("release in a forked child runs when the child completes", async () => {
+    const log: string[] = [];
+
+    const child = acquireRelease(
+      sync(() => {
+        log.push("acquire");
+        return "child-res";
+      }),
+      (r) =>
+        sync(() => {
+          log.push(`release:${r}`);
+        }),
+    ).map(() => "child-done");
+
+    const program = fork(child).flatMap((f) => join(f));
+
+    expect(await run(program)).toBe("child-done");
+    expect(log).toEqual(["acquire", "release:child-res"]);
+  });
+
+  test("release runs when the fiber is interrupted while suspended", async () => {
+    const log: string[] = [];
+
+    const child = acquireRelease(
+      sync(() => {
+        log.push("acquire");
+        return "res";
+      }),
+      (r) =>
+        sync(() => {
+          log.push(`release:${r}`);
+        }),
+    ).flatMap(() => sleep(5000));
+
+    // fork, give the child time to acquire and suspend in sleep, then let the
+    // parent complete — structured cancellation interrupts the child
+    const program = fork(child).flatMap(() => sleep(20));
+
+    await run(program);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(log).toEqual(["acquire", "release:res"]);
+  });
+});

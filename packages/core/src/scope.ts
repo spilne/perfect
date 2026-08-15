@@ -20,8 +20,11 @@ export class Scope {
     const fns = this.finalizers.reverse();
     if (fns.length === 0) return succeed(undefined);
 
-    // chain: run fns[0], then fns[1], ... via flatMap
-    let chain: Eff<void, never> = fns[0]!();
+    // chain: run fns[0], then fns[1], ... via flatMap — every finalizer
+    // (including the first) is invoked only when the returned Eff runs
+    let chain: Eff<void, never> = new Suspend(Op.FlatMap, new Suspend(Op.Succeed, undefined, null), () =>
+      fns[0]!(),
+    ) as any;
     for (let i = 1; i < fns.length; i++) {
       const fin = fns[i]!;
       chain = new Suspend(Op.FlatMap, chain, () => fin()) as any;

@@ -31,13 +31,25 @@ function succeedAfterFinalizer(finalizer: Suspend, value: any): Suspend {
   );
 }
 
+// The finalizer's outcome is reified BEFORE the original cause is rethrown —
+// rethrowing inside the finalizer's own CatchAll would re-catch it and
+// compose the cause with itself.
 function failAfterFinalizer(finalizer: Suspend, cause: Cause): Suspend {
   return new Suspend(
     Op.SetInterruptible,
     new Suspend(
-      Op.CatchAll,
-      new Suspend(Op.FlatMap, finalizer, () => new Suspend(Op.Fail, cause, null)),
-      (finalizerCause: Cause) => new Suspend(Op.Fail, Cause.then(cause, finalizerCause), null),
+      Op.FlatMap,
+      new Suspend(
+        Op.CatchAll,
+        new Suspend(Op.FlatMap, finalizer, () => new Suspend(Op.Succeed, null, null)),
+        (finalizerCause: Cause) => new Suspend(Op.Succeed, finalizerCause, null),
+      ),
+      (finalizerCause: Cause | null) =>
+        new Suspend(
+          Op.Fail,
+          finalizerCause === null ? cause : Cause.then(cause, finalizerCause),
+          null,
+        ),
     ),
     false,
   );
@@ -53,129 +65,19 @@ function succeedAfterFinalizerInline(finalizer: Suspend, value: any): Suspend {
 
 function failAfterFinalizerInline(finalizer: Suspend, cause: Cause): Suspend {
   return new Suspend(
-    Op.CatchAll,
-    new Suspend(Op.FlatMap, finalizer, () => new Suspend(Op.Fail, cause, null)),
-    (finalizerCause: Cause) => new Suspend(Op.Fail, Cause.then(cause, finalizerCause), null),
+    Op.FlatMap,
+    new Suspend(
+      Op.CatchAll,
+      new Suspend(Op.FlatMap, finalizer, () => new Suspend(Op.Succeed, null, null)),
+      (finalizerCause: Cause) => new Suspend(Op.Succeed, finalizerCause, null),
+    ),
+    (finalizerCause: Cause | null) =>
+      new Suspend(
+        Op.Fail,
+        finalizerCause === null ? cause : Cause.then(cause, finalizerCause),
+        null,
+      ),
   );
-}
-
-// Try to evaluate a node fully synchronously without spawning a fiber.
-// Returns:
-//   { ok: true, value }   — completed sync with a value
-//   { ok: false, cause }  — completed sync with a cause
-//   null                  — needs the fiber runtime (Async, Fork, Race, nested All, etc.)
-export function evalSync(
-  node: Suspend,
-  ctx: Context,
-): { ok: true; value: any } | { ok: false; cause: Cause } | null {
-  let cur: any = node;
-  let context = ctx;
-  let k: Cont | null = null;
-
-  loop: while (true) {
-    if (!(cur instanceof Suspend)) {
-      while (k !== null) {
-        const frame: Cont = k;
-        k = frame.next;
-        switch (frame.op) {
-          case Op.FlatMap: {
-            cur = frame.fn(cur);
-            continue loop;
-          }
-          case Op.Catch:
-          case Op.CatchAll: {
-            continue;
-          }
-          case Op.Provide: {
-            context = frame.fn as Context;
-            continue;
-          }
-          case Op.SetInterruptible: {
-            continue;
-          }
-        }
-      }
-      return { ok: true, value: cur };
-    }
-
-    switch (cur.op) {
-      case Op.Succeed: {
-        cur = cur.a;
-        continue loop;
-      }
-      case Op.Sync: {
-        try {
-          cur = cur.a();
-        } catch (e) {
-          cur = new Suspend(Op.Fail, Cause.die(e), null);
-        }
-        continue loop;
-      }
-      case Op.Fail: {
-        const cause = cur.a as Cause;
-        while (k !== null) {
-          const frame = k;
-          k = frame.next;
-          if (frame.op === Op.Catch) {
-            const f = Cause.firstFail(cause);
-            if (f) {
-              cur = frame.fn(f.value);
-              continue loop;
-            }
-          }
-          if (frame.op === Op.CatchAll) {
-            cur = frame.fn(cause);
-            continue loop;
-          }
-          if (frame.op === Op.Provide) {
-            context = frame.fn as Context;
-            continue;
-          }
-          if (frame.op === Op.SetInterruptible) {
-            continue;
-          }
-        }
-        return { ok: false, cause };
-      }
-      case Op.FlatMap: {
-        k = new Cont(Op.FlatMap, cur.b, k);
-        cur = cur.a;
-        continue loop;
-      }
-      case Op.Catch: {
-        k = new Cont(Op.Catch, cur.b, k);
-        cur = cur.a;
-        continue loop;
-      }
-      case Op.CatchAll: {
-        k = new Cont(Op.CatchAll, cur.b, k);
-        cur = cur.a;
-        continue loop;
-      }
-      case Op.Provide: {
-        k = new Cont(Op.Provide, context, k);
-        context = mergeContexts(context, cur.b as Context);
-        cur = cur.a;
-        continue loop;
-      }
-      case Op.GetCtx: {
-        const key = cur.a as symbol;
-        const val = context.get(key);
-        if (val === undefined) {
-          return {
-            ok: false,
-            cause: Cause.die(new Error(`Service not provided: ${key.description}`)),
-          };
-        }
-        cur = val;
-        continue loop;
-      }
-      // Anything else (Async, Fork, ForkDaemon, Race, All, Ensuring, Scoped,
-      // AcqRel, GetScope, SetInterruptible, YieldNow) needs the fiber runtime.
-      default:
-        return null;
-    }
-  }
 }
 
 function runFiberLoop(fiber: Fiber<any>): void {
@@ -241,7 +143,13 @@ function runFiberLoop(fiber: Fiber<any>): void {
         k = frame.next;
         switch (frame.op) {
           case Op.FlatMap: {
-            cur = frame.fn(cur);
+            // a throwing continuation (user callback in .map/.flatMap) is a
+            // defect, not an interpreter crash
+            try {
+              cur = frame.fn(cur);
+            } catch (e) {
+              cur = new Suspend(Op.Fail, Cause.die(e), null);
+            }
             continue loop;
           }
           case Op.Catch:
@@ -319,12 +227,20 @@ function runFiberLoop(fiber: Fiber<any>): void {
           if (frame.op === Op.Catch) {
             const f = Cause.firstFail(cause);
             if (f) {
-              cur = frame.fn(f.value);
+              try {
+                cur = frame.fn(f.value);
+              } catch (e) {
+                cur = new Suspend(Op.Fail, Cause.die(e), null);
+              }
               continue loop;
             }
           }
           if (frame.op === Op.CatchAll) {
-            cur = frame.fn(cause);
+            try {
+              cur = frame.fn(cause);
+            } catch (e) {
+              cur = new Suspend(Op.Fail, Cause.die(e), null);
+            }
             continue loop;
           }
           if (frame.op === Op.Provide) {
@@ -535,13 +451,16 @@ function runFiberLoop(fiber: Fiber<any>): void {
         const acquire = cur.a;
         const release = cur.b as (a: any) => Eff<void, never>;
 
-        // acquire, then register release on the fiber's scope
+        // acquire, then register release on the innermost active scope.
+        // Without an enclosing scoped(), fall back to a lazily-created
+        // fiber-level scope — closed when the fiber completes (success,
+        // failure, or interrupt paths all close fiber.scope). A finalizer
+        // must never be silently dropped.
         k = new Cont(
           Op.FlatMap,
           (resource: any) => {
-            if (fiber.scope) {
-              fiber.scope.addFinalizer(() => release(resource));
-            }
+            if (!fiber.scope) fiber.scope = new Scope();
+            fiber.scope.addFinalizer(() => release(resource));
             return new Suspend(Op.Succeed, resource, null);
           },
           k,
@@ -616,7 +535,13 @@ function stepInline(
         k = frame.next;
         switch (frame.op) {
           case Op.FlatMap: {
-            cur = frame.fn(cur);
+            // a throwing continuation (user callback in .map/.flatMap) is a
+            // defect, not an interpreter crash
+            try {
+              cur = frame.fn(cur);
+            } catch (e) {
+              cur = new Suspend(Op.Fail, Cause.die(e), null);
+            }
             continue loop;
           }
           case Op.Catch:
@@ -671,12 +596,20 @@ function stepInline(
           if (frame.op === Op.Catch) {
             const f = Cause.firstFail(cause);
             if (f) {
-              cur = frame.fn(f.value);
+              try {
+                cur = frame.fn(f.value);
+              } catch (e) {
+                cur = new Suspend(Op.Fail, Cause.die(e), null);
+              }
               continue loop;
             }
           }
           if (frame.op === Op.CatchAll) {
-            cur = frame.fn(cause);
+            try {
+              cur = frame.fn(cause);
+            } catch (e) {
+              cur = new Suspend(Op.Fail, Cause.die(e), null);
+            }
             continue loop;
           }
           if (frame.op === Op.Provide) context = frame.fn as Context;
@@ -940,11 +873,6 @@ export function runFiber<A, S>(eff: Eff<A, S> & EffectCheck<S>, scheduler?: Sche
  *
  * Use this when you want to pattern-match on success vs every flavour of
  * failure (typed error, defect, interrupt) and inspect the full Cause tree.
- *
- * Fast-path: purely-synchronous effects (no Async/Fork/Race/etc.) resolve
- * via evalSync without spawning a fiber. Side effects run eagerly during
- * the runExit() call, not on the next microtask — same behaviour as runSync
- * but always returns a Promise.
  */
 export function runExit<A>(eff: Eff<A, any>, scheduler?: Scheduler): Promise<Exit<unknown, A>> {
   // Literal-leaf fast path — see top-of-file comment for rationale.

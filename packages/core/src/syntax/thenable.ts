@@ -5,10 +5,9 @@
 // For hot loops, use `.flatMap` / `eff($)` / `for { } yield` instead — those
 // compose inside a single fiber at ~14 ns per step.
 //
-// We fast-path purely-synchronous chains through `evalSync` — no fiber, no
-// scheduler, just a Promise resolution. That makes `await eff` on pure effects
-// roughly 10× faster than spawning a fresh fiber per await (but still 10×
-// slower than composed .flatMap because the microtask hop is unavoidable).
+// Literal leaves (Succeed/Fail) and bare tryPromise resolve without spawning
+// a fiber; anything richer goes through run(). The microtask hop is
+// unavoidable either way — still ~10× slower than composed .flatMap.
 
 import { Suspend, Op } from "../eff";
 import { Cause } from "../cause";

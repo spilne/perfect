@@ -119,7 +119,7 @@ export class Chunk<A> {
     for (let i = 0; i < this.length; i++) {
       if (p(this.array[this.start + i]!)) return true;
     }
-    return true;
+    return false;
   }
 
   toArray(): A[] {

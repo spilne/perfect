@@ -12,6 +12,17 @@ export interface Clock {
 
 export const Clock: ServiceTag<Clock> = service<Clock>("Clock");
 
+/**
+ * Current time in ms read from the context's Clock service — the effectful
+ * counterpart of `Date.now()`. Primitives that gate behaviour on time route
+ * through this so a TestClock drives them deterministically.
+ */
+export const clockNow: Eff<number, never> = new Suspend(
+  Op.FlatMap,
+  new Suspend(Op.GetCtx, Clock.key, null) as any,
+  (c: Clock) => new Suspend(Op.Sync, () => c.now(), null),
+) as any;
+
 // ── Real clock: wall time via setTimeout / Date.now ────────────────
 
 export class RealClock implements Clock {

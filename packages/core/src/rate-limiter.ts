@@ -17,6 +17,7 @@
 import { type Eff, type Throws } from "./eff";
 import { sync, fail, sleep } from "./constructors";
 import { type Ref, Ref as RefNS } from "./ref";
+import { clockNow } from "./clock";
 
 export type RateLimitStrategy = "sliding-window" | "fixed-window" | "token-bucket";
 
@@ -183,11 +184,12 @@ class InProcessRateLimiter implements RateLimiter {
   ) {}
 
   private get tryAcquireOnce(): Eff<AcquireResult, never> {
-    return this.state.modify((s) => {
-      const now = Date.now();
-      const [result, next] = tryAcquireState(s, now, this.limit, this.windowMs, false);
-      return [result, next];
-    });
+    return (clockNow as any).flatMap((now: number) =>
+      this.state.modify((s) => {
+        const [result, next] = tryAcquireState(s, now, this.limit, this.windowMs, false);
+        return [result, next];
+      }),
+    ) as Eff<AcquireResult, never>;
   }
 
   get acquire(): Eff<void, Throws<RateLimitExceeded>> {
@@ -219,23 +221,26 @@ class InProcessRateLimiter implements RateLimiter {
   }
 
   get remaining(): Eff<number, never> {
-    return (this.state.get as any).map((s: State) =>
-      computeRemaining(s, Date.now(), this.limit, this.windowMs),
+    return (clockNow as any).flatMap((now: number) =>
+      (this.state.get as any).map((s: State) =>
+        computeRemaining(s, now, this.limit, this.windowMs),
+      ),
     );
   }
 
   get resetAt(): Eff<number, never> {
-    return (this.state.get as any).map((s: State) =>
-      computeResetAt(s, Date.now(), this.limit, this.windowMs),
+    return (clockNow as any).flatMap((now: number) =>
+      (this.state.get as any).map((s: State) => computeResetAt(s, now, this.limit, this.windowMs)),
     );
   }
 
   get nextSlotIn(): Eff<number, never> {
-    return (this.state.get as any).map((s: State) => {
-      const now = Date.now();
-      const [result] = tryAcquireState(s, now, this.limit, this.windowMs, true);
-      return result._tag === "ok" ? 0 : result.retryAfterMs;
-    });
+    return (clockNow as any).flatMap((now: number) =>
+      (this.state.get as any).map((s: State) => {
+        const [result] = tryAcquireState(s, now, this.limit, this.windowMs, true);
+        return result._tag === "ok" ? 0 : result.retryAfterMs;
+      }),
+    );
   }
 }
 
@@ -245,9 +250,11 @@ export const RateLimiter = {
     if (opts.limit < 1) throw new Error("RateLimiter.make: limit must be >= 1");
     if (opts.windowMs < 1) throw new Error("RateLimiter.make: windowMs must be >= 1");
     const strategy = opts.strategy ?? "sliding-window";
-    return RefNS.make<State>(makeInitialState(strategy, opts.limit, Date.now())).map(
-      (state) => new InProcessRateLimiter(opts.limit, opts.windowMs, state) as RateLimiter,
-    );
+    return (clockNow as any).flatMap((now: number) =>
+      RefNS.make<State>(makeInitialState(strategy, opts.limit, now)).map(
+        (state) => new InProcessRateLimiter(opts.limit, opts.windowMs, state) as RateLimiter,
+      ),
+    ) as Eff<RateLimiter, never>;
   },
   /** Convenience: sliding-window strategy. */
   slidingWindow(opts: { limit: number; windowMs: number }): Eff<RateLimiter, never> {
