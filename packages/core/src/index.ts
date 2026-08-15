@@ -62,6 +62,39 @@ import "./layer";
 export { Clock, RealClock, TestClock, realClock } from "./clock";
 export { Random, RealRandom, TestRandom, realRandom } from "./random";
 export { Console, RealConsole, TestConsole, realConsole } from "./console";
+export {
+  Logger,
+  Log,
+  ConsoleLogger,
+  JsonLogger,
+  TestLogger,
+  defaultLogger,
+  levelEnabled,
+  type LogLevel,
+  type LogEntry,
+} from "./logger";
+export {
+  Tracer,
+  withSpan,
+  currentSpan,
+  noopTracer,
+  TestTracer,
+  type Span,
+  type SpanStatus,
+  type SpanOptions,
+  type RecordedSpan,
+} from "./tracing";
+export {
+  Metrics,
+  MetricsRegistry,
+  Counter,
+  Gauge,
+  Histogram,
+  defaultMetricsRegistry,
+  DEFAULT_BUCKETS,
+  type Labels,
+  type MetricsSnapshot,
+} from "./metrics";
 export { Gen, forAll } from "./gen";
 export type { PropertyFailure } from "./gen";
 export { run, runSync, runFiber, runExit, runSafe } from "./runtime";
