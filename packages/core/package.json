@@ -19,6 +19,10 @@
       "types": "./dist/types/stream/index.d.ts",
       "default": "./dist/stream/index.js"
     },
+    "./connect": {
+      "types": "./dist/types/connect/index.d.ts",
+      "default": "./dist/connect/index.js"
+    },
     "./syntax": {
       "types": "./dist/types/syntax/index.d.ts",
       "default": "./dist/syntax/index.js"
