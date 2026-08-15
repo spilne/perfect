@@ -146,9 +146,7 @@ describe("ensuring cause fidelity", () => {
   });
 
   test("stream failure through onFinalize keeps the cause un-duplicated", async () => {
-    const exit = await runExit(
-      (Stream.fail("boom") as any).onFinalize(sync(() => {})).toArray(),
-    );
+    const exit = await runExit((Stream.fail("boom") as any).onFinalize(sync(() => {})).toArray());
     expect(exit._tag).toBe("Failure");
     if (exit._tag === "Failure") {
       expect(Cause.pretty(exit.cause)).toBe("Fail(boom)");
@@ -161,11 +159,13 @@ describe("stream concurrency ops — structured cleanup", () => {
     let calls = 0;
     const result = await run(
       Stream.iterate(0, (n: number) => n + 1)
-        .parEvalMap(2, (x) =>
-          sync(() => {
-            calls++;
-            return x;
-          }) as any,
+        .parEvalMap(
+          2,
+          (x) =>
+            sync(() => {
+              calls++;
+              return x;
+            }) as any,
         )
         .take(3)
         .toArray() as any,
@@ -186,7 +186,12 @@ describe("stream concurrency ops — structured cleanup", () => {
         return 1;
       }) as any,
     );
-    const result = await run(infinite.merge(infinite as any).take(4).toArray() as any);
+    const result = await run(
+      infinite
+        .merge(infinite as any)
+        .take(4)
+        .toArray() as any,
+    );
     expect(result.length).toBe(4);
 
     const after = pulls;

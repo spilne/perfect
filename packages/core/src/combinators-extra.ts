@@ -169,16 +169,22 @@ export function repeatUntil<A, S>(
   const startNow = clockNow;
 
   function step(attempt: number, started: number): Eff<A, S | Throws<RepeatTimeoutError<A>>> {
-    return new Suspend(Op.FlatMap, eff as any, (value: A) =>
-      new Suspend(Op.FlatMap, clockNow as any, (now: number) => {
-      if (until(value)) return succeed(value);
-      const elapsed = now - started;
-      if (attempt + 1 >= maxAttempts)
-        return fail(makeRepeatTimeout("maxAttempts", attempt + 1, elapsed, value));
-      if (elapsed >= maxDurationMs)
-        return fail(makeRepeatTimeout("maxDuration", attempt + 1, elapsed, value));
-      return new Suspend(Op.FlatMap, sleep(intervalMs), () => step(attempt + 1, started)) as any;
-    })) as any;
+    return new Suspend(
+      Op.FlatMap,
+      eff as any,
+      (value: A) =>
+        new Suspend(Op.FlatMap, clockNow as any, (now: number) => {
+          if (until(value)) return succeed(value);
+          const elapsed = now - started;
+          if (attempt + 1 >= maxAttempts)
+            return fail(makeRepeatTimeout("maxAttempts", attempt + 1, elapsed, value));
+          if (elapsed >= maxDurationMs)
+            return fail(makeRepeatTimeout("maxDuration", attempt + 1, elapsed, value));
+          return new Suspend(Op.FlatMap, sleep(intervalMs), () =>
+            step(attempt + 1, started),
+          ) as any;
+        }),
+    ) as any;
   }
 
   return new Suspend(Op.FlatMap, startNow as any, (now: number) => step(0, now)) as any;
@@ -209,19 +215,23 @@ export function repeatUntilWithBackoff<A, S>(
     currentInterval: number,
     started: number,
   ): Eff<A, S | Throws<RepeatTimeoutError<A>>> {
-    return new Suspend(Op.FlatMap, eff as any, (value: A) =>
-      new Suspend(Op.FlatMap, clockNow as any, (now: number) => {
-      if (until(value)) return succeed(value);
-      const elapsed = now - started;
-      if (attempt + 1 >= maxAttempts)
-        return fail(makeRepeatTimeout("maxAttempts", attempt + 1, elapsed, value));
-      if (elapsed >= maxDurationMs)
-        return fail(makeRepeatTimeout("maxDuration", attempt + 1, elapsed, value));
-      const nextInterval = Math.min(currentInterval * 2, maxIntervalMs);
-      return new Suspend(Op.FlatMap, sleep(currentInterval), () =>
-        step(attempt + 1, nextInterval, started),
-      ) as any;
-    })) as any;
+    return new Suspend(
+      Op.FlatMap,
+      eff as any,
+      (value: A) =>
+        new Suspend(Op.FlatMap, clockNow as any, (now: number) => {
+          if (until(value)) return succeed(value);
+          const elapsed = now - started;
+          if (attempt + 1 >= maxAttempts)
+            return fail(makeRepeatTimeout("maxAttempts", attempt + 1, elapsed, value));
+          if (elapsed >= maxDurationMs)
+            return fail(makeRepeatTimeout("maxDuration", attempt + 1, elapsed, value));
+          const nextInterval = Math.min(currentInterval * 2, maxIntervalMs);
+          return new Suspend(Op.FlatMap, sleep(currentInterval), () =>
+            step(attempt + 1, nextInterval, started),
+          ) as any;
+        }),
+    ) as any;
   }
 
   return new Suspend(Op.FlatMap, startNow as any, (now: number) =>

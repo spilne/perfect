@@ -24,9 +24,9 @@ describe("Stream.dropWhile", () => {
   });
 
   test("drops nothing when the first element fails the predicate", async () => {
-    expect(await run((Stream.of(5, 1, 2) as any).dropWhile((n: number) => n < 3).toArray())).toEqual(
-      [5, 1, 2],
-    );
+    expect(
+      await run((Stream.of(5, 1, 2) as any).dropWhile((n: number) => n < 3).toArray()),
+    ).toEqual([5, 1, 2]);
   });
 });
 
@@ -58,7 +58,9 @@ describe("Stream.evalFilter", () => {
 describe("Stream.unfoldEffect", () => {
   test("unfolds from a seed using an effectful step", async () => {
     const result = await run(
-      Stream.unfoldEffect(0, (n) => sync(() => (n < 4 ? ([n * 10, n + 1] as [number, number]) : null))).toArray(),
+      Stream.unfoldEffect(0, (n) =>
+        sync(() => (n < 4 ? ([n * 10, n + 1] as [number, number]) : null)),
+      ).toArray(),
     );
     expect(result).toEqual([0, 10, 20, 30]);
   });
@@ -89,9 +91,7 @@ describe("Stream.unfoldEffect", () => {
 describe("Stream.tick", () => {
   test("emits once per interval on virtual time", async () => {
     const c = new TestClock();
-    const done = run(
-      provide((Stream.tick(100) as any).take(3).toArray(), Clock, c) as any,
-    );
+    const done = run(provide((Stream.tick(100) as any).take(3).toArray(), Clock, c) as any);
     for (let i = 0; i < 5; i++) {
       await tick();
       c.advance(100);
@@ -201,7 +201,11 @@ describe("Chunk methods", () => {
   });
 
   test("flatMap to empty chunks yields empty", () => {
-    expect(Chunk.of(1, 2).flatMap(() => Chunk.empty<number>()).toArray()).toEqual([]);
+    expect(
+      Chunk.of(1, 2)
+        .flatMap(() => Chunk.empty<number>())
+        .toArray(),
+    ).toEqual([]);
   });
 
   test("forEach visits each element in order", () => {

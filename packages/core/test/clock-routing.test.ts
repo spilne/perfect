@@ -13,11 +13,7 @@ describe("RateLimiter under TestClock", () => {
   test("fixed window resets on virtual time, no real waiting", async () => {
     const c = new TestClock();
 
-    const make = provide(
-      RateLimiter.fixedWindow({ limit: 2, windowMs: 1000 }) as any,
-      Clock,
-      c,
-    );
+    const make = provide(RateLimiter.fixedWindow({ limit: 2, windowMs: 1000 }) as any, Clock, c);
     const limiter = await run(make as any);
 
     const acquire = () => run(provide((limiter as any).tryAcquire, Clock, c) as any);
@@ -126,9 +122,7 @@ describe("stream time ops under TestClock", () => {
     const { Stream } = await import("../src");
     const c = new TestClock();
 
-    const done = run(
-      provide((Stream.of(1, 2, 3) as any).throttle(100).toArray(), Clock, c) as any,
-    );
+    const done = run(provide((Stream.of(1, 2, 3) as any).throttle(100).toArray(), Clock, c) as any);
     // item 1 emits at t=0; items 2 and 3 wait on virtual sleeps
     for (let i = 0; i < 6; i++) {
       await tick();

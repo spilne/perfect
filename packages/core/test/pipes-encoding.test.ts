@@ -60,7 +60,9 @@ describe("utf8Encode / utf8Decode", () => {
 
 describe("base64Encode / base64Decode", () => {
   test("round-trips an ASCII string", async () => {
-    const encoded = await run((Stream.succeed("hello") as any).through(Pipes.base64Encode).toArray());
+    const encoded = await run(
+      (Stream.succeed("hello") as any).through(Pipes.base64Encode).toArray(),
+    );
     expect(encoded).toEqual(["aGVsbG8="]);
 
     const decoded = await run(
@@ -110,9 +112,7 @@ describe("base64Encode / base64Decode", () => {
   test("base64Encode fails with a Die cause on non-latin1 input (btoa limitation)", async () => {
     // btoa throws on codepoints > 0xFF; the throw happens inside a `.map`
     // callback and surfaces as a defect (Die), not an interpreter crash
-    const exit = await runExit(
-      (Stream.succeed("🚀") as any).through(Pipes.base64Encode).toArray(),
-    );
+    const exit = await runExit((Stream.succeed("🚀") as any).through(Pipes.base64Encode).toArray());
     expect(exit._tag).toBe("Failure");
     if (exit._tag === "Failure") {
       expect(Cause.hasDie(exit.cause)).toBe(true);

@@ -811,7 +811,10 @@ export class Stream<A, S = never> {
     // Drivers are structured children of the consuming fiber; the stream
     // finalizer interrupts them on early termination.
     const self = this;
-    type Slot = { _tag: "chunk"; chunk: Chunk<A> } | { _tag: "end" } | { _tag: "fail"; cause: Cause };
+    type Slot =
+      | { _tag: "chunk"; chunk: Chunk<A> }
+      | { _tag: "end" }
+      | { _tag: "fail"; cause: Cause };
 
     const drivers: Fiber<any>[] = [];
 
@@ -919,7 +922,9 @@ export class Stream<A, S = never> {
               if (slot._tag === "end") return succeed(DONE);
               return (slot.deferred.await as any).flatMap((exit: Exit<unknown, B>) =>
                 exit._tag === "Success"
-                  ? succeed(emit(Chunk.single(exit.value), new Stream(suspend(() => pull()) as any)))
+                  ? succeed(
+                      emit(Chunk.single(exit.value), new Stream(suspend(() => pull()) as any)),
+                    )
                   : failCause(exit.cause),
               );
             });
@@ -1119,16 +1124,13 @@ export class Stream<A, S = never> {
           });
 
         const settle = (latest: A): Eff<Step<A>, any> =>
-          (timeoutOption(slots.take() as any, ms) as any).flatMap(
-            (slot: Slot | undefined): any => {
-              if (slot === undefined)
-                return succeed(emit(Chunk.single(latest), new Stream(suspend(() => idle()) as any)));
-              if (slot._tag === "fail") return failCause(slot.cause);
-              if (slot._tag === "end")
-                return succeed(emit(Chunk.single(latest), Stream.empty()));
-              return settle(slot.value);
-            },
-          );
+          (timeoutOption(slots.take() as any, ms) as any).flatMap((slot: Slot | undefined): any => {
+            if (slot === undefined)
+              return succeed(emit(Chunk.single(latest), new Stream(suspend(() => idle()) as any)));
+            if (slot._tag === "fail") return failCause(slot.cause);
+            if (slot._tag === "end") return succeed(emit(Chunk.single(latest), Stream.empty()));
+            return settle(slot.value);
+          });
 
         return (fork(driver) as any).flatMap((fb: Fiber<any>) => {
           drivers.push(fb);
