@@ -18,10 +18,12 @@ import {
   sleep,
   fork,
   interrupt,
+  race,
   timeoutOption,
   retry as effRetry,
   type RetryConfig,
 } from "../constructors";
+import { TaggedError } from "../tagged-error";
 import type { RetryPolicy } from "../retry-policy";
 import { type Queue, Queue as QueueNS, QueueClosed } from "../queue";
 import { type Deferred, Deferred as DeferredNS } from "../deferred";
@@ -51,6 +53,14 @@ function interruptAllEff(drivers: Fiber<any>[]): Eff<void, never> {
 }
 import { Chunk } from "./chunk";
 import { type FusibleOp, compileFused, hasFilterOps, SKIP } from "./fusion";
+
+// ── Errors ─────────────────────────────────────────────────────────
+
+/** Typed failure produced by {@link Stream.timeout} when the gap between
+ *  element-producing pulls exceeds the limit. */
+export class StreamTimeoutError extends TaggedError("StreamTimeoutError")<{
+  readonly ms: number;
+}>() {}
 
 // ── Step type ──────────────────────────────────────────────────────
 
@@ -254,6 +264,26 @@ export class Stream<A, S = never> {
       const chunk = Chunk.single(value);
       return new Stream(succeed(emit(chunk, Stream.repeatValue(value))));
     });
+  }
+
+  /**
+   * Run the stream produced by `factory` end-to-end `n` times, concatenating
+   * the runs.
+   *
+   * This is a static taking a factory rather than an instance `repeatN`
+   * because perfect streams are single-shot pull cursors — once a step chain
+   * has been consumed it cannot be rewound, so an instance method would have
+   * nothing left to replay. The factory re-creates a fresh stream (lazily,
+   * via {@link Stream.suspend}) for each repetition.
+   */
+  static repeatWith<A, S>(factory: () => Stream<A, S>, n: number): Stream<A, S> {
+    const count = Math.floor(n);
+    if (count <= 0) return Stream.empty() as any;
+    const go = (remaining: number): Stream<A, S> =>
+      remaining <= 1
+        ? Stream.suspend(factory)
+        : (Stream.suspend(factory).concat(Stream.suspend(() => go(remaining - 1))) as any);
+    return go(count);
   }
 
   static tick(intervalMs: number): Stream<void, never> {
@@ -693,6 +723,37 @@ export class Stream<A, S = never> {
     return new Stream(succeed(emit(Chunk.single(zero), go(zero, this))), this._finalizer);
   }
 
+  /**
+   * Stateful map — thread an accumulator through the stream, emitting the
+   * mapped value for each element. `f` returns `[nextState, output]`; the
+   * state carries across chunk boundaries. Unlike `scan` the state itself is
+   * never emitted.
+   */
+  mapAccumulate<St, B>(initial: St, f: (state: St, a: A) => readonly [St, B]): Stream<B, S> {
+    function go(state: St, stream: Stream<A, any>): Stream<B, any> {
+      return new Stream(
+        (stream.step as any).map((s: Step<A>) => {
+          if (s._tag === "Done") return DONE;
+          const out: B[] = [];
+          let current = state;
+          for (const item of s.chunk) {
+            const [next, b] = f(current, item);
+            current = next;
+            out.push(b);
+          }
+          return emit(Chunk.fromArray(out), go(current, s.next));
+        }),
+        stream._finalizer,
+      );
+    }
+    return go(initial, this);
+  }
+
+  /** Alias of {@link mapAccumulate} — pure running state, emits the mapped value. */
+  statefulMap<St, B>(initial: St, f: (state: St, a: A) => readonly [St, B]): Stream<B, S> {
+    return this.mapAccumulate(initial, f);
+  }
+
   tap(f: (a: A) => void): Stream<A, S> {
     return this._withOp({ _tag: "tap", fn: f as any });
   }
@@ -713,6 +774,40 @@ export class Stream<A, S = never> {
       last = a;
       return true;
     });
+  }
+
+  /** Pair each element with its predecessor — the first element pairs with
+   *  `undefined`: `[undefined, first], [first, second], …`. */
+  zipWithPrevious(): Stream<[A | undefined, A], S> {
+    return this.mapAccumulate<A | undefined, [A | undefined, A]>(undefined, (prev, curr) => [
+      curr,
+      [prev, curr] as [A | undefined, A],
+    ]);
+  }
+
+  /**
+   * Global deduplication — drop any element whose key was already seen (first
+   * occurrence wins). Keys are compared by Set identity (`SameValueZero`).
+   *
+   * Unlike {@link changes}, which only suppresses *consecutive* duplicates,
+   * this tracks every key seen so far — memory grows with the number of
+   * distinct keys, so prefer `changes` for sorted/bursty inputs.
+   */
+  dedupe(keyFn?: (a: A) => unknown): Stream<A, S> {
+    const key = keyFn ?? ((a: A) => a as unknown);
+    const seen = new Set<unknown>();
+    return this.filter((a) => {
+      const k = key(a);
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+  }
+
+  /** Alias of {@link dedupe} with a required key function — keeps the first
+   *  occurrence of each key. */
+  distinctBy(keyFn: (a: A) => unknown): Stream<A, S> {
+    return this.dedupe(keyFn);
   }
 
   // ── Batching ─────────────────────────────────────────────────────
@@ -750,6 +845,49 @@ export class Stream<A, S = never> {
 
   rechunk(size: number): Stream<A, S> {
     return this.grouped(size).flatMap((chunk) => Stream.fromChunk(chunk));
+  }
+
+  /**
+   * Sliding windows of `size` elements, advancing by `step` (default 1)
+   * between windows. Only full windows are emitted — a stream shorter than
+   * `size` emits nothing — and `step > size` skips elements between windows.
+   */
+  sliding(size: number, step = 1): Stream<Chunk<A>, S> {
+    const sz = Math.max(1, Math.floor(size));
+    const st = Math.max(1, Math.floor(step));
+    function go(buffer: A[], skip: number, stream: Stream<A, any>): Stream<Chunk<A>, any> {
+      return new Stream(
+        (stream.step as any)
+          .map((s: Step<A>) => {
+            if (s._tag === "Done") return DONE;
+            const windows: Chunk<A>[] = [];
+            let buf = buffer.slice();
+            let toSkip = skip;
+            for (const item of s.chunk) {
+              if (toSkip > 0) {
+                toSkip--;
+                continue;
+              }
+              buf.push(item);
+              if (buf.length === sz) {
+                windows.push(Chunk.fromArray(buf));
+                if (st >= sz) {
+                  toSkip = st - sz;
+                  buf = [];
+                } else {
+                  buf = buf.slice(st);
+                }
+              }
+            }
+            const next = go(buf, toSkip, s.next);
+            if (windows.length === 0) return next.step;
+            return emit(Chunk.fromArray(windows), next);
+          })
+          .flatMap((r: any) => (r instanceof Suspend ? r : succeed(r))),
+        stream._finalizer,
+      );
+    }
+    return go([], 0, this);
   }
 
   // ── Combination ──────────────────────────────────────────────────
@@ -1244,6 +1382,90 @@ export class Stream<A, S = never> {
     );
   }
 
+  /**
+   * Fail with {@link StreamTimeoutError} if any single pull takes longer
+   * than `ms` to produce a step — i.e. the gap between emitted chunks (or
+   * between subscription and the first chunk) exceeds the limit.
+   *
+   * Consumer-side and Clock-routed (`timeoutOption`), so a TestClock drives
+   * it deterministically; the in-flight pull is interrupted when the timer
+   * fires.
+   */
+  timeout(ms: number): Stream<A, S | Throws<StreamTimeoutError>> {
+    const wrap = (s: Stream<A, any>): Stream<A, any> =>
+      new Stream(
+        (timeoutOption(s.step as any, ms) as any).flatMap((step: Step<A> | undefined) => {
+          if (step === undefined) return fail(new StreamTimeoutError({ ms }));
+          if (step._tag === "Done") return succeed(DONE);
+          return succeed(emit(step.chunk, wrap(step.next)));
+        }),
+        s._finalizer,
+      );
+    return wrap(this) as any;
+  }
+
+  /**
+   * End the stream gracefully (Done, not a failure) when the AbortSignal
+   * aborts — even while a pull is blocked mid-wait. Each pull races the
+   * upstream step against an async that resolves on abort; whichever side
+   * loses is interrupted, which also removes the abort listener, so nothing
+   * leaks after the stream terminates.
+   */
+  interruptOn(signal: AbortSignal): Stream<A, S> {
+    const abortStep: Eff<Step<A>, never> = async<Step<A>>((resume) => {
+      if (signal.aborted) {
+        resume(succeed(DONE) as any);
+        return;
+      }
+      const onAbort = () => resume(succeed(DONE) as any);
+      signal.addEventListener("abort", onAbort, { once: true });
+      return () => signal.removeEventListener("abort", onAbort);
+    }) as any;
+    const wrap = (s: Stream<A, any>): Stream<A, any> =>
+      new Stream(
+        suspend(() =>
+          signal.aborted
+            ? (succeed(DONE) as any)
+            : race([
+                (s.step as any).map((step: Step<A>) =>
+                  step._tag === "Done" ? DONE : emit(step.chunk, wrap(step.next)),
+                ),
+                abortStep as any,
+              ]),
+        ) as any,
+        s._finalizer,
+      );
+    return wrap(this);
+  }
+
+  /**
+   * End the stream gracefully once `ms` milliseconds (Clock time, anchored
+   * at the first pull) have elapsed. A pull still blocked when the deadline
+   * hits is interrupted and the stream completes with Done rather than
+   * failing. Clock-routed — a TestClock drives it deterministically.
+   */
+  interruptAfter(ms: number): Stream<A, S> {
+    const self = this;
+    const wrap = (deadline: number, s: Stream<A, any>): Stream<A, any> =>
+      new Stream(
+        (clockNow as any).flatMap((now: number) => {
+          const remaining = deadline - now;
+          if (remaining <= 0) return succeed(DONE);
+          return (timeoutOption(s.step as any, remaining) as any).map(
+            (step: Step<A> | undefined) => {
+              if (step === undefined || step._tag === "Done") return DONE;
+              return emit(step.chunk, wrap(deadline, step.next));
+            },
+          );
+        }),
+        s._finalizer,
+      );
+    return new Stream(
+      (clockNow as any).flatMap((now: number) => wrap(now + ms, self).step),
+      self._finalizer,
+    );
+  }
+
   // ── Pipe ─────────────────────────────────────────────────────────
 
   through<B, S2>(pipe: Pipe<A, B, S2>): Stream<B, S | S2> {
@@ -1266,6 +1488,15 @@ export class Stream<A, S = never> {
         .catch((e: any) => handler(e).step),
       this._finalizer,
     );
+  }
+
+  /**
+   * If this stream fails, switch to the fallback stream. Elements emitted
+   * before the failure are preserved; the failure itself is replaced by
+   * whatever the (lazily built) fallback produces.
+   */
+  orElse<B, S2>(that: () => Stream<B, S2>): Stream<A | B, S2> {
+    return this.catch(() => that());
   }
 
   onFinalize<S2>(finalizer: Eff<void, S2>): Stream<A, S | S2> {

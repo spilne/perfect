@@ -30,6 +30,9 @@ export {
 
 export type { Codec } from "./codec";
 export { JsonCodec, codecFromSchema, codecTuple, codecRecord, codecArray } from "./codec";
+export { LosslessJsonCodec } from "./lossless-codec";
+export { canonicalJSON, payloadHash } from "./canonicalize";
 
 export { OffsetTracker } from "./offset-tracker";
+export { type StateBackend, InMemoryState } from "./state-backend";
 export { autoCommitBatchWithin } from "./auto-commit";

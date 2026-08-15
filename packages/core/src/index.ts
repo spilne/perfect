@@ -95,6 +95,22 @@ export {
   type Labels,
   type MetricsSnapshot,
 } from "./metrics";
+export {
+  type Eq,
+  type Ord,
+  type Show,
+  type Monoid,
+  JsonEq,
+  eqFromCodec,
+  numberOrd,
+  stringOrd,
+  ordBy,
+  JsonShow,
+  arrayMonoid,
+  sumMonoid,
+  stringMonoid,
+} from "./typeclasses";
+export { createGracefulShutdown, type GracefulShutdown } from "./graceful-shutdown";
 export { Gen, forAll } from "./gen";
 export type { PropertyFailure } from "./gen";
 export { run, runSync, runFiber, runExit, runSafe } from "./runtime";
@@ -122,8 +138,8 @@ export { Schedule, retryWith, repeat } from "./schedule";
 export type { Scheduler } from "./scheduler";
 export { AsyncScheduler, BunScheduler, SyncScheduler, setDefaultScheduler } from "./scheduler";
 export { WorkerPool } from "./worker";
-export { Chunk, Stream, Sink, Pipes, Sinks } from "./stream";
-export type { Pipe } from "./stream";
+export { Chunk, Stream, StreamTimeoutError, SchemaParseError, Sink, Pipes, Sinks } from "./stream";
+export type { Pipe, SchemaParser } from "./stream";
 
 export { eff } from "./syntax";
 import "./syntax";
