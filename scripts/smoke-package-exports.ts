@@ -8,6 +8,9 @@ const packages = [
   },
   { dir: "packages/http", imports: ["dist/index.js"] },
   { dir: "packages/http-otel", imports: ["dist/index.js"] },
+  { dir: "packages/kafka", imports: ["dist/index.js"] },
+  { dir: "packages/otel", imports: ["dist/index.js"] },
+  { dir: "packages/topology", imports: ["dist/index.js"] },
   { dir: "packages/transform", imports: ["dist/rewrite.js", "dist/bun-plugin.js", "dist/plugin.js"] },
 ];
 
