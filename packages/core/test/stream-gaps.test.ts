@@ -221,3 +221,78 @@ describe("Chunk methods", () => {
     expect(c.drop(1).get(0)).toBe(20);
   });
 });
+
+describe("Stream.buffer", () => {
+  test("passes all elements through in order", async () => {
+    const result = await run((Stream.range(0, 20) as any).rechunk(1).buffer(4).toArray());
+    expect(result).toEqual(Array.from({ length: 20 }, (_, i) => i));
+  });
+
+  test("producer runs ahead of a slow consumer up to capacity", async () => {
+    let produced = 0;
+    const { sleep } = await import("../src");
+
+    const source = Stream.unfoldEffect(0, (n) =>
+      sync(() => {
+        if (n >= 10) return null;
+        produced++;
+        return [n, n + 1] as [number, number];
+      }),
+    );
+
+    const result = await run(
+      (source as any)
+        .buffer(5)
+        .evalMap((x: number) => sleep(5).map(() => x))
+        .take(2)
+        .toArray() as any,
+    );
+
+    expect(result).toEqual([0, 1]);
+    // while the consumer slept on the first items, the driver prefetched more
+    expect(produced).toBeGreaterThan(2);
+    expect(produced).toBeLessThanOrEqual(10);
+  });
+
+  test("propagates failures", async () => {
+    const { runExit, Cause, fail: failFn } = await import("../src");
+    const source = (Stream.of(1, 2) as any).concat(Stream.fromEffect(failFn("boom")));
+    const exit = await runExit(source.buffer(4).toArray());
+    expect(exit._tag).toBe("Failure");
+    if (exit._tag === "Failure") {
+      expect(Cause.firstFail(exit.cause)?.value).toBe("boom");
+    }
+  });
+
+  test("stops the driver on early termination", async () => {
+    let produced = 0;
+    const infinite = Stream.unfoldEffect(0, (n) =>
+      sync(() => {
+        produced++;
+        return [n, n + 1] as [number, number];
+      }),
+    );
+
+    const result = await run((infinite as any).buffer(3).take(2).toArray());
+    expect(result).toEqual([0, 1]);
+
+    const after = produced;
+    await new Promise((r) => setTimeout(r, 30));
+    expect(produced).toBe(after);
+  });
+});
+
+describe("parEvalMap ordering guarantee (kafka migration requirement)", () => {
+  test("preserves input order under adversarial completion times", async () => {
+    const { sleep } = await import("../src");
+    // later items complete much faster than earlier ones
+    const delays = [50, 5, 30, 1, 20, 2, 40, 3];
+    const result = await run(
+      Stream.fromArray(delays.map((d, i) => ({ d, i })))
+        .rechunk(1)
+        .parEvalMap(4, ({ d, i }) => sleep(d).map(() => i) as any)
+        .toArray() as any,
+    );
+    expect(result).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+  });
+});
