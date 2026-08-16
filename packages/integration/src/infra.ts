@@ -1,0 +1,323 @@
+// ---------------------------------------------------------------------------
+// Integration test infrastructure — testcontainer lifecycle helpers
+//
+// Usage:
+//   withKafka("topic tests", (ctx) => {
+//     it("publishes and consumes", async () => { ... });
+//   });
+//
+//   withRedis("cache tests", (ctx) => { ... });
+//
+//   withAll("e2e pipeline", (ctx) => { ... });
+//
+// Every wrapper is gated on Docker being reachable: without a daemon the
+// suites skip cleanly (describe.skipIf) so a plain `bun test` stays green
+// on machines without Docker. In CI the suites also skip unless
+// PERFECT_INTEGRATION=1 — this package is opt-in, not part of the default
+// pipeline.
+// ---------------------------------------------------------------------------
+
+import { describe, beforeAll, afterAll, setDefaultTimeout } from "bun:test";
+
+// Integration tests need longer timeouts for container startup
+setDefaultTimeout(300_000);
+import { GenericContainer, Wait, type StartedTestContainer } from "testcontainers";
+import { KafkaContainer } from "@testcontainers/kafka";
+
+// ---------------------------------------------------------------------------
+// Docker gate
+// ---------------------------------------------------------------------------
+
+function detectDocker(): boolean {
+  try {
+    // `docker version` (unlike `docker info`) exits non-zero when the
+    // daemon is unreachable, not just when the CLI is missing.
+    const result = Bun.spawnSync({
+      cmd: ["docker", "version", "--format", "{{.Server.Version}}"],
+      stdout: "pipe",
+      stderr: "pipe",
+      timeout: 10_000,
+    });
+    return result.exitCode === 0;
+  } catch {
+    return false;
+  }
+}
+
+/** True when a Docker daemon is reachable. Computed once at load. */
+export const dockerAvailable = detectDocker();
+
+const ciOptedOut = !!process.env.CI && process.env.PERFECT_INTEGRATION !== "1";
+
+/** True when the container-backed suites will actually run. */
+export const integrationEnabled = dockerAvailable && !ciOptedOut;
+
+if (!integrationEnabled) {
+  const reason = dockerAvailable
+    ? "CI run without PERFECT_INTEGRATION=1"
+    : "Docker is not available";
+  console.log(`[integration] ${reason} — skipping container-backed suites.`);
+}
+
+const describeInfra = describe.skipIf(!integrationEnabled);
+
+// ---------------------------------------------------------------------------
+// Container configs
+// ---------------------------------------------------------------------------
+
+const REDPANDA_IMAGE = "redpandadata/redpanda:v24.3.7";
+const REDIS_IMAGE = "redis:7-alpine";
+const POSTGRES_IMAGE = "postgres:17-alpine";
+
+const TIMEOUT = 180_000; // container startup timeout
+const KAFKA_TIMEOUT = 300_000; // Kafka (JVM) needs more time to start
+
+// ---------------------------------------------------------------------------
+// Context — what tests receive
+// ---------------------------------------------------------------------------
+
+export interface KafkaCtx {
+  broker: string;
+}
+
+export interface RedisCtx {
+  url: string;
+  host: string;
+  port: number;
+}
+
+export interface PostgresCtx {
+  url: string;
+  host: string;
+  port: number;
+}
+
+export interface InfraCtx {
+  kafka?: KafkaCtx;
+  redis?: RedisCtx;
+  postgres?: PostgresCtx;
+}
+
+// ---------------------------------------------------------------------------
+// Container launchers
+// ---------------------------------------------------------------------------
+
+async function startKafka(): Promise<{ container: StartedTestContainer; ctx: KafkaCtx }> {
+  // Redpanda — Kafka-compatible, starts in seconds (no JVM).
+  // Use a fixed host port so the advertised listener matches what clients connect to.
+  const hostPort = 29092 + Math.floor(Math.random() * 1000);
+
+  const container = await new GenericContainer(REDPANDA_IMAGE)
+    .withExposedPorts({ container: 29092, host: hostPort })
+    .withCommand([
+      "redpanda",
+      "start",
+      "--smp",
+      "1",
+      "--memory",
+      "256M",
+      "--mode",
+      "dev-container",
+      "--kafka-addr",
+      "PLAINTEXT://0.0.0.0:29092",
+      "--advertise-kafka-addr",
+      `PLAINTEXT://localhost:${hostPort}`,
+    ])
+    .withWaitStrategy(Wait.forLogMessage("Successfully started Redpanda"))
+    .withStartupTimeout(TIMEOUT)
+    .start();
+
+  return { container, ctx: { broker: `localhost:${hostPort}` } };
+}
+
+async function startApacheKafka(): Promise<{ container: StartedTestContainer; ctx: KafkaCtx }> {
+  const container = await new KafkaContainer("confluentinc/cp-kafka:7.9.1")
+    .withKraft()
+    .withStartupTimeout(KAFKA_TIMEOUT)
+    .start();
+
+  const broker = `${container.getHost()}:${container.getMappedPort(9093)}`;
+  return { container, ctx: { broker } };
+}
+
+async function startRedis(): Promise<{ container: StartedTestContainer; ctx: RedisCtx }> {
+  const container = await new GenericContainer(REDIS_IMAGE)
+    .withExposedPorts(6379)
+    .withWaitStrategy(Wait.forLogMessage("Ready to accept connections"))
+    .withStartupTimeout(TIMEOUT)
+    .start();
+
+  const host = container.getHost();
+  const port = container.getMappedPort(6379);
+
+  return { container, ctx: { host, port, url: `redis://${host}:${port}` } };
+}
+
+async function startPostgres(): Promise<{ container: StartedTestContainer; ctx: PostgresCtx }> {
+  const container = await new GenericContainer(POSTGRES_IMAGE)
+    .withExposedPorts(5432)
+    .withEnvironment({
+      POSTGRES_USER: "test",
+      POSTGRES_PASSWORD: "test",
+      POSTGRES_DB: "test",
+    })
+    .withCommand(["postgres", "-c", "fsync=off", "-c", "synchronous_commit=off"])
+    .withWaitStrategy(Wait.forLogMessage("database system is ready to accept connections", 2))
+    .withStartupTimeout(TIMEOUT)
+    .start();
+
+  const host = container.getHost();
+  const port = container.getMappedPort(5432);
+
+  return { container, ctx: { host, port, url: `postgres://test:test@${host}:${port}/test` } };
+}
+
+// ---------------------------------------------------------------------------
+// Describe wrappers — one per infra combo
+// ---------------------------------------------------------------------------
+
+type TestFn<T> = (ctx: T) => void;
+
+export function withKafka(name: string, fn: TestFn<KafkaCtx>) {
+  describeInfra(name, () => {
+    let container: StartedTestContainer;
+    const ctx: KafkaCtx = { broker: "" };
+
+    beforeAll(async () => {
+      const result = await startKafka();
+      container = result.container;
+      Object.assign(ctx, result.ctx);
+    }, TIMEOUT);
+
+    afterAll(async () => {
+      await container?.stop();
+    });
+
+    fn(ctx);
+  });
+}
+
+export function withApacheKafka(name: string, fn: TestFn<KafkaCtx>) {
+  describeInfra(name, () => {
+    let container: StartedTestContainer;
+    const ctx: KafkaCtx = { broker: "" };
+
+    beforeAll(async () => {
+      const result = await startApacheKafka();
+      container = result.container;
+      Object.assign(ctx, result.ctx);
+    }, KAFKA_TIMEOUT);
+
+    afterAll(async () => {
+      await container?.stop();
+    });
+
+    fn(ctx);
+  });
+}
+
+export function withRedis(name: string, fn: TestFn<RedisCtx>) {
+  describeInfra(name, () => {
+    let container: StartedTestContainer;
+    const ctx: RedisCtx = { url: "", host: "", port: 0 };
+
+    beforeAll(async () => {
+      const result = await startRedis();
+      container = result.container;
+      Object.assign(ctx, result.ctx);
+    }, TIMEOUT);
+
+    afterAll(async () => {
+      await container?.stop();
+    });
+
+    fn(ctx);
+  });
+}
+
+export function withPostgres(name: string, fn: TestFn<PostgresCtx>) {
+  describeInfra(name, () => {
+    let container: StartedTestContainer;
+    const ctx: PostgresCtx = { url: "", host: "", port: 0 };
+
+    beforeAll(async () => {
+      const result = await startPostgres();
+      container = result.container;
+      Object.assign(ctx, result.ctx);
+    }, TIMEOUT);
+
+    afterAll(async () => {
+      await container?.stop();
+    });
+
+    fn(ctx);
+  });
+}
+
+export function withAll(name: string, fn: TestFn<Required<InfraCtx>>) {
+  describeInfra(name, () => {
+    const containers: StartedTestContainer[] = [];
+    const ctx = {} as Required<InfraCtx>;
+
+    beforeAll(async () => {
+      const [k, r, p] = await Promise.all([startKafka(), startRedis(), startPostgres()]);
+      containers.push(k.container, r.container, p.container);
+      ctx.kafka = k.ctx;
+      ctx.redis = r.ctx;
+      ctx.postgres = p.ctx;
+    }, KAFKA_TIMEOUT); // 3 containers in parallel — use the longer timeout
+
+    afterAll(async () => {
+      await Promise.all(containers.map((c) => c.stop()));
+    });
+
+    fn(ctx);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Test utilities
+// ---------------------------------------------------------------------------
+
+/**
+ * Retry an assertion until it passes or timeout.
+ * Use for eventually-consistent distributed assertions.
+ *
+ * @example
+ * ```ts
+ * await eventually(() => expect(sink.items.length).toBe(5));
+ * await eventually(() => expect(metrics.count).toBeGreaterThan(0), { timeoutMs: 10_000 });
+ * ```
+ */
+export async function eventually(
+  assertion: () => void | Promise<void>,
+  opts?: { timeoutMs?: number; intervalMs?: number },
+): Promise<void> {
+  const { timeoutMs = 5_000, intervalMs = 100 } = opts ?? {};
+  const deadline = Date.now() + timeoutMs;
+  let lastError: unknown;
+
+  while (Date.now() < deadline) {
+    try {
+      await assertion();
+      return;
+    } catch (e) {
+      lastError = e;
+      await new Promise((r) => setTimeout(r, intervalMs));
+    }
+  }
+
+  throw lastError;
+}
+
+/**
+ * Generate a unique topic/stream/key name for test isolation.
+ *
+ * @example
+ * ```ts
+ * const topic = uniqueName("orders"); // "orders-a1b2c3"
+ * ```
+ */
+export function uniqueName(prefix: string): string {
+  return `${prefix}-${crypto.randomUUID().slice(0, 8)}`;
+}

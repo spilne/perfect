@@ -1,0 +1,9 @@
+{
+  "name": "@perfect/integration",
+  "sourceRoot": "packages/integration/src",
+  "targets": {
+    "test": {},
+    "lint": {},
+    "typecheck": {}
+  }
+}
