@@ -27,7 +27,7 @@ function makeFakeOtelTracer() {
     startSpan(name: string, options?: { attributes?: Record<string, unknown> }) {
       const record: FakeSpanRecord = {
         name,
-        attributes: { ...(options?.attributes ?? {}) },
+        attributes: { ...options?.attributes },
         status: null,
         ended: false,
         exceptions: [],

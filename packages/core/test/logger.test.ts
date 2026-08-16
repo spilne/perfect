@@ -1,6 +1,5 @@
 import { describe, test, expect } from "bun:test";
 import {
-  succeed,
   provide,
   run,
   Clock,
