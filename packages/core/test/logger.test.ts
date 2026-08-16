@@ -11,7 +11,7 @@ import {
   levelEnabled,
 } from "../src";
 
-function withLogger<A>(eff: any, logger: TestLogger, clock?: TestClock) {
+function withLogger(eff: any, logger: TestLogger, clock?: TestClock) {
   const withLog = provide(eff, Logger, logger);
   return clock ? provide(withLog, Clock, clock) : withLog;
 }
