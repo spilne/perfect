@@ -605,7 +605,7 @@ export class Stream<A, S = never> {
       new Stream(
         (inner.step as any).flatMap((s: Step<B>) => {
           if (s._tag === "Emit") {
-            return succeed(emit(s.chunk, drainInner(s.next, outer, pending, idx + 0)));
+            return succeed(emit(s.chunk, drainInner(s.next as any, outer, pending, idx + 0)));
           }
           return nextElement(outer, pending, idx + 1).step;
         }),
@@ -622,7 +622,7 @@ export class Stream<A, S = never> {
       return new Stream(
         (outer.step as any).flatMap((s: Step<A>) => {
           if (s._tag === "Done") return succeed(DONE);
-          return nextElement(s.next, s.chunk, 0).step;
+          return nextElement(s.next as any, s.chunk, 0).step;
         }),
       );
     };
@@ -1479,7 +1479,7 @@ export class Stream<A, S = never> {
     return pipe(this) as any;
   }
 
-  runSink<B, S2>(sink: { run(input: Stream<A, unknown>): Eff<B, S2> }): Eff<B, S | S2> {
+  runSink<B, S2>(sink: { run<S3>(input: Stream<A, S3>): Eff<B, S2 | S3> }): Eff<B, S | S2> {
     return sink.run(this) as any;
   }
 
@@ -1524,7 +1524,7 @@ export class Stream<A, S = never> {
       new Stream(
         (effRetry(s.step as any, policy as any) as any).map((step: Step<A>) => {
           if (step._tag === "Done") return DONE;
-          return emit(step.chunk, wrap(step.next));
+          return emit(step.chunk, wrap(step.next as any));
         }),
         s._finalizer,
       );
@@ -1609,7 +1609,10 @@ export class Stream<A, S = never> {
 
 // ── Pipe type ──────────────────────────────────────────────────────
 
-export type Pipe<I, O, S = never> = (input: Stream<I, unknown>) => Stream<O, S>;
+// Polymorphic in the input's effect union: a pipe THREADS the upstream S
+// through to its output (adding its own S2, e.g. a parse error) instead of
+// erasing it. `.through()` therefore preserves requirements end to end.
+export type Pipe<I, O, S2 = never> = <S>(input: Stream<I, S>) => Stream<O, S | S2>;
 
 // ── Helpers ────────────────────────────────────────────────────────
 
