@@ -75,5 +75,6 @@
       "analyzeSourceFiles": false,
       "analyzeLockfile": false
     }
-  }
+  },
+  "analytics": false
 }
