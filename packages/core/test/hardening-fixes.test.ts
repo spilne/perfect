@@ -101,6 +101,8 @@ describe("generator Cause fidelity", () => {
 
   test("defect caught and rethrown in the body stays a defect", async () => {
     const program = eff(function* () {
+      // oxlint-disable-next-line no-useless-catch -- the rethrow IS the test:
+      // a caught defect thrown again must stay a defect
       try {
         yield* die("kaboom");
       } catch (e) {
