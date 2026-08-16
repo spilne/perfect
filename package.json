@@ -30,11 +30,11 @@
     "release:dry": "(cd packages/core && bun pm pack --dry-run) && (cd packages/http && bun pm pack --dry-run) && (cd packages/http-otel && bun pm pack --dry-run) && (cd packages/kafka && bun pm pack --dry-run) && (cd packages/otel && bun pm pack --dry-run) && (cd packages/postgres && bun pm pack --dry-run) && (cd packages/topology && bun pm pack --dry-run) && (cd packages/transform && bun pm pack --dry-run) && (cd packages/swc-plugin && bun pm pack --dry-run)"
   },
   "devDependencies": {
-    "@nx/js": "^22.7.8",
+    "@nx/js": "^23.1.1",
     "@types/bun": "latest",
     "@types/markdown-it-container": "^4.0.0",
     "markdown-it-container": "^4.0.0",
-    "nx": "^22.7.8",
+    "nx": "^23.1.1",
     "oxfmt": "^0.26.0",
     "oxlint": "^1.78.0",
     "rxjs": "^7.8.2",

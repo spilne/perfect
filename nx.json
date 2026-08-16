@@ -10,44 +10,49 @@
     ],
     "sharedGlobals": []
   },
-  "plugins": [
-    {
-      "plugin": "@nx/js/typescript",
-      "include": ["packages/**/*"],
-      "options": {
-        "typecheck": {
-          "targetName": "typecheck"
-        },
-        "build": {
-          "targetName": "build"
-        }
-      }
-    }
-  ],
   "targetDefaults": {
     "build": {
       "executor": "nx:run-commands",
-      "dependsOn": ["^build"],
+      "dependsOn": [
+        "^build"
+      ],
       "options": {
-        "commands": ["tsc -b tsconfig.lib.json"],
+        "commands": [
+          "bun run build"
+        ],
         "cwd": "{projectRoot}"
       },
-      "outputs": ["{projectRoot}/dist"]
+      "outputs": [
+        "{projectRoot}/dist"
+      ]
     },
     "typecheck": {
-      "dependsOn": ["^typecheck"]
+      "executor": "nx:run-commands",
+      "dependsOn": [
+        "^typecheck"
+      ],
+      "options": {
+        "commands": [
+          "bun run typecheck"
+        ],
+        "cwd": "{projectRoot}"
+      }
     },
     "test": {
       "executor": "nx:run-commands",
       "options": {
-        "commands": ["bun test --pass-with-no-tests"],
+        "commands": [
+          "bun test --pass-with-no-tests"
+        ],
         "cwd": "{projectRoot}"
       }
     },
     "lint": {
       "executor": "nx:run-commands",
       "options": {
-        "commands": ["oxlint -c .oxlintrc.json {projectRoot}"],
+        "commands": [
+          "oxlint -c .oxlintrc.json {projectRoot}"
+        ],
         "cwd": "{workspaceRoot}"
       },
       "inputs": [
@@ -63,6 +68,12 @@
         "test",
         "^ci"
       ]
+    }
+  },
+  "pluginsConfig": {
+    "@nx/js": {
+      "analyzeSourceFiles": false,
+      "analyzeLockfile": false
     }
   }
 }
