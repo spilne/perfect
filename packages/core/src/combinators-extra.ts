@@ -14,6 +14,8 @@ import { all as allParallel } from "./combinators";
 // throw domain exceptions you want to handle structurally rather than letting
 // them propagate as `Cause.die`.
 
+// `any[]` is required for constructor-pattern matching — `unknown[]` would
+// reject constructors with typed parameters. The args never escape.
 type Ctor<E> = new (...args: any[]) => E;
 
 export function trapError<A, S, Classes extends Ctor<any>[]>(
@@ -40,11 +42,11 @@ export function trapError<A, S, Classes extends Ctor<any>[]>(
 //
 // `all` fails-fast on first failure; `validate` reports all problems.
 
-export function validate<const T extends readonly Eff<any, any>[]>(
+export function validate<const T extends readonly Eff<unknown, unknown>[]>(
   effects: T,
 ): Eff<
-  { [K in keyof T]: T[K] extends Eff<infer A, any> ? A : never },
-  T[number] extends Eff<any, infer S> ? S : never
+  { [K in keyof T]: T[K] extends Eff<infer A, unknown> ? A : never },
+  T[number] extends Eff<unknown, infer S> ? S : never
 > {
   if (effects.length === 0) return succeed([] as any) as any;
 

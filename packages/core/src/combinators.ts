@@ -2,16 +2,16 @@ import { type Eff, type InferValue, type InferEffects, Suspend, Op } from "./eff
 
 // standalone combinators only — fluent methods live in syntax/
 
-type AllValues<T extends readonly Eff<any, any>[]> = {
+type AllValues<T extends readonly Eff<unknown, unknown>[]> = {
   [K in keyof T]: InferValue<T[K]>;
 };
-type AllEffects<T extends readonly Eff<any, any>[]> = InferEffects<T[number]>;
+type AllEffects<T extends readonly Eff<unknown, unknown>[]> = InferEffects<T[number]>;
 
-type ObjValues<T extends Record<string, Eff<any, any>>> = {
-  [K in keyof T]: T[K] extends Eff<infer A, any> ? A : never;
+type ObjValues<T extends Record<string, Eff<unknown, unknown>>> = {
+  [K in keyof T]: T[K] extends Eff<infer A, unknown> ? A : never;
 };
-type ObjEffects<T extends Record<string, Eff<any, any>>> =
-  T[keyof T] extends Eff<any, infer S> ? S : never;
+type ObjEffects<T extends Record<string, Eff<unknown, unknown>>> =
+  T[keyof T] extends Eff<unknown, infer S> ? S : never;
 
 /**
  * Run effects in parallel, collect results.
@@ -21,10 +21,10 @@ type ObjEffects<T extends Record<string, Eff<any, any>>> =
  *
  * If any effect fails, the rest are interrupted.
  */
-export function all<const T extends readonly Eff<any, any>[]>(
+export function all<const T extends readonly Eff<unknown, unknown>[]>(
   effects: T,
 ): Eff<AllValues<T>, AllEffects<T>>;
-export function all<T extends Record<string, Eff<any, any>>>(
+export function all<T extends Record<string, Eff<unknown, unknown>>>(
   effects: T,
 ): Eff<ObjValues<T>, ObjEffects<T>>;
 export function all(effects: any): any {

@@ -8,6 +8,12 @@ import { Stream } from "@perfect/core/stream";
 import type { Envelope } from "@perfect/core/connect";
 import { commitBatchWithin } from "../src/commit-batch-within";
 import type { KafkaConsumer, KafkaOffsetCommit } from "../src/kafka-types";
+import { TopicName, PartitionId, KafkaOffset } from "../src/brands";
+
+/** Expected-commit helper — brands the identifier fields. */
+function commit(partition: number, offset: string): KafkaOffsetCommit {
+  return { topic: TopicName("t"), partition: PartitionId(partition), offset: KafkaOffset(offset) };
+}
 
 function makeFakeConsumer(opts?: { failCommits?: number }): {
   consumer: KafkaConsumer;
@@ -48,15 +54,19 @@ describe("commitBatchWithin", () => {
 
     const values = await run(
       Stream.fromIterable(envelopes)
-        .through(commitBatchWithin({ maxBatchSize: 2, maxWaitMs: 60_000, consumer, topic: "t" }))
+        .through(
+          commitBatchWithin({
+            maxBatchSize: 2,
+            maxWaitMs: 60_000,
+            consumer,
+            topic: TopicName("t"),
+          }),
+        )
         .toArray(),
     );
 
     expect(values).toEqual(["v0", "v1", "v2", "v3"]);
-    expect(committed).toEqual([
-      [{ topic: "t", partition: 0, offset: "2" }],
-      [{ topic: "t", partition: 0, offset: "4" }],
-    ]);
+    expect(committed).toEqual([[commit(0, "2")], [commit(0, "4")]]);
   });
 
   it("flushes a partial batch when the stream ends", async () => {
@@ -65,12 +75,19 @@ describe("commitBatchWithin", () => {
 
     const values = await run(
       Stream.fromIterable(envelopes)
-        .through(commitBatchWithin({ maxBatchSize: 100, maxWaitMs: 60_000, consumer, topic: "t" }))
+        .through(
+          commitBatchWithin({
+            maxBatchSize: 100,
+            maxWaitMs: 60_000,
+            consumer,
+            topic: TopicName("t"),
+          }),
+        )
         .toArray(),
     );
 
     expect(values).toEqual([0, 1, 2]);
-    expect(committed).toEqual([[{ topic: "t", partition: 0, offset: "3" }]]);
+    expect(committed).toEqual([[commit(0, "3")]]);
   });
 
   it("holds commits behind an offset gap (contiguity)", async () => {
@@ -80,12 +97,19 @@ describe("commitBatchWithin", () => {
 
     const values = await run(
       Stream.fromIterable(envelopes)
-        .through(commitBatchWithin({ maxBatchSize: 3, maxWaitMs: 60_000, consumer, topic: "t" }))
+        .through(
+          commitBatchWithin({
+            maxBatchSize: 3,
+            maxWaitMs: 60_000,
+            consumer,
+            topic: TopicName("t"),
+          }),
+        )
         .toArray(),
     );
 
     expect(values).toEqual([0, 1, 3]);
-    expect(committed).toEqual([[{ topic: "t", partition: 0, offset: "2" }]]);
+    expect(committed).toEqual([[commit(0, "2")]]);
   });
 
   it("commits per partition", async () => {
@@ -94,17 +118,19 @@ describe("commitBatchWithin", () => {
 
     await run(
       Stream.fromIterable(envelopes)
-        .through(commitBatchWithin({ maxBatchSize: 3, maxWaitMs: 60_000, consumer, topic: "t" }))
+        .through(
+          commitBatchWithin({
+            maxBatchSize: 3,
+            maxWaitMs: 60_000,
+            consumer,
+            topic: TopicName("t"),
+          }),
+        )
         .toArray(),
     );
 
     expect(committed).toHaveLength(1);
-    expect(committed[0]).toEqual(
-      expect.arrayContaining([
-        { topic: "t", partition: 0, offset: "2" },
-        { topic: "t", partition: 1, offset: "1" },
-      ]),
-    );
+    expect(committed[0]).toEqual(expect.arrayContaining([commit(0, "2"), commit(1, "1")]));
   });
 
   it("commits by time when the batch is not full", async () => {
@@ -119,7 +145,9 @@ describe("commitBatchWithin", () => {
         close = doClose;
         return sync(() => {});
       })
-        .through(commitBatchWithin({ maxBatchSize: 100, maxWaitMs: 50, consumer, topic: "t" }))
+        .through(
+          commitBatchWithin({ maxBatchSize: 100, maxWaitMs: 50, consumer, topic: TopicName("t") }),
+        )
         .toArray(),
     );
 
@@ -128,7 +156,7 @@ describe("commitBatchWithin", () => {
     emitEnv(envelope("only", 0, 0));
     // Wait past maxWaitMs so groupWithin's timer flushes the partial batch.
     await new Promise((r) => setTimeout(r, 120));
-    expect(committed).toEqual([[{ topic: "t", partition: 0, offset: "1" }]]);
+    expect(committed).toEqual([[commit(0, "1")]]);
 
     close();
     const values = await collecting;
@@ -141,12 +169,19 @@ describe("commitBatchWithin", () => {
 
     const values = await run(
       Stream.fromIterable(envelopes)
-        .through(commitBatchWithin({ maxBatchSize: 2, maxWaitMs: 60_000, consumer, topic: "t" }))
+        .through(
+          commitBatchWithin({
+            maxBatchSize: 2,
+            maxWaitMs: 60_000,
+            consumer,
+            topic: TopicName("t"),
+          }),
+        )
         .toArray(),
     );
 
     expect(values).toEqual([0, 1, 2, 3]);
     // First commit ("2") failed and was swallowed; the second ("4") subsumes it.
-    expect(committed).toEqual([[{ topic: "t", partition: 0, offset: "4" }]]);
+    expect(committed).toEqual([[commit(0, "4")]]);
   });
 });

@@ -13,12 +13,21 @@
 //   Completed: [1, _, 3, 4, _]  → committable: 2 (only offset 1 is contiguous)
 //   Completed: [1, 2, 3, 4, _]  → committable: 5 (offsets 1-4 are contiguous)
 //   Completed: [1, 2, 3, 4, 5]  → committable: 6 (all done)
+//
+// Partitions are branded (`Partition`) — a partition id is a confusable
+// identifier next to an offset of the same primitive. OFFSETS stay plain
+// numbers on purpose: this class is offset arithmetic (cursor++, min
+// comparisons, +1 commit positions), and a Brand<number> degrades to number
+// on every operation anyway — branding would force rebrand ceremony at each
+// step for no swap protection inside a single (partition, offset) pair.
+
+import type { Partition } from "./contracts";
 
 export class OffsetTracker {
   // partition → set of completed offsets
-  private completed = new Map<number, Set<number>>();
+  private completed = new Map<Partition, Set<number>>();
   // partition → lowest uncommitted offset (the frontier)
-  private frontier = new Map<number, number>();
+  private frontier = new Map<Partition, number>();
 
   /**
    * Seed/lower the per-partition frontier from a delivered offset. Call once
@@ -36,7 +45,7 @@ export class OffsetTracker {
    *    resume — no driver rebalance callback required. Reordering-safe (we take
    *    the min, never clear), so it's correct downstream of parallel maps too.
    */
-  observe(partition: number, offset: number): void {
+  observe(partition: Partition, offset: number): void {
     const front = this.frontier.get(partition);
     if (front === undefined || offset < front) {
       this.frontier.set(partition, offset);
@@ -47,11 +56,11 @@ export class OffsetTracker {
    * Set the starting frontier for a partition explicitly (e.g. after commit
    * recovery). Prefer {@link observe}, which seeds automatically in delivery order.
    */
-  setFrontier(partition: number, offset: number): void {
+  setFrontier(partition: Partition, offset: number): void {
     this.frontier.set(partition, offset);
   }
 
-  complete(partition: number, offset: number): void {
+  complete(partition: Partition, offset: number): void {
     if (!this.completed.has(partition)) {
       this.completed.set(partition, new Set());
     }
@@ -71,8 +80,8 @@ export class OffsetTracker {
    * After calling this, the returned offsets are "consumed" — calling again
    * without new completions returns empty.
    */
-  committable(): Map<number, number> {
-    const result = new Map<number, number>();
+  committable(): Map<Partition, number> {
+    const result = new Map<Partition, number>();
 
     for (const [partition, completedSet] of this.completed) {
       let cursor = this.frontier.get(partition) ?? 0;

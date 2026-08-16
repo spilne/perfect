@@ -24,6 +24,9 @@ export interface FiberSnapshot {
   readonly childCount: number;
 }
 
+// Fiber<any> throughout the supervision API: Fiber is invariant in A (its
+// completion listeners consume A), so `Fiber<unknown>` would reject fibers of
+// concrete result types. `any` is the only type that admits every fiber.
 export interface FiberSupervisor {
   onStart?(fiber: Fiber<any>): void;
   onFork?(parent: Fiber<any>, child: Fiber<any>): void;
@@ -59,12 +62,15 @@ export class Fiber<A = unknown> {
   result: FiberResult<A> | null = null;
   private listeners: Array<(result: FiberResult<A>) => void> = [];
   interruptHandle: (() => void) | null = null;
+  // Fiber<any>: see FiberSupervisor note — Fiber is invariant in A, so a
+  // heterogeneous parent/child tree needs `any`.
   private children: Fiber<any>[] = [];
   parent: Fiber<any> | null = null;
   scope: Scope | null = null;
 
-  // interpreter state — saved when yielding
-  current: any = undefined;
+  // interpreter state — saved when yielding. `unknown`, not `any`: the
+  // interpreter casts at the use site.
+  current: unknown = undefined;
   stack: Cont | null = null;
   context: Context | null = null;
   opCount = 0;

@@ -1,7 +1,7 @@
 import { describe, test, expect } from "bun:test";
 import { Stream } from "@perfect/core/stream";
 import type { Streamable, Acknowledgeable, Sinkable, Codec } from "@perfect/core/connect";
-import { StreamTopology, TopologyRunner, WindowManager, JoinBuffer } from "../src";
+import { StreamTopology, TopologyRunner, WindowManager, JoinBuffer, ConsumerGroup } from "../src";
 
 // ---------------------------------------------------------------------------
 // Test helpers — in-memory source/sink that implement the connect contracts
@@ -206,7 +206,7 @@ describe("TopologyRunner — compiles and runs a topology", () => {
       .map((n) => n * 10)
       .to(sink);
 
-    const handle = await TopologyRunner.run(topology, { group: "test-map" });
+    const handle = await TopologyRunner.run(topology, { group: ConsumerGroup("test-map") });
 
     // Give the stream time to process
     await new Promise((r) => setTimeout(r, 200));
@@ -223,7 +223,7 @@ describe("TopologyRunner — compiles and runs a topology", () => {
       .filter((n) => n % 2 === 0)
       .to(sink);
 
-    const handle = await TopologyRunner.run(topology, { group: "test-filter" });
+    const handle = await TopologyRunner.run(topology, { group: ConsumerGroup("test-filter") });
     await new Promise((r) => setTimeout(r, 200));
     await handle.shutdown();
 
@@ -238,7 +238,7 @@ describe("TopologyRunner — compiles and runs a topology", () => {
       .mapAsync(2, async (n) => `item-${n}`)
       .to(sink);
 
-    const handle = await TopologyRunner.run(topology, { group: "test-async" });
+    const handle = await TopologyRunner.run(topology, { group: ConsumerGroup("test-async") });
     await new Promise((r) => setTimeout(r, 200));
     await handle.shutdown();
 
@@ -265,7 +265,7 @@ describe("TopologyRunner — compiles and runs a topology", () => {
       })
       .to(sink);
 
-    const handle = await TopologyRunner.run(topology, { group: "test-process" });
+    const handle = await TopologyRunner.run(topology, { group: ConsumerGroup("test-process") });
     await new Promise((r) => setTimeout(r, 200));
     await handle.shutdown();
 
@@ -292,7 +292,7 @@ describe("TopologyRunner — compiles and runs a topology", () => {
       .dedupe((e) => e.id)
       .to(sink);
 
-    const handle = await TopologyRunner.run(topology, { group: "test-dedup" });
+    const handle = await TopologyRunner.run(topology, { group: ConsumerGroup("test-dedup") });
     await new Promise((r) => setTimeout(r, 200));
     await handle.shutdown();
 
@@ -575,7 +575,7 @@ describe("TopologyRunner — metrics and backpressure", () => {
       .map((n) => n * 2)
       .to(sink);
 
-    const handle = await TopologyRunner.run(topology, { group: "test-metrics" });
+    const handle = await TopologyRunner.run(topology, { group: ConsumerGroup("test-metrics") });
     await new Promise((r) => setTimeout(r, 200));
 
     const metrics = handle.metrics();
@@ -594,7 +594,7 @@ describe("TopologyRunner — metrics and backpressure", () => {
       .to(sink);
 
     const handle = await TopologyRunner.run(topology, {
-      group: "test-buffer",
+      group: ConsumerGroup("test-buffer"),
       maxBufferSize: 2,
     });
 
@@ -618,7 +618,7 @@ describe("TopologyRunner — metrics and backpressure", () => {
       .to(sink);
 
     const handle = await TopologyRunner.run(topology, {
-      group: "test-dedupe-evict",
+      group: ConsumerGroup("test-dedupe-evict"),
       maxDedupeSize: 5, // Only keep last 5 keys
     });
 

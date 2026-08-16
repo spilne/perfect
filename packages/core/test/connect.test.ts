@@ -19,9 +19,13 @@ import {
   codecRecord,
   codecArray,
   OffsetTracker,
+  Partition,
   autoCommitBatchWithin,
   type Envelope,
 } from "../src/connect";
+
+const p0 = Partition(0);
+const p1 = Partition(1);
 
 // ── Type guards ────────────────────────────────────────────────────
 
@@ -118,86 +122,86 @@ describe("codecs", () => {
 describe("OffsetTracker — parallel-safe commit ordering", () => {
   test("sequential completions — commit advances with each ack", () => {
     const tracker = new OffsetTracker();
-    tracker.complete(0, 0);
-    tracker.complete(0, 1);
-    tracker.complete(0, 2);
-    expect(tracker.committable().get(0)).toBe(3);
+    tracker.complete(p0, 0);
+    tracker.complete(p0, 1);
+    tracker.complete(p0, 2);
+    expect(tracker.committable().get(p0)).toBe(3);
   });
 
   test("out-of-order completions — commit waits for the gap to fill", () => {
     const tracker = new OffsetTracker();
-    tracker.complete(0, 0);
-    tracker.complete(0, 2);
-    tracker.complete(0, 3);
-    expect(tracker.committable().get(0)).toBe(1);
-    tracker.complete(0, 1);
-    expect(tracker.committable().get(0)).toBe(4);
+    tracker.complete(p0, 0);
+    tracker.complete(p0, 2);
+    tracker.complete(p0, 3);
+    expect(tracker.committable().get(p0)).toBe(1);
+    tracker.complete(p0, 1);
+    expect(tracker.committable().get(p0)).toBe(4);
   });
 
   test("nothing committable when first offset is still pending", () => {
     const tracker = new OffsetTracker();
-    tracker.setFrontier(0, 0);
-    tracker.complete(0, 1);
-    tracker.complete(0, 2);
+    tracker.setFrontier(p0, 0);
+    tracker.complete(p0, 1);
+    tracker.complete(p0, 2);
     expect(tracker.committable().size).toBe(0);
   });
 
   test("tracks partitions independently", () => {
     const tracker = new OffsetTracker();
-    tracker.complete(0, 0);
-    tracker.complete(0, 1);
-    tracker.complete(1, 0);
+    tracker.complete(p0, 0);
+    tracker.complete(p0, 1);
+    tracker.complete(p1, 0);
     const committable = tracker.committable();
-    expect(committable.get(0)).toBe(2);
-    expect(committable.get(1)).toBe(1);
+    expect(committable.get(p0)).toBe(2);
+    expect(committable.get(p1)).toBe(1);
   });
 
   test("committable is consumed — calling twice returns empty", () => {
     const tracker = new OffsetTracker();
-    tracker.complete(0, 0);
-    tracker.complete(0, 1);
-    expect(tracker.committable().get(0)).toBe(2);
+    tracker.complete(p0, 0);
+    tracker.complete(p0, 1);
+    expect(tracker.committable().get(p0)).toBe(2);
     expect(tracker.committable().size).toBe(0);
   });
 
   test("new completions after commit are tracked from the new frontier", () => {
     const tracker = new OffsetTracker();
-    tracker.complete(0, 0);
-    tracker.complete(0, 1);
+    tracker.complete(p0, 0);
+    tracker.complete(p0, 1);
     tracker.committable();
-    tracker.complete(0, 2);
-    tracker.complete(0, 3);
-    expect(tracker.committable().get(0)).toBe(4);
+    tracker.complete(p0, 2);
+    tracker.complete(p0, 3);
+    expect(tracker.committable().get(p0)).toBe(4);
   });
 
   test("pendingCount shows messages behind a gap", () => {
     const tracker = new OffsetTracker();
-    tracker.complete(0, 0);
-    tracker.complete(0, 2);
-    tracker.complete(0, 3);
+    tracker.complete(p0, 0);
+    tracker.complete(p0, 2);
+    tracker.complete(p0, 3);
     tracker.committable();
     expect(tracker.pendingCount()).toBe(2); // 2 and 3 held behind the gap at 1
   });
 
   test("observe seeds the frontier for non-zero resume", () => {
     const tracker = new OffsetTracker();
-    tracker.observe(0, 5000);
-    tracker.complete(0, 5000);
-    tracker.complete(0, 5001);
-    expect(tracker.committable().get(0)).toBe(5002);
+    tracker.observe(p0, 5000);
+    tracker.complete(p0, 5000);
+    tracker.complete(p0, 5001);
+    expect(tracker.committable().get(p0)).toBe(5002);
   });
 
   test("observe lowers the frontier on rewind redelivery", () => {
     const tracker = new OffsetTracker();
-    tracker.observe(0, 10);
-    tracker.complete(0, 10);
+    tracker.observe(p0, 10);
+    tracker.complete(p0, 10);
     tracker.committable(); // frontier → 11
     // rebalance redelivers from committed offset 8
-    tracker.observe(0, 8);
-    tracker.complete(0, 8);
-    tracker.complete(0, 9);
-    tracker.complete(0, 10);
-    expect(tracker.committable().get(0)).toBe(11);
+    tracker.observe(p0, 8);
+    tracker.complete(p0, 8);
+    tracker.complete(p0, 9);
+    tracker.complete(p0, 10);
+    expect(tracker.committable().get(p0)).toBe(11);
   });
 });
 

@@ -65,12 +65,14 @@ export class StreamTimeoutError extends TaggedError("StreamTimeoutError")<{
 // ── Step type ──────────────────────────────────────────────────────
 
 export type Step<A> =
-  | { readonly _tag: "Emit"; readonly chunk: Chunk<A>; readonly next: Stream<A, any> }
+  // `next: Stream<A, unknown>`: the continuation's effect union is erased —
+  // the driving terminal op re-attaches S at the Stream level.
+  | { readonly _tag: "Emit"; readonly chunk: Chunk<A>; readonly next: Stream<A, unknown> }
   | { readonly _tag: "Done" };
 
 const DONE: Step<any> = { _tag: "Done" };
 
-function emit<A>(chunk: Chunk<A>, next: Stream<A, any>): Step<A> {
+function emit<A>(chunk: Chunk<A>, next: Stream<A, unknown>): Step<A> {
   return { _tag: "Emit", chunk, next };
 }
 
@@ -115,9 +117,9 @@ export class Stream<A, S = never> {
   private _rawStep: Eff<Step<A>, S>;
   // Accumulated pure ops (map/filter/filterMap/tap) awaiting compilation.
   private _pending: FusibleOp[] = [];
-  _finalizer: Eff<void, any> | null;
+  _finalizer: Eff<void, unknown> | null;
 
-  constructor(step: Eff<Step<A>, S>, finalizer: Eff<void, any> | null = null) {
+  constructor(step: Eff<Step<A>, S>, finalizer: Eff<void, unknown> | null = null) {
     this._rawStep = step;
     this._finalizer = finalizer;
   }
@@ -295,7 +297,10 @@ export class Stream<A, S = never> {
     return go();
   }
 
-  static fromQueue<A>(queue: { take(): Eff<A, any> }): Stream<A, any> {
+  // Return S is `any` by design: the queue's effect union is erased here
+  // (shutdown becomes end-of-stream, other failures re-propagate untyped);
+  // `unknown` would make every downstream run() fail the EffectCheck.
+  static fromQueue<A>(queue: { take(): Eff<A, unknown> }): Stream<A, any> {
     function go(): Stream<A, any> {
       return new Stream(
         (queue.take() as any)
@@ -401,10 +406,12 @@ export class Stream<A, S = never> {
    * event is observed. On cleanup the listener is removed.
    */
   static fromEventEmitter<A = unknown>(
+    // Listener args stay `any[]` for structural compat with Node's
+    // EventEmitter and typed-listener emitters; returns are ignored.
     emitter: {
-      on(event: string, listener: (...args: any[]) => void): any;
-      off?(event: string, listener: (...args: any[]) => void): any;
-      removeListener?(event: string, listener: (...args: any[]) => void): any;
+      on(event: string, listener: (...args: any[]) => void): unknown;
+      off?(event: string, listener: (...args: any[]) => void): unknown;
+      removeListener?(event: string, listener: (...args: any[]) => void): unknown;
     },
     event: string,
     bufferSize = 1024,
@@ -758,7 +765,7 @@ export class Stream<A, S = never> {
     return this._withOp({ _tag: "tap", fn: f as any });
   }
 
-  tapEffect<S2>(f: (a: A) => Eff<any, S2>): Stream<A, S | S2> {
+  tapEffect<S2>(f: (a: A) => Eff<unknown, S2>): Stream<A, S | S2> {
     return this.evalMap((a) => (f(a) as any).map(() => a));
   }
 
@@ -1472,13 +1479,13 @@ export class Stream<A, S = never> {
     return pipe(this) as any;
   }
 
-  runSink<B, S2>(sink: { run(input: Stream<A, any>): Eff<B, S2> }): Eff<B, S | S2> {
+  runSink<B, S2>(sink: { run(input: Stream<A, unknown>): Eff<B, S2> }): Eff<B, S | S2> {
     return sink.run(this) as any;
   }
 
   // ── Error handling ───────────────────────────────────────────────
 
-  catch<B, S2>(handler: (error: any) => Stream<B, S2>): Stream<A | B, S2> {
+  catch<B, S2>(handler: (error: unknown) => Stream<B, S2>): Stream<A | B, S2> {
     return new Stream(
       (this.step as any)
         .map((s: Step<A>) => {
@@ -1602,7 +1609,7 @@ export class Stream<A, S = never> {
 
 // ── Pipe type ──────────────────────────────────────────────────────
 
-export type Pipe<I, O, S = never> = (input: Stream<I, any>) => Stream<O, S>;
+export type Pipe<I, O, S = never> = (input: Stream<I, unknown>) => Stream<O, S>;
 
 // ── Helpers ────────────────────────────────────────────────────────
 

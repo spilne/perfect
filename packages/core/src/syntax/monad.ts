@@ -5,7 +5,7 @@ declare module "../eff" {
   interface Suspend {
     flatMap<A, S1, B, S2>(this: Eff<A, S1>, f: (a: A) => Eff<B, S2>): Eff<B, S1 | S2>;
 
-    tap<A, S1, S2>(this: Eff<A, S1>, f: (a: A) => Eff<any, S2>): Eff<A, S1 | S2>;
+    tap<A, S1, S2>(this: Eff<A, S1>, f: (a: A) => Eff<unknown, S2>): Eff<A, S1 | S2>;
 
     flatten<A, S1, S2>(this: Eff<Eff<A, S2>, S1>): Eff<A, S1 | S2>;
   }

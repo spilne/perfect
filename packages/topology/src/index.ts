@@ -4,6 +4,8 @@
 // deduplication, and checkpointing. Ported from promin's stream-topology
 // (StreamPipeline → Stream; ShuffleTransport now lives in @perfect/core/connect).
 
+export { StageId, ConsumerGroup, ChannelName, CheckpointName } from "./brands";
+
 export { StreamTopology, KeyedTopology, WindowedTopology, BuiltTopology } from "./stream-topology";
 
 export { TopologyRunner } from "./topology-runner";

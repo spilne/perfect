@@ -17,6 +17,7 @@ import type {
   KafkaOffsetCommit,
   KafkaProducer,
 } from "../src/kafka-types";
+import { TopicName, GroupId, PartitionId, KafkaOffset } from "../src/brands";
 
 /**
  * Fake client that simulates a kafkajs-style consumer. The consumer's
@@ -29,7 +30,7 @@ import type {
  * every commitOffsets call.
  */
 function makeFakeKafka(opts: {
-  topic: string;
+  topic: TopicName;
   batches: ReadonlyArray<ReadonlyArray<{ value: unknown; offset: string; key?: string }>>;
 }): {
   client: KafkaClient;
@@ -66,11 +67,11 @@ function makeFakeKafka(opts: {
           for (const m of batch) {
             const msg: KafkaMessage = {
               topic: opts.topic,
-              partition,
+              partition: PartitionId(partition),
               message: {
                 key: m.key ?? null,
                 value: JSON.stringify(m.value),
-                offset: m.offset,
+                offset: KafkaOffset(m.offset),
                 timestamp: "0",
               },
             };
@@ -111,7 +112,7 @@ function makeFakeKafka(opts: {
 describe("KafkaTopic — subscribe", () => {
   it("delivers messages in order via eachMessage", async () => {
     const { client, dispatchedVia } = makeFakeKafka({
-      topic: "orders",
+      topic: TopicName("orders"),
       batches: [
         [
           { value: { n: 1 }, offset: "0" },
@@ -122,8 +123,8 @@ describe("KafkaTopic — subscribe", () => {
 
     const topic = new KafkaTopic<{ n: number }>({
       kafka: client,
-      topic: "orders",
-      groupId: "g",
+      topic: TopicName("orders"),
+      groupId: GroupId("g"),
     });
 
     const values = await run(topic.subscribe().take(2).toArray());
@@ -133,7 +134,7 @@ describe("KafkaTopic — subscribe", () => {
 
   it("delivers messages from multiple partitions", async () => {
     const { client } = makeFakeKafka({
-      topic: "orders",
+      topic: TopicName("orders"),
       batches: [
         [
           { value: { n: 10 }, offset: "0" },
@@ -148,8 +149,8 @@ describe("KafkaTopic — subscribe", () => {
 
     const topic = new KafkaTopic<{ n: number }>({
       kafka: client,
-      topic: "orders",
-      groupId: "g",
+      topic: TopicName("orders"),
+      groupId: GroupId("g"),
     });
 
     const values = await run(topic.subscribe().take(4).toArray());
@@ -162,13 +163,13 @@ describe("KafkaTopic — subscribe", () => {
     // client's run() throws if both are passed — so this test fails loudly
     // if we ever regress.
     const { client, dispatchedVia } = makeFakeKafka({
-      topic: "t",
+      topic: TopicName("t"),
       batches: [[{ value: { n: 1 }, offset: "0" }]],
     });
     const topic = new KafkaTopic<{ n: number }>({
       kafka: client,
-      topic: "t",
-      groupId: "g",
+      topic: TopicName("t"),
+      groupId: GroupId("g"),
     });
     const values = await run(topic.subscribe().take(1).toArray());
     expect(values).toEqual([{ n: 1 }]);
@@ -179,7 +180,7 @@ describe("KafkaTopic — subscribe", () => {
 describe("KafkaTopic — subscribeAck", () => {
   it("delivers envelopes in order with offset metadata", async () => {
     const { client, dispatchedVia } = makeFakeKafka({
-      topic: "orders",
+      topic: TopicName("orders"),
       batches: [
         [
           { value: { n: 1 }, offset: "0" },
@@ -190,8 +191,8 @@ describe("KafkaTopic — subscribeAck", () => {
 
     const topic = new KafkaTopic<{ n: number }>({
       kafka: client,
-      topic: "orders",
-      groupId: "g",
+      topic: TopicName("orders"),
+      groupId: GroupId("g"),
     });
 
     const envelopes = await run(topic.subscribeAck().take(2).toArray());
@@ -205,7 +206,7 @@ describe("KafkaTopic — subscribeAck", () => {
 
   it("commits acked offsets on shutdown flush", async () => {
     const { client, committed } = makeFakeKafka({
-      topic: "orders",
+      topic: TopicName("orders"),
       batches: [
         [
           { value: { n: 1 }, offset: "0" },
@@ -216,8 +217,8 @@ describe("KafkaTopic — subscribeAck", () => {
 
     const topic = new KafkaTopic<{ n: number }>({
       kafka: client,
-      topic: "orders",
-      groupId: "g",
+      topic: TopicName("orders"),
+      groupId: GroupId("g"),
     });
 
     // Ack while streaming (like a real handler would) — the shutdown flush
@@ -242,19 +243,21 @@ describe("KafkaTopic — subscribeAck", () => {
     // The stream's cleanup flush is fire-and-forget — give it a tick.
     await new Promise((r) => setTimeout(r, 20));
 
-    expect(committed).toEqual([[{ topic: "orders", partition: 0, offset: "2" }]]);
+    expect(committed).toEqual([
+      [{ topic: TopicName("orders"), partition: PartitionId(0), offset: KafkaOffset("2") }],
+    ]);
   });
 
   it("does not commit unacked offsets", async () => {
     const { client, committed } = makeFakeKafka({
-      topic: "orders",
+      topic: TopicName("orders"),
       batches: [[{ value: { n: 1 }, offset: "0" }]],
     });
 
     const topic = new KafkaTopic<{ n: number }>({
       kafka: client,
-      topic: "orders",
-      groupId: "g",
+      topic: TopicName("orders"),
+      groupId: GroupId("g"),
     });
 
     await run(topic.subscribeAck().take(1).toArray());
@@ -267,9 +270,14 @@ describe("KafkaTopic — subscribeAck", () => {
 describe("KafkaTopic — stream-mode driver", () => {
   it("consumes via consumer.stream() when the driver exposes it", async () => {
     const messages: KafkaMessage[] = [1, 2, 3].map((n, i) => ({
-      topic: "t",
-      partition: 0,
-      message: { key: null, value: JSON.stringify({ n }), offset: String(i), timestamp: "0" },
+      topic: TopicName("t"),
+      partition: PartitionId(0),
+      message: {
+        key: null,
+        value: JSON.stringify({ n }),
+        offset: KafkaOffset(String(i)),
+        timestamp: "0",
+      },
     }));
 
     const consumer: KafkaConsumer = {
@@ -300,7 +308,11 @@ describe("KafkaTopic — stream-mode driver", () => {
       }),
     };
 
-    const topic = new KafkaTopic<{ n: number }>({ kafka: client, topic: "t", groupId: "g" });
+    const topic = new KafkaTopic<{ n: number }>({
+      kafka: client,
+      topic: TopicName("t"),
+      groupId: GroupId("g"),
+    });
     const values = await run(topic.subscribe().take(3).toArray());
     expect(values.map((v) => v.n)).toEqual([1, 2, 3]);
   });

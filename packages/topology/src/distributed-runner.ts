@@ -21,14 +21,15 @@ import type {
   Acknowledgeable,
   KeyedSinkable,
   ShuffleTransport,
+  ChannelName,
 } from "@perfect/core/connect";
-import { JsonCodec } from "@perfect/core/connect";
+import { JsonCodec, ConsumerGroup } from "@perfect/core/connect";
 
 /**
  * Config for DistributedRunner — extends TopologyConfig with shuffle transport.
  */
 export interface DistributedTopologyConfig {
-  group: string;
+  group: ConsumerGroup;
   shuffleTransport: ShuffleTransport;
   stateBackend?: StateBackend<string, unknown>;
   checkpointIntervalMs?: number;
@@ -80,7 +81,7 @@ export class DistributedRunner {
 
     // Create repartition channels
     const channels = new Map<
-      string,
+      ChannelName,
       { source: Streamable<unknown> & Acknowledgeable<unknown>; sink: KeyedSinkable<unknown> }
     >();
 
@@ -121,7 +122,8 @@ export class DistributedRunner {
       });
 
       const handle = await TopologyRunner.run(stageTopology, {
-        group: `${config.group}-${stage.id}`,
+        // Each stage is its own consumer group — derived, so rebrand.
+        group: ConsumerGroup(`${config.group}-${stage.id}`),
         stateBackend: config.stateBackend,
         checkpointIntervalMs: config.checkpointIntervalMs,
         maxBufferSize: config.maxBufferSize,

@@ -1,7 +1,7 @@
 import { describe, test, expect } from "bun:test";
 import { Stream } from "@perfect/core/stream";
 import type { Streamable, Acknowledgeable, Sinkable, Codec } from "@perfect/core/connect";
-import { StreamTopology, planStages } from "../src";
+import { StreamTopology, planStages, ConsumerGroup, ChannelName } from "../src";
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -33,7 +33,7 @@ describe("planStages", () => {
       .map((e) => e.v)
       .to(mockSink());
 
-    const plan = planStages({ compiled: topology.compiled, group: "test" });
+    const plan = planStages({ compiled: topology.compiled, group: ConsumerGroup("test") });
 
     expect(plan.stages).toHaveLength(1);
     expect(plan.repartitionTopics).toHaveLength(0);
@@ -50,7 +50,7 @@ describe("planStages", () => {
       .count()
       .to(mockSink());
 
-    const plan = planStages({ compiled: topology.compiled, group: "counter" });
+    const plan = planStages({ compiled: topology.compiled, group: ConsumerGroup("counter") });
 
     expect(plan.stages).toHaveLength(2);
     expect(plan.repartitionTopics).toHaveLength(1);
@@ -79,7 +79,7 @@ describe("planStages", () => {
       .count()
       .to(mockSink());
 
-    const plan = planStages({ compiled: topology.compiled, group: "multi" });
+    const plan = planStages({ compiled: topology.compiled, group: ConsumerGroup("multi") });
 
     expect(plan.stages).toHaveLength(3);
     expect(plan.repartitionTopics).toHaveLength(2);
@@ -90,12 +90,12 @@ describe("planStages", () => {
   test("user-specified topic name is respected", () => {
     const topology = StreamTopology.source(mockSource<{ userId: string }>())
       .keyBy((e) => e.userId)
-      .shuffle({ topicName: "my-custom-topic" })
+      .shuffle({ topicName: ChannelName("my-custom-topic") })
       .tumbling(60_000)
       .count()
       .to(mockSink());
 
-    const plan = planStages({ compiled: topology.compiled, group: "custom" });
+    const plan = planStages({ compiled: topology.compiled, group: ConsumerGroup("custom") });
 
     expect(plan.repartitionTopics).toEqual(["my-custom-topic"]);
   });

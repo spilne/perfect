@@ -12,13 +12,41 @@
 //   broker-shaped (RabbitMQ, SQS, NATS core): opaque per-message ack token —
 //                 just Streamable + Sinkable + Acknowledgeable.
 
+import { type Brand, nominal, refined } from "../brand";
 import type { Stream } from "../stream";
 import type { Codec } from "./codec";
+
+// ── Branded identifiers — shared across all backends ───────────────
+//
+// These are the queue-agnostic confusable identifiers: every backend has
+// consumer groups and (log-shaped ones) partitions, and the distributed
+// layer names repartition channels. Backends reuse these brands (kafka's
+// GroupId IS ConsumerGroup, its PartitionId IS Partition) rather than
+// defining lookalikes — cross-package call sites stay assignable.
+
+// Constructor signatures are pinned explicitly (the cast is runtime-free):
+// exporting the inferred `(value: Unbrand<A>) => A` type would reference
+// brand.ts's unexported BRAND symbol in declaration emit (TS4023).
+
+/** A consumer-group identifier — backend-agnostic. */
+export type ConsumerGroup = Brand<string, "ConsumerGroup">;
+export const ConsumerGroup = nominal<ConsumerGroup>() as (value: string) => ConsumerGroup;
+
+/** A partition identifier (log-shaped backends). Integer ≥ 0. */
+export type Partition = Brand<number, "Partition">;
+export const Partition = refined<Partition>(
+  (n) => Number.isInteger(n) && n >= 0,
+  (n) => `Partition must be a non-negative integer, got ${n}`,
+) as (value: number) => Partition;
+
+/** A repartition-channel name (shuffle transport). */
+export type ChannelName = Brand<string, "ChannelName">;
+export const ChannelName = nominal<ChannelName>() as (value: string) => ChannelName;
 
 // ── Streamable<T> — "I can produce a stream of T" ──────────────────
 
 export interface Streamable<T> {
-  subscribe(params?: { group?: string }): Stream<T, never>;
+  subscribe(params?: { group?: ConsumerGroup }): Stream<T, never>;
   codec: Codec<T>;
 }
 
@@ -62,8 +90,9 @@ export function isKeyedSinkable<T>(value: unknown): value is KeyedSinkable<T> {
 // ── Partitionable<T> — "I have partitions" ─────────────────────────
 
 export interface Partitionable<T> extends Streamable<T> {
+  /** Partition COUNT — a cardinality, not an identifier, so plain number. */
   partitions: number;
-  subscribe(params?: { group?: string; partitions?: number[] }): Stream<T, never>;
+  subscribe(params?: { group?: ConsumerGroup; partitions?: Partition[] }): Stream<T, never>;
 }
 
 export function isPartitionable<T>(value: unknown): value is Partitionable<T> {
@@ -74,6 +103,11 @@ export function isPartitionable<T>(value: unknown): value is Partitionable<T> {
 
 // ── Replayable<T> — "I can seek to a point in time" ────────────────
 
+// `specific.value` stays a PLAIN string on purpose: it is backend-opaque.
+// A Kafka offset is a stringly integer, a Redis Streams id is "1526919-0",
+// a Kinesis sequence number is something else again — branding it here
+// would impose one backend's semantics on all of them. Backends may brand
+// their own offset representation internally (kafka's KafkaOffset does).
 export type Offset =
   | { type: "earliest" }
   | { type: "latest" }
@@ -81,7 +115,7 @@ export type Offset =
   | { type: "specific"; value: string };
 
 export interface Replayable<T> extends Streamable<T> {
-  subscribeFrom(params: { offset: Offset; group?: string }): Stream<T, never>;
+  subscribeFrom(params: { offset: Offset; group?: ConsumerGroup }): Stream<T, never>;
 }
 
 export function isReplayable<T>(value: unknown): value is Replayable<T> {
@@ -102,7 +136,7 @@ export interface Envelope<T> {
 }
 
 export interface Acknowledgeable<T> extends Streamable<T> {
-  subscribeAck(params?: { group?: string }): Stream<Envelope<T>, never>;
+  subscribeAck(params?: { group?: ConsumerGroup }): Stream<Envelope<T>, never>;
 }
 
 export function isAcknowledgeable<T>(value: unknown): value is Acknowledgeable<T> {
@@ -116,8 +150,10 @@ export function isAcknowledgeable<T>(value: unknown): value is Acknowledgeable<T
 // ── Checkpointable<T> — "I can save/restore consumption position" ──
 
 export interface Checkpointable<T> extends Streamable<T> {
-  commitOffset(params: { group: string; offset: string }): Promise<void>;
-  getCommittedOffset(params: { group: string }): Promise<string | null>;
+  // `offset` is plain here for the same backend-opacity reason as
+  // Offset.specific.value above.
+  commitOffset(params: { group: ConsumerGroup; offset: string }): Promise<void>;
+  getCommittedOffset(params: { group: ConsumerGroup }): Promise<string | null>;
 }
 
 export function isCheckpointable<T>(value: unknown): value is Checkpointable<T> {
@@ -136,7 +172,11 @@ export function isCheckpointable<T>(value: unknown): value is Checkpointable<T> 
 // dependency cycle: kafka IMPLEMENTS it, topology CONSUMES it.
 
 export interface ShuffleTransport<T = unknown> {
-  getOrCreateRepartitionChannel(params: { name: string; group: string; codec: Codec<T> }): Promise<{
+  getOrCreateRepartitionChannel(params: {
+    name: ChannelName;
+    group: ConsumerGroup;
+    codec: Codec<T>;
+  }): Promise<{
     source: Streamable<T> & Acknowledgeable<T>;
     sink: KeyedSinkable<T>;
   }>;

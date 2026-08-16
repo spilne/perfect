@@ -54,12 +54,12 @@ declare module "../eff" {
       tag: ServiceTag<T>,
       impl: T,
     ): Eff<A, Exclude<S, Needs<T>>>;
-    retry<A, S>(this: Eff<A, S>, policy: RetryPolicy | RetryConfig<any>): Eff<A, S>;
-    repeat<A, S>(this: Eff<A, S>, schedule: Schedule<any>): Eff<A, S>;
-    retryWith<A, S>(
+    retry<A, S>(this: Eff<A, S>, policy: RetryPolicy | RetryConfig): Eff<A, S>;
+    repeat<A, S>(this: Eff<A, S>, schedule: Schedule<A>): Eff<A, S>;
+    retryWith<A, S, In = unknown, Out = unknown>(
       this: Eff<A, S>,
-      schedule: Schedule<any>,
-      opts?: { while?: (e: any) => boolean },
+      schedule: Schedule<In, Out>,
+      opts?: { while?: (e: unknown) => boolean },
     ): Eff<A, S>;
     /**
      * Re-run until `until(value)` returns true. Fixed interval between

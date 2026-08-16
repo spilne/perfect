@@ -9,6 +9,8 @@
 // Each stage is a sub-topology that TopologyRunner can execute independently.
 // ---------------------------------------------------------------------------
 
+import { ChannelName, type ConsumerGroup } from "@perfect/core/connect";
+import { StageId } from "./brands";
 import type { TopologyNode, CompiledTopology, ShuffleNode, SinkNode } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -18,17 +20,17 @@ import type { TopologyNode, CompiledTopology, ShuffleNode, SinkNode } from "./ty
 export interface StagePlan {
   /** Ordered list of stages (stage 0 reads from original source). */
   stages: TopologyStage[];
-  /** Names of repartition topics created between stages. */
-  repartitionTopics: string[];
+  /** Names of repartition channels created between stages. */
+  repartitionTopics: ChannelName[];
 }
 
 export interface TopologyStage {
   /** Unique stage identifier. */
-  id: string;
+  id: StageId;
   /** Where this stage reads from. */
-  source: "original" | { repartitionTopic: string };
+  source: "original" | { repartitionTopic: ChannelName };
   /** Where this stage writes to. */
-  sink: "terminal" | { repartitionTopic: string };
+  sink: "terminal" | { repartitionTopic: ChannelName };
   /** The topology nodes in this stage. */
   nodes: TopologyNode[];
   /** Sink nodes (only present in the final stage). */
@@ -50,7 +52,10 @@ export interface TopologyStage {
  * @returns StagePlan with stages and repartition topic names.
  *          If no shuffles, returns a single stage with the original topology.
  */
-export function planStages(params: { compiled: CompiledTopology; group: string }): StagePlan {
+export function planStages(params: {
+  compiled: CompiledTopology;
+  group: ConsumerGroup;
+}): StagePlan {
   const { compiled, group } = params;
 
   // Collect all nodes in the DAG by walking from sinks
@@ -64,7 +69,7 @@ export function planStages(params: { compiled: CompiledTopology; group: string }
     return {
       stages: [
         {
-          id: `${group}-stage-0`,
+          id: StageId(`${group}-stage-0`),
           source: "original",
           sink: "terminal",
           nodes: allNodes,
@@ -76,16 +81,16 @@ export function planStages(params: { compiled: CompiledTopology; group: string }
   }
 
   // Build repartition topic names for each shuffle
-  const shuffleTopics = new Map<ShuffleNode<unknown>, string>();
+  const shuffleTopics = new Map<ShuffleNode<unknown>, ChannelName>();
   shuffleNodes.forEach((node, i) => {
-    const name = node.topicName ?? `${group}-repartition-${i}`;
+    const name = node.topicName ?? ChannelName(`${group}-repartition-${i}`);
     shuffleTopics.set(node, name);
   });
 
   // For each sink, walk back to find the chain of shuffles and create stages
   // For simplicity, handle the common case: linear topology with shuffles
   const stages: TopologyStage[] = [];
-  const repartitionTopics: string[] = [...shuffleTopics.values()];
+  const repartitionTopics: ChannelName[] = [...shuffleTopics.values()];
 
   // Walk from source to sinks, splitting at shuffles
   // Find the ordered shuffle boundaries by walking the first sink's parent chain
@@ -99,7 +104,7 @@ export function planStages(params: { compiled: CompiledTopology; group: string }
     const firstShuffle = orderedShuffles[0]!;
     const keyFn = findKeyFnBefore(firstShuffle);
     stages.push({
-      id: `${group}-stage-0`,
+      id: StageId(`${group}-stage-0`),
       source: "original",
       sink: { repartitionTopic: shuffleTopics.get(firstShuffle)! },
       nodes: collectNodesBefore(firstShuffle),
@@ -114,7 +119,7 @@ export function planStages(params: { compiled: CompiledTopology; group: string }
     const nextShuffle = orderedShuffles[i + 1]!;
     const keyFn = findKeyFnBefore(nextShuffle);
     stages.push({
-      id: `${group}-stage-${i + 1}`,
+      id: StageId(`${group}-stage-${i + 1}`),
       source: { repartitionTopic: shuffleTopics.get(currentShuffle)! },
       sink: { repartitionTopic: shuffleTopics.get(nextShuffle)! },
       nodes: collectNodesBetween(currentShuffle, nextShuffle),
@@ -126,7 +131,7 @@ export function planStages(params: { compiled: CompiledTopology; group: string }
   // Final stage: repartition[last] → ... → sink
   const lastShuffle = orderedShuffles[orderedShuffles.length - 1]!;
   stages.push({
-    id: `${group}-stage-${orderedShuffles.length}`,
+    id: StageId(`${group}-stage-${orderedShuffles.length}`),
     source: { repartitionTopic: shuffleTopics.get(lastShuffle)! },
     sink: "terminal",
     nodes: collectNodesAfter(lastShuffle, parentChain),

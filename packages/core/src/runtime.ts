@@ -154,7 +154,7 @@ function runFiberLoop(fiber: Fiber<any>): void {
             // a throwing continuation (user callback in .map/.flatMap) is a
             // defect, not an interpreter crash
             try {
-              cur = frame.fn(cur);
+              cur = (frame.fn as any)(cur);
             } catch (e) {
               cur = new Suspend(Op.Fail, Cause.die(e), null);
             }
@@ -220,7 +220,7 @@ function runFiberLoop(fiber: Fiber<any>): void {
 
       case Op.Sync: {
         try {
-          cur = cur.a();
+          cur = (cur.a as any)();
         } catch (e) {
           cur = new Suspend(Op.Fail, Cause.die(e), null);
         }
@@ -236,7 +236,7 @@ function runFiberLoop(fiber: Fiber<any>): void {
             const f = Cause.firstFail(cause);
             if (f) {
               try {
-                cur = frame.fn(f.value);
+                cur = (frame.fn as any)(f.value);
               } catch (e) {
                 cur = new Suspend(Op.Fail, Cause.die(e), null);
               }
@@ -245,7 +245,7 @@ function runFiberLoop(fiber: Fiber<any>): void {
           }
           if (frame.op === Op.CatchAll) {
             try {
-              cur = frame.fn(cause);
+              cur = (frame.fn as any)(cause);
             } catch (e) {
               cur = new Suspend(Op.Fail, Cause.die(e), null);
             }
@@ -546,7 +546,7 @@ function stepInline(
             // a throwing continuation (user callback in .map/.flatMap) is a
             // defect, not an interpreter crash
             try {
-              cur = frame.fn(cur);
+              cur = (frame.fn as any)(cur);
             } catch (e) {
               cur = new Suspend(Op.Fail, Cause.die(e), null);
             }
@@ -590,7 +590,7 @@ function stepInline(
       }
       case Op.Sync: {
         try {
-          cur = cur.a();
+          cur = (cur.a as any)();
         } catch (e) {
           cur = new Suspend(Op.Fail, Cause.die(e), null);
         }
@@ -605,7 +605,7 @@ function stepInline(
             const f = Cause.firstFail(cause);
             if (f) {
               try {
-                cur = frame.fn(f.value);
+                cur = (frame.fn as any)(f.value);
               } catch (e) {
                 cur = new Suspend(Op.Fail, Cause.die(e), null);
               }
@@ -614,7 +614,7 @@ function stepInline(
           }
           if (frame.op === Op.CatchAll) {
             try {
-              cur = frame.fn(cause);
+              cur = (frame.fn as any)(cause);
             } catch (e) {
               cur = new Suspend(Op.Fail, Cause.die(e), null);
             }
@@ -654,8 +654,8 @@ function stepInline(
         continue loop;
       }
       case Op.Ensuring: {
-        const body = cur.a;
-        const finalizer = cur.b;
+        const body = cur.a as Suspend;
+        const finalizer = cur.b as Suspend;
         stepInline(
           body,
           context,
@@ -722,7 +722,7 @@ function stepInline(
       }
       case Op.Async: {
         // async in finalizer context — still need to handle it
-        const register = cur.a;
+        const register = cur.a as (resume: (value: any) => void) => unknown;
         register((value: any) => {
           stepInline(
             value instanceof Suspend ? value : new Suspend(Op.Succeed, value, null),
@@ -882,7 +882,7 @@ export function runFiber<A, S>(eff: Eff<A, S> & EffectCheck<S>, scheduler?: Sche
  * Use this when you want to pattern-match on success vs every flavour of
  * failure (typed error, defect, interrupt) and inspect the full Cause tree.
  */
-export function runExit<A>(eff: Eff<A, any>, scheduler?: Scheduler): Promise<Exit<unknown, A>> {
+export function runExit<A>(eff: Eff<A, unknown>, scheduler?: Scheduler): Promise<Exit<unknown, A>> {
   // Literal-leaf fast path — see top-of-file comment for rationale.
   const node = eff as any;
   if (node.op === Op.Succeed) return Promise.resolve({ _tag: "Success" as const, value: node.a });
@@ -908,17 +908,17 @@ export function runExit<A>(eff: Eff<A, any>, scheduler?: Scheduler): Promise<Exi
  *   // error is now typed | unknown (defects as well)
  */
 export function runSafe<A, E = unknown>(
-  eff: Eff<A, any>,
+  eff: Eff<A, unknown>,
   opts: { catchDefects: true },
   scheduler?: Scheduler,
 ): Promise<{ data: A; error: null } | { data: null; error: E | unknown }>;
 export function runSafe<A, E = unknown>(
-  eff: Eff<A, any>,
+  eff: Eff<A, unknown>,
   opts?: { catchDefects?: false },
   scheduler?: Scheduler,
 ): Promise<{ data: A; error: null } | { data: null; error: E }>;
 export function runSafe<A>(
-  eff: Eff<A, any>,
+  eff: Eff<A, unknown>,
   opts: { catchDefects?: boolean } = {},
   scheduler?: Scheduler,
 ): Promise<{ data: A; error: null } | { data: null; error: unknown }> {

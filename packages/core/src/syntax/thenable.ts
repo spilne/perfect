@@ -22,6 +22,8 @@ declare module "../eff" {
      */
     then<TResult1 = unknown, TResult2 = never>(
       onFulfilled?: ((value: unknown) => TResult1 | PromiseLike<TResult1>) | null,
+      // `reason: any` mirrors lib.es5's PromiseLike/Promise `then` exactly —
+      // required for structural thenable compatibility.
       onRejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | null,
     ): Promise<TResult1 | TResult2>;
   }
@@ -47,7 +49,7 @@ Suspend.prototype.then = function (this: Suspend, onFulfilled?: any, onRejected?
   // Literal-leaf fast path — see runtime.ts top-of-file comment for rationale.
   if (this.op === Op.Succeed) return Promise.resolve(this.a).then(onFulfilled, onRejected);
   if (this.op === Op.Fail)
-    return Promise.reject(Cause.squash(this.a)).then(onFulfilled, onRejected);
+    return Promise.reject(Cause.squash(this.a as Cause)).then(onFulfilled, onRejected);
   // Anything richer (Sync/FlatMap/Async/Fork/...) goes through the fiber runtime.
   return run(this as any).then(onFulfilled, onRejected);
 };

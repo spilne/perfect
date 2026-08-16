@@ -9,6 +9,17 @@
 // Eff layer wraps at call sites.
 // ---------------------------------------------------------------------------
 
+import { type Brand, nominal } from "../brand";
+
+/**
+ * A checkpoint identifier. Branded because backends with string keys
+ * (K = string) would otherwise let a state key slip in where a checkpoint
+ * name belongs — both are plain strings at the same call sites.
+ */
+export type CheckpointName = Brand<string, "CheckpointName">;
+// Signature pinned explicitly — see the note in contracts.ts.
+export const CheckpointName = nominal<CheckpointName>() as (value: string) => CheckpointName;
+
 export interface StateBackend<K, V> {
   /** Get the value for a key. Returns undefined if not found. */
   get(key: K): Promise<V | undefined>;
@@ -26,10 +37,10 @@ export interface StateBackend<K, V> {
   entries(): Promise<[K, V][]>;
 
   /** Checkpoint current state (for crash recovery). No-op for in-memory. */
-  checkpoint(params: { name: string }): Promise<void>;
+  checkpoint(params: { name: CheckpointName }): Promise<void>;
 
   /** Restore state from a checkpoint. No-op for in-memory. */
-  restore(params: { name: string }): Promise<void>;
+  restore(params: { name: CheckpointName }): Promise<void>;
 
   /** Clear all state. */
   clear(): Promise<void>;
@@ -38,7 +49,7 @@ export interface StateBackend<K, V> {
 /** Map-backed StateBackend — the default when no backend is configured. */
 export class InMemoryState<K, V> implements StateBackend<K, V> {
   private store = new Map<K, V>();
-  private checkpoints = new Map<string, Map<K, V>>();
+  private checkpoints = new Map<CheckpointName, Map<K, V>>();
 
   async get(key: K): Promise<V | undefined> {
     return this.store.get(key);
@@ -60,11 +71,11 @@ export class InMemoryState<K, V> implements StateBackend<K, V> {
     return [...this.store.entries()];
   }
 
-  async checkpoint(params: { name: string }): Promise<void> {
+  async checkpoint(params: { name: CheckpointName }): Promise<void> {
     this.checkpoints.set(params.name, new Map(this.store));
   }
 
-  async restore(params: { name: string }): Promise<void> {
+  async restore(params: { name: CheckpointName }): Promise<void> {
     const saved = this.checkpoints.get(params.name);
     if (saved) {
       this.store = new Map(saved);

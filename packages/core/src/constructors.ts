@@ -17,7 +17,7 @@ export function die(defect: unknown): Eff<never, never> {
 
 /** Fail with a pre-existing Cause — useful for re-failing unchanged after
  *  inspecting it, without `mapErrorCause`'s transformation step. */
-export function failCause<E = unknown>(cause: import("./cause").Cause<E>): Eff<never, any> {
+export function failCause<E = unknown>(cause: import("./cause").Cause<E>): Eff<never, Throws<E>> {
   return new Suspend(Op.Fail, cause, null) as any;
 }
 
@@ -164,7 +164,7 @@ export function raceEither(...args: any[]): any {
 // Run all in parallel and collect their Exits — never fails, never interrupts siblings on failure.
 export function raceAll<A, S>(
   effects: Eff<A, S>[],
-): Eff<Exit<unknown, A>[], Exclude<S, Throws<any>>> {
+): Eff<Exit<unknown, A>[], Exclude<S, Throws<unknown>>> {
   const wrapped = effects.map(
     (e) =>
       new Suspend(

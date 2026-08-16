@@ -21,7 +21,10 @@ import type { Envelope } from "./contracts";
 export function autoCommitBatchWithin<T>(
   maxBatchSize: number,
   maxWaitMs: number,
-): (stream: Stream<Envelope<T>, any>) => Stream<T, any> {
+): (stream: Stream<Envelope<T>, unknown>) => Stream<T, any> {
+  // return-side S is deliberately erased (`any`, not `unknown`) — the ack
+  // effects introduce no typed failures the caller must handle, and
+  // `unknown` would fail EffectCheck at every downstream run()
   return (stream) =>
     stream
       .groupWithin(maxBatchSize, maxWaitMs)
