@@ -1,5 +1,5 @@
 import { Cause } from "./cause";
-import { type Eff, type Throws, Suspend, Op } from "./eff";
+import { type Eff, type Throws, type InferValue, type InferEffects, Suspend, Op } from "./eff";
 import { Fiber } from "./fiber";
 import { type Exit, Exit as ExitNS } from "./exit";
 
@@ -134,12 +134,18 @@ export function delay<A, S>(eff: Eff<A, S>, ms: number): Eff<A, S> {
 // ── Race ───────────────────────────────────────────────────────────
 
 // First settled (success OR failure) wins; losers are interrupted.
-export function race<A, S>(effects: Eff<A, S>[]): Eff<A, S> {
+// Generic over the tuple so heterogeneous arrays infer the UNION of their
+// value/effect types instead of locking onto the first element.
+export function race<E extends Eff<unknown, unknown>[]>(
+  effects: [...E],
+): Eff<InferValue<E[number]>, InferEffects<E[number]>> {
   return new Suspend(Op.Race, effects, null) as any;
 }
 
 // Alias for race — named for symmetry with raceAll.
-export function raceFirst<A, S>(effects: Eff<A, S>[]): Eff<A, S> {
+export function raceFirst<E extends Eff<unknown, unknown>[]>(
+  effects: [...E],
+): Eff<InferValue<E[number]>, InferEffects<E[number]>> {
   return race(effects);
 }
 

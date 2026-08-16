@@ -147,7 +147,8 @@ function tupleGen<A extends readonly Gen<unknown>[]>(
 ): Gen<{ [K in keyof A]: A[K] extends Gen<infer V> ? V : never }> {
   return mk(
     (() => {
-      const collect = (i: number, acc: any[]): Eff<any[], never> => {
+      // accumulator is heterogenous by construction; cast at the boundary
+      const collect = (i: number, acc: any[]): Eff<any, never> => {
         if (i >= gens.length) return sync(() => acc) as any;
         return new Suspend(Op.FlatMap, gens[i]!.generate, (v: any) => {
           acc.push(v);

@@ -1,4 +1,4 @@
-import { type Eff, type Throws, Suspend, Op } from "../eff";
+import { type Eff, type Throws, type ErrorsOf, type ExcludeTags, Suspend, Op } from "../eff";
 import { Cause } from "../cause";
 import { type Exit, Exit as ExitNS } from "../exit";
 import { succeed, fail, die } from "../constructors";
@@ -9,21 +9,21 @@ type Either<E, A> =
 
 declare module "../eff" {
   interface Suspend {
-    catch<A, S, E, B, S2>(
-      this: Eff<A, S | Throws<E>>,
-      handler: (error: E) => Eff<B, S2>,
-    ): Eff<A | B, Exclude<S, Throws<E>> | S2>;
+    catch<A, S, B, S2>(
+      this: Eff<A, S>,
+      handler: (error: ErrorsOf<S>) => Eff<B, S2>,
+    ): Eff<A | B, Exclude<S, Throws<unknown>> | S2>;
 
-    catchTag<A, S, Tag extends string, E extends { readonly _tag: Tag }, B, S2>(
-      this: Eff<A, S | Throws<E>>,
+    catchTag<A, S, Tag extends string, B, S2>(
+      this: Eff<A, S>,
       tag: Tag,
-      handler: (error: Extract<E, { readonly _tag: Tag }>) => Eff<B, S2>,
-    ): Eff<A | B, Exclude<S, Throws<Extract<E, { readonly _tag: Tag }>>> | S2>;
+      handler: (error: Extract<ErrorsOf<S>, { readonly _tag: Tag }>) => Eff<B, S2>,
+    ): Eff<A | B, ExcludeTags<S, Tag> | S2>;
 
-    catchSome<A, S, E, B, S2>(
-      this: Eff<A, S | Throws<E>>,
-      handler: (error: E) => Eff<B, S2> | undefined,
-    ): Eff<A | B, S | Throws<E> | S2>;
+    catchSome<A, S, B, S2>(
+      this: Eff<A, S>,
+      handler: (error: ErrorsOf<S>) => Eff<B, S2> | undefined,
+    ): Eff<A | B, S | S2>;
 
     catchAllCause<A, S, B, S2>(
       this: Eff<A, S>,
@@ -34,27 +34,27 @@ declare module "../eff" {
 
     orDie<A, S>(this: Eff<A, S>): Eff<A, Exclude<S, Throws<unknown>>>;
 
-    option<A, S, E>(this: Eff<A, S | Throws<E>>): Eff<A | undefined, Exclude<S, Throws<E>>>;
+    option<A, S>(this: Eff<A, S>): Eff<A | undefined, Exclude<S, Throws<unknown>>>;
 
-    either<A, S, E>(this: Eff<A, S | Throws<E>>): Eff<Either<E, A>, Exclude<S, Throws<E>>>;
+    either<A, S>(this: Eff<A, S>): Eff<Either<ErrorsOf<S>, A>, Exclude<S, Throws<unknown>>>;
 
-    mapError<A, S, E, E2>(
-      this: Eff<A, S | Throws<E>>,
-      f: (e: E) => E2,
-    ): Eff<A, Exclude<S, Throws<E>> | Throws<E2>>;
+    mapError<A, S, E2>(
+      this: Eff<A, S>,
+      f: (e: ErrorsOf<S>) => E2,
+    ): Eff<A, Exclude<S, Throws<unknown>> | Throws<E2>>;
 
-    tapError<A, S, E, S2>(
-      this: Eff<A, S | Throws<E>>,
-      f: (e: E) => Eff<unknown, S2>,
-    ): Eff<A, S | Throws<E> | S2>;
+    tapError<A, S, S2>(
+      this: Eff<A, S>,
+      f: (e: ErrorsOf<S>) => Eff<unknown, S2>,
+    ): Eff<A, S | S2>;
 
     tapErrorCause<A, S, S2>(this: Eff<A, S>, f: (cause: Cause) => Eff<unknown, S2>): Eff<A, S | S2>;
 
-    tapBoth<A, S, E, S2, S3>(
-      this: Eff<A, S | Throws<E>>,
-      onError: (e: E) => Eff<unknown, S2>,
+    tapBoth<A, S, S2, S3>(
+      this: Eff<A, S>,
+      onError: (e: ErrorsOf<S>) => Eff<unknown, S2>,
       onSuccess: (a: A) => Eff<unknown, S3>,
-    ): Eff<A, S | Throws<E> | S2 | S3>;
+    ): Eff<A, S | S2 | S3>;
 
     /**
      * Bulk tag handler — `eff.catchTags({ NotFound: e => ..., Forbidden: e => ... })`
@@ -70,22 +70,18 @@ declare module "../eff" {
     catchTags<
       A,
       S,
-      E extends { readonly _tag: string },
       Handlers extends {
-        readonly [K in E["_tag"]]?: (error: Extract<E, { readonly _tag: K }>) => Eff<any, any>;
+        readonly [K in Extract<ErrorsOf<S>, { readonly _tag: string }>["_tag"]]?: (
+          error: Extract<ErrorsOf<S>, { readonly _tag: K }>,
+        ) => Eff<any, any>;
       },
     >(
-      this: Eff<A, S | Throws<E>>,
+      this: Eff<A, S>,
       handlers: Handlers,
     ): Eff<
       | A
       | (Handlers[keyof Handlers] extends ((e: any) => Eff<infer B, any>) | undefined ? B : never),
-      | Exclude<S, Throws<E>>
-      | Throws<
-          Exclude<E["_tag"], keyof Handlers> extends infer R extends string
-            ? Extract<E, { readonly _tag: R }>
-            : never
-        >
+      | ExcludeTags<S, keyof Handlers & string>
       | (Handlers[keyof Handlers] extends ((e: any) => Eff<any, infer S2>) | undefined ? S2 : never)
     >;
 
@@ -93,18 +89,18 @@ declare module "../eff" {
      * Switch-style match on a single tag — returns `onMatch(value)` if the
      * tag matches, else returns `onElse(otherError)`.
      */
-    matchTag<A, S, E extends { readonly _tag: string }, Tag extends E["_tag"], B, S2, C, S3>(
-      this: Eff<A, S | Throws<E>>,
+    matchTag<A, S, Tag extends string, B, S2, C, S3>(
+      this: Eff<A, S>,
       tag: Tag,
-      onMatch: (error: Extract<E, { readonly _tag: Tag }>) => Eff<B, S2>,
-      onElse: (error: Exclude<E, { readonly _tag: Tag }>) => Eff<C, S3>,
-    ): Eff<A | B | C, Exclude<S, Throws<E>> | S2 | S3>;
+      onMatch: (error: Extract<ErrorsOf<S>, { readonly _tag: Tag }>) => Eff<B, S2>,
+      onElse: (error: Exclude<ErrorsOf<S>, { readonly _tag: Tag }>) => Eff<C, S3>,
+    ): Eff<A | B | C, Exclude<S, Throws<unknown>> | S2 | S3>;
 
     /**
      * Convert `Eff<A, S | Throws<E>>` to `Eff<Exit<E, A>, never>` — never fails
      * for typed/defect/interrupt; the outcome is in the success channel.
      */
-    exit<A, S, E>(this: Eff<A, S | Throws<E>>): Eff<Exit<E, A>, Exclude<S, Throws<E>>>;
+    exit<A, S>(this: Eff<A, S>): Eff<Exit<ErrorsOf<S>, A>, Exclude<S, Throws<unknown>>>;
 
     /** Observe defects (uncaught throws → Cause.Die) only — re-fails after. */
     tapDefect<A, S, S2>(this: Eff<A, S>, f: (defect: unknown) => Eff<unknown, S2>): Eff<A, S | S2>;
@@ -115,38 +111,38 @@ declare module "../eff" {
     // ── Cats-flavored aliases (for users migrating from cats-effect / promin) ──
 
     /** alias: catch — total handler returning an Eff for any error. */
-    handleErrorWith<A, S, E, B, S2>(
-      this: Eff<A, S | Throws<E>>,
-      handler: (error: E) => Eff<B, S2>,
-    ): Eff<A | B, Exclude<S, Throws<E>> | S2>;
+    handleErrorWith<A, S, B, S2>(
+      this: Eff<A, S>,
+      handler: (error: ErrorsOf<S>) => Eff<B, S2>,
+    ): Eff<A | B, Exclude<S, Throws<unknown>> | S2>;
 
     /** alias: catchSome via predicate + plain-value handler (cats `recover`). */
-    recover<A, S, E, B>(
-      this: Eff<A, S | Throws<E>>,
-      predicate: (error: E) => boolean,
-      handler: (error: E) => B,
-    ): Eff<A | B, S | Throws<E>>;
+    recover<A, S, B>(
+      this: Eff<A, S>,
+      predicate: (error: ErrorsOf<S>) => boolean,
+      handler: (error: ErrorsOf<S>) => B,
+    ): Eff<A | B, S>;
 
     /** alias: catchSome via predicate + Eff-returning handler (cats `recoverWith`). */
-    recoverWith<A, S, E, B, S2>(
-      this: Eff<A, S | Throws<E>>,
-      predicate: (error: E) => boolean,
-      handler: (error: E) => Eff<B, S2>,
-    ): Eff<A | B, S | Throws<E> | S2>;
+    recoverWith<A, S, B, S2>(
+      this: Eff<A, S>,
+      predicate: (error: ErrorsOf<S>) => boolean,
+      handler: (error: ErrorsOf<S>) => Eff<B, S2>,
+    ): Eff<A | B, S | S2>;
 
     /** cats: match both channels with plain-value functions. */
-    redeem<A, S, E, B>(
-      this: Eff<A, S | Throws<E>>,
-      onError: (error: E) => B,
+    redeem<A, S, B>(
+      this: Eff<A, S>,
+      onError: (error: ErrorsOf<S>) => B,
       onSuccess: (value: A) => B,
-    ): Eff<B, Exclude<S, Throws<E>>>;
+    ): Eff<B, Exclude<S, Throws<unknown>>>;
 
     /** cats: match both channels with Eff-returning functions. */
-    redeemWith<A, S, E, B, S2, S3>(
-      this: Eff<A, S | Throws<E>>,
-      onError: (error: E) => Eff<B, S2>,
+    redeemWith<A, S, B, S2, S3>(
+      this: Eff<A, S>,
+      onError: (error: ErrorsOf<S>) => Eff<B, S2>,
       onSuccess: (value: A) => Eff<B, S3>,
-    ): Eff<B, Exclude<S, Throws<E>> | S2 | S3>;
+    ): Eff<B, Exclude<S, Throws<unknown>> | S2 | S3>;
   }
 }
 

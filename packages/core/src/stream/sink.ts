@@ -3,7 +3,9 @@ import { succeed } from "../constructors";
 import type { Stream } from "./stream";
 
 export class Sink<A, B, S = never> {
-  constructor(readonly run: (input: Stream<A, unknown>) => Eff<B, S>) {}
+  // Polymorphic in the input's effect union, like Pipe: a sink THREADS the
+  // upstream S through its result instead of erasing it.
+  constructor(readonly run: <S2>(input: Stream<A, S2>) => Eff<B, S | S2>) {}
 
   contramap<C>(f: (c: C) => A): Sink<C, B, S> {
     return new Sink((input) => input.map(f).runSink(this));

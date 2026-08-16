@@ -5,6 +5,7 @@
 import {
   type Eff,
   type Throws,
+  type Needs,
   succeed,
   fail,
   service,
@@ -45,7 +46,7 @@ const _ok4: Eff<string | number, never> = race([
   succeed("ok"),
   fail(new NotFound()).catchTag("NotFound", () => succeed(1)),
 ]);
-const _ok5: Eff<[number, string], never> = all([succeed(1), succeed("two")] as const);
+const _ok5: Eff<readonly [number, string], never> = all([succeed(1), succeed("two")] as const);
 const _ok6: Eff<{ a: number; b: string }, never> = all({ a: succeed(1), b: succeed("two") });
 const _ok7: Eff<number[], never> = Stream.of(1, 2, 3).runSink(Sinks.collectAll());
 const _ok8: Eff<number | undefined, never> = Stream.of(1, 2, 3).runSink(Sinks.head());
@@ -127,3 +128,51 @@ const _err8 = run(
     Sinks.forEach((id) => UserRepo.get.flatMap((repo) => repo.find(id)).as(undefined)),
   ),
 );
+
+// ── Eff variance (regression: phantom collapse) ────────────────────
+// Suspend used to declare `_A: never`, collapsing every Eff<A, S> into one
+// structural type — any Eff was assignable to any other. These assertions
+// pin the fixed behavior.
+{
+  const effNum: Eff<number, never> = succeed(1);
+
+  // @ts-expect-error a produced number is not a string
+  const _wrongA: Eff<string, never> = effNum;
+
+  const effFails: Eff<number, Throws<"boom">> = effNum;
+  // @ts-expect-error requirements cannot be dropped — Throws<"boom"> ⊄ never
+  const _dropReq: Eff<number, never> = effFails;
+
+  // covariance positives — these must stay legal:
+  const _widenS: Eff<number, Throws<"boom"> | Needs<{ db: true }>> = effFails;
+  const _widenA: Eff<number | string, never> = effNum;
+  const _bottom: Eff<never, never> = null as unknown as Eff<never, never>;
+  const _bottomAnywhere: Eff<number, Throws<"x">> = _bottom;
+  void [_widenS, _widenA, _bottomAnywhere];
+}
+
+// ── catch-family stripping (regression: union-split inference) ─────
+// The old `this: Eff<A, S | Throws<E>>` signatures could not actually
+// split a union across two inference variables, so stripping silently
+// failed. These pin the whole-S formulations.
+{
+  const many: Eff<number, Many> = null as unknown as Eff<number, Many>;
+
+  const _optStrips: Eff<number | undefined, never> = many.option();
+  const _eitherStrips: Eff<unknown, never> = many.either();
+  const _redeemStrips: Eff<string, never> = many.redeem(
+    () => "e",
+    (n) => String(n),
+  );
+  const _mapErrorReplaces: Eff<number, Throws<"wrapped">> = many.mapError(() => "wrapped" as const);
+  void [_optStrips, _eitherStrips, _redeemStrips, _mapErrorReplaces];
+
+  // catchTag removes exactly one tag, keeps the rest
+  const two: Eff<number, Throws<{ readonly _tag: "A" }> | Throws<{ readonly _tag: "B" }>> =
+    null as unknown as never;
+  const afterTag = two.catchTag("A", () => succeed(0));
+  const _keepsB: Eff<number, Throws<{ readonly _tag: "B" }>> = afterTag;
+  // @ts-expect-error B is still unhandled
+  const _notNever: Eff<number, never> = afterTag;
+  void [_keepsB];
+}

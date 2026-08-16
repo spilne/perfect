@@ -57,9 +57,10 @@ export class Cont {
 // ── Suspend node (the runtime representation of an effect) ─────────
 export class Suspend {
   readonly [EFF_TAG] = true as const;
-  // phantom variance markers — never read at runtime
-  declare readonly _A: never;
-  declare readonly _S: never;
+  // NOTE: no phantom fields here. Declaring `_A: never` on the class made
+  // the Eff intersection compute `never & A = never` for every A — all
+  // Eff<A, S> types collapsed to one structural type and any Eff was
+  // assignable to any other. The phantoms live only on the Eff alias.
 
   constructor(
     public readonly op: Op,
@@ -72,7 +73,10 @@ export class Suspend {
 }
 
 // ── The Eff type ───────────────────────────────────────────────────
-// At the type level: Eff<A, S> is a Suspend node.
+// At the type level: Eff<A, S> is a Suspend node plus phantom readonly
+// markers, which make Eff properly covariant in A (a produced value can
+// widen) and S (a requirement set can grow). Runtime values never carry
+// these fields — constructors cast at the boundary.
 // At runtime: succeed(v) produces a Suspend(Op.Succeed, v) node too —
 // keeping one hidden class. The interpreter special-cases Op.Succeed.
 export type Eff<A, S = never> = Suspend & { readonly _A: A; readonly _S: S };
@@ -81,9 +85,28 @@ export type Eff<A, S = never> = Suspend & { readonly _A: A; readonly _S: S };
 export type InferValue<T> = T extends Eff<infer A, unknown> ? A : never;
 export type InferEffects<T> = T extends Eff<unknown, infer S> ? S : never;
 
+// ── Error-channel type helpers ─────────────────────────────────────
+// These power the catch-family signatures: infer S WHOLE and compute, never
+// split `S | Throws<E>` across two inference variables — TS cannot divide a
+// union that way, so E inferred as never and stripping silently failed
+// (invisible while Eff assignability was degenerate).
+
+/** Union of typed error payloads in S. */
+export type ErrorsOf<S> = S extends Throws<infer E> ? E : never;
+
+/**
+ * S with the given error tags removed. Distributes over S so the union
+ * shape is preserved; a Throws whose payload empties collapses to never.
+ */
+export type ExcludeTags<S, Tags extends string> = S extends Throws<infer E>
+  ? [Exclude<E, { readonly _tag: Tags }>] extends [never]
+    ? never
+    : Throws<Exclude<E, { readonly _tag: Tags }>>
+  : S;
+
 // ── Compile-time effect diagnostics ────────────────────────────────
 // Extract specific effect categories from the union
-type ExtractErrors<S> = S extends Throws<infer E> ? E : never;
+type ExtractErrors<S> = ErrorsOf<S>;
 type ExtractServices<S> = S extends Needs<infer D> ? D : never;
 type ExtractOther<S> = Exclude<S, Throws<unknown> | Needs<unknown>>;
 

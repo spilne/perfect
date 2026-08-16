@@ -26,12 +26,12 @@ declare module "../eff" {
 
 // parZip: run both in parallel, collect results
 Suspend.prototype.parZip = function (that: any) {
-  return new Suspend(Op.All, [this, that], null).map(([a, b]: any) => [a, b]) as any;
+  return (new Suspend(Op.All, [this, that], null) as any).map(([a, b]: any) => [a, b]);
 };
 
 // parZipWith: run both in parallel, combine results
 Suspend.prototype.parZipWith = function (that: any, f: any) {
-  return new Suspend(Op.All, [this, that], null).map(([a, b]: any) => f(a, b)) as any;
+  return (new Suspend(Op.All, [this, that], null) as any).map(([a, b]: any) => f(a, b));
 };
 
 // parMap: alias for parZipWith (Scala naming)

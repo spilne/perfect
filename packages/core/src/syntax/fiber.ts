@@ -183,13 +183,13 @@ Suspend.prototype.repeatUntilWithBackoff = function (opts: any) {
 };
 
 Suspend.prototype.when = function (cond: any) {
-  return new Suspend(Op.Sync, () => cond(), null).flatMap((c: boolean) =>
+  return (new Suspend(Op.Sync, () => cond(), null) as any).flatMap((c: boolean) =>
     c ? (this as any) : new Suspend(Op.Succeed, undefined, null),
   ) as any;
 };
 
 Suspend.prototype.unless = function (cond: any) {
-  return new Suspend(Op.Sync, () => cond(), null).flatMap((c: boolean) =>
+  return (new Suspend(Op.Sync, () => cond(), null) as any).flatMap((c: boolean) =>
     c ? new Suspend(Op.Succeed, undefined, null) : (this as any),
   ) as any;
 };
