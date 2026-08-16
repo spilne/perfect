@@ -98,11 +98,12 @@ export type ErrorsOf<S> = S extends Throws<infer E> ? E : never;
  * S with the given error tags removed. Distributes over S so the union
  * shape is preserved; a Throws whose payload empties collapses to never.
  */
-export type ExcludeTags<S, Tags extends string> = S extends Throws<infer E>
-  ? [Exclude<E, { readonly _tag: Tags }>] extends [never]
-    ? never
-    : Throws<Exclude<E, { readonly _tag: Tags }>>
-  : S;
+export type ExcludeTags<S, Tags extends string> =
+  S extends Throws<infer E>
+    ? [Exclude<E, { readonly _tag: Tags }>] extends [never]
+      ? never
+      : Throws<Exclude<E, { readonly _tag: Tags }>>
+    : S;
 
 // ── Compile-time effect diagnostics ────────────────────────────────
 // Extract specific effect categories from the union
