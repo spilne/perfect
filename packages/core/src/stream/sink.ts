@@ -3,7 +3,7 @@ import { succeed } from "../constructors";
 import type { Stream } from "./stream";
 
 export class Sink<A, B, S = never> {
-  constructor(readonly run: (input: Stream<A, any>) => Eff<B, S>) {}
+  constructor(readonly run: (input: Stream<A, unknown>) => Eff<B, S>) {}
 
   contramap<C>(f: (c: C) => A): Sink<C, B, S> {
     return new Sink((input) => input.map(f).runSink(this));

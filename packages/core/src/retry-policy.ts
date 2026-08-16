@@ -18,10 +18,10 @@ export type { RetryDetails } from "./schedule";
 // ── Internal policy config ──────────────────────────────────────────
 
 interface PolicyImpl {
-  readonly schedule: Schedule<unknown, any>;
+  readonly schedule: Schedule<unknown, unknown>;
   readonly whenError?: (error: unknown) => boolean;
   readonly whenCause?: (cause: Cause) => boolean;
-  readonly onRetry?: (details: RetryDetails<Cause, any>) => Eff<void, any>;
+  readonly onRetry?: (details: RetryDetails<Cause, unknown>) => Eff<void, unknown>;
   // Time budget is applied by intersecting a whileOutput(cumulativeDelay, < budget)
   // onto the schedule at build time. Stored so multiple withTimeBudget() calls
   // are idempotent (the last one wins rather than compounding).
@@ -72,8 +72,8 @@ export class RetryPolicy {
   static none: RetryPolicy = new RetryPolicy({ schedule: Schedule.recurs(0) });
 
   /** Wrap an existing Schedule. */
-  static fromSchedule(s: Schedule<any, any>): RetryPolicy {
-    return new RetryPolicy({ schedule: s });
+  static fromSchedule<In, Out>(s: Schedule<In, Out>): RetryPolicy {
+    return new RetryPolicy({ schedule: s as Schedule<unknown, unknown> });
   }
 
   // ── Fluent modifiers ──────────────────────────────────────────────
@@ -119,7 +119,7 @@ export class RetryPolicy {
   }
 
   /** Hook fired before each retry (and when giving up) — for logging/metrics. */
-  onRetry(fn: (details: RetryDetails<Cause, any>) => Eff<void, any>): RetryPolicy {
+  onRetry(fn: (details: RetryDetails<Cause, unknown>) => Eff<void, unknown>): RetryPolicy {
     return this.copy({ onRetry: fn });
   }
 

@@ -25,6 +25,7 @@ import { Stream } from "@perfect/core/stream";
 import { OffsetTracker } from "@perfect/core/connect";
 import type { Envelope } from "@perfect/core/connect";
 import type { KafkaConsumer, KafkaOffsetCommit } from "./kafka-types";
+import { type TopicName, PartitionId, KafkaOffset } from "./brands";
 
 export interface CommitBatchWithinConfig {
   /** Commit after this many messages. */
@@ -34,7 +35,7 @@ export interface CommitBatchWithinConfig {
   /** Kafka consumer to commit offsets on. */
   consumer: KafkaConsumer;
   /** Topic name (for offset commits). */
-  topic: string;
+  topic: TopicName;
 }
 
 /**
@@ -47,7 +48,7 @@ export interface CommitBatchWithinConfig {
  */
 export function commitBatchWithin<T>(
   config: CommitBatchWithinConfig,
-): (stream: Stream<Envelope<T>, any>) => Stream<T, any> {
+): (stream: Stream<Envelope<T>, unknown>) => Stream<T, any> {
   return (stream) => {
     const tracker = new OffsetTracker();
 
@@ -58,7 +59,9 @@ export function commitBatchWithin<T>(
           fromPromise(
             async () => {
               for (const env of chunk) {
-                const partition = (env.metadata.partition as number) ?? 0;
+                // Envelope metadata is deliberately Record<string, unknown> —
+                // rebrand at this boundary.
+                const partition = PartitionId((env.metadata.partition as number) ?? 0);
                 const offset = Number(env.metadata.offset ?? 0);
 
                 // Seed the frontier from the lowest offset seen
@@ -74,7 +77,7 @@ export function commitBatchWithin<T>(
                   ([partition, offset]) => ({
                     topic: config.topic,
                     partition,
-                    offset: offset.toString(),
+                    offset: KafkaOffset(offset.toString()),
                   }),
                 );
 

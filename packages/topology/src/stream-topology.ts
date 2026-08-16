@@ -11,7 +11,7 @@
 // Think: Kafka Streams Topology / Flink JobGraph, with our API style.
 // ---------------------------------------------------------------------------
 
-import type { Streamable, Acknowledgeable, Sinkable } from "@perfect/core/connect";
+import type { Streamable, Acknowledgeable, Sinkable, ChannelName } from "@perfect/core/connect";
 import type {
   TopologyNode,
   AggregateSpec,
@@ -120,7 +120,7 @@ export class KeyedTopology<K extends string, T> {
    * In single-process mode (TopologyRunner), shuffle is a no-op passthrough.
    * In distributed mode (DistributedRunner), it creates a stage boundary.
    */
-  shuffle(params?: { topicName?: string }): KeyedTopology<K, T> {
+  shuffle(params?: { topicName?: ChannelName }): KeyedTopology<K, T> {
     return new KeyedTopology({
       type: "shuffle",
       parent: this.node,

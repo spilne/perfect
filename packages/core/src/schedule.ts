@@ -1,14 +1,21 @@
 import { type Eff, Suspend, Op } from "./eff";
+import type { Cause } from "./cause";
 import { succeed, sleep, suspend } from "./constructors";
 
 // A Schedule<In, Out> decides whether to continue and what delay to use.
 // Each step receives the input and returns either a delay + output, or done.
+//
+// `state`/`initial` are `any` by design: the state type is existential —
+// each schedule picks its own (number, [number, number], nested records) and
+// it never escapes the step/initial pair. `unknown` here would reject every
+// implementation whose step annotates its own state type.
 export interface Schedule<In = unknown, Out = unknown> {
   readonly step: (input: In, state: any) => ScheduleDecision<Out>;
   readonly initial: any;
 }
 
 export type ScheduleDecision<Out> =
+  // `state: any`: same existential-state rationale as Schedule.
   | { readonly _tag: "Continue"; readonly delay: number; readonly output: Out; readonly state: any }
   | { readonly _tag: "Done"; readonly output: Out };
 
@@ -238,12 +245,12 @@ export interface RetryDetails<In = unknown, Out = unknown> {
   readonly givingUp: boolean;
 }
 
-export function retryWith<A, S, In>(
+export function retryWith<A, S, In, Out = unknown>(
   eff: Eff<A, S>,
-  schedule: Schedule<In, any>,
+  schedule: Schedule<In, Out>,
   opts: {
-    toInput?: (cause: any) => In;
-    onRetry?: (details: RetryDetails<In, any>) => Eff<void, any>;
+    toInput?: (cause: Cause) => In;
+    onRetry?: (details: RetryDetails<In, Out>) => Eff<void, unknown>;
   } = {},
 ): Eff<A, S> {
   const { toInput, onRetry } = opts;
@@ -255,7 +262,7 @@ export function retryWith<A, S, In>(
       const decision = schedule.step(input, state);
       if (decision._tag === "Done") {
         if (onRetry) {
-          const details: RetryDetails<In, any> = {
+          const details: RetryDetails<In, Out> = {
             attempts: attempts + 1,
             upcomingDelayMs: 0,
             input,
@@ -272,7 +279,7 @@ export function retryWith<A, S, In>(
         return (wait as any).flatMap(() => loop(decision.state, attempts + 1));
       };
       if (onRetry) {
-        const details: RetryDetails<In, any> = {
+        const details: RetryDetails<In, Out> = {
           attempts: attempts + 1,
           upcomingDelayMs: decision.delay,
           input,
@@ -287,7 +294,7 @@ export function retryWith<A, S, In>(
   return loop(schedule.initial, 0);
 }
 
-export function repeat<A, S>(eff: Eff<A, S>, schedule: Schedule<A, any>): Eff<A, S> {
+export function repeat<A, S>(eff: Eff<A, S>, schedule: Schedule<A, unknown>): Eff<A, S> {
   function loop(state: any): Eff<A, S> {
     return (eff as any).flatMap((value: A) => {
       const decision = schedule.step(value, state);

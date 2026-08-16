@@ -23,19 +23,22 @@ import type {
   Replayable,
   Acknowledgeable,
   Checkpointable,
+  ConsumerGroup,
   Envelope,
   Codec,
   Offset,
+  Partition,
 } from "@perfect/core/connect";
 import type { KafkaClient, KafkaConsumerOptions, KafkaProducer, KafkaMessage } from "./kafka-types";
+import { type TopicName, type GroupId, PartitionId, KafkaOffset } from "./brands";
 
 export interface KafkaTopicConfig<T> {
   /** Kafka client instance. */
   kafka: KafkaClient;
   /** Topic name. */
-  topic: string;
+  topic: TopicName;
   /** Consumer group ID. */
-  groupId: string;
+  groupId: GroupId;
   /** Codec for message serialization. Default: JsonCodec. */
   codec?: Codec<T>;
   /**
@@ -57,8 +60,8 @@ export class KafkaTopic<T>
 {
   readonly codec: Codec<T>;
   private readonly kafka: KafkaClient;
-  private readonly topic: string;
-  private readonly groupId: string;
+  private readonly topic: TopicName;
+  private readonly groupId: GroupId;
   private readonly consumerOptions?: Omit<KafkaConsumerOptions, "groupId">;
 
   private producer?: KafkaProducer;
@@ -130,7 +133,7 @@ export class KafkaTopic<T>
   // Streamable — subscribe to messages
   // =========================================================================
 
-  subscribe(params?: { group?: string; partitions?: number[] }): Stream<T, never> {
+  subscribe(params?: { group?: ConsumerGroup; partitions?: Partition[] }): Stream<T, never> {
     return this.createConsumerStream(params?.group);
   }
 
@@ -138,7 +141,7 @@ export class KafkaTopic<T>
   // Replayable — subscribe from offset
   // =========================================================================
 
-  subscribeFrom(params: { offset: Offset; group?: string }): Stream<T, never> {
+  subscribeFrom(params: { offset: Offset; group?: ConsumerGroup }): Stream<T, never> {
     return this.createConsumerStream(params.group, params.offset);
   }
 
@@ -147,7 +150,7 @@ export class KafkaTopic<T>
   // =========================================================================
 
   subscribeAck(params?: {
-    group?: string;
+    group?: ConsumerGroup;
     commitIntervalMs?: number;
     fromBeginning?: boolean;
   }): Stream<Envelope<T>, never> {
@@ -185,7 +188,7 @@ export class KafkaTopic<T>
           const offsets = [...committable.entries()].map(([partition, offset]) => ({
             topic,
             partition,
-            offset: offset.toString(),
+            offset: KafkaOffset(offset.toString()),
           }));
 
           await consumer.commitOffsets(offsets);
@@ -271,14 +274,16 @@ export class KafkaTopic<T>
   // Checkpointable — offset management
   // =========================================================================
 
-  async commitOffset(params: { group: string; offset: string }): Promise<void> {
+  async commitOffset(params: { group: ConsumerGroup; offset: string }): Promise<void> {
     const consumer = this.kafka.consumer({ groupId: params.group });
     await consumer.connect();
-    await consumer.commitOffsets([{ topic: this.topic, partition: 0, offset: params.offset }]);
+    await consumer.commitOffsets([
+      { topic: this.topic, partition: PartitionId(0), offset: KafkaOffset(params.offset) },
+    ]);
     await consumer.disconnect();
   }
 
-  async getCommittedOffset(params: { group: string }): Promise<string | null> {
+  async getCommittedOffset(params: { group: ConsumerGroup }): Promise<string | null> {
     const admin = this.kafka.admin();
     await admin.connect();
     const offsets = await admin.fetchOffsets({ groupId: params.group, topics: [this.topic] });
@@ -292,7 +297,7 @@ export class KafkaTopic<T>
   // Internal — consumer stream creation
   // =========================================================================
 
-  private createConsumerStream(group?: string, offset?: Offset): Stream<T, never> {
+  private createConsumerStream(group?: ConsumerGroup, offset?: Offset): Stream<T, never> {
     const codec = this.codec;
     const kafka = this.kafka;
     const topic = this.topic;

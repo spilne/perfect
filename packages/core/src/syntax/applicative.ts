@@ -11,7 +11,7 @@ declare module "../eff" {
       f: (a: A, b: B) => C,
     ): Eff<C, S1 | S2>;
 
-    zipLeft<A, S1, S2>(this: Eff<A, S1>, that: Eff<any, S2>): Eff<A, S1 | S2>;
+    zipLeft<A, S1, S2>(this: Eff<A, S1>, that: Eff<unknown, S2>): Eff<A, S1 | S2>;
 
     zipRight<A, S1, B, S2>(this: Eff<A, S1>, that: Eff<B, S2>): Eff<B, S1 | S2>;
   }

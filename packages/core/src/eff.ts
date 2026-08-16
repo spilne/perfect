@@ -47,7 +47,9 @@ export class Cont {
       | Op.SetInterruptible
       | Op.EnsuringFrame
       | Op.ScopeFrame,
-    public readonly fn: any,
+    // unknown, not any: the frame payload is genuinely erased — the
+    // interpreter casts at the use site.
+    public readonly fn: unknown,
     public next: Cont | null,
   ) {}
 }
@@ -61,8 +63,11 @@ export class Suspend {
 
   constructor(
     public readonly op: Op,
-    public readonly a: any,
-    public readonly b: any,
+    // unknown, not any: operand types are genuinely erased per-op — the
+    // interpreter casts at the use site. Keeps `.a`/`.b` from leaking `any`
+    // to consumers through the public Eff type.
+    public readonly a: unknown,
+    public readonly b: unknown,
   ) {}
 }
 
@@ -73,14 +78,14 @@ export class Suspend {
 export type Eff<A, S = never> = Suspend & { readonly _A: A; readonly _S: S };
 
 // ── Type-level helpers ─────────────────────────────────────────────
-export type InferValue<T> = T extends Eff<infer A, any> ? A : never;
-export type InferEffects<T> = T extends Eff<any, infer S> ? S : never;
+export type InferValue<T> = T extends Eff<infer A, unknown> ? A : never;
+export type InferEffects<T> = T extends Eff<unknown, infer S> ? S : never;
 
 // ── Compile-time effect diagnostics ────────────────────────────────
 // Extract specific effect categories from the union
 type ExtractErrors<S> = S extends Throws<infer E> ? E : never;
 type ExtractServices<S> = S extends Needs<infer D> ? D : never;
-type ExtractOther<S> = Exclude<S, Throws<any> | Needs<any>>;
+type ExtractOther<S> = Exclude<S, Throws<unknown> | Needs<unknown>>;
 
 // Produce a readable error object when effects aren't fully handled
 export type EffectCheck<S> = [S] extends [never]

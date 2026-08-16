@@ -19,6 +19,11 @@ import { succeed, fail, failCause } from "../constructors";
 import { Cause } from "../cause";
 
 // Make Suspend iterable so `yield* effect` works inside generator bodies.
+// TReturn/TNext are `any` by design: TNext=any is what lets
+// `const x: T = yield* effect` typecheck (the yield expression's type must
+// unify with every effect's value type in the body), and TReturn=any admits
+// generators returning any value. `unknown` in either slot breaks the
+// for-comprehension ergonomics.
 declare module "../eff" {
   interface Suspend {
     [Symbol.iterator](): Iterator<Suspend, any, any>;

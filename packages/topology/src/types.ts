@@ -2,6 +2,7 @@
 // StreamTopology types — stateful stream processing with windows, joins, checkpointing
 // ---------------------------------------------------------------------------
 
+import type { ChannelName, ConsumerGroup } from "@perfect/core/connect";
 import type { StateBackend } from "./state-backend";
 
 export interface TimeWindow {
@@ -30,7 +31,7 @@ export interface JoinConfig {
 }
 
 export interface TopologyConfig {
-  group: string;
+  group: ConsumerGroup;
   stateBackend?: StateBackend<string, unknown>;
   checkpointIntervalMs?: number;
   /** Max items buffered between stages before backpressure kicks in. Default: unbounded. */
@@ -82,9 +83,9 @@ export interface TopologyMetrics {
 // Topology plan nodes — the logical plan for the processing DAG
 // ---------------------------------------------------------------------------
 
-export type TopologyNode<_T = any> =
-  | SourceNode<any>
-  | MapNode<any>
+export type TopologyNode<_T = unknown> =
+  | SourceNode<unknown>
+  | MapNode<unknown>
   | FilterNode<any>
   | MapAsyncNode<any>
   | KeyByNode<any>
@@ -129,8 +130,8 @@ export interface KeyByNode<T> {
 export interface ShuffleNode<_T> {
   type: "shuffle";
   parent: TopologyNode;
-  /** Optional explicit repartition topic name. Auto-generated if omitted. */
-  topicName?: string;
+  /** Optional explicit repartition channel name. Auto-generated if omitted. */
+  topicName?: ChannelName;
 }
 
 export interface WindowNode<_T> {

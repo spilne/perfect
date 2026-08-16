@@ -111,6 +111,7 @@ export {
   stringMonoid,
 } from "./typeclasses";
 export { createGracefulShutdown, type GracefulShutdown } from "./graceful-shutdown";
+export { type Brand, type Unbrand, nominal, refined, BrandError } from "./brand";
 export { Gen, forAll } from "./gen";
 export type { PropertyFailure } from "./gen";
 export { run, runSync, runFiber, runExit, runSafe } from "./runtime";

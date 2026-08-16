@@ -10,7 +10,7 @@ import type {
   Codec,
   ShuffleTransport,
 } from "@perfect/core/connect";
-import { StreamTopology, DistributedRunner, planStages } from "../src";
+import { StreamTopology, DistributedRunner, planStages, ConsumerGroup } from "../src";
 
 // ---------------------------------------------------------------------------
 // In-memory ShuffleTransport for testing
@@ -98,7 +98,7 @@ describe("DistributedRunner", () => {
       .to(sink);
 
     const handle = await DistributedRunner.run(topology, {
-      group: "no-shuffle",
+      group: ConsumerGroup("no-shuffle"),
       shuffleTransport: createInMemoryTransport(),
     });
 
@@ -122,7 +122,7 @@ describe("DistributedRunner", () => {
       .map((e) => e)
       .to(createTestSink());
 
-    const plan = planStages({ compiled: topology.compiled, group: "two-stage" });
+    const plan = planStages({ compiled: topology.compiled, group: ConsumerGroup("two-stage") });
 
     expect(plan.stages).toHaveLength(2);
     expect(plan.repartitionTopics).toEqual(["two-stage-repartition-0"]);
@@ -146,7 +146,7 @@ describe("DistributedRunner", () => {
       .to(sink);
 
     const handle = await DistributedRunner.run(topology, {
-      group: "metrics-test",
+      group: ConsumerGroup("metrics-test"),
       shuffleTransport: createInMemoryTransport(),
     });
 

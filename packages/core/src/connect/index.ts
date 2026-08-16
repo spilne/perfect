@@ -18,6 +18,8 @@ export type {
   ShuffleTransport,
 } from "./contracts";
 
+export { ConsumerGroup, Partition, ChannelName } from "./contracts";
+
 export {
   isStreamable,
   isSinkable,
@@ -34,5 +36,5 @@ export { LosslessJsonCodec } from "./lossless-codec";
 export { canonicalJSON, payloadHash } from "./canonicalize";
 
 export { OffsetTracker } from "./offset-tracker";
-export { type StateBackend, InMemoryState } from "./state-backend";
+export { type StateBackend, CheckpointName, InMemoryState } from "./state-backend";
 export { autoCommitBatchWithin } from "./auto-commit";

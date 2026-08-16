@@ -27,6 +27,11 @@ import type { Scope } from "./scope";
  * A layer is an Eff that yields a record of services.
  * `Services` — record mapping service name → impl
  * `E` — effects needed to build the layer (errors + deps)
+ *
+ * The `Record<string, any>` constraints in this module are deliberate:
+ * `Record<string, unknown>` would reject interface-typed service records
+ * (interfaces have no implicit index signature). The `any` never escapes —
+ * concrete Services types flow through unchanged.
  */
 export type Layer<Services extends Record<string, any>, E = never> = Eff<Services, E>;
 

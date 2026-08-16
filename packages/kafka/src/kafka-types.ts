@@ -8,7 +8,14 @@
 //
 // The consumer interface is callback-based (kafkajs-style): subscribe()
 // then run({ eachMessage }); KafkaTopic adapts it to perfect Streams.
+//
+// Identifier params are branded (TopicName / GroupId / PartitionId /
+// KafkaOffset — see brands.ts). Adapters wrapping a real driver construct
+// the brands at the boundary (e.g. `TopicName(raw.topic)`); free-form
+// payloads (keys, values, headers, timestamps) stay plain.
 // ---------------------------------------------------------------------------
+
+import type { TopicName, GroupId, PartitionId, KafkaOffset } from "./brands";
 
 // ---------------------------------------------------------------------------
 // Client — entry point for creating producers, consumers, admins
@@ -23,7 +30,7 @@
  * Fields are optional; drivers ignore knobs they don't support.
  */
 export interface KafkaConsumerOptions {
-  groupId: string;
+  groupId: GroupId;
   /** Max time (ms) a handler may run before the broker rebalances the group. */
   maxPollInterval?: number;
   /** Group session timeout (ms). */
@@ -48,7 +55,7 @@ export interface KafkaProducer {
   /** Disconnect from the broker. */
   disconnect(): Promise<void>;
   /** Send messages to a topic. */
-  send(params: { topic: string; messages: KafkaOutgoingMessage[] }): Promise<void>;
+  send(params: { topic: TopicName; messages: KafkaOutgoingMessage[] }): Promise<void>;
 }
 
 export interface KafkaOutgoingMessage {
@@ -68,7 +75,7 @@ export interface KafkaConsumer {
   disconnect(): Promise<void>;
 
   /** Subscribe to a topic. */
-  subscribe(params: { topic: string; fromBeginning?: boolean }): Promise<void>;
+  subscribe(params: { topic: TopicName; fromBeginning?: boolean }): Promise<void>;
 
   /**
    * Start consuming messages. Three patterns supported, in preference order:
@@ -116,7 +123,7 @@ export interface KafkaConsumer {
   commitOffsets(offsets: KafkaOffsetCommit[]): Promise<void>;
 
   /** Seek to a specific offset (runtime). Optional — not all clients support this. */
-  seek?(params: { topic: string; partition: number; offset: string }): void;
+  seek?(params: { topic: TopicName; partition: PartitionId; offset: KafkaOffset }): void;
 }
 
 // ---------------------------------------------------------------------------
@@ -126,13 +133,16 @@ export interface KafkaConsumer {
 export interface KafkaAdmin {
   connect(): Promise<void>;
   disconnect(): Promise<void>;
-  fetchOffsets(params: { groupId: string; topics: string[] }): Promise<KafkaTopicOffsets[]>;
-  fetchTopicOffsetsByTimestamp(topic: string, timestamp: number): Promise<KafkaPartitionOffset[]>;
+  fetchOffsets(params: { groupId: GroupId; topics: TopicName[] }): Promise<KafkaTopicOffsets[]>;
+  fetchTopicOffsetsByTimestamp(
+    topic: TopicName,
+    timestamp: number,
+  ): Promise<KafkaPartitionOffset[]>;
   /** Fetch partition count for a topic. Optional — not all clients expose this. */
-  fetchTopicPartitionCount?(topic: string): Promise<number>;
+  fetchTopicPartitionCount?(topic: TopicName): Promise<number>;
   /** Create topics. Optional — used by KafkaShuffleTransport for repartition topics. */
   createTopics?(params: {
-    topics: { topic: string; numPartitions: number; replicationFactor: number }[];
+    topics: { topic: TopicName; numPartitions: number; replicationFactor: number }[];
   }): Promise<void>;
 }
 
@@ -141,12 +151,14 @@ export interface KafkaAdmin {
 // ---------------------------------------------------------------------------
 
 export interface KafkaMessage {
-  topic: string;
-  partition: number;
+  topic: TopicName;
+  partition: PartitionId;
   message: {
     key: Buffer | string | null;
     value: Buffer | string | null;
-    offset: string;
+    offset: KafkaOffset;
+    // Stringly like `offset`, but a VALUE (epoch millis), not an identifier —
+    // stays plain; branding `offset` alone already blocks the swap.
     timestamp: string;
     headers?: Record<string, Buffer | string>;
   };
@@ -160,24 +172,24 @@ export interface KafkaMessage {
  */
 export interface KafkaBatchPayload {
   readonly batch: {
-    readonly topic: string;
-    readonly partition: number;
+    readonly topic: TopicName;
+    readonly partition: PartitionId;
     readonly messages: ReadonlyArray<KafkaMessage["message"]>;
   };
 }
 
 export interface KafkaOffsetCommit {
-  topic: string;
-  partition: number;
-  offset: string;
+  topic: TopicName;
+  partition: PartitionId;
+  offset: KafkaOffset;
 }
 
 export interface KafkaTopicOffsets {
-  topic: string;
+  topic: TopicName;
   partitions: KafkaPartitionOffset[];
 }
 
 export interface KafkaPartitionOffset {
-  partition: number;
-  offset: string;
+  partition: PartitionId;
+  offset: KafkaOffset;
 }

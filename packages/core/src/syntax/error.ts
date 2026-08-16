@@ -32,7 +32,7 @@ declare module "../eff" {
 
     orElse<A, S1, B, S2>(this: Eff<A, S1>, that: () => Eff<B, S2>): Eff<A | B, S2>;
 
-    orDie<A, S>(this: Eff<A, S>): Eff<A, Exclude<S, Throws<any>>>;
+    orDie<A, S>(this: Eff<A, S>): Eff<A, Exclude<S, Throws<unknown>>>;
 
     option<A, S, E>(this: Eff<A, S | Throws<E>>): Eff<A | undefined, Exclude<S, Throws<E>>>;
 
@@ -45,21 +45,27 @@ declare module "../eff" {
 
     tapError<A, S, E, S2>(
       this: Eff<A, S | Throws<E>>,
-      f: (e: E) => Eff<any, S2>,
+      f: (e: E) => Eff<unknown, S2>,
     ): Eff<A, S | Throws<E> | S2>;
 
-    tapErrorCause<A, S, S2>(this: Eff<A, S>, f: (cause: Cause) => Eff<any, S2>): Eff<A, S | S2>;
+    tapErrorCause<A, S, S2>(this: Eff<A, S>, f: (cause: Cause) => Eff<unknown, S2>): Eff<A, S | S2>;
 
     tapBoth<A, S, E, S2, S3>(
       this: Eff<A, S | Throws<E>>,
-      onError: (e: E) => Eff<any, S2>,
-      onSuccess: (a: A) => Eff<any, S3>,
+      onError: (e: E) => Eff<unknown, S2>,
+      onSuccess: (a: A) => Eff<unknown, S3>,
     ): Eff<A, S | Throws<E> | S2 | S3>;
 
     /**
      * Bulk tag handler — `eff.catchTags({ NotFound: e => ..., Forbidden: e => ... })`
      * is equivalent to chaining `.catchTag()` calls. TS narrows each handler's
      * `e` parameter to its tag's payload type.
+     *
+     * The `any`s below are inference machinery, not a leak: `(e: any) =>`
+     * patterns must stay `any` so conditional types match handlers whose
+     * parameter is a narrowed error type (`unknown` would fail contravariance
+     * inside `extends`), and each `any` sits inside an `extends`/`infer`
+     * clause that never surfaces in the result type.
      */
     catchTags<
       A,
@@ -101,7 +107,7 @@ declare module "../eff" {
     exit<A, S, E>(this: Eff<A, S | Throws<E>>): Eff<Exit<E, A>, Exclude<S, Throws<E>>>;
 
     /** Observe defects (uncaught throws → Cause.Die) only — re-fails after. */
-    tapDefect<A, S, S2>(this: Eff<A, S>, f: (defect: unknown) => Eff<any, S2>): Eff<A, S | S2>;
+    tapDefect<A, S, S2>(this: Eff<A, S>, f: (defect: unknown) => Eff<unknown, S2>): Eff<A, S | S2>;
 
     /** Transform the entire Cause tree, not just typed leaves. */
     mapErrorCause<A, S>(this: Eff<A, S>, f: (cause: Cause) => Cause): Eff<A, S>;

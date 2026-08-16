@@ -7,7 +7,7 @@
 // No shrinking yet — counterexamples are reported as-generated. Adding
 // shrinking is a separate, much larger piece of work (cf. fast-check).
 
-import { type Eff, Suspend, Op } from "./eff";
+import { type Eff, type Throws, Suspend, Op } from "./eff";
 import { Random } from "./random";
 import { fail, sync } from "./constructors";
 
@@ -99,7 +99,7 @@ function arrayGen<A>(
   );
 }
 
-function objectGen<T extends Record<string, Gen<any>>>(
+function objectGen<T extends Record<string, Gen<unknown>>>(
   shape: T,
 ): Gen<{ [K in keyof T]: T[K] extends Gen<infer A> ? A : never }> {
   const keys = Object.keys(shape);
@@ -142,7 +142,7 @@ function flatMapGen<A, B>(g: Gen<A>, f: (a: A) => Gen<B>): Gen<B> {
   return mk(new Suspend(Op.FlatMap, g.generate, (a: A) => f(a).generate) as any);
 }
 
-function tupleGen<A extends readonly Gen<any>[]>(
+function tupleGen<A extends readonly Gen<unknown>[]>(
   ...gens: A
 ): Gen<{ [K in keyof A]: A[K] extends Gen<infer V> ? V : never }> {
   return mk(
@@ -197,8 +197,8 @@ export function forAll<A>(
   gen: Gen<A>,
   count: number,
   predicate: (value: A) => boolean | Eff<boolean, never>,
-): Eff<void, any> {
-  const step = (attempt: number): Eff<void, any> => {
+): Eff<void, Throws<PropertyFailure<A>>> {
+  const step = (attempt: number): Eff<void, Throws<PropertyFailure<A>>> => {
     if (attempt > count) return sync(() => undefined) as any;
     return new Suspend(Op.FlatMap, gen.generate, (value: A) => {
       const result = predicate(value);

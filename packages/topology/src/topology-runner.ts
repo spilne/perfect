@@ -21,6 +21,7 @@
 import { type Eff, type Fiber, fromPromise, runFiber } from "@perfect/core";
 import { Chunk, Stream } from "@perfect/core/stream";
 import type { Streamable, Acknowledgeable, Envelope, Sinkable } from "@perfect/core/connect";
+import { CheckpointName } from "@perfect/core/connect";
 import type { StateBackend } from "./state-backend";
 import { InMemoryState } from "./state-backend";
 import { BuiltTopology } from "./stream-topology";
@@ -279,11 +280,11 @@ class TopologyRunnerInstance {
       await this.stateBackend.put(`process-map:${i}`, entries);
     }
 
-    await this.stateBackend.checkpoint({ name: `topology:${this.config.group}` });
+    await this.stateBackend.checkpoint({ name: CheckpointName(`topology:${this.config.group}`) });
   }
 
   private async restoreAllState(): Promise<void> {
-    await this.stateBackend.restore({ name: `topology:${this.config.group}` });
+    await this.stateBackend.restore({ name: CheckpointName(`topology:${this.config.group}`) });
 
     // Note: actual restoration happens in compile* methods when they
     // create their stateful operators — they check the backend for

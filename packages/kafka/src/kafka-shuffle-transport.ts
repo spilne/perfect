@@ -7,6 +7,8 @@
 
 import type {
   ShuffleTransport,
+  ChannelName,
+  ConsumerGroup,
   Codec,
   Streamable,
   Acknowledgeable,
@@ -14,6 +16,7 @@ import type {
 } from "@perfect/core/connect";
 import { KafkaTopic } from "./kafka-topic";
 import type { KafkaClient } from "./kafka-types";
+import { TopicName } from "./brands";
 
 export interface KafkaShuffleTransportConfig {
   /** Kafka client instance. */
@@ -25,7 +28,7 @@ export interface KafkaShuffleTransportConfig {
 export class KafkaShuffleTransport implements ShuffleTransport {
   private readonly kafka: KafkaClient;
   private readonly partitions: number;
-  private readonly topics = new Map<string, KafkaTopic<unknown>>();
+  private readonly topics = new Map<ChannelName, KafkaTopic<unknown>>();
 
   constructor(config: KafkaShuffleTransportConfig) {
     this.kafka = config.kafka;
@@ -33,13 +36,16 @@ export class KafkaShuffleTransport implements ShuffleTransport {
   }
 
   async getOrCreateRepartitionChannel<T>(params: {
-    name: string;
-    group: string;
+    name: ChannelName;
+    group: ConsumerGroup;
     codec: Codec<T>;
   }): Promise<{
     source: Streamable<T> & Acknowledgeable<T>;
     sink: KeyedSinkable<T>;
   }> {
+    // A repartition channel is realized as a Kafka topic of the same name.
+    const topicName = TopicName(params.name);
+
     // Ensure topic exists
     const admin = this.kafka.admin();
     await admin.connect();
@@ -47,7 +53,7 @@ export class KafkaShuffleTransport implements ShuffleTransport {
       await admin.createTopics({
         topics: [
           {
-            topic: params.name,
+            topic: topicName,
             numPartitions: this.partitions,
             replicationFactor: 1,
           },
@@ -59,7 +65,7 @@ export class KafkaShuffleTransport implements ShuffleTransport {
     // Create KafkaTopic for this repartition channel
     const kt = new KafkaTopic<T>({
       kafka: this.kafka,
-      topic: params.name,
+      topic: topicName,
       groupId: params.group,
       codec: params.codec,
     });
