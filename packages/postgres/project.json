@@ -1,0 +1,10 @@
+{
+  "name": "@perfect/postgres",
+  "sourceRoot": "packages/postgres/src",
+  "targets": {
+    "build": {},
+    "test": {},
+    "lint": {},
+    "typecheck": {}
+  }
+}

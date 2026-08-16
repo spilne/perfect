@@ -1,0 +1,57 @@
+{
+  "name": "@perfect/postgres",
+  "version": "0.0.1",
+  "description": "Postgres coordination backends for @perfect/core — pgmq + SKIP LOCKED queues, LISTEN/NOTIFY change streams, distributed rate limiting, leader election, durable state.",
+  "keywords": [
+    "change-stream",
+    "coordination",
+    "effect",
+    "pgmq",
+    "postgres",
+    "queue"
+  ],
+  "homepage": "https://github.com/spilne/perfect#readme",
+  "bugs": {
+    "url": "https://github.com/spilne/perfect/issues"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/spilne/perfect.git",
+    "directory": "packages/postgres"
+  },
+  "files": [
+    "dist",
+    "LICENSE"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "main": "dist/index.js",
+  "types": "dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./pgmq": {
+      "types": "./dist/types/pgmq/index.d.ts",
+      "default": "./dist/pgmq/index.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc -p tsconfig.src.json --noEmit",
+    "build": "bun ../../scripts/build-package.ts ."
+  },
+  "dependencies": {
+    "@perfect/core": "workspace:*",
+    "drizzle-orm": "^0.44.0",
+    "postgres": "^3.4.5"
+  },
+  "devDependencies": {
+    "testcontainers": "^11.13.0"
+  }
+}

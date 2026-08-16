@@ -43,10 +43,7 @@ declare module "../eff" {
       f: (e: ErrorsOf<S>) => E2,
     ): Eff<A, Exclude<S, Throws<unknown>> | Throws<E2>>;
 
-    tapError<A, S, S2>(
-      this: Eff<A, S>,
-      f: (e: ErrorsOf<S>) => Eff<unknown, S2>,
-    ): Eff<A, S | S2>;
+    tapError<A, S, S2>(this: Eff<A, S>, f: (e: ErrorsOf<S>) => Eff<unknown, S2>): Eff<A, S | S2>;
 
     tapErrorCause<A, S, S2>(this: Eff<A, S>, f: (cause: Cause) => Eff<unknown, S2>): Eff<A, S | S2>;
 

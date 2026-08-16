@@ -16,6 +16,7 @@ export type {
   Envelope,
   Offset,
   ShuffleTransport,
+  LeaderElection,
 } from "./contracts";
 
 export { ConsumerGroup, Partition, ChannelName } from "./contracts";

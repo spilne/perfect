@@ -166,6 +166,20 @@ export function isCheckpointable<T>(value: unknown): value is Checkpointable<T> 
   );
 }
 
+// ── LeaderElection — "only one coordinator runs at a time" ─────────
+//
+// Coordination capability for distributed backends (Postgres advisory
+// locks, Redis locks, etcd leases, …). Ported from promin's workflow
+// leader-election interface. Promise-based like Envelope.ack — this is a
+// driver-facing boundary; the Eff layer wraps at call sites.
+
+export interface LeaderElection {
+  /** Try to become the leader. Returns true if this instance is now the leader. */
+  tryAcquire(): Promise<boolean>;
+  /** Release leadership. */
+  release(): Promise<void>;
+}
+
 // ── ShuffleTransport — repartition channels for distributed runs ───
 //
 // Lives here (not in @perfect/kafka or @perfect/topology) to break the
