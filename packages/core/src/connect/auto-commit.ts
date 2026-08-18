@@ -13,32 +13,31 @@
 //     .through(autoCommitBatchWithin(500, 15_000))
 //     .drain()
 
+import type { Eff } from "../eff";
+import { succeed } from "../constructors";
 import { TaggedError } from "../tagged-error";
-import type { Eff, Throws } from "../eff";
-import { fromPromise } from "../constructors";
 import { Stream } from "../stream";
+import type { Pipe } from "../stream";
 import type { Envelope } from "./contracts";
 
 export class AckError extends TaggedError("AckError")<{
   readonly cause: unknown;
 }>() {}
 
-export function autoCommitBatchWithin<T>(
+export function autoCommitBatchWithin<T, AckS = never>(
   maxBatchSize: number,
   maxWaitMs: number,
-): <S>(stream: Stream<Envelope<T>, S>) => Stream<T, S | Throws<AckError>> {
-  return <S>(stream: Stream<Envelope<T>, S>) =>
+): Pipe<Envelope<T, AckS>, T, AckS> {
+  return <S>(stream: Stream<Envelope<T, AckS>, S>) =>
     stream
       .groupWithin(maxBatchSize, maxWaitMs)
-      .evalMap(
-        (chunk) =>
-          fromPromise(
-            async () => {
-              for (const env of chunk) await env.ack();
-              return chunk;
-            },
-            (cause) => new AckError({ cause }),
-          ) as Eff<typeof chunk, Throws<AckError>>,
+      .evalMap((chunk) =>
+        Array.from(chunk)
+          .reduce<Eff<void, AckS>>(
+            (effect, envelope) => effect.flatMap(() => envelope.ack()),
+            succeed(undefined),
+          )
+          .map(() => chunk),
       )
       .flatMap((chunk) => Stream.fromChunk(chunk).map((env) => env.value));
 }

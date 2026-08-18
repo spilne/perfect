@@ -31,7 +31,13 @@ import {
   Chunk,
   Sinks,
 } from "../src";
-import { AckError, autoCommitBatchWithin, type Envelope } from "../src/connect";
+import {
+  AckError,
+  autoCommitBatchWithin,
+  type Acknowledgeable,
+  type Envelope,
+  type Streamable,
+} from "../src/connect";
 
 class NotFound {
   readonly _tag = "NotFound" as const;
@@ -93,15 +99,21 @@ class BackendFailure {
     fail(new Forbidden()),
   );
 
-  const envelopes = null as unknown as Stream<Envelope<number>, Backend>;
+  const envelopes = null as unknown as Stream<Envelope<number, Throws<AckError>>, Backend>;
   const _acked: Stream<number, Backend | Throws<AckError>> = envelopes.through(
-    autoCommitBatchWithin<number>(10, 1000),
+    autoCommitBatchWithin<number, Throws<AckError>>(10, 1000),
   );
   const _chunkSource: Stream<number, Backend> = Stream.asyncChunks((emit) =>
     ref.get.map((value) => {
       emit(Chunk.single(value));
     }),
   );
+  const source = null as unknown as Streamable<number, Backend>;
+  const _sourceStream: Stream<number, Backend> = source.subscribe();
+  // @ts-expect-error connector backend failures cannot be dropped
+  const _unsafeSourceStream: Stream<number, never> = source.subscribe();
+  const ackSource = null as unknown as Acknowledgeable<number, Backend>;
+  const _ackStream: Stream<Envelope<number, Backend>, Backend> = ackSource.subscribeAck();
 
   void [
     _refGet,
@@ -120,6 +132,9 @@ class BackendFailure {
     _pooled,
     _acked,
     _chunkSource,
+    _sourceStream,
+    _unsafeSourceStream,
+    _ackStream,
   ];
 }
 interface UserRepo {

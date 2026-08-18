@@ -1,4 +1,5 @@
 import { describe, test, expect } from "bun:test";
+import { succeed } from "@perfect/core";
 import { Stream } from "@perfect/core/stream";
 import type { Streamable, Acknowledgeable, Sinkable, Codec } from "@perfect/core/connect";
 import { StreamTopology, planStages, ConsumerGroup, ChannelName } from "../src";
@@ -18,7 +19,7 @@ function mockSource<T>(): Streamable<T> & Acknowledgeable<T> {
 
 function mockSink<T>(): Sinkable<T> {
   return {
-    publish: async () => {},
+    publish: () => succeed(undefined),
     codec: { encode: (v) => v, decode: (v) => v as T },
   };
 }
@@ -54,17 +55,17 @@ describe("planStages", () => {
 
     expect(plan.stages).toHaveLength(2);
     expect(plan.repartitionTopics).toHaveLength(1);
-    expect(plan.repartitionTopics[0]).toBe("counter-repartition-0");
+    expect(plan.repartitionTopics[0]).toBe(ChannelName("counter-repartition-0"));
 
     // Stage 0: source → map → keyBy → publish to repartition
     const stage0 = plan.stages[0]!;
     expect(stage0.source).toBe("original");
-    expect(stage0.sink).toEqual({ repartitionTopic: "counter-repartition-0" });
+    expect(stage0.sink).toEqual({ repartitionTopic: ChannelName("counter-repartition-0") });
     expect(stage0.keyFn).toBeDefined();
 
     // Stage 1: repartition → window → aggregate → sink
     const stage1 = plan.stages[1]!;
-    expect(stage1.source).toEqual({ repartitionTopic: "counter-repartition-0" });
+    expect(stage1.source).toEqual({ repartitionTopic: ChannelName("counter-repartition-0") });
     expect(stage1.sink).toBe("terminal");
     expect(stage1.sinkNodes).toHaveLength(1);
   });
@@ -83,8 +84,8 @@ describe("planStages", () => {
 
     expect(plan.stages).toHaveLength(3);
     expect(plan.repartitionTopics).toHaveLength(2);
-    expect(plan.repartitionTopics[0]).toBe("multi-repartition-0");
-    expect(plan.repartitionTopics[1]).toBe("multi-repartition-1");
+    expect(plan.repartitionTopics[0]).toBe(ChannelName("multi-repartition-0"));
+    expect(plan.repartitionTopics[1]).toBe(ChannelName("multi-repartition-1"));
   });
 
   test("user-specified topic name is respected", () => {
@@ -97,6 +98,6 @@ describe("planStages", () => {
 
     const plan = planStages({ compiled: topology.compiled, group: ConsumerGroup("custom") });
 
-    expect(plan.repartitionTopics).toEqual(["my-custom-topic"]);
+    expect(plan.repartitionTopics).toEqual([ChannelName("my-custom-topic")]);
   });
 });

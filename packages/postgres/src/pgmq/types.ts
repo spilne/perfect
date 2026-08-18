@@ -38,7 +38,9 @@ export type ReadMode =
   | ReadMode.Grouped
   | ReadMode.GroupedPoll
   | ReadMode.GroupedRoundRobin
-  | ReadMode.GroupedRoundRobinPoll;
+  | ReadMode.GroupedRoundRobinPoll
+  | ReadMode.GroupedHead
+  | ReadMode.GroupedHeadPoll;
 
 export namespace ReadMode {
   export interface Standard {
@@ -83,6 +85,20 @@ export namespace ReadMode {
     readonly pollIntervalMs?: number;
   }
 
+  export interface GroupedHead {
+    readonly _tag: "grouped-head";
+    readonly vt: number;
+    readonly qty: number;
+  }
+
+  export interface GroupedHeadPoll {
+    readonly _tag: "grouped-head-poll";
+    readonly vt: number;
+    readonly qty: number;
+    readonly maxPollSeconds?: number;
+    readonly pollIntervalMs?: number;
+  }
+
   export const standard = (params: { vt: number; qty: number }): Standard => ({
     _tag: "standard",
     ...params,
@@ -118,6 +134,18 @@ export namespace ReadMode {
     maxPollSeconds?: number;
     pollIntervalMs?: number;
   }): GroupedRoundRobinPoll => ({ _tag: "grouped-round-robin-poll", ...params });
+
+  export const groupedHead = (params: { vt: number; qty: number }): GroupedHead => ({
+    _tag: "grouped-head",
+    ...params,
+  });
+
+  export const groupedHeadPoll = (params: {
+    vt: number;
+    qty: number;
+    maxPollSeconds?: number;
+    pollIntervalMs?: number;
+  }): GroupedHeadPoll => ({ _tag: "grouped-head-poll", ...params });
 }
 
 /** How to acknowledge processed messages. */

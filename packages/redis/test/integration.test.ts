@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { fail, fromPromise, run, sleep, succeed, type Eff } from "@perfect/core";
+import { CheckpointName } from "@perfect/core/connect";
 import Redis from "ioredis";
 import { GenericContainer, Wait, type StartedTestContainer } from "testcontainers";
 import {
@@ -14,6 +15,7 @@ import {
   RedisRateLimiter,
   RedisRef,
   RedisSemaphore,
+  RedisStateBackend,
   RedisSingleflight,
   RedisStream,
   RedisSubscriptionRef,
@@ -220,13 +222,14 @@ describe.skipIf(!dockerAvailable)("integration — redis:7-alpine", () => {
     await messages.publish({ n: 1 }, { key: "account-1" });
     await messages.publish({ n: 2 });
 
-    expect(await run(messages.subscribe().take(2).toArray())).toEqual([{ n: 1 }, { n: 2 }]);
+    expect(await run(messages.subscribe().take(2).toArray().orDie())).toEqual([{ n: 1 }, { n: 2 }]);
     expect(
       await run(
         messages
           .subscribeFrom({ offset: { type: "earliest" } })
           .take(2)
-          .toArray(),
+          .toArray()
+          .orDie(),
       ),
     ).toEqual([{ n: 1 }, { n: 2 }]);
     expect(await messages.info()).toMatchObject({ length: 2, groups: 1 });
@@ -238,15 +241,31 @@ describe.skipIf(!dockerAvailable)("integration — redis:7-alpine", () => {
       blockMs: 50,
     });
     await pending.publish({ n: 3 });
-    const [envelope] = await run(pending.subscribeAck().take(1).toArray());
+    const [envelope] = await run(pending.subscribeAck().take(1).toArray().orDie());
     const claimed = await pending.claimPending({ minIdleMs: 0, count: 10 });
-    expect(claimed).toEqual([{ id: envelope!.metadata.id, value: { n: 3 } }]);
+    expect(claimed).toEqual([{ id: String(envelope!.metadata.id), value: { n: 3 } }]);
     expect(await pending.acknowledge(String(envelope!.metadata.id))).toBe(true);
+  });
+
+  test("state backend atomically checkpoints and restores keyed state", async () => {
+    const state = new RedisStateBackend<{ count: number }>({
+      redis,
+      key: "topology-state",
+    });
+    await state.put("user-1", { count: 1 });
+    await state.checkpoint({ name: CheckpointName("checkpoint-1") });
+    await state.put("user-1", { count: 2 });
+    await state.put("user-2", { count: 1 });
+
+    await state.restore({ name: CheckpointName("checkpoint-1") });
+
+    expect(await state.entries()).toEqual([["user-1", { count: 1 }]]);
+    await state.clear();
   });
 
   test("channel connector publishes to active stream subscribers", async () => {
     const channel = RedisChannel.make<{ n: number }>({ redis, channel: "channel-events" });
-    const received = run(channel.subscribe().take(1).toArray());
+    const received = run(channel.subscribe().take(1).toArray().orDie());
 
     for (let attempt = 0; attempt < 100 && (await channel.subscriberCount()) === 0; attempt++) {
       await Bun.sleep(5);
@@ -260,7 +279,7 @@ describe.skipIf(!dockerAvailable)("integration — redis:7-alpine", () => {
   test("channel connector supports pattern subscriptions", async () => {
     const first = RedisChannel.make<{ n: number }>({ redis, channel: "channel-pattern:one" });
     const second = RedisChannel.make<{ n: number }>({ redis, channel: "channel-pattern:two" });
-    const received = run(first.subscribePattern("channel-pattern:*").take(2).toArray());
+    const received = run(first.subscribePattern("channel-pattern:*").take(2).toArray().orDie());
 
     for (
       let attempt = 0;

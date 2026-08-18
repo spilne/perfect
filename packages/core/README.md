@@ -101,7 +101,8 @@ Each is also a fluent method: `program.run()`, `.runSync()`, `.runExit()`, `.run
 - **Retry + schedule** — `retry`, `RetryPolicy`, `Schedule`, `repeat`,
   `repeatUntilWithBackoff`, `hedged`
 - **Streams** — `Stream` / `Chunk` / `Sink` / `Pipes`: fused, lazy,
-  effect-typed; `parEvalMap`, `groupWithin`, `throttle`, SSE/lines/CSV pipes
+  effect-typed; `scan`, `mapAccumulate`, backend-powered `statefulMap`,
+  `parEvalMap`, `groupWithin`, `throttle`, SSE/lines/CSV pipes
 - **Coordination** — `Ref`, `Deferred`, `Queue`, `Semaphore`, `Latch`,
   `Barrier`, `PubSub`, `SubscriptionRef`, `Pool`, `WorkerPool`
 - **Resilience** — `CircuitBreaker`, `RateLimiter`, `Throttle`,

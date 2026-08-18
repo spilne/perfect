@@ -4,16 +4,26 @@ import { join } from "node:path";
 const packages = [
   {
     dir: "packages/core",
-    imports: ["dist/index.js", "dist/stream/index.js", "dist/worker/index.js", "dist/syntax/index.js"],
+    imports: [
+      "dist/index.js",
+      "dist/stream/index.js",
+      "dist/worker/index.js",
+      "dist/syntax/index.js",
+    ],
   },
   { dir: "packages/http", imports: ["dist/index.js"] },
   { dir: "packages/http-otel", imports: ["dist/index.js"] },
   { dir: "packages/kafka", imports: ["dist/index.js"] },
+  { dir: "packages/kafka-kafkajs", imports: ["dist/index.js"] },
+  { dir: "packages/kafka-platformatic", imports: ["dist/index.js"] },
   { dir: "packages/otel", imports: ["dist/index.js"] },
   { dir: "packages/postgres", imports: ["dist/index.js", "dist/pgmq/index.js"] },
   { dir: "packages/redis", imports: ["dist/index.js"] },
   { dir: "packages/topology", imports: ["dist/index.js"] },
-  { dir: "packages/transform", imports: ["dist/rewrite.js", "dist/bun-plugin.js", "dist/plugin.js"] },
+  {
+    dir: "packages/transform",
+    imports: ["dist/rewrite.js", "dist/bun-plugin.js", "dist/plugin.js"],
+  },
 ];
 
 // @perfect/swc-plugin ships a wasm artifact built by the Rust job — verify its
@@ -24,7 +34,8 @@ const packages = [
   try {
     await access(wasmPath);
     const { size } = await import("node:fs").then((fs) => fs.statSync(wasmPath));
-    if (size < 100_000) throw new Error(`@perfect/swc-plugin: ${wasmPath} suspiciously small (${size} bytes)`);
+    if (size < 100_000)
+      throw new Error(`@perfect/swc-plugin: ${wasmPath} suspiciously small (${size} bytes)`);
     console.log(`ok  @perfect/swc-plugin wasm artifact (${(size / 1024).toFixed(0)} KiB)`);
   } catch (e) {
     if ((e as { code?: string }).code === "ENOENT") {
@@ -62,7 +73,11 @@ for (const pkg of packages) {
   }
 }
 
-async function assertFile(packageDir: string, path: string | undefined, label: string): Promise<void> {
+async function assertFile(
+  packageDir: string,
+  path: string | undefined,
+  label: string,
+): Promise<void> {
   if (!path) {
     throw new Error(`${label} is missing`);
   }

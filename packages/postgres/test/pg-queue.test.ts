@@ -34,7 +34,7 @@ describe("PgQueue (fake db)", () => {
     });
     const queue = PgQueue.wrap<{ userId: string }>({ db, queue: "jobs", pollIntervalMs: 5 });
 
-    const [envelope] = await run(queue.subscribeAck().take(1).toArray());
+    const [envelope] = await run(queue.subscribeAck().take(1).toArray().orDie());
     expect(envelope!.value).toEqual({ userId: "u_1" });
     expect(envelope!.metadata.msgId).toBe(7);
     expect(envelope!.metadata.attemptCount).toBe(1);
@@ -59,7 +59,7 @@ describe("PgQueue (fake db)", () => {
     });
     const queue = PgQueue.wrap<string>({ db, queue: "jobs", pollIntervalMs: 5 });
 
-    const [envelope] = await run(queue.subscribeAck().take(1).toArray());
+    const [envelope] = await run(queue.subscribeAck().take(1).toArray().orDie());
     await envelope!.nack();
     expect(fake.allSql).toContain(
       "SET status = 'pending', visible_at = NOW(), locked_by = NULL WHERE id = 3",
@@ -80,7 +80,7 @@ describe("PgQueue (fake db)", () => {
     });
     const queue = PgQueue.wrap<{ n: number }>({ db, queue: "jobs", pollIntervalMs: 5 });
 
-    const items = await run(queue.subscribe().take(2).toArray());
+    const items = await run(queue.subscribe().take(2).toArray().orDie());
     expect(items).toEqual([{ n: 1 }, { n: 2 }]);
     expect(fake.allSql).toContain("FOR UPDATE SKIP LOCKED");
   });

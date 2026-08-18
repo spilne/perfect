@@ -157,7 +157,7 @@ export interface KafkaMessage {
     // Stringly like `offset`, but a VALUE (epoch millis), not an identifier —
     // stays plain; branding `offset` alone already blocks the swap.
     timestamp: string;
-    headers?: Record<string, Buffer | string>;
+    headers?: Record<string, Buffer | string | (Buffer | string)[] | undefined>;
   };
 }
 

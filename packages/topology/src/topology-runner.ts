@@ -18,10 +18,20 @@
 // State logic (windows, joins, dedup, process) is unchanged.
 // ---------------------------------------------------------------------------
 
-import { type Eff, type Fiber, fromPromise, runFiber } from "@perfect/core";
-import { Chunk, Stream } from "@perfect/core/stream";
-import type { Streamable, Acknowledgeable, Envelope, Sinkable } from "@perfect/core/connect";
-import { CheckpointName } from "@perfect/core/connect";
+import {
+  type Eff,
+  type ExitT,
+  type Fiber,
+  type Throws,
+  Cause,
+  Exit,
+  fromPromise,
+  runFiber,
+  succeed,
+} from "@perfect/core";
+import { Stream } from "@perfect/core/stream";
+import type { Streamable, Acknowledgeable, Sinkable } from "@perfect/core/connect";
+import { autoCommitBatchWithin, CheckpointName } from "@perfect/core/connect";
 import type { StateBackend } from "./state-backend";
 import { InMemoryState } from "./state-backend";
 import { BuiltTopology } from "./stream-topology";
@@ -128,15 +138,18 @@ class TopologyRunnerInstance {
   private stateBackend: StateBackend<string, unknown>;
   private checkpointInterval: ReturnType<typeof setInterval> | null = null;
   private fibers: Fiber<void>[] = [];
+  private pendingRestores: Promise<void>[] = [];
+  private drainPromise: Promise<readonly ExitT<unknown, void>[]> = Promise.resolve([]);
+  private checkpointInFlight: Promise<void> | null = null;
+  private checkpointFailure: unknown;
+  private stopping = false;
+  private shutdownPromise: Promise<void> | null = null;
 
   // Stateful operators tracked for checkpointing
   private windowManagers: WindowManager<unknown, unknown, unknown>[] = [];
   private joinBuffers: JoinBuffer<unknown, unknown>[] = [];
   private dedupSets: LruSet[] = [];
   private processStates: Map<string, unknown>[] = [];
-
-  // Batch ack — flush pending on shutdown
-  private pendingAckEnvelope: Envelope<unknown> | null = null;
 
   // Metrics
   private itemsProcessed = 0;
@@ -155,43 +168,38 @@ class TopologyRunnerInstance {
   }
 
   async start(): Promise<TopologyHandle> {
-    // Restore all state from last checkpoint
     await this.restoreAllState();
 
-    // Set up periodic checkpointing
-    if (this.config.checkpointIntervalMs) {
-      this.checkpointInterval = setInterval(
-        () => this.checkpointAllState(),
-        this.config.checkpointIntervalMs,
-      );
-    }
+    const drains: Eff<void, unknown>[] = [];
 
-    // Compile and run each sink branch. Each branch drains in its own fiber
-    // so shutdown can interrupt it (replaces promin's interruptOn(signal)).
     if (this.topology.compiled.sinks.length > 0) {
       for (const sink of this.topology.compiled.sinks) {
         let pipeline = this.compile(sink.parent);
-        const sinkTarget = sink.sink as Sinkable<unknown>;
+        const sinkTarget = sink.sink as Sinkable<unknown, unknown>;
 
         // Apply backpressure buffer
         if (this.config.maxBufferSize) {
           pipeline = pipeline.buffer(this.config.maxBufferSize);
         }
 
-        const drainEff = pipeline
-          .evalMap((value) =>
-            fromPromise(
-              async () => {
-                if (this.rateLimiter) await this.rateLimiter.acquire();
-                await sinkTarget.publish(value);
-                this.itemsProcessed++;
-              },
-              (e) => e,
-            ),
-          )
-          .drain();
+        drains.push(
+          pipeline
+            .evalMap((value) => {
+              const rateLimit = this.rateLimiter
+                ? fromPromise(
+                    () => this.rateLimiter!.acquire(),
+                    (error) => error,
+                  )
+                : succeed(undefined);
 
-        this.fibers.push(runFiber(drainEff as Eff<void, never>));
+              return rateLimit
+                .flatMap(() => sinkTarget.publish(value))
+                .map(() => {
+                  this.itemsProcessed++;
+                });
+            })
+            .drain(),
+        );
       }
     } else {
       const terminal = this.topology.compiled.nodes[this.topology.compiled.nodes.length - 1]!;
@@ -207,26 +215,39 @@ class TopologyRunnerInstance {
         })
         .drain();
 
-      this.fibers.push(runFiber(drainEff as Eff<void, never>));
+      drains.push(drainEff);
     }
 
-    // Fiber.await() resolves with an Exit — never rejects
-    const drainPromise = Promise.all(this.fibers.map((f) => f.await()));
+    await Promise.all(this.pendingRestores);
+
+    this.fibers = drains.map((drain) => runFiber((drain as Eff<void, Throws<unknown>>).orDie()));
+    const exits = this.fibers.map((fiber, index) =>
+      fiber.await().then((exit) => {
+        if (!this.stopping && exit._tag === "Failure" && !Cause.isInterruptedOnly(exit.cause)) {
+          this.running = false;
+          for (let i = 0; i < this.fibers.length; i++) {
+            if (i !== index) this.fibers[i]!.interrupt();
+          }
+        }
+        return exit;
+      }),
+    );
+    this.drainPromise = Promise.all(exits).then((completed) => {
+      this.running = false;
+      return completed;
+    });
+
+    if (this.config.checkpointIntervalMs) {
+      this.checkpointInterval = setInterval(
+        () => this.startCheckpoint(),
+        this.config.checkpointIntervalMs,
+      );
+    }
 
     const self = this;
     const handle: TopologyHandle = {
-      shutdown: async () => {
-        self.running = false;
-        for (const fiber of self.fibers) fiber.interrupt();
-        if (self.checkpointInterval) clearInterval(self.checkpointInterval);
-        // Flush pending ack before checkpoint
-        if (self.pendingAckEnvelope) {
-          await self.pendingAckEnvelope.ack();
-          self.pendingAckEnvelope = null;
-        }
-        await self.checkpointAllState();
-        await drainPromise.catch(() => {});
-      },
+      shutdown: () => self.shutdown(),
+      awaitExit: () => self.awaitExit(),
       isRunning: () => self.running,
       metrics: () => self.getMetrics(),
     };
@@ -283,6 +304,45 @@ class TopologyRunnerInstance {
     await this.stateBackend.checkpoint({ name: CheckpointName(`topology:${this.config.group}`) });
   }
 
+  private startCheckpoint(): void {
+    if (this.checkpointInFlight || this.stopping) return;
+    this.checkpointInFlight = this.checkpointAllState()
+      .catch((error) => {
+        this.checkpointFailure = error;
+        this.running = false;
+        for (const fiber of this.fibers) fiber.interrupt();
+      })
+      .finally(() => {
+        this.checkpointInFlight = null;
+      });
+  }
+
+  private async awaitExit(): Promise<readonly ExitT<unknown, void>[]> {
+    const exits = await this.drainPromise;
+    return this.checkpointFailure === undefined
+      ? exits
+      : [...exits, Exit.die(this.checkpointFailure)];
+  }
+
+  private shutdown(): Promise<void> {
+    if (this.shutdownPromise) return this.shutdownPromise;
+
+    this.shutdownPromise = (async () => {
+      this.stopping = true;
+      this.running = false;
+      if (this.checkpointInterval) {
+        clearInterval(this.checkpointInterval);
+        this.checkpointInterval = null;
+      }
+      for (const fiber of this.fibers) fiber.interrupt();
+      await this.drainPromise;
+      await this.checkpointInFlight;
+      await this.checkpointAllState();
+    })();
+
+    return this.shutdownPromise;
+  }
+
   private async restoreAllState(): Promise<void> {
     await this.stateBackend.restore({ name: CheckpointName(`topology:${this.config.group}`) });
 
@@ -333,37 +393,16 @@ class TopologyRunnerInstance {
   }
 
   private compileSource(node: { source: unknown }): Stream<unknown, any> {
-    const source = node.source as Streamable<unknown> & Acknowledgeable<unknown>;
+    const source = node.source as Streamable<unknown, any> & Acknowledgeable<unknown, any>;
     const batchSize = this.config.ackBatchSize ?? 100;
-    let count = 0;
 
-    // Use subscribe() (no ack) when ack is disabled, subscribeAck() otherwise.
-    // Batch ack: sync-unwrap values, ack only the last envelope per batch.
-    // For Kafka, acking offset N implicitly acks all offsets < N.
     if (batchSize <= 0) {
-      // No ack — fastest path for sources that don't need acknowledgement
       return source.subscribe();
     }
 
-    // Single mapChunks: unwrap + batch ack in one pass per chunk.
-    // Avoids per-item effect overhead from chained .map().tap().
     return source
       .subscribeAck({ group: this.config.group })
-      .mapChunks((chunk: Chunk<Envelope<unknown>>) => {
-        const values: unknown[] = new Array(chunk.length);
-        for (let i = 0; i < chunk.length; i++) {
-          const env = chunk.get(i);
-          values[i] = env.value;
-          this.pendingAckEnvelope = env;
-          count++;
-          if (count >= batchSize) {
-            env.ack();
-            this.pendingAckEnvelope = null;
-            count = 0;
-          }
-        }
-        return Chunk.fromArray(values);
-      });
+      .through(autoCommitBatchWithin(batchSize, this.config.ackMaxWaitMs ?? 1_000));
   }
 
   private compileAggregate(node: {
@@ -375,12 +414,11 @@ class TopologyRunnerInstance {
     const idx = this.windowManagers.length;
     this.windowManagers.push(manager);
 
-    // Restore from checkpoint (fire-and-forget — completes before first item arrives)
-    this.stateBackend.get(`window:${idx}`).then((saved) => {
-      if (saved && Array.isArray(saved)) {
-        manager.restore(saved as any);
-      }
-    });
+    this.pendingRestores.push(
+      this.stateBackend.get(`window:${idx}`).then((saved) => {
+        if (saved && Array.isArray(saved)) manager.restore(saved as any);
+      }),
+    );
 
     return this.compile(node.parent).flatMap((value: unknown) => {
       const key = keyFn(value);
@@ -402,14 +440,15 @@ class TopologyRunnerInstance {
     const idx = this.processStates.length;
     this.processStates.push(keyStates);
 
-    // Restore from checkpoint
-    this.stateBackend.get(`process-map:${idx}`).then((saved) => {
-      if (saved && Array.isArray(saved)) {
-        for (const [k, v] of saved as [string, unknown][]) {
-          keyStates.set(k, v);
+    this.pendingRestores.push(
+      this.stateBackend.get(`process-map:${idx}`).then((saved) => {
+        if (saved && Array.isArray(saved)) {
+          for (const [k, v] of saved as [string, unknown][]) {
+            keyStates.set(k, v);
+          }
         }
-      }
-    });
+      }),
+    );
 
     return this.compile(node.parent).filterMap((value: unknown) => {
       const key = keyFn(value);
@@ -429,12 +468,11 @@ class TopologyRunnerInstance {
     const idx = this.dedupSets.length;
     this.dedupSets.push(seen);
 
-    // Restore from checkpoint
-    this.stateBackend.get(`dedupe:${idx}`).then((saved) => {
-      if (saved && Array.isArray(saved)) {
-        seen.restore(saved as string[]);
-      }
-    });
+    this.pendingRestores.push(
+      this.stateBackend.get(`dedupe:${idx}`).then((saved) => {
+        if (saved && Array.isArray(saved)) seen.restore(saved as string[]);
+      }),
+    );
 
     return this.compile(node.parent).filter((value: unknown) => {
       const key = node.keyFn(value);
@@ -453,12 +491,11 @@ class TopologyRunnerInstance {
     const idx = this.joinBuffers.length;
     this.joinBuffers.push(buffer);
 
-    // Restore from checkpoint
-    this.stateBackend.get(`join:${idx}`).then((saved) => {
-      if (saved) {
-        buffer.restore(saved as any);
-      }
-    });
+    this.pendingRestores.push(
+      this.stateBackend.get(`join:${idx}`).then((saved) => {
+        if (saved) buffer.restore(saved as any);
+      }),
+    );
 
     const leftKeyFn = this.findKeyBy(node.left).keyFn;
     const rightKeyFn = this.findKeyBy(node.right).keyFn;

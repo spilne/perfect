@@ -11,13 +11,16 @@
   },
   "dependencies": {
     "@perfect/core": "workspace:*",
-    "@perfect/kafka": "workspace:*"
+    "@perfect/kafka": "workspace:*",
+    "@perfect/kafka-kafkajs": "workspace:*",
+    "@perfect/kafka-platformatic": "workspace:*"
   },
   "devDependencies": {
-    "@platformatic/kafka": "^1.32.0",
-    "@testcontainers/kafka": "^11.13.0",
+    "@platformatic/kafka": "^2.9.0",
+    "@testcontainers/kafka": "^12.1.0",
     "@types/debug": "^4.1.12",
     "kafkajs": "^2.2.4",
-    "testcontainers": "^11.13.0"
+    "node": "^24.6.0",
+    "testcontainers": "^12.1.0"
   }
 }

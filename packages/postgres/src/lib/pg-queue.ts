@@ -13,6 +13,7 @@
 // ---------------------------------------------------------------------------
 
 import { sql } from "drizzle-orm";
+import { fromPromise, type Throws } from "@perfect/core";
 import { JsonCodec } from "@perfect/core/connect";
 import type {
   Streamable,
@@ -27,6 +28,7 @@ import { type DrizzleDb, execRaw } from "./drizzle-db";
 import { createQueueTable } from "./pg-queue-schema";
 import { ensureTable as ensureTableFromSchema } from "./schema-utils";
 import { pollStream } from "./poll-stream";
+import { PostgresError, toPostgresError } from "./postgres-error";
 
 // ---------------------------------------------------------------------------
 // Config
@@ -72,17 +74,27 @@ export interface PgQueueConfig<T> {
  *
  * // Consume with manual ack
  * await run(
- *   queue.subscribeAck().forEach(async (envelope) => {
- *     await processUser(envelope.value);
- *     await envelope.ack();
- *   }),
+ *   queue
+ *     .subscribeAck()
+ *     .forEach((envelope) =>
+ *       fromPromise(async () => {
+ *         await processUser(envelope.value);
+ *         await envelope.ack();
+ *       }, (cause) => cause).orDie(),
+ *     )
+ *     .orDie(),
  * );
  *
  * // Or auto-consume (pop — read + delete in one step)
- * await run(queue.subscribe().take(10).toArray());
+ * await run(queue.subscribe().take(10).toArray().orDie());
  * ```
  */
-export class PgQueue<T> implements Streamable<T>, Sinkable<T>, Acknowledgeable<T> {
+export class PgQueue<T>
+  implements
+    Streamable<T, Throws<PostgresError>>,
+    Sinkable<T, Throws<PostgresError>>,
+    Acknowledgeable<T, Throws<PostgresError>>
+{
   readonly codec: Codec<T>;
   readonly queue: string;
   private readonly db: DrizzleDb;
@@ -149,19 +161,24 @@ export class PgQueue<T> implements Streamable<T>, Sinkable<T>, Acknowledgeable<T
   // Sinkable<T> — publish
   // ---------------------------------------------------------------------------
 
-  async publish(
+  publish(
     value: T,
     params?: { delay?: number; headers?: Record<string, string> },
-  ): Promise<void> {
-    const payload = JSON.stringify(this.codec.encode(value));
-    const headers = params?.headers ? JSON.stringify(params.headers) : null;
-    const delaySeconds = params?.delay ?? 0;
+  ): import("@perfect/core").Eff<void, Throws<PostgresError>> {
+    return fromPromise(
+      async () => {
+        const payload = JSON.stringify(this.codec.encode(value));
+        const headers = params?.headers ? JSON.stringify(params.headers) : null;
+        const delaySeconds = params?.delay ?? 0;
 
-    await this.db.execute(
-      sql.raw(`
-        INSERT INTO ${this.tableName} (payload, headers, visible_at)
-        VALUES ('${payload.replace(/'/g, "''")}'::jsonb, ${headers ? `'${headers.replace(/'/g, "''")}'::jsonb` : "NULL"}, NOW() + INTERVAL '${delaySeconds} seconds')
-      `),
+        await this.db.execute(
+          sql.raw(`
+            INSERT INTO ${this.tableName} (payload, headers, visible_at)
+            VALUES ('${payload.replace(/'/g, "''")}'::jsonb, ${headers ? `'${headers.replace(/'/g, "''")}'::jsonb` : "NULL"}, NOW() + INTERVAL '${delaySeconds} seconds')
+          `),
+        );
+      },
+      (cause) => toPostgresError("queue.publish", cause),
     );
   }
 
@@ -169,9 +186,16 @@ export class PgQueue<T> implements Streamable<T>, Sinkable<T>, Acknowledgeable<T
   // Streamable<T> — subscribe with auto-pop
   // ---------------------------------------------------------------------------
 
-  subscribe(_params?: { group?: ConsumerGroup }): Stream<T, never> {
-    return pollStream(() => this.pop(this.defaultBatchSize), this.pollIntervalMs).map((row) =>
-      this.codec.decode(row.payload),
+  subscribe(_params?: { group?: ConsumerGroup }): Stream<T, Throws<PostgresError>> {
+    return pollStream(
+      () => this.pop(this.defaultBatchSize),
+      this.pollIntervalMs,
+      "queue.pop",
+    ).evalMap((row) =>
+      fromPromise(
+        async () => this.codec.decode(row.payload),
+        (cause) => toPostgresError("queue.decode", cause),
+      ),
     );
   }
 
@@ -179,21 +203,39 @@ export class PgQueue<T> implements Streamable<T>, Sinkable<T>, Acknowledgeable<T
   // Acknowledgeable<T> — subscribe with manual ack/nack
   // ---------------------------------------------------------------------------
 
-  subscribeAck(params?: { group?: ConsumerGroup; vtSeconds?: number }): Stream<Envelope<T>, never> {
+  subscribeAck(params?: {
+    group?: ConsumerGroup;
+    vtSeconds?: number;
+  }): Stream<Envelope<T, Throws<PostgresError>>, Throws<PostgresError>> {
     const vt = params?.vtSeconds ?? this.defaultVtSeconds;
 
-    return pollStream(() => this.dequeue(this.defaultBatchSize, vt), this.pollIntervalMs).map(
-      (row): Envelope<T> => ({
-        value: this.codec.decode(row.payload),
-        ack: () => this.ack(row.id),
-        nack: () => this.nack(row.id),
-        metadata: {
-          msgId: row.id,
-          attemptCount: row.attemptCount,
-          createdAt: row.createdAt,
-          headers: row.headers,
-        },
-      }),
+    return pollStream(
+      () => this.dequeue(this.defaultBatchSize, vt),
+      this.pollIntervalMs,
+      "queue.dequeue",
+    ).evalMap((row) =>
+      fromPromise(
+        async (): Promise<Envelope<T, Throws<PostgresError>>> => ({
+          value: this.codec.decode(row.payload),
+          ack: () =>
+            fromPromise(
+              () => this.ack(row.id),
+              (cause) => toPostgresError("queue.ack", cause),
+            ),
+          nack: () =>
+            fromPromise(
+              () => this.nack(row.id),
+              (cause) => toPostgresError("queue.nack", cause),
+            ),
+          metadata: {
+            msgId: row.id,
+            attemptCount: row.attemptCount,
+            createdAt: row.createdAt,
+            headers: row.headers,
+          },
+        }),
+        (cause) => toPostgresError("queue.decode", cause),
+      ),
     );
   }
 

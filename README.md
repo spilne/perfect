@@ -7,7 +7,9 @@ behind a fluent API with no `pipe()`.
 ```ts
 import { eff, succeed, fail, provide, service, run } from "@perfect/core";
 
-interface Db { findUser(id: string): Eff<User, Throws<NotFound>> }
+interface Db {
+  findUser(id: string): Eff<User, Throws<NotFound>>;
+}
 const Db = service<Db>("Db");
 
 const program = eff(function* () {
@@ -41,16 +43,20 @@ await run(provide(program, Db, liveDb));
 
 ## Packages
 
-| Package | What it is |
-|---|---|
-| `@perfect/core` | The runtime: `Eff`, fibers, scheduler, `Stream`, concurrency primitives (Queue, Semaphore, CircuitBreaker, RateLimiter, Pool, PubSub, …), Layer DI, Clock/Random/Console/Logger/Tracer/Metrics services, and the `connect` contracts for messaging backends |
-| `@perfect/http` | HTTP client: typed errors, retry, streaming (SSE/NDJSON), mock client, schema-library-agnostic validation |
-| `@perfect/kafka` | Kafka backend for the `connect` contracts — offset-safe parallel commits, injected driver interface |
-| `@perfect/topology` | Flink-style stream topology engine: windows, joins, stage planning, distributed runs over a shuffle transport |
-| `@perfect/otel` | OpenTelemetry bridge for the core `Tracer` and `Metrics` services |
-| `@perfect/http-otel` | HTTP-specific tracing middleware + W3C trace propagation for `@perfect/http` |
-| `@perfect/transform` | Build-time compiler for the `eff(($) => …)` and `for { x <- e } yield` syntaxes (Bun plugin) |
-| `@perfect/swc-plugin` | SWC WASM plugin — the canonical `eff(($) => …)` compiler for Next.js/Vite/anything SWC |
+| Package                       | What it is                                                                                                                                                                                                                                                  |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@perfect/core`               | The runtime: `Eff`, fibers, scheduler, `Stream`, concurrency primitives (Queue, Semaphore, CircuitBreaker, RateLimiter, Pool, PubSub, …), Layer DI, Clock/Random/Console/Logger/Tracer/Metrics services, and the `connect` contracts for messaging backends |
+| `@perfect/http`               | HTTP client: typed errors, retry, streaming (SSE/NDJSON), mock client, schema-library-agnostic validation                                                                                                                                                   |
+| `@perfect/kafka`              | Driver-neutral Kafka backend for the `connect` contracts — typed failures, offset-safe parallel commits, and a config builder                                                                                                                               |
+| `@perfect/kafka-kafkajs`      | KafkaJS adapter for `@perfect/kafka` (Bun and Node.js)                                                                                                                                                                                                      |
+| `@perfect/kafka-platformatic` | Platformatic Kafka adapter for `@perfect/kafka` (Node.js)                                                                                                                                                                                                   |
+| `@perfect/postgres`           | Postgres coordination, LISTEN/NOTIFY streams, durable state, and PGMQ queues with optional FIFO message groups                                                                                                                                              |
+| `@perfect/redis`              | Redis-backed concurrency primitives, durable state, Redis Streams, and bounded Pub/Sub connectors                                                                                                                                                           |
+| `@perfect/topology`           | Flink-style stream topology engine: windows, joins, stage planning, distributed runs over a shuffle transport                                                                                                                                               |
+| `@perfect/otel`               | OpenTelemetry bridge for the core `Tracer` and `Metrics` services                                                                                                                                                                                           |
+| `@perfect/http-otel`          | HTTP-specific tracing middleware + W3C trace propagation for `@perfect/http`                                                                                                                                                                                |
+| `@perfect/transform`          | Build-time compiler for the `eff(($) => …)` and `for { x <- e } yield` syntaxes (Bun plugin)                                                                                                                                                                |
+| `@perfect/swc-plugin`         | SWC WASM plugin — the canonical `eff(($) => …)` compiler for Next.js/Vite/anything SWC                                                                                                                                                                      |
 
 ## Development
 

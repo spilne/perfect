@@ -1,4 +1,5 @@
 import { describe, test, expect } from "bun:test";
+import { succeed } from "@perfect/core";
 import { Stream } from "@perfect/core/stream";
 import type { Streamable, Acknowledgeable, Sinkable, Codec } from "@perfect/core/connect";
 import { StreamTopology, analyzeTopology } from "../src";
@@ -18,7 +19,7 @@ function mockSource<T>(): Streamable<T> & Acknowledgeable<T> {
 
 function mockSink<T>(): Sinkable<T> {
   return {
-    publish: async () => {},
+    publish: () => succeed(undefined),
     codec: { encode: (v) => v, decode: (v) => v as T },
   };
 }

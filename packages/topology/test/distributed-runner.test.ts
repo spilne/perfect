@@ -2,6 +2,7 @@
 // ShuffleTransport; no real broker.
 
 import { describe, test, expect } from "bun:test";
+import { succeed, sync } from "@perfect/core";
 import { Stream } from "@perfect/core/stream";
 import type {
   Streamable,
@@ -10,7 +11,7 @@ import type {
   Codec,
   ShuffleTransport,
 } from "@perfect/core/connect";
-import { StreamTopology, DistributedRunner, planStages, ConsumerGroup } from "../src";
+import { StreamTopology, DistributedRunner, planStages, ConsumerGroup, ChannelName } from "../src";
 
 // ---------------------------------------------------------------------------
 // In-memory ShuffleTransport for testing
@@ -35,17 +36,15 @@ function createInMemoryTransport(): ShuffleTransport {
             Stream.fromIterable(
               items.map((value) => ({
                 value,
-                ack: async () => {},
-                nack: async () => {},
+                ack: () => succeed(undefined),
+                nack: () => succeed(undefined),
                 metadata: {},
               })),
             ),
         },
         sink: {
           codec: params.codec,
-          publish: async (value: unknown) => {
-            items.push(value);
-          },
+          publish: (value: unknown) => sync(() => void items.push(value)),
         },
       };
     },
@@ -65,8 +64,8 @@ function createTestSource<T>(items: T[]): Streamable<T> & Acknowledgeable<T> {
       Stream.fromIterable(
         items.map((value) => ({
           value,
-          ack: async () => {},
-          nack: async () => {},
+          ack: () => succeed(undefined),
+          nack: () => succeed(undefined),
           metadata: {},
         })),
       ),
@@ -78,9 +77,7 @@ function createTestSink<T>(): Sinkable<T> & { items: T[] } {
   return {
     items,
     codec: { encode: (v) => v, decode: (v) => v as T },
-    publish: async (value: T) => {
-      items.push(value);
-    },
+    publish: (value: T) => sync(() => void items.push(value)),
   };
 }
 
@@ -125,15 +122,19 @@ describe("DistributedRunner", () => {
     const plan = planStages({ compiled: topology.compiled, group: ConsumerGroup("two-stage") });
 
     expect(plan.stages).toHaveLength(2);
-    expect(plan.repartitionTopics).toEqual(["two-stage-repartition-0"]);
+    expect(plan.repartitionTopics).toEqual([ChannelName("two-stage-repartition-0")]);
 
     // Stage 0 reads from original, writes to repartition
     expect(plan.stages[0]!.source).toBe("original");
-    expect(plan.stages[0]!.sink).toEqual({ repartitionTopic: "two-stage-repartition-0" });
+    expect(plan.stages[0]!.sink).toEqual({
+      repartitionTopic: ChannelName("two-stage-repartition-0"),
+    });
     expect(plan.stages[0]!.keyFn).toBeDefined();
 
     // Stage 1 reads from repartition, writes to terminal
-    expect(plan.stages[1]!.source).toEqual({ repartitionTopic: "two-stage-repartition-0" });
+    expect(plan.stages[1]!.source).toEqual({
+      repartitionTopic: ChannelName("two-stage-repartition-0"),
+    });
     expect(plan.stages[1]!.sink).toBe("terminal");
   });
 

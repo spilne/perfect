@@ -44,13 +44,5 @@
   },
   "dependencies": {
     "@perfect/core": "workspace:*"
-  },
-  "peerDependencies": {
-    "@confluentinc/kafka-javascript": "^1.9.0"
-  },
-  "peerDependenciesMeta": {
-    "@confluentinc/kafka-javascript": {
-      "optional": true
-    }
   }
 }

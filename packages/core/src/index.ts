@@ -140,7 +140,7 @@ export type { Scheduler } from "./scheduler";
 export { AsyncScheduler, BunScheduler, SyncScheduler, setDefaultScheduler } from "./scheduler";
 export { WorkerPool } from "./worker";
 export { Chunk, Stream, StreamTimeoutError, SchemaParseError, Sink, Pipes, Sinks } from "./stream";
-export type { Pipe, SchemaParser } from "./stream";
+export type { Pipe, SchemaParser, StatefulMapOptions } from "./stream";
 
 export { eff } from "./syntax";
 import "./syntax";

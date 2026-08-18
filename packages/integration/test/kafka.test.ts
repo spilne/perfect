@@ -5,11 +5,13 @@
 // ---------------------------------------------------------------------------
 
 import { describe, it, expect, setDefaultTimeout } from "bun:test";
+import { rm } from "node:fs/promises";
+import { join } from "node:path";
 
 // Kafka operations (consumer group join, rebalancing, commits) need generous timeouts
 setDefaultTimeout(300_000);
 
-import { die, run, fromPromise } from "@perfect/core";
+import { die, run, sync } from "@perfect/core";
 import {
   autoCommitBatchWithin,
   ChannelName,
@@ -24,11 +26,12 @@ import {
   TopicName,
   GroupId,
   KafkaOffset,
+  type KafkaError,
   type KafkaClient,
 } from "@perfect/kafka";
+import type { Throws } from "@perfect/core";
 import { withKafka, withApacheKafka, eventually, uniqueName } from "../src/infra";
-import { createKafkajsClient, createTopic } from "../src/adapters/kafkajs-adapter";
-import { createPlatformaticClient } from "../src/adapters/stream-adapter";
+import { createKafkajsClient, createKafkajsTopic } from "@perfect/kafka-kafkajs";
 
 // ---------------------------------------------------------------------------
 // Shared test suite — same tests, different adapter
@@ -43,7 +46,7 @@ function adapterTests(
     it("publishes and consumes a single message", async () => {
       const broker = getBroker();
       const topic = TopicName(uniqueName("single"));
-      await createTopic(broker, topic);
+      await createKafkajsTopic(broker, topic);
 
       const kt = new KafkaTopic<{ orderId: string }>({
         kafka: makeClient(broker),
@@ -57,7 +60,8 @@ function adapterTests(
         kt
           .subscribeFrom({ offset: { type: "earliest" }, group: ConsumerGroup(uniqueName("g")) })
           .take(1)
-          .toArray(),
+          .toArray()
+          .orDie(),
       );
 
       expect(items).toEqual([{ orderId: "o-1" }]);
@@ -67,7 +71,7 @@ function adapterTests(
     it("publishBatch sends multiple messages", async () => {
       const broker = getBroker();
       const topic = TopicName(uniqueName("batch"));
-      await createTopic(broker, topic);
+      await createKafkajsTopic(broker, topic);
 
       const kt = new KafkaTopic<{ v: number }>({
         kafka: makeClient(broker),
@@ -81,7 +85,8 @@ function adapterTests(
         kt
           .subscribeFrom({ offset: { type: "earliest" }, group: ConsumerGroup(uniqueName("g")) })
           .take(3)
-          .toArray(),
+          .toArray()
+          .orDie(),
       );
 
       expect(items.map((i) => i.v).sort()).toEqual([1, 2, 3]);
@@ -91,7 +96,7 @@ function adapterTests(
     it("keyed messages preserve partition ordering", async () => {
       const broker = getBroker();
       const topic = TopicName(uniqueName("keyed"));
-      await createTopic(broker, topic, 3);
+      await createKafkajsTopic(broker, topic, 3);
 
       const kt = new KafkaTopic<{ seq: number }>({
         kafka: makeClient(broker),
@@ -107,7 +112,8 @@ function adapterTests(
         kt
           .subscribeFrom({ offset: { type: "earliest" }, group: ConsumerGroup(uniqueName("g")) })
           .take(3)
-          .toArray(),
+          .toArray()
+          .orDie(),
       );
 
       expect(items.map((i) => i.seq)).toEqual([1, 2, 3]);
@@ -129,7 +135,7 @@ withKafka("Kafka integration (Redpanda)", (ctx) => {
     it("rewinds a committed consumer group to the earliest offset", async () => {
       const client = createKafkajsClient(ctx.broker);
       const topic = TopicName(uniqueName("replay"));
-      await createTopic(ctx.broker, topic);
+      await createKafkajsTopic(ctx.broker, topic);
       const group = GroupId(uniqueName("replay-group"));
       const kt = new KafkaTopic<{ v: number }>({ kafka: client, topic, groupId: group });
       await kt.publishBatch([{ value: { v: 1 } }, { value: { v: 2 } }, { value: { v: 3 } }]);
@@ -151,7 +157,8 @@ withKafka("Kafka integration (Redpanda)", (ctx) => {
             }),
           )
           .drain()
-          .catchTag("KafkaCommitError", (error) => die(error)),
+          .catchTag("KafkaCommitError", (error) => die(error))
+          .orDie(),
       );
       await subscription.close();
 
@@ -159,7 +166,8 @@ withKafka("Kafka integration (Redpanda)", (ctx) => {
         kt
           .subscribeFrom({ offset: { type: "earliest" }, group })
           .take(3)
-          .toArray(),
+          .toArray()
+          .orDie(),
       );
 
       expect(replayed).toEqual([{ v: 1 }, { v: 2 }, { v: 3 }]);
@@ -171,7 +179,7 @@ withKafka("Kafka integration (Redpanda)", (ctx) => {
     it("consumes callback-driver fetch batches as Stream chunks", async () => {
       const client = createKafkajsClient(ctx.broker);
       const topic = TopicName(uniqueName("batch-emit"));
-      await createTopic(ctx.broker, topic);
+      await createKafkajsTopic(ctx.broker, topic);
       const kt = new KafkaTopic<{ v: number }>({
         kafka: client,
         topic,
@@ -192,7 +200,8 @@ withKafka("Kafka integration (Redpanda)", (ctx) => {
             return chunk;
           })
           .take(6)
-          .toArray(),
+          .toArray()
+          .orDie(),
       );
 
       expect(values.map((value) => value.v)).toEqual([1, 2, 3, 4, 5, 6]);
@@ -206,7 +215,7 @@ withKafka("Kafka integration (Redpanda)", (ctx) => {
     it("processes all messages and commits acked offsets for the group", async () => {
       const client = createKafkajsClient(ctx.broker);
       const topic = TopicName(uniqueName("ack"));
-      await createTopic(ctx.broker, topic);
+      await createKafkajsTopic(ctx.broker, topic);
       const group = GroupId(uniqueName("g"));
 
       const kt = new KafkaTopic<{ v: number }>({ kafka: client, topic, groupId: group });
@@ -220,10 +229,11 @@ withKafka("Kafka integration (Redpanda)", (ctx) => {
       const values: { v: number }[] = await run(
         kt
           .subscribeAck({ group, fromBeginning: true, commitIntervalMs: 200 })
-          .through(autoCommitBatchWithin<{ v: number }>(5, 300))
+          .through(autoCommitBatchWithin<{ v: number }, Throws<KafkaError>>(5, 300))
           .take(10)
           .toArray()
-          .catchTag("AckError", (error) => die(error)),
+          .catchTag("AckError", (error) => die(error))
+          .orDie(),
       );
 
       for (const v of values) seen.push(v.v);
@@ -247,7 +257,7 @@ withKafka("Kafka integration (Redpanda)", (ctx) => {
     it("commits batched offsets through a real consumer", async () => {
       const client = createKafkajsClient(ctx.broker);
       const topic = TopicName(uniqueName("commit"));
-      await createTopic(ctx.broker, topic);
+      await createKafkajsTopic(ctx.broker, topic);
 
       const kt = new KafkaTopic<{ v: number }>({
         kafka: client,
@@ -269,16 +279,13 @@ withKafka("Kafka integration (Redpanda)", (ctx) => {
         subscription.stream
           .take(10)
           .evalMap((env) =>
-            fromPromise(
-              async () => {
-                seen.push(env.value.v);
-                return env;
-              },
-              (e) => e,
-            ),
+            sync(() => {
+              seen.push(env.value.v);
+              return env;
+            }),
           )
           .through(
-            commitBatchWithin({
+            commitBatchWithin<{ v: number }>({
               maxBatchSize: 4,
               maxWaitMs: 1_000,
               consumer: subscription.consumer,
@@ -286,7 +293,8 @@ withKafka("Kafka integration (Redpanda)", (ctx) => {
             }),
           )
           .drain()
-          .catchTag("KafkaCommitError", (error) => die(error)),
+          .catchTag("KafkaCommitError", (error) => die(error))
+          .orDie(),
       );
 
       expect(seen.sort((a, b) => a - b)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
@@ -332,7 +340,7 @@ withKafka("Kafka integration (Redpanda)", (ctx) => {
       // Acknowledgeable's contract has no replay knob — downcast to reach
       // KafkaTopic's fromBeginning option (see README: interface friction).
       const envelopes = await run(
-        (source as KafkaTopic<Ev>).subscribeAck({ fromBeginning: true }).take(4).toArray(),
+        (source as KafkaTopic<Ev>).subscribeAck({ fromBeginning: true }).take(4).toArray().orDie(),
       );
 
       const received = envelopes
@@ -370,7 +378,56 @@ withKafka("Kafka integration (Redpanda)", (ctx) => {
 const runFullKafka = process.env.KAFKA_FULL === "1";
 
 if (runFullKafka) {
-  withApacheKafka("@platformatic/kafka adapter (Apache Kafka)", (ctx) => {
-    adapterTests("stream-based consume", () => ctx.broker, createPlatformaticClient);
+  withApacheKafka("Kafka adapter compatibility (Apache Kafka)", (ctx) => {
+    const getBroker = () => ctx.broker;
+    adapterTests("kafkajs adapter (callback-based)", getBroker, createKafkajsClient);
+
+    it("runs the Platformatic stream adapter under its supported Node runtime", async () => {
+      const topic = TopicName(uniqueName("platformatic"));
+      await createKafkajsTopic(ctx.broker, topic, 3);
+      const bundleDirectory = join(
+        import.meta.dir,
+        `../.platformatic-probe-${crypto.randomUUID()}`,
+      );
+      const bundle = join(bundleDirectory, "probe.mjs");
+      const build = await Bun.build({
+        entrypoints: [new URL("../src/platformatic-node-probe.ts", import.meta.url).pathname],
+        outdir: bundleDirectory,
+        naming: "probe.mjs",
+        target: "node",
+        minify: false,
+        external: ["@platformatic/kafka"],
+      });
+      if (!build.success) {
+        throw new Error(build.logs.map((log) => log.message).join("\n"));
+      }
+
+      try {
+        const node = join(import.meta.dir, "../node_modules/.bin/node");
+        const child = Bun.spawn({
+          cmd: [node, bundle, ctx.broker, topic],
+          stdout: "pipe",
+          stderr: "pipe",
+        });
+        const timeout = setTimeout(() => child.kill(9), 45_000);
+        const [exitCode, stdout, stderr] = await Promise.all([
+          child.exited,
+          new Response(child.stdout).text(),
+          new Response(child.stderr).text(),
+        ]).finally(() => clearTimeout(timeout));
+        if (exitCode !== 0) throw new Error(stderr || stdout);
+
+        const marker = stdout
+          .split("\n")
+          .find((line) => line.startsWith("PERFECT_PLATFORMATIC_RESULT="));
+        expect(marker).toBeDefined();
+        const received = JSON.parse(marker!.slice("PERFECT_PLATFORMATIC_RESULT=".length));
+        expect(received.map((message: { sequence: number }) => message.sequence)).toEqual([
+          1, 2, 3,
+        ]);
+      } finally {
+        await rm(bundleDirectory, { recursive: true, force: true });
+      }
+    });
   });
 }

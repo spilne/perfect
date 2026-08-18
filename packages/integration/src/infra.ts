@@ -131,7 +131,7 @@ async function startKafka(): Promise<{ container: StartedTestContainer; ctx: Kaf
 }
 
 async function startApacheKafka(): Promise<{ container: StartedTestContainer; ctx: KafkaCtx }> {
-  const container = await new KafkaContainer("confluentinc/cp-kafka:7.9.1")
+  const container = await new KafkaContainer("confluentinc/cp-kafka:8.2.2")
     .withKraft()
     .withStartupTimeout(KAFKA_TIMEOUT)
     .start();

@@ -1,0 +1,10 @@
+{
+  "name": "@perfect/kafka-platformatic",
+  "sourceRoot": "packages/kafka-platformatic/src",
+  "targets": {
+    "build": {},
+    "test": {},
+    "lint": {},
+    "typecheck": {}
+  }
+}

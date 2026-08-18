@@ -3,6 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import type { ChannelName, ConsumerGroup } from "@perfect/core/connect";
+import type { ExitT } from "@perfect/core";
 import type { StateBackend } from "./state-backend";
 
 export interface TimeWindow {
@@ -44,6 +45,8 @@ export interface TopologyConfig {
   onBackpressure?: (stats: BackpressureStats) => void;
   /** Ack every N items instead of per-item. Default: 100. Set to 1 for per-item ack. */
   ackBatchSize?: number;
+  /** Flush a partial ack batch after this many milliseconds. Default: 1_000. */
+  ackMaxWaitMs?: number;
 }
 
 export interface BackpressureStats {
@@ -59,6 +62,8 @@ export interface BackpressureStats {
 
 export interface TopologyHandle {
   shutdown(): Promise<void>;
+  /** Wait for every branch and inspect typed failures, defects, or interruption. */
+  awaitExit(): Promise<readonly ExitT<unknown, void>[]>;
   isRunning(): boolean;
   /** Get current topology metrics. */
   metrics(): TopologyMetrics;

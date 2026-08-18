@@ -2,9 +2,9 @@
 
 Distributed Redis implementations of the concurrency and coordination contracts in
 `@perfect/core`, plus durable Redis Streams and Pub/Sub connectors for
-`@perfect/core/connect`. Coordination operations expose `Throws<RedisError>` in
-`Eff<A, S>`; driver failures are recoverable with `.catchTag("RedisError", ...)` instead
-of becoming defects.
+`@perfect/core/connect`. Coordination operations and connector subscription streams expose
+`Throws<RedisError>` in `Eff<A, S>`; driver failures are recoverable with
+`.catchTag("RedisError", ...)` instead of becoming defects.
 
 ## Install
 
@@ -42,6 +42,8 @@ const value = await run(
 - `RedisRateLimiter` and `RedisThrottle`
 - `RedisCircuitBreaker`
 - `RedisCacheStore`
+- `RedisStateBackend` — durable keyed state and atomic checkpoints for
+  `Stream.statefulMap` and `@perfect/topology`
 - `RedisStream` — durable consumer groups, replay, manual acknowledgement, claiming,
   keyed publish, and metrics
 - `RedisChannel` — non-durable Pub/Sub implementing `Streamable` and `Sinkable`, with
@@ -61,6 +63,11 @@ const events = RedisStream.make<{ id: string }>({
   redis,
   stream: "events",
   group: "indexer",
+  recovery: {
+    minIdleMs: 30_000,
+    maxDeliveries: 5,
+    deadLetterStream: "events-dlq",
+  },
 });
 
 await events.publish({ id: "e-1" }, { key: "account-1" });
@@ -69,11 +76,21 @@ const envelopes = await run(
   events
     .subscribeAck({ offset: { type: "earliest" } })
     .take(1)
-    .toArray(),
+    .toArray()
+    .orDie(),
 );
 await envelopes[0]!.ack();
 ```
 
 `RedisStream.subscribe()` auto-acknowledges each Redis read batch. Use
-`subscribeAck()` for at-least-once processing, and `claimPending()` to recover messages
-left in the pending entries list by an inactive consumer.
+`subscribeAck()` for at-least-once processing. Configure `recovery` to reclaim abandoned
+deliveries with `XAUTOCLAIM`; messages that reach `maxDeliveries` are copied to the dead-letter
+stream and acknowledged in the source group. `recoverPending()` exposes the same mechanism for
+manual recovery. Stream and Pub/Sub subscription
+failures surface as `RedisError`; apply `Stream.retry(...)` explicitly when reconnect or retry
+behavior is appropriate for the application.
+
+Pub/Sub subscriptions use a bounded buffer (1,024 messages by default). A subscriber that cannot
+keep up fails with `RedisError` operation `pubsub.overflow` instead of consuming unbounded memory;
+set `bufferCapacity` on `RedisPubSub` or `RedisChannel` for the workload. Multi-key Lua primitives
+derive keys with a shared Redis Cluster hash tag, while preserving a caller-provided `{tag}`.

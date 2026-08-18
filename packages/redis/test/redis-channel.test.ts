@@ -1,7 +1,10 @@
 import { expect, test } from "bun:test";
-import { run } from "@perfect/core";
+import { run, succeed } from "@perfect/core";
+import type { Throws } from "@perfect/core";
+import type { Stream } from "@perfect/core/stream";
 import { RedisChannel } from "../src/redis-channel";
 import type { RedisClient } from "../src/redis-client";
+import { RedisError } from "../src/redis-error";
 
 test("RedisChannel bridges Redis Pub/Sub to the connect contracts", async () => {
   const listeners = new Set<(...args: any[]) => void>();
@@ -36,7 +39,7 @@ test("RedisChannel bridges Redis Pub/Sub to the connect contracts", async () => 
     channel: "events",
   });
 
-  const received = run(channel.subscribe().take(1).toArray());
+  const received = run(channel.subscribe().take(1).toArray().orDie());
   while (!subscribed) await Bun.sleep(1);
   expect(await channel.subscriberCount()).toBe(1);
   await channel.publish({ n: 1 });
@@ -77,10 +80,35 @@ test("RedisChannel supports pattern subscriptions", async () => {
     channel: "events:one",
   });
 
-  const received = run(channel.subscribePattern("events:*").take(1).toArray());
+  const received = run(channel.subscribePattern("events:*").take(1).toArray().orDie());
   while (!subscribed) await Bun.sleep(1);
   await channel.publish({ n: 2 });
 
   expect(await received).toEqual([{ n: 2 }]);
   expect(listeners.size).toBe(0);
+});
+
+test("RedisChannel exposes subscription setup failures as RedisError", async () => {
+  const driverFailure = new Error("connection refused");
+  const client: Partial<RedisClient> = {
+    duplicate() {
+      throw driverFailure;
+    },
+  };
+  const channel = RedisChannel.make<number>({
+    redis: client as RedisClient,
+    channel: "events",
+  });
+  const source: Stream<number, Throws<RedisError>> = channel.subscribe();
+
+  const error = await run(
+    source
+      .take(1)
+      .toArray()
+      .map(() => undefined as RedisError | undefined)
+      .catchTag("RedisError", (failure) => succeed(failure)),
+  );
+
+  expect(error).toBeInstanceOf(RedisError);
+  expect(error).toMatchObject({ operation: "channel.subscribe", cause: driverFailure });
 });

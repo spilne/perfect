@@ -22,6 +22,8 @@ describe("ReadMode constructors", () => {
     expect(ReadMode.groupedRoundRobinPoll({ vt: 30, qty: 10 })._tag).toBe(
       "grouped-round-robin-poll",
     );
+    expect(ReadMode.groupedHead({ vt: 30, qty: 10 })._tag).toBe("grouped-head");
+    expect(ReadMode.groupedHeadPoll({ vt: 30, qty: 10 })._tag).toBe("grouped-head-poll");
   });
 
   it("carries vt/qty through", () => {

@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { run } from "@perfect/core";
+import { run, succeed } from "@perfect/core";
+import type { Throws } from "@perfect/core";
+import type { Stream } from "@perfect/core/stream";
+import { RedisError } from "../src/redis-error";
 import { RedisStream } from "../src/redis-stream";
 import type { RedisClient } from "../src/redis-client";
 
@@ -76,7 +79,7 @@ describe("RedisStream", () => {
     ]);
     const stream = RedisStream.make<{ n: number }>({ redis: client, stream: "events", group: "g" });
 
-    const values = await run(stream.subscribe().take(3).toArray());
+    const values = await run(stream.subscribe().take(3).toArray().orDie());
     await Bun.sleep(5);
 
     expect(values).toEqual([{ n: 1 }, { n: 2 }, { n: 3 }]);
@@ -92,7 +95,7 @@ describe("RedisStream", () => {
     ]);
     const stream = RedisStream.make<{ n: number }>({ redis: client, stream: "events", group: "g" });
 
-    const envelopes = await run(stream.subscribeAck().take(2).toArray());
+    const envelopes = await run(stream.subscribeAck().take(2).toArray().orDie());
     expect(state.acknowledgements).toEqual([]);
     expect(envelopes[0]?.metadata).toMatchObject({ id: "2-0", key: "account-1" });
 
@@ -123,5 +126,26 @@ describe("RedisStream", () => {
     expect(state.additions).toEqual([
       ["events", "*", "data", JSON.stringify({ n: 1 }), "key", "account-1"],
     ]);
+  });
+
+  test("read failures remain typed RedisError values", async () => {
+    const { client } = fakeStreamClient([]);
+    const driverFailure = new Error("connection lost");
+    client.xreadgroup = async () => {
+      throw driverFailure;
+    };
+    const stream = RedisStream.make<number>({ redis: client, stream: "events", group: "g" });
+    const source: Stream<number, Throws<RedisError>> = stream.subscribe();
+
+    const error = await run(
+      source
+        .take(1)
+        .toArray()
+        .map(() => undefined as RedisError | undefined)
+        .catchTag("RedisError", (failure) => succeed(failure)),
+    );
+
+    expect(error).toBeInstanceOf(RedisError);
+    expect(error).toMatchObject({ operation: "stream.read", cause: driverFailure });
   });
 });

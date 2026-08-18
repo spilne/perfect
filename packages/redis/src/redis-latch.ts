@@ -1,6 +1,6 @@
 import { succeed } from "@perfect/core";
 import type { Eff, Latch, Throws } from "@perfect/core";
-import { numberResult, redisBlocking, redisEff } from "./internal";
+import { numberResult, redisBlocking, redisEff, redisKeyFamily } from "./internal";
 import type { RedisClient } from "./redis-client";
 import { RedisError } from "./redis-error";
 
@@ -30,9 +30,10 @@ export class RedisLatch implements Latch<Throws<RedisError>> {
     if (!Number.isInteger(config.count) || config.count < 0) {
       throw new Error("RedisLatch.make: count must be a non-negative integer");
     }
-    const latch = new RedisLatch(config.redis, `${config.key}:count`, `${config.key}:notify`);
+    const key = redisKeyFamily(config.key);
+    const latch = new RedisLatch(config.redis, `${key}:count`, `${key}:notify`);
     return redisEff("latch.initialize", async () => {
-      await config.redis.set(`${config.key}:count`, String(config.count), "NX");
+      await config.redis.set(`${key}:count`, String(config.count), "NX");
       return latch;
     });
   }

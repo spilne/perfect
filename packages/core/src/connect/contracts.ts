@@ -13,6 +13,7 @@
 //                 just Streamable + Sinkable + Acknowledgeable.
 
 import { type Brand, nominal, refined } from "../brand";
+import type { Eff } from "../eff";
 import type { Stream } from "../stream";
 import type { Codec } from "./codec";
 
@@ -45,12 +46,12 @@ export const ChannelName = nominal<ChannelName>() as (value: string) => ChannelN
 
 // ── Streamable<T> — "I can produce a stream of T" ──────────────────
 
-export interface Streamable<T> {
-  subscribe(params?: { group?: ConsumerGroup }): Stream<T, never>;
+export interface Streamable<T, S = never> {
+  subscribe(params?: { group?: ConsumerGroup }): Stream<T, S>;
   codec: Codec<T>;
 }
 
-export function isStreamable<T>(value: unknown): value is Streamable<T> {
+export function isStreamable<T, S = never>(value: unknown): value is Streamable<T, S> {
   return (
     value !== null &&
     typeof value === "object" &&
@@ -62,12 +63,12 @@ export function isStreamable<T>(value: unknown): value is Streamable<T> {
 
 // ── Sinkable<T> — "I can consume values of T" ──────────────────────
 
-export interface Sinkable<T> {
-  publish(value: T): Promise<void>;
+export interface Sinkable<T, S = never> {
+  publish(value: T): Eff<void, S>;
   codec: Codec<T>;
 }
 
-export function isSinkable<T>(value: unknown): value is Sinkable<T> {
+export function isSinkable<T, S = never>(value: unknown): value is Sinkable<T, S> {
   return (
     value !== null &&
     typeof value === "object" &&
@@ -79,23 +80,23 @@ export function isSinkable<T>(value: unknown): value is Sinkable<T> {
 
 // ── KeyedSinkable<T> — "I can route by key" ────────────────────────
 
-export interface KeyedSinkable<T> extends Sinkable<T> {
-  publish(value: T, params?: { key: string }): Promise<void>;
+export interface KeyedSinkable<T, S = never> extends Sinkable<T, S> {
+  publish(value: T, params?: { key: string }): Eff<void, S>;
 }
 
-export function isKeyedSinkable<T>(value: unknown): value is KeyedSinkable<T> {
+export function isKeyedSinkable<T, S = never>(value: unknown): value is KeyedSinkable<T, S> {
   return isSinkable(value);
 }
 
 // ── Partitionable<T> — "I have partitions" ─────────────────────────
 
-export interface Partitionable<T> extends Streamable<T> {
+export interface Partitionable<T, S = never> extends Streamable<T, S> {
   /** Partition COUNT — a cardinality, not an identifier, so plain number. */
   partitions: number;
-  subscribe(params?: { group?: ConsumerGroup; partitions?: Partition[] }): Stream<T, never>;
+  subscribe(params?: { group?: ConsumerGroup; partitions?: Partition[] }): Stream<T, S>;
 }
 
-export function isPartitionable<T>(value: unknown): value is Partitionable<T> {
+export function isPartitionable<T, S = never>(value: unknown): value is Partitionable<T, S> {
   return (
     isStreamable(value) && "partitions" in value && typeof (value as any).partitions === "number"
   );
@@ -114,11 +115,11 @@ export type Offset =
   | { type: "timestamp"; value: number }
   | { type: "specific"; value: string };
 
-export interface Replayable<T> extends Streamable<T> {
-  subscribeFrom(params: { offset: Offset; group?: ConsumerGroup }): Stream<T, never>;
+export interface Replayable<T, S = never> extends Streamable<T, S> {
+  subscribeFrom(params: { offset: Offset; group?: ConsumerGroup }): Stream<T, S>;
 }
 
-export function isReplayable<T>(value: unknown): value is Replayable<T> {
+export function isReplayable<T, S = never>(value: unknown): value is Replayable<T, S> {
   return (
     isStreamable(value) &&
     "subscribeFrom" in value &&
@@ -128,10 +129,10 @@ export function isReplayable<T>(value: unknown): value is Replayable<T> {
 
 // ── Acknowledgeable<T> — "I support manual ack/nack" ───────────────
 
-export interface Envelope<T> {
+export interface Envelope<T, S = never> {
   readonly value: T;
-  ack(): Promise<void>;
-  nack(): Promise<void>;
+  ack(): Eff<void, S>;
+  nack(): Eff<void, S>;
   readonly metadata: Record<string, unknown>;
 }
 
@@ -140,11 +141,11 @@ export interface AcknowledgeOptions {
   readonly offset?: Offset;
 }
 
-export interface Acknowledgeable<T> extends Streamable<T> {
-  subscribeAck(params?: AcknowledgeOptions): Stream<Envelope<T>, never>;
+export interface Acknowledgeable<T, S = never> extends Streamable<T, S> {
+  subscribeAck(params?: AcknowledgeOptions): Stream<Envelope<T, S>, S>;
 }
 
-export function isAcknowledgeable<T>(value: unknown): value is Acknowledgeable<T> {
+export function isAcknowledgeable<T, S = never>(value: unknown): value is Acknowledgeable<T, S> {
   return (
     isStreamable(value) &&
     "subscribeAck" in value &&
@@ -154,14 +155,14 @@ export function isAcknowledgeable<T>(value: unknown): value is Acknowledgeable<T
 
 // ── Checkpointable<T> — "I can save/restore consumption position" ──
 
-export interface Checkpointable<T> extends Streamable<T> {
+export interface Checkpointable<T, S = never> extends Streamable<T, S> {
   // `offset` is plain here for the same backend-opacity reason as
   // Offset.specific.value above.
   commitOffset(params: { group: ConsumerGroup; offset: string }): Promise<void>;
   getCommittedOffset(params: { group: ConsumerGroup }): Promise<string | null>;
 }
 
-export function isCheckpointable<T>(value: unknown): value is Checkpointable<T> {
+export function isCheckpointable<T, S = never>(value: unknown): value is Checkpointable<T, S> {
   return (
     isStreamable(value) &&
     "commitOffset" in value &&
@@ -175,8 +176,8 @@ export function isCheckpointable<T>(value: unknown): value is Checkpointable<T> 
 //
 // Coordination capability for distributed backends (Postgres advisory
 // locks, Redis locks, etcd leases, …). Ported from promin's workflow
-// leader-election interface. Promise-based like Envelope.ack — this is a
-// driver-facing boundary; the Eff layer wraps at call sites.
+// leader-election interface. This remains a Promise-based driver boundary;
+// the Eff layer wraps it at call sites.
 
 export interface LeaderElection {
   /** Try to become the leader. Returns true if this instance is now the leader. */
@@ -190,13 +191,13 @@ export interface LeaderElection {
 // Lives here (not in @perfect/kafka or @perfect/topology) to break the
 // dependency cycle: kafka IMPLEMENTS it, topology CONSUMES it.
 
-export interface ShuffleTransport<T = unknown> {
+export interface ShuffleTransport<T = unknown, S = never> {
   getOrCreateRepartitionChannel(params: {
     name: ChannelName;
     group: ConsumerGroup;
     codec: Codec<T>;
   }): Promise<{
-    source: Streamable<T> & Acknowledgeable<T>;
-    sink: KeyedSinkable<T>;
+    source: Streamable<T, S> & Acknowledgeable<T, S>;
+    sink: KeyedSinkable<T, S>;
   }>;
 }

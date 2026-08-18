@@ -24,6 +24,7 @@ import type {
   ChannelName,
 } from "@perfect/core/connect";
 import { JsonCodec, ConsumerGroup } from "@perfect/core/connect";
+import type { Eff } from "@perfect/core";
 
 /**
  * Config for DistributedRunner — extends TopologyConfig with shuffle transport.
@@ -37,6 +38,7 @@ export interface DistributedTopologyConfig {
   maxItemsPerSecond?: number;
   maxDedupeSize?: number;
   ackBatchSize?: number;
+  ackMaxWaitMs?: number;
 }
 
 /**
@@ -130,6 +132,7 @@ export class DistributedRunner {
         maxItemsPerSecond: config.maxItemsPerSecond,
         maxDedupeSize: config.maxDedupeSize,
         ackBatchSize: config.ackBatchSize,
+        ackMaxWaitMs: config.ackMaxWaitMs,
       });
 
       handles.push(handle);
@@ -139,6 +142,9 @@ export class DistributedRunner {
     return {
       async shutdown() {
         await Promise.all(handles.map((h) => h.shutdown()));
+      },
+      async awaitExit() {
+        return (await Promise.all(handles.map((handle) => handle.awaitExit()))).flat();
       },
       isRunning() {
         return handles.some((h) => h.isRunning());
@@ -182,9 +188,9 @@ function buildStageTopology(params: {
     // Build a topology: original source → pre-shuffle nodes → keyed publish
     const keyFn = stage.keyFn;
     const sinkable = {
-      publish: async (value: unknown) => {
+      publish: (value: unknown) => {
         const key = keyFn ? keyFn(value) : undefined;
-        await stageSink.publish(value, key ? { key } : undefined);
+        return stageSink.publish(value, key ? { key } : undefined);
       },
       codec: JsonCodec,
     };
@@ -211,9 +217,9 @@ function buildStageTopology(params: {
   if (stageSource && stageSink) {
     const keyFn = stage.keyFn;
     const sinkable = {
-      publish: async (value: unknown) => {
+      publish: (value: unknown) => {
         const key = keyFn ? keyFn(value) : undefined;
-        await stageSink.publish(value, key ? { key } : undefined);
+        return stageSink.publish(value, key ? { key } : undefined);
       },
       codec: JsonCodec,
     };
@@ -248,7 +254,7 @@ function findSourceNode(nodes: readonly any[]): { source: unknown } | undefined 
 function buildFromNodes(
   base: StreamTopology<unknown>,
   nodes: readonly any[],
-  sink?: { publish: (value: unknown) => Promise<void>; codec: any },
+  sink?: { publish: (value: unknown) => Eff<void, any>; codec: any },
 ): BuiltTopology {
   let topo: any = base;
 

@@ -12,7 +12,8 @@
 // one native Stream chunk.
 // ---------------------------------------------------------------------------
 
-import { sync } from "@perfect/core";
+import { fromPromise, succeed, sync } from "@perfect/core";
+import type { Eff, Throws } from "@perfect/core";
 import { Chunk, Stream } from "@perfect/core/stream";
 import { JsonCodec, OffsetTracker } from "@perfect/core/connect";
 import type {
@@ -37,6 +38,7 @@ import type {
   KafkaBatchPayload,
 } from "./kafka-types";
 import { type TopicName, type GroupId, PartitionId, KafkaOffset } from "./brands";
+import { KafkaError, toKafkaError } from "./kafka-error";
 
 export interface KafkaTopicConfig<T> {
   /** Kafka client instance. */
@@ -69,7 +71,7 @@ export interface KafkaAckOptions extends AcknowledgeOptions {
 }
 
 export interface KafkaAckSubscription<T> {
-  readonly stream: Stream<Envelope<T>, never>;
+  readonly stream: Stream<Envelope<T, Throws<KafkaError>>, Throws<KafkaError>>;
   readonly consumer: KafkaConsumer;
   readonly topic: TopicName;
   readonly groupId: GroupId;
@@ -79,11 +81,11 @@ export interface KafkaAckSubscription<T> {
 
 export class KafkaTopic<T>
   implements
-    Partitionable<T>,
-    Replayable<T>,
-    Acknowledgeable<T>,
-    KeyedSinkable<T>,
-    Checkpointable<T>
+    Partitionable<T, Throws<KafkaError>>,
+    Replayable<T, Throws<KafkaError>>,
+    Acknowledgeable<T, Throws<KafkaError>>,
+    KeyedSinkable<T, Throws<KafkaError>>,
+    Checkpointable<T, Throws<KafkaError>>
 {
   readonly codec: Codec<T>;
   private readonly kafka: KafkaClient;
@@ -125,44 +127,57 @@ export class KafkaTopic<T>
   // Sinkable — publish messages
   // =========================================================================
 
-  async publish(value: T, params?: { key: string }): Promise<void> {
-    if (!this.producer) {
-      this.producer = this.kafka.producer();
-      await this.producer.connect();
-    }
+  publish(value: T, params?: { key: string }): Eff<void, Throws<KafkaError>> {
+    return fromPromise(
+      async () => {
+        if (!this.producer) {
+          this.producer = this.kafka.producer();
+          await this.producer.connect();
+        }
 
-    const encoded = this.codec.encode(value);
-    await this.producer.send({
-      topic: this.topic,
-      messages: [
-        {
-          key: params?.key ?? null,
-          value: JSON.stringify(encoded),
-        },
-      ],
-    });
+        const encoded = this.codec.encode(value);
+        await this.producer.send({
+          topic: this.topic,
+          messages: [
+            {
+              key: params?.key ?? null,
+              value: JSON.stringify(encoded),
+            },
+          ],
+        });
+      },
+      (cause) => toKafkaError("topic.publish", this.topic, cause),
+    );
   }
 
-  async publishBatch(messages: { value: T; key?: string }[]): Promise<void> {
-    if (!this.producer) {
-      this.producer = this.kafka.producer();
-      await this.producer.connect();
-    }
+  publishBatch(messages: { value: T; key?: string }[]): Eff<void, Throws<KafkaError>> {
+    return fromPromise(
+      async () => {
+        if (!this.producer) {
+          this.producer = this.kafka.producer();
+          await this.producer.connect();
+        }
 
-    await this.producer.send({
-      topic: this.topic,
-      messages: messages.map((m) => ({
-        key: m.key ?? null,
-        value: JSON.stringify(this.codec.encode(m.value)),
-      })),
-    });
+        await this.producer.send({
+          topic: this.topic,
+          messages: messages.map((m) => ({
+            key: m.key ?? null,
+            value: JSON.stringify(this.codec.encode(m.value)),
+          })),
+        });
+      },
+      (cause) => toKafkaError("topic.publishBatch", this.topic, cause),
+    );
   }
 
   // =========================================================================
   // Streamable — subscribe to messages
   // =========================================================================
 
-  subscribe(params?: { group?: ConsumerGroup; partitions?: Partition[] }): Stream<T, never> {
+  subscribe(params?: {
+    group?: ConsumerGroup;
+    partitions?: Partition[];
+  }): Stream<T, Throws<KafkaError>> {
     return this.createConsumerStream(params?.group);
   }
 
@@ -170,7 +185,7 @@ export class KafkaTopic<T>
   // Replayable — subscribe from offset
   // =========================================================================
 
-  subscribeFrom(params: { offset: Offset; group?: ConsumerGroup }): Stream<T, never> {
+  subscribeFrom(params: { offset: Offset; group?: ConsumerGroup }): Stream<T, Throws<KafkaError>> {
     return this.createConsumerStream(params.group, params.offset);
   }
 
@@ -178,9 +193,16 @@ export class KafkaTopic<T>
   // Acknowledgeable — manual ack/nack
   // =========================================================================
 
-  subscribeAck(params?: KafkaAckOptions): Stream<Envelope<T>, never> {
+  subscribeAck(
+    params?: KafkaAckOptions,
+  ): Stream<Envelope<T, Throws<KafkaError>>, Throws<KafkaError>> {
     const subscription = this.subscribeAckWithHandle(params);
-    return subscription.stream.onFinalize(sync(() => void subscription.close()));
+    return subscription.stream.onFinalize(
+      fromPromise(
+        () => subscription.close(),
+        (cause) => toKafkaError("topic.unsubscribe", this.topic, cause),
+      ),
+    );
   }
 
   subscribeAckWithHandle(params?: KafkaAckOptions): KafkaAckSubscription<T> {
@@ -231,13 +253,24 @@ export class KafkaTopic<T>
       if (closePromise) return closePromise;
       stopped = true;
       if (commitTimer) clearInterval(commitTimer);
-      closePromise = flushCommits()
-        .catch(() => {})
-        .finally(() => consumer.disconnect().catch(() => {}));
+      closePromise = (async () => {
+        let failure: unknown;
+        try {
+          await flushCommits();
+        } catch (cause) {
+          failure = cause;
+        }
+        try {
+          await consumer.disconnect();
+        } catch (cause) {
+          if (failure === undefined) failure = cause;
+        }
+        if (failure !== undefined) throw failure;
+      })();
       return closePromise;
     };
 
-    const makeEnvelope = (msg: KafkaMessage): Envelope<T> => {
+    const makeEnvelope = (msg: KafkaMessage): Envelope<T, Throws<KafkaError>> => {
       const raw = msg.message.value;
       const str = raw instanceof Buffer ? raw.toString() : (raw as string);
       const value = codec.decode(JSON.parse(str));
@@ -248,10 +281,8 @@ export class KafkaTopic<T>
 
       return {
         value,
-        ack: async () => {
-          tracker.complete(partition, offset);
-        },
-        nack: async () => {},
+        ack: () => sync(() => tracker.complete(partition, offset)),
+        nack: () => succeed(undefined),
         metadata: {
           topic: msg.topic,
           partition,
@@ -262,13 +293,23 @@ export class KafkaTopic<T>
       };
     };
 
-    const register = (emitBatch: (batch: Envelope<T>[]) => void) => {
+    const register = (
+      emitBatch: (batch: Envelope<T, Throws<KafkaError>>[]) => void,
+      closeStream: () => void,
+      failStream: (error: unknown) => void,
+    ) => {
       const run = async () => {
         await consumer.connect();
         await consumer.subscribe({ topic, fromBeginning: offset?.type === "earliest" });
 
         if (autoCommit) {
-          commitTimer = setInterval(() => void flushCommits().catch(() => {}), commitIntervalMs);
+          commitTimer = setInterval(
+            () =>
+              void flushCommits().catch((cause) =>
+                failStream(toKafkaError("topic.commit", topic, cause)),
+              ),
+            commitIntervalMs,
+          );
         }
 
         if (consumer.stream) {
@@ -308,19 +349,30 @@ export class KafkaTopic<T>
       };
 
       return sync(() => {
-        run().catch(() => {});
+        void run().then(
+          () => {
+            if (consumer.stream) closeStream();
+          },
+          (cause) => failStream(toKafkaError("topic.subscribe", topic, cause)),
+        );
         return () => {};
       });
     };
 
     const stream = batchEmit
-      ? Stream.asyncChunks<Envelope<T>, never>((emit) =>
-          register((batch) => emit(Chunk.fromArray(batch))),
+      ? Stream.asyncChunks<Envelope<T, Throws<KafkaError>>, Throws<KafkaError>>(
+          (emit, closeStream, failStream) =>
+            register((batch) => emit(Chunk.fromArray(batch)), closeStream, failStream),
         )
-      : Stream.async<Envelope<T>, never>((emit) =>
-          register((batch) => {
-            for (const envelope of batch) emit(envelope);
-          }),
+      : Stream.async<Envelope<T, Throws<KafkaError>>, Throws<KafkaError>>(
+          (emit, closeStream, failStream) =>
+            register(
+              (batch) => {
+                for (const envelope of batch) emit(envelope);
+              },
+              closeStream,
+              failStream,
+            ),
         );
 
     return {
@@ -459,7 +511,10 @@ export class KafkaTopic<T>
     await running;
   }
 
-  private createConsumerStream(group?: ConsumerGroup, offset?: Offset): Stream<T, never> {
+  private createConsumerStream(
+    group?: ConsumerGroup,
+    offset?: Offset,
+  ): Stream<T, Throws<KafkaError>> {
     const codec = this.codec;
     const kafka = this.kafka;
     const topic = this.topic;
@@ -467,7 +522,11 @@ export class KafkaTopic<T>
     const batchEmit = this.batchEmit;
     const consumerOptions = this.consumerOptions;
 
-    const register = (emitBatch: (batch: T[]) => void) => {
+    const register = (
+      emitBatch: (batch: T[]) => void,
+      closeStream: () => void,
+      failStream: (error: unknown) => void,
+    ) => {
       const consumer = kafka.consumer({ groupId, ...consumerOptions });
       let stopped = false;
 
@@ -527,17 +586,28 @@ export class KafkaTopic<T>
       };
 
       return sync(() => {
-        run().catch(() => {});
+        void run().then(
+          () => {
+            if (consumer.stream) closeStream();
+          },
+          (cause) => failStream(toKafkaError("topic.subscribe", topic, cause)),
+        );
         return cleanup;
       });
     };
 
     return batchEmit
-      ? Stream.asyncChunks<T, never>((emit) => register((batch) => emit(Chunk.fromArray(batch))))
-      : Stream.async<T, never>((emit) =>
-          register((batch) => {
-            for (const value of batch) emit(value);
-          }),
+      ? Stream.asyncChunks<T, Throws<KafkaError>>((emit, closeStream, failStream) =>
+          register((batch) => emit(Chunk.fromArray(batch)), closeStream, failStream),
+        )
+      : Stream.async<T, Throws<KafkaError>>((emit, closeStream, failStream) =>
+          register(
+            (batch) => {
+              for (const value of batch) emit(value);
+            },
+            closeStream,
+            failStream,
+          ),
         );
   }
 
