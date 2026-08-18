@@ -43,6 +43,7 @@ part of this map.
 | Export | Contents |
 | --- | --- |
 | `@perfect/core/connect` | Backend-neutral messaging, codecs, checkpoints, transactional sinks, and partitioned-state contracts |
+| `@perfect/core/retry` | `RetryPolicy`, `Schedule`, `retryWith`, and scheduled repetition |
 | `@perfect/core/stream` | `Stream`, `Chunk`, `Sink`, and `Pipes` |
 | `@perfect/core/syntax` | Comprehension syntax and fluent syntax installation |
 | `@perfect/core/worker` | Worker executors and `WorkerPool` |

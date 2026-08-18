@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="An editable stream playground for the Perfect TypeScript effect runtime"
+    />
+    <title>Perfect Stream Playground</title>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <p class="eyebrow">@perfect/core · stream lab</p>
+        <h1>Edit the stream.<br />Run the effect.</h1>
+        <p class="lede">
+          Explore concurrency, typed failures, source retry, state, cancellation, and reliable
+          observation. Every edit runs in a disposable worker with a five-second limit.
+        </p>
+      </header>
+
+      <section class="scenario-card" aria-labelledby="scenario-title">
+        <div id="scenarios" class="scenario-list" aria-label="Example scenarios"></div>
+        <div class="scenario-copy">
+          <h2 id="scenario-title"></h2>
+          <p id="scenario-description"></p>
+        </div>
+      </section>
+
+      <section class="editor-card" aria-label="Editable stream program">
+        <div class="editor-heading">
+          <span>stream.js</span>
+          <span>JavaScript · Ctrl/⌘ + Enter to run</span>
+        </div>
+        <textarea id="editor" spellcheck="false" aria-label="Editable stream source"></textarea>
+        <div class="editor-actions">
+          <button id="reset" class="secondary" type="button">Reset preset</button>
+          <button id="run" type="button">Run stream</button>
+        </div>
+      </section>
+
+      <section id="result" class="result-card" aria-live="polite" aria-busy="false">
+        <div class="result-heading">
+          <span id="status" class="status ready">Ready</span>
+          <span id="timing" class="timing"></span>
+        </div>
+        <div id="output" class="output">Choose a scenario and run it.</div>
+      </section>
+
+      <footer>
+        <span
+          >The editor exposes Stream, RetryPolicy, delay, succeed, and fail. StackBlitz provides
+          full TypeScript diagnostics.</span
+        >
+        <a href="https://github.com/spilne/perfect" target="_blank" rel="noreferrer">GitHub</a>
+      </footer>
+    </main>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

@@ -46,6 +46,11 @@ console.log(await provide(program, Db, liveDb).run()); // Ada
 > **Pre-release.** The packages are not on npm yet — clone the repo and use
 > the Bun workspace. Install lines below describe the post-publish shape.
 
+Try the [playground built into the guide](documentation/playground.md), or
+[open its project in StackBlitz](https://stackblitz.com/fork/github/spilne/perfect/tree/main/templates/stackblitz?title=Perfect%20Playground).
+The standalone starter is checked against the monorepo in CI and becomes directly
+runnable when `@perfect/core` is published to npm.
+
 ## Core ideas
 
 - **`Eff<A, S>`** — an effect returning `A` with a flat union `S` of effect

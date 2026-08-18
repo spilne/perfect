@@ -3,6 +3,7 @@ import type { Theme } from "vitepress";
 import { h } from "vue";
 import SyntaxTabs from "./SyntaxTabs.vue";
 import SyntaxToggle from "./SyntaxToggle.vue";
+import PerfectPlayground from "./PerfectPlayground.vue";
 
 export default {
   extends: DefaultTheme,
@@ -12,5 +13,6 @@ export default {
     }),
   enhanceApp({ app }) {
     app.component("SyntaxTabs", SyntaxTabs);
+    app.component("PerfectPlayground", PerfectPlayground);
   },
 } satisfies Theme;

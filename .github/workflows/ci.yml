@@ -6,6 +6,7 @@ on:
     branches: [main]
     paths:
       - "packages/**"
+      - "templates/**"
       - "crates/**"
       - "scripts/**"
       - ".github/workflows/ci.yml"
@@ -42,7 +43,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.bun/install/cache
-          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock', 'package.json', 'packages/*/package.json') }}
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock', 'package.json', 'packages/*/package.json', 'templates/*/package.json') }}
           restore-keys: |
             ${{ runner.os }}-bun-
 
@@ -59,6 +60,8 @@ jobs:
       - run: bun run build:packages
 
       - run: bun run smoke:packages
+
+      - run: bun run smoke:stackblitz
 
   rust:
     runs-on: ubuntu-latest
@@ -113,7 +116,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.bun/install/cache
-          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock', 'package.json', 'packages/*/package.json') }}
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock', 'package.json', 'packages/*/package.json', 'templates/*/package.json') }}
           restore-keys: |
             ${{ runner.os }}-bun-
 
