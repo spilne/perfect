@@ -1,14 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import {
-  provide,
-  run,
-  Clock,
-  TestClock,
-  Log,
-  Logger,
-  TestLogger,
-  levelEnabled,
-} from "../src";
+import { provide, run, Clock, TestClock, Log, Logger, TestLogger, levelEnabled } from "../src";
 
 function withLogger(eff: any, logger: TestLogger, clock?: TestClock) {
   const withLog = provide(eff, Logger, logger);

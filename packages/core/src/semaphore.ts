@@ -4,17 +4,17 @@
 import { type Eff } from "./eff";
 import { succeed, sync, async, ensuring } from "./constructors";
 
-export interface Semaphore {
+export interface Semaphore<S = never> {
   /** Take one permit, blocking until available. */
-  acquire(): Eff<void, never>;
+  acquire(): Eff<void, S>;
   /** Return one permit, waking the next waiter (if any). */
-  release(): Eff<void, never>;
+  release(): Eff<void, S>;
   /** acquire → run → release. Release fires even on failure. */
-  withPermit<A, S>(eff: Eff<A, S>): Eff<A, S>;
+  withPermit<A, S2>(eff: Eff<A, S2>): Eff<A, S | S2>;
   /** acquire N → run → release N. Useful for weighted operations. */
-  withPermits<A, S>(n: number, eff: Eff<A, S>): Eff<A, S>;
+  withPermits<A, S2>(n: number, eff: Eff<A, S2>): Eff<A, S | S2>;
   /** Current available permits (for metrics/inspection). */
-  readonly available: Eff<number, never>;
+  readonly available: Eff<number, S>;
 }
 
 class InProcessSemaphore implements Semaphore {

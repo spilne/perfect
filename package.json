@@ -10,8 +10,8 @@
     "test:transform": "cd packages/transform && bun test",
     "typecheck": "bun run typecheck:core && bun run typecheck:packages",
     "typecheck:core": "cd packages/core && bun run typecheck && bun run typecheck:types",
-    "typecheck:packages": "cd packages/http && bun run typecheck && cd ../http-otel && bun run typecheck && cd ../kafka && bun run typecheck && cd ../otel && bun run typecheck && cd ../postgres && bun run typecheck && cd ../topology && bun run typecheck && cd ../transform && bun run typecheck",
-    "build:packages": "cd packages/core && bun run build && cd ../http && bun run build && cd ../http-otel && bun run build && cd ../kafka && bun run build && cd ../otel && bun run build && cd ../postgres && bun run build && cd ../topology && bun run build && cd ../transform && bun run build",
+    "typecheck:packages": "cd packages/http && bun run typecheck && cd ../http-otel && bun run typecheck && cd ../kafka && bun run typecheck && cd ../otel && bun run typecheck && cd ../postgres && bun run typecheck && cd ../redis && bun run typecheck && cd ../topology && bun run typecheck && cd ../transform && bun run typecheck",
+    "build:packages": "cd packages/core && bun run build && cd ../http && bun run build && cd ../http-otel && bun run build && cd ../kafka && bun run build && cd ../otel && bun run build && cd ../postgres && bun run build && cd ../redis && bun run build && cd ../topology && bun run build && cd ../transform && bun run build",
     "smoke:packages": "bun scripts/smoke-package-exports.ts",
     "lint": "oxlint -c .oxlintrc.json packages/",
     "fmt": "oxfmt packages/ '!**/dist/**'",
@@ -27,10 +27,10 @@
     "documentation:build:html": "bun documentation/build.ts && vitepress build documentation",
     "documentation:preview": "vitepress preview documentation",
     "build:swc": "rustup target add wasm32-wasip1 && cd crates/swc-plugin-perfect && cargo build --locked --target wasm32-wasip1 --release && mkdir -p ../../packages/swc-plugin/dist && cp target/wasm32-wasip1/release/swc_plugin_perfect.wasm ../../packages/swc-plugin/dist/plugin.wasm",
-    "release:dry": "(cd packages/core && bun pm pack --dry-run) && (cd packages/http && bun pm pack --dry-run) && (cd packages/http-otel && bun pm pack --dry-run) && (cd packages/kafka && bun pm pack --dry-run) && (cd packages/otel && bun pm pack --dry-run) && (cd packages/postgres && bun pm pack --dry-run) && (cd packages/topology && bun pm pack --dry-run) && (cd packages/transform && bun pm pack --dry-run) && (cd packages/swc-plugin && bun pm pack --dry-run)",
+    "release:dry": "(cd packages/core && bun pm pack --dry-run) && (cd packages/http && bun pm pack --dry-run) && (cd packages/http-otel && bun pm pack --dry-run) && (cd packages/kafka && bun pm pack --dry-run) && (cd packages/otel && bun pm pack --dry-run) && (cd packages/postgres && bun pm pack --dry-run) && (cd packages/redis && bun pm pack --dry-run) && (cd packages/topology && bun pm pack --dry-run) && (cd packages/transform && bun pm pack --dry-run) && (cd packages/swc-plugin && bun pm pack --dry-run)",
     "check": "bun run lint && bun run typecheck && bun run test",
     "ci": "bun run fmt:check && bun run lint && bun run typecheck && bun run test && bun run build:packages && bun run smoke:packages && bun run documentation:check && bun run perf:gate",
-    "test:integration": "(cd packages/integration && bun test) && (cd packages/postgres && bun test)"
+    "test:integration": "(cd packages/integration && bun test) && (cd packages/redis && bun test) && (cd packages/postgres && bun test)"
   },
   "devDependencies": {
     "@nx/js": "^23.1.1",

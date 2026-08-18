@@ -21,15 +21,15 @@ import { succeed, sync } from "./constructors";
 import { type Queue, Queue as QueueNS, QueueClosed } from "./queue";
 import { Stream } from "./stream";
 
-export interface PubSub<T> {
+export interface PubSub<T, S = never> {
   /** Publish a value to all current subscribers. Blocks if any subscriber queue is full. */
-  publish(value: T): Eff<boolean, never>;
+  publish(value: T): Eff<boolean, S>;
   /** Open a new subscription. Returns a Stream that ends when shutdown() is called. */
-  readonly subscribe: Eff<Stream<T, Throws<QueueClosed>>, never>;
+  readonly subscribe: Eff<Stream<T, S | Throws<QueueClosed>>, S>;
   /** Close all subscriber queues — every subscribe stream terminates. */
-  shutdown(): Eff<void, never>;
+  shutdown(): Eff<void, S>;
   /** Number of active subscribers. */
-  readonly subscriberCount: Eff<number, never>;
+  readonly subscriberCount: Eff<number, S>;
 }
 
 class InProcessPubSub<T> implements PubSub<T> {

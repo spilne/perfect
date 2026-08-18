@@ -5,8 +5,14 @@
 // (Envelope, OffsetTracker, autoCommitBatchWithin, …) is @perfect/core/connect.
 
 export { TopicName, GroupId, PartitionId, KafkaOffset } from "./brands";
-export { KafkaTopic, type KafkaTopicConfig } from "./kafka-topic";
+export {
+  KafkaTopic,
+  type KafkaTopicConfig,
+  type KafkaAckOptions,
+  type KafkaAckSubscription,
+} from "./kafka-topic";
 export { commitBatchWithin, type CommitBatchWithinConfig } from "./commit-batch-within";
+export { KafkaCommitError } from "./kafka-error";
 export { KafkaShuffleTransport, type KafkaShuffleTransportConfig } from "./kafka-shuffle-transport";
 export type {
   KafkaClient,

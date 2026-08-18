@@ -34,16 +34,26 @@ function makeFakeKafka(opts: {
   batches: ReadonlyArray<ReadonlyArray<{ value: unknown; offset: string; key?: string }>>;
 }): {
   client: KafkaClient;
+  consumer: KafkaConsumer;
   dispatchedVia: { current: "eachMessage" | "eachBatch" | null };
   committed: KafkaOffsetCommit[][];
+  subscriptions: Array<{ topic: TopicName; fromBeginning?: boolean }>;
+  sought: Array<{ topic: TopicName; partition: PartitionId; offset: KafkaOffset }>;
 } {
   const dispatchedVia: { current: "eachMessage" | "eachBatch" | null } = { current: null };
   const committed: KafkaOffsetCommit[][] = [];
+  const subscriptions: Array<{ topic: TopicName; fromBeginning?: boolean }> = [];
+  const sought: Array<{ topic: TopicName; partition: PartitionId; offset: KafkaOffset }> = [];
 
   const consumer: KafkaConsumer = {
     async connect() {},
     async disconnect() {},
-    async subscribe() {},
+    async subscribe(params) {
+      subscriptions.push(params);
+    },
+    seek(params) {
+      sought.push(params);
+    },
     async commitOffsets(offsets) {
       committed.push(offsets);
     },
@@ -98,6 +108,9 @@ function makeFakeKafka(opts: {
     async fetchTopicOffsetsByTimestamp() {
       return [];
     },
+    async fetchTopicPartitionCount() {
+      return opts.batches.length;
+    },
   };
 
   const client: KafkaClient = {
@@ -106,7 +119,7 @@ function makeFakeKafka(opts: {
     admin: () => admin,
   };
 
-  return { client, dispatchedVia, committed };
+  return { client, consumer, dispatchedVia, committed, subscriptions, sought };
 }
 
 describe("KafkaTopic — subscribe", () => {
@@ -178,6 +191,56 @@ describe("KafkaTopic — subscribe", () => {
 });
 
 describe("KafkaTopic — subscribeAck", () => {
+  it("exposes the subscription consumer as a commit handle", async () => {
+    const { client, consumer, subscriptions } = makeFakeKafka({
+      topic: TopicName("orders"),
+      batches: [
+        [
+          { value: { n: 1 }, offset: "0" },
+          { value: { n: 2 }, offset: "1" },
+        ],
+      ],
+    });
+    const topic = new KafkaTopic<{ n: number }>({
+      kafka: client,
+      topic: TopicName("orders"),
+      groupId: GroupId("g"),
+    });
+
+    const subscription = topic.subscribeAckWithHandle({
+      autoCommit: false,
+      offset: { type: "earliest" },
+    });
+    expect(subscription.consumer).toBe(consumer);
+    expect(await run(subscription.stream.take(1).toArray())).toHaveLength(1);
+    expect(subscriptions[0]?.fromBeginning).toBe(true);
+    await subscription.close();
+  });
+
+  it("applies specific replay offsets to every partition", async () => {
+    const { client, sought } = makeFakeKafka({
+      topic: TopicName("orders"),
+      batches: [[{ value: { n: 1 }, offset: "7" }], [{ value: { n: 2 }, offset: "7" }]],
+    });
+    const topic = new KafkaTopic<{ n: number }>({
+      kafka: client,
+      topic: TopicName("orders"),
+      groupId: GroupId("g"),
+    });
+
+    await run(
+      topic
+        .subscribeAck({ offset: { type: "specific", value: "7" } })
+        .take(1)
+        .toArray(),
+    );
+
+    expect(sought).toEqual([
+      { topic: TopicName("orders"), partition: PartitionId(0), offset: KafkaOffset("7") },
+      { topic: TopicName("orders"), partition: PartitionId(1), offset: KafkaOffset("7") },
+    ]);
+  });
+
   it("delivers envelopes in order with offset metadata", async () => {
     const { client, dispatchedVia } = makeFakeKafka({
       topic: TopicName("orders"),

@@ -12,6 +12,7 @@ export type {
   Partitionable,
   Replayable,
   Acknowledgeable,
+  AcknowledgeOptions,
   Checkpointable,
   Envelope,
   Offset,
@@ -38,4 +39,4 @@ export { canonicalJSON, payloadHash } from "./canonicalize";
 
 export { OffsetTracker } from "./offset-tracker";
 export { type StateBackend, CheckpointName, InMemoryState } from "./state-backend";
-export { autoCommitBatchWithin } from "./auto-commit";
+export { AckError, autoCommitBatchWithin } from "./auto-commit";

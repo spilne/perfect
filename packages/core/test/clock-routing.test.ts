@@ -2,7 +2,19 @@
 // a TestClock drives them deterministically with zero real waiting.
 
 import { describe, test, expect } from "bun:test";
-import { succeed, fail, sync, provide, run, runExit, retry, Clock, TestClock, Cause } from "../src";
+import {
+  succeed,
+  fail,
+  sync,
+  provide,
+  run,
+  runSync,
+  runExit,
+  retry,
+  Clock,
+  TestClock,
+  Cause,
+} from "../src";
 import { RateLimiter } from "../src/rate-limiter";
 import { CircuitBreaker } from "../src/circuit-breaker";
 import { CacheStore } from "../src/cache-store";
@@ -52,7 +64,7 @@ describe("CircuitBreaker under TestClock", () => {
 
     // trip it
     await expect(run(protectedFail as any)).rejects.toBe("boom");
-    expect(breaker.state).toBe("open");
+    expect(runSync(breaker.state)).toBe("open");
 
     // still open — rejects fast with CircuitOpen
     const exit = await runExit(provide(breaker.protect(succeed("nope")) as any, Clock, c) as any);
@@ -61,7 +73,7 @@ describe("CircuitBreaker under TestClock", () => {
     // advance past the reset timeout: next protect probes (half-open) and closes
     c.advance(5001);
     expect(await run(protectedOk as any)).toBe("ok");
-    expect(breaker.state).toBe("closed");
+    expect(runSync(breaker.state)).toBe("closed");
   });
 });
 

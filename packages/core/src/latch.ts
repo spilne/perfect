@@ -18,15 +18,15 @@ import { succeed } from "./constructors";
 import { type Deferred, Deferred as DeferredNS } from "./deferred";
 import { Ref } from "./ref";
 
-export interface Latch {
+export interface Latch<S = never> {
   /** Decrement the counter by 1. Releases all awaiters when it hits 0. */
-  readonly countDown: Eff<void, never>;
+  readonly countDown: Eff<void, S>;
   /** Decrement by N (clamped at 0). */
-  countDownBy(n: number): Eff<void, never>;
+  countDownBy(n: number): Eff<void, S>;
   /** Block until the counter reaches 0. Returns immediately if already 0. */
-  readonly await: Eff<void, never>;
+  readonly await: Eff<void, S>;
   /** Current remaining count. */
-  readonly remaining: Eff<number, never>;
+  readonly remaining: Eff<number, S>;
 }
 
 class InProcessLatch implements Latch {

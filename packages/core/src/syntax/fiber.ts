@@ -26,7 +26,7 @@ declare module "../eff" {
     fork<A, S>(this: Eff<A, S>): Eff<Fiber<A>, never>;
     withSpan<A, S>(this: Eff<A, S>, name: string, attributes?: Record<string, unknown>): Eff<A, S>;
     forkDaemon<A, S>(this: Eff<A, S>): Eff<Fiber<A>, never>;
-    ensuring<A, S>(this: Eff<A, S>, finalizer: Eff<void, never>): Eff<A, S>;
+    ensuring<A, S, S2>(this: Eff<A, S>, finalizer: Eff<void, S2>): Eff<A, S | S2>;
     onExit<A, S, S2>(
       this: Eff<A, S>,
       handler: (exit: Exit<unknown, A>) => Eff<void, S2>,
@@ -48,7 +48,7 @@ declare module "../eff" {
      * Pair this acquire effect with a release function — the release fires
      * when the surrounding `scoped` block ends.
      */
-    acquireRelease<A, S>(this: Eff<A, S>, release: (a: A) => Eff<void, never>): Eff<A, S>;
+    acquireRelease<A, S, S2>(this: Eff<A, S>, release: (a: A) => Eff<void, S2>): Eff<A, S | S2>;
     provide<A, S, T>(
       this: Eff<A, S | Needs<T>>,
       tag: ServiceTag<T>,

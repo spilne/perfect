@@ -19,13 +19,14 @@
 // processed, so two commitOffsets calls can never be in flight at once.
 // ---------------------------------------------------------------------------
 
-import type { Eff } from "@perfect/core";
+import type { Eff, Throws } from "@perfect/core";
 import { fromPromise } from "@perfect/core";
 import { Stream } from "@perfect/core/stream";
 import { OffsetTracker } from "@perfect/core/connect";
 import type { Envelope } from "@perfect/core/connect";
 import type { KafkaConsumer, KafkaOffsetCommit } from "./kafka-types";
 import { type TopicName, PartitionId, KafkaOffset } from "./brands";
+import { KafkaCommitError } from "./kafka-error";
 
 export interface CommitBatchWithinConfig {
   /** Commit after this many messages. */
@@ -48,53 +49,50 @@ export interface CommitBatchWithinConfig {
  */
 export function commitBatchWithin<T>(
   config: CommitBatchWithinConfig,
-): (stream: Stream<Envelope<T>, unknown>) => Stream<T, any> {
-  return (stream) => {
+): <S>(stream: Stream<Envelope<T>, S>) => Stream<T, S | Throws<KafkaCommitError>> {
+  return <S>(stream: Stream<Envelope<T>, S>) => {
     const tracker = new OffsetTracker();
 
     return stream
       .groupWithin(config.maxBatchSize, config.maxWaitMs)
-      .evalMap(
-        (chunk) =>
-          fromPromise(
-            async () => {
-              for (const env of chunk) {
-                // Envelope metadata is deliberately Record<string, unknown> —
-                // rebrand at this boundary.
-                const partition = PartitionId((env.metadata.partition as number) ?? 0);
-                const offset = Number(env.metadata.offset ?? 0);
+      .evalMap((chunk) => {
+        let attemptedOffsets: KafkaOffsetCommit[] = [];
+        return fromPromise(
+          async () => {
+            for (const env of chunk) {
+              // Envelope metadata is deliberately Record<string, unknown> —
+              // rebrand at this boundary.
+              const partition = PartitionId((env.metadata.partition as number) ?? 0);
+              const offset = Number(env.metadata.offset ?? 0);
 
-                // Seed the frontier from the lowest offset seen
-                // (reordering-safe) so commits start at the right place on a
-                // non-zero resume / rewind.
-                tracker.observe(partition, offset);
-                tracker.complete(partition, offset);
-              }
+              // Seed the frontier from the lowest offset seen
+              // (reordering-safe) so commits start at the right place on a
+              // non-zero resume / rewind.
+              tracker.observe(partition, offset);
+              tracker.complete(partition, offset);
+            }
 
-              const committable = tracker.committable();
-              if (committable.size > 0) {
-                const offsets: KafkaOffsetCommit[] = [...committable.entries()].map(
-                  ([partition, offset]) => ({
-                    topic: config.topic,
-                    partition,
-                    offset: KafkaOffset(offset.toString()),
-                  }),
-                );
+            const committable = tracker.committable();
+            if (committable.size > 0) {
+              attemptedOffsets = [...committable.entries()].map(([partition, offset]) => ({
+                topic: config.topic,
+                partition,
+                offset: KafkaOffset(offset.toString()),
+              }));
 
-                try {
-                  await config.consumer.commitOffsets(offsets);
-                } catch {
-                  // Commit failed — the next successful commit carries a
-                  // higher watermark that subsumes this one (Kafka commits
-                  // are cumulative), same as promin's retry-on-next-flush.
-                }
-              }
+              await config.consumer.commitOffsets(attemptedOffsets);
+            }
 
-              return chunk;
-            },
-            (e) => e,
-          ) as Eff<typeof chunk, any>,
-      )
+            return chunk;
+          },
+          (cause) =>
+            new KafkaCommitError({
+              cause,
+              topic: config.topic,
+              offsets: attemptedOffsets,
+            }),
+        ) as Eff<typeof chunk, Throws<KafkaCommitError>>;
+      })
       .flatMap((chunk) => Stream.fromChunk(chunk).map((env) => env.value));
   };
 }

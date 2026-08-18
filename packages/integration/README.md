@@ -1,8 +1,8 @@
 # @perfect/integration
 
-Testcontainers-based integration tests that run `@perfect/kafka` against real
-backends. Private package — never published, and deliberately **not** wired
-into CI or the default release/test pipelines.
+Testcontainers-based integration tests for the Kafka, Redis, and Postgres backends.
+Private package — never published, and deliberately **not** wired into CI or the
+default release/test pipelines.
 
 ## Running
 
@@ -27,8 +27,8 @@ adapter needs).
 | -------------------- | ------------------------------- | ----------------------------------------------- |
 | Kafka (default)      | `redpandadata/redpanda:v24.3.7` | `withKafka`                                     |
 | Kafka (full, opt-in) | `confluentinc/cp-kafka:7.9.1`   | `withApacheKafka` (`KAFKA_FULL=1`)              |
-| Redis                | `redis:7-alpine`                | `withRedis` (reserved for future redis work)    |
-| Postgres             | `postgres:17-alpine`            | `withPostgres` (reserved for the postgres work) |
+| Redis                | `redis:7-alpine`                | `withRedis`; `@perfect/redis` integration tests |
+| Postgres             | `postgres:17-alpine`            | `withPostgres`; `@perfect/postgres` tests       |
 
 ## Layout
 

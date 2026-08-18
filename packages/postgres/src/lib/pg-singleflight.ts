@@ -18,6 +18,7 @@ import { fromPromise, run } from "@perfect/core";
 import type { Eff, Throws, Singleflight } from "@perfect/core";
 import { sql } from "drizzle-orm";
 import { type DrizzleDb, execRaw } from "./drizzle-db";
+import { PostgresError, toPostgresError } from "./postgres-error";
 
 export interface PgSingleflightConfig {
   db: DrizzleDb;
@@ -35,7 +36,13 @@ interface FlightRow {
   error: string | null;
 }
 
-export class PgSingleflight implements Singleflight {
+class UserEffectError extends Error {
+  constructor(readonly value: unknown) {
+    super("Singleflight user effect failed");
+  }
+}
+
+export class PgSingleflight implements Singleflight<Throws<PostgresError>> {
   private readonly db: DrizzleDb;
   private readonly pollIntervalMs: number;
   private readonly table: string;
@@ -81,13 +88,19 @@ export class PgSingleflight implements Singleflight {
   // Singleflight (Eff-typed contract)
   // ---------------------------------------------------------------------------
 
-  do<A, E>(key: string, eff: Eff<A, Throws<E>>): Eff<A, Throws<E>> {
+  do<A, E>(key: string, eff: Eff<A, Throws<E>>): Eff<A, Throws<E> | Throws<PostgresError>> {
     // run() rejects with the squashed cause — for a typed failure that is
     // the original error value, so the winner path preserves `E`.
     return fromPromise(
-      () => this.doAsync(key, () => run(eff as any) as Promise<A>),
-      (e) => e as E,
-    );
+      () =>
+        this.doAsync(key, () =>
+          (run(eff as any) as Promise<A>).catch((error) => {
+            throw new UserEffectError(error);
+          }),
+        ),
+      (e) =>
+        e instanceof UserEffectError ? (e.value as E) : toPostgresError("singleflight.do", e),
+    ) as Eff<A, Throws<E> | Throws<PostgresError>>;
   }
 
   /** Promise-facing variant — dedupe an async thunk by key. */

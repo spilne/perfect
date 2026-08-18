@@ -22,6 +22,7 @@ import type {
   Partitionable,
   Replayable,
   Acknowledgeable,
+  AcknowledgeOptions,
   Checkpointable,
   ConsumerGroup,
   Envelope,
@@ -29,7 +30,13 @@ import type {
   Offset,
   Partition,
 } from "@perfect/core/connect";
-import type { KafkaClient, KafkaConsumerOptions, KafkaProducer, KafkaMessage } from "./kafka-types";
+import type {
+  KafkaClient,
+  KafkaConsumer,
+  KafkaConsumerOptions,
+  KafkaProducer,
+  KafkaMessage,
+} from "./kafka-types";
 import { type TopicName, type GroupId, PartitionId, KafkaOffset } from "./brands";
 
 export interface KafkaTopicConfig<T> {
@@ -48,6 +55,21 @@ export interface KafkaTopicConfig<T> {
    * gets the consumer kicked → rebalance → redelivery loop.
    */
   consumerOptions?: Omit<KafkaConsumerOptions, "groupId">;
+}
+
+export interface KafkaAckOptions extends AcknowledgeOptions {
+  readonly commitIntervalMs?: number;
+  readonly autoCommit?: boolean;
+  readonly fromBeginning?: boolean;
+}
+
+export interface KafkaAckSubscription<T> {
+  readonly stream: Stream<Envelope<T>, never>;
+  readonly consumer: KafkaConsumer;
+  readonly topic: TopicName;
+  readonly groupId: GroupId;
+  /** Stops and disconnects the explicitly owned consumer. */
+  close(): Promise<void>;
 }
 
 export class KafkaTopic<T>
@@ -149,56 +171,65 @@ export class KafkaTopic<T>
   // Acknowledgeable — manual ack/nack
   // =========================================================================
 
-  subscribeAck(params?: {
-    group?: ConsumerGroup;
-    commitIntervalMs?: number;
-    fromBeginning?: boolean;
-  }): Stream<Envelope<T>, never> {
+  subscribeAck(params?: KafkaAckOptions): Stream<Envelope<T>, never> {
+    const subscription = this.subscribeAckWithHandle(params);
+    return subscription.stream.onFinalize(sync(() => void subscription.close()));
+  }
+
+  subscribeAckWithHandle(params?: KafkaAckOptions): KafkaAckSubscription<T> {
     const codec = this.codec;
     const kafka = this.kafka;
     const topic = this.topic;
     const groupId = params?.group ?? this.groupId;
     const commitIntervalMs = params?.commitIntervalMs ?? 1000;
+    const autoCommit = params?.autoCommit ?? true;
+    const offset = params?.offset ?? (params?.fromBeginning ? { type: "earliest" } : undefined);
     const consumerOptions = this.consumerOptions;
+    const consumer = kafka.consumer({ groupId, ...consumerOptions });
+    const tracker = new OffsetTracker();
+    let commitTimer: ReturnType<typeof setInterval> | undefined;
+    let stopped = false;
+    let flushPromise: Promise<void> | null = null;
+    let closePromise: Promise<void> | null = null;
+    let pendingCommit: Array<{
+      topic: TopicName;
+      partition: PartitionId;
+      offset: KafkaOffset;
+    }> | null = null;
 
-    // Cleanup is wired twice on purpose: returned from the register effect
-    // (runs on close/interruption) AND as an explicit .onFinalize (runs on
-    // normal downstream completion, e.g. `take(n)` consuming exactly n
-    // values — a path where Stream.async's own cleanup does not fire). The
-    // idempotency guard inside `cleanup` makes double-firing safe.
-    let cleanup: (() => void) | undefined;
-
-    const stream = Stream.async<Envelope<T>, never>((emit) => {
-      const consumer = kafka.consumer({ groupId, ...consumerOptions });
-      const tracker = new OffsetTracker();
-      let commitTimer: ReturnType<typeof setInterval> | undefined;
-      let stopped = false;
-      let flushing = false;
-
-      const flushCommits = async () => {
-        // Re-entrancy guard: the interval can fire again while a slow
-        // commitOffsets is still in flight; overlapping commits could land
-        // out of order. Skipping is safe — committable() recomputes next tick.
-        if (flushing) return;
-        flushing = true;
-        try {
+    const flushCommits = (): Promise<void> => {
+      if (!autoCommit) return Promise.resolve();
+      if (flushPromise) return flushPromise;
+      flushPromise = (async () => {
+        if (pendingCommit === null) {
           const committable = tracker.committable();
           if (committable.size === 0) return;
-
-          const offsets = [...committable.entries()].map(([partition, offset]) => ({
+          pendingCommit = [...committable.entries()].map(([partition, nextOffset]) => ({
             topic,
             partition,
-            offset: KafkaOffset(offset.toString()),
+            offset: KafkaOffset(nextOffset.toString()),
           }));
-
-          await consumer.commitOffsets(offsets);
-        } catch {
-          // Commit failed — will retry on next interval
-        } finally {
-          flushing = false;
         }
-      };
 
+        await consumer.commitOffsets(pendingCommit);
+        pendingCommit = null;
+      })().finally(() => {
+        flushPromise = null;
+      });
+      return flushPromise;
+    };
+
+    const close = (): Promise<void> => {
+      if (closePromise) return closePromise;
+      stopped = true;
+      if (commitTimer) clearInterval(commitTimer);
+      closePromise = flushCommits()
+        .catch(() => {})
+        .finally(() => consumer.disconnect().catch(() => {}));
+      return closePromise;
+    };
+
+    const stream = Stream.async<Envelope<T>, never>((emit) => {
       const makeEnvelope = (msg: KafkaMessage): Envelope<T> => {
         const raw = msg.message.value;
         const str = raw instanceof Buffer ? raw.toString() : (raw as string);
@@ -229,20 +260,25 @@ export class KafkaTopic<T>
 
       const run = async () => {
         await consumer.connect();
-        await consumer.subscribe({ topic, fromBeginning: params?.fromBeginning ?? false });
+        await consumer.subscribe({ topic, fromBeginning: offset?.type === "earliest" });
 
-        commitTimer = setInterval(flushCommits, commitIntervalMs);
+        if (autoCommit) {
+          commitTimer = setInterval(() => void flushCommits().catch(() => {}), commitIntervalMs);
+        }
 
         if (consumer.stream) {
           // Platformatic-style per-message iteration.
+          await this.seekConsumer(consumer, offset);
           for await (const msg of consumer.stream()) {
             if (stopped) break;
             emit(makeEnvelope(msg));
           }
         } else if (consumer.run) {
-          await consumer.run({
+          await this.runCallbackConsumer({
+            consumer,
+            offset,
             autoCommit: false,
-            eachMessage: async (msg: KafkaMessage) => {
+            onMessage: async (msg) => {
               if (stopped) return;
               emit(makeEnvelope(msg));
             },
@@ -250,24 +286,19 @@ export class KafkaTopic<T>
         }
       };
 
-      let cleaned = false;
-      cleanup = () => {
-        if (cleaned) return;
-        cleaned = true;
-        stopped = true;
-        if (commitTimer) clearInterval(commitTimer);
-        // Cleanup must be synchronous for Stream.async — fire and forget the
-        // final flush + disconnect.
-        void flushCommits().finally(() => consumer.disconnect().catch(() => {}));
-      };
-
       return sync(() => {
         run().catch(() => {});
-        return cleanup;
+        return () => {};
       });
     });
 
-    return stream.onFinalize(sync(() => cleanup?.()));
+    return {
+      stream,
+      consumer,
+      topic,
+      groupId,
+      close,
+    };
   }
 
   // =========================================================================
@@ -297,6 +328,86 @@ export class KafkaTopic<T>
   // Internal — consumer stream creation
   // =========================================================================
 
+  private async seekConsumer(consumer: KafkaConsumer, offset?: Offset): Promise<void> {
+    if (!offset || !consumer.seek) return;
+
+    if (offset.type === "timestamp") {
+      const admin = this.kafka.admin();
+      await admin.connect();
+      const result = await admin.fetchTopicOffsetsByTimestamp(this.topic, offset.value);
+      await admin.disconnect();
+      for (const partition of result) {
+        consumer.seek({
+          topic: this.topic,
+          partition: partition.partition,
+          offset: partition.offset,
+        });
+      }
+      return;
+    }
+
+    const target =
+      offset.type === "earliest"
+        ? KafkaOffset("-2")
+        : offset.type === "latest"
+          ? KafkaOffset("-1")
+          : KafkaOffset(offset.value);
+    const partitions = await this.fetchPartitions();
+    for (let partition = 0; partition < partitions; partition++) {
+      consumer.seek({
+        topic: this.topic,
+        partition: PartitionId(partition),
+        offset: target,
+      });
+    }
+  }
+
+  private async runCallbackConsumer(params: {
+    consumer: KafkaConsumer;
+    offset?: Offset;
+    autoCommit?: boolean;
+    onMessage: (message: KafkaMessage) => Promise<void>;
+  }): Promise<void> {
+    const { consumer, offset, autoCommit, onMessage } = params;
+    if (!consumer.run) return;
+
+    if (!offset || !consumer.seek) {
+      await consumer.run({ autoCommit, eachMessage: onMessage });
+      return;
+    }
+
+    let replayReady = false;
+    let notifyStarted!: () => void;
+    let releaseBuffered!: () => void;
+    const started = new Promise<void>((resolve) => {
+      notifyStarted = resolve;
+    });
+    const buffered = new Promise<void>((resolve) => {
+      releaseBuffered = resolve;
+    });
+
+    const running = consumer.run({
+      autoCommit,
+      eachMessage: async (message) => {
+        if (!replayReady) {
+          notifyStarted();
+          await buffered;
+          return;
+        }
+        await onMessage(message);
+      },
+    });
+
+    await Promise.race([running, started]);
+    try {
+      await this.seekConsumer(consumer, offset);
+    } finally {
+      replayReady = true;
+      releaseBuffered();
+    }
+    await running;
+  }
+
   private createConsumerStream(group?: ConsumerGroup, offset?: Offset): Stream<T, never> {
     const codec = this.codec;
     const kafka = this.kafka;
@@ -324,27 +435,18 @@ export class KafkaTopic<T>
           fromBeginning: offset?.type === "earliest",
         });
 
-        if (offset?.type === "timestamp") {
-          const admin = kafka.admin();
-          await admin.connect();
-          const result = await admin.fetchTopicOffsetsByTimestamp(topic, offset.value);
-          await admin.disconnect();
-          if (consumer.seek) {
-            for (const p of result) {
-              consumer.seek({ topic, partition: p.partition, offset: p.offset });
-            }
-          }
-        }
-
         if (consumer.stream) {
           // Platformatic stream mode — per-message iteration.
+          await this.seekConsumer(consumer, offset);
           for await (const msg of consumer.stream()) {
             if (stopped) break;
             emit(decodeMessage(msg));
           }
         } else if (consumer.run) {
-          await consumer.run({
-            eachMessage: async (msg: KafkaMessage) => {
+          await this.runCallbackConsumer({
+            consumer,
+            offset,
+            onMessage: async (msg) => {
               if (stopped) return;
               emit(decodeMessage(msg));
             },

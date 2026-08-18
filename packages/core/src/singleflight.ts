@@ -17,13 +17,13 @@ import { sync } from "./constructors";
 import { Cause } from "./cause";
 import { type Deferred, InProcessDeferred } from "./deferred";
 
-export interface Singleflight {
+export interface Singleflight<SF = never> {
   /**
    * Deduplicate by key. First caller runs the effect; concurrent callers
    * with the same key wait for that execution to settle and receive its
    * result (success or failure). Key is cleared on settle.
    */
-  do<A, E>(key: string, eff: Eff<A, Throws<E>>): Eff<A, Throws<E>>;
+  do<A, E>(key: string, eff: Eff<A, Throws<E>>): Eff<A, SF | Throws<E>>;
 }
 
 type LeaderOrFollower<A, E> =

@@ -15,11 +15,11 @@ import { type Eff } from "./eff";
 import { type Deferred, Deferred as DeferredNS } from "./deferred";
 import { Ref } from "./ref";
 
-export interface Barrier {
+export interface Barrier<S = never> {
   /** Arrive at the barrier and block until all `parties` have arrived. */
-  readonly await: Eff<void, never>;
+  readonly await: Eff<void, S>;
   /** Number of parties that have arrived so far. */
-  readonly arrived: Eff<number, never>;
+  readonly arrived: Eff<number, S>;
 }
 
 class InProcessBarrier implements Barrier {

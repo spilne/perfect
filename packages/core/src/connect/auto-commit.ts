@@ -13,19 +13,21 @@
 //     .through(autoCommitBatchWithin(500, 15_000))
 //     .drain()
 
-import type { Eff } from "../eff";
+import { TaggedError } from "../tagged-error";
+import type { Eff, Throws } from "../eff";
 import { fromPromise } from "../constructors";
 import { Stream } from "../stream";
 import type { Envelope } from "./contracts";
 
+export class AckError extends TaggedError("AckError")<{
+  readonly cause: unknown;
+}>() {}
+
 export function autoCommitBatchWithin<T>(
   maxBatchSize: number,
   maxWaitMs: number,
-): (stream: Stream<Envelope<T>, unknown>) => Stream<T, any> {
-  // return-side S is deliberately erased (`any`, not `unknown`) — the ack
-  // effects introduce no typed failures the caller must handle, and
-  // `unknown` would fail EffectCheck at every downstream run()
-  return (stream) =>
+): <S>(stream: Stream<Envelope<T>, S>) => Stream<T, S | Throws<AckError>> {
+  return <S>(stream: Stream<Envelope<T>, S>) =>
     stream
       .groupWithin(maxBatchSize, maxWaitMs)
       .evalMap(
@@ -35,8 +37,8 @@ export function autoCommitBatchWithin<T>(
               for (const env of chunk) await env.ack();
               return chunk;
             },
-            (e) => e,
-          ) as Eff<typeof chunk, any>,
+            (cause) => new AckError({ cause }),
+          ) as Eff<typeof chunk, Throws<AckError>>,
       )
       .flatMap((chunk) => Stream.fromChunk(chunk).map((env) => env.value));
 }

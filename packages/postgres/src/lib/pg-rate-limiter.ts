@@ -3,9 +3,8 @@
 //
 // Implements @perfect/core's Eff-typed RateLimiter contract on top of a
 // Promise-based Postgres driver: one row per granted slot, expired rows
-// swept inside the acquire transaction. Driver rejections become defects
-// (Eff<_, never> members can't carry them as typed errors); over-limit is
-// the typed RateLimitExceeded failure.
+// swept inside the acquire transaction. Driver rejections are typed
+// PostgresError failures; over-limit is RateLimitExceeded.
 //
 // Adapted from promin's Promise-typed RateLimiter (acquireAsync/…): the
 // per-call `resource` suffix is gone — perfect's contract keys the limiter
@@ -16,6 +15,7 @@ import { fail, fromPromise, sleep, succeed, sync } from "@perfect/core";
 import type { Eff, Throws, RateLimitExceeded, RateLimiter } from "@perfect/core";
 import { sql } from "drizzle-orm";
 import { type DrizzleDb, execRaw } from "./drizzle-db";
+import { PostgresError, toPostgresError } from "./postgres-error";
 
 export interface PgRateLimiterConfig {
   db: DrizzleDb;
@@ -41,7 +41,7 @@ export function slidingWindowDecision(params: {
   return { granted: false, retryAfterMs: Math.max(1, oldest + params.windowMs - params.now) };
 }
 
-export class PgRateLimiter implements RateLimiter {
+export class PgRateLimiter implements RateLimiter<Throws<PostgresError>> {
   private readonly db: DrizzleDb;
   private readonly key: string;
   private readonly limit: number;
@@ -155,82 +155,70 @@ export class PgRateLimiter implements RateLimiter {
   // RateLimiter (Eff-typed contract)
   // ---------------------------------------------------------------------------
 
-  get acquire(): Eff<void, Throws<RateLimitExceeded>> {
+  get acquire(): Eff<void, Throws<PostgresError> | Throws<RateLimitExceeded>> {
     return fromPromise(
       () => this._tryAcquireOnce(),
-      (e) => e,
-    )
-      .orDie()
-      .flatMap((waitMs) =>
-        waitMs === 0
-          ? succeed(undefined)
-          : fail<RateLimitExceeded>({ _tag: "RateLimitExceeded", retryAfterMs: waitMs }),
-      );
+      (e) => toPostgresError("rateLimiter.acquire", e),
+    ).flatMap((waitMs) =>
+      waitMs === 0
+        ? succeed(undefined)
+        : fail<RateLimitExceeded>({ _tag: "RateLimitExceeded", retryAfterMs: waitMs }),
+    );
   }
 
-  get tryAcquire(): Eff<boolean, never> {
+  get tryAcquire(): Eff<boolean, Throws<PostgresError>> {
     return fromPromise(
       () => this._tryAcquireOnce(),
-      (e) => e,
-    )
-      .orDie()
-      .map((waitMs) => waitMs === 0);
+      (e) => toPostgresError("rateLimiter.tryAcquire", e),
+    ).map((waitMs) => waitMs === 0);
   }
 
-  get acquireWaiting(): Eff<void, never> {
-    const loop = (): Eff<void, never> =>
+  get acquireWaiting(): Eff<void, Throws<PostgresError>> {
+    const loop = (): Eff<void, Throws<PostgresError>> =>
       fromPromise(
         () => this._tryAcquireOnce(),
-        (e) => e,
-      )
-        .orDie()
-        .flatMap((waitMs) =>
-          waitMs === 0 ? sync(() => undefined) : sleep(waitMs).flatMap(() => loop()),
-        );
+        (e) => toPostgresError("rateLimiter.acquireWaiting", e),
+      ).flatMap((waitMs) =>
+        waitMs === 0 ? sync(() => undefined) : sleep(waitMs).flatMap(() => loop()),
+      );
     return loop();
   }
 
-  withLimit<A, S>(eff: Eff<A, S>): Eff<A, S | Throws<RateLimitExceeded>> {
+  withLimit<A, S>(eff: Eff<A, S>): Eff<A, S | Throws<PostgresError> | Throws<RateLimitExceeded>> {
     return (this.acquire as any).flatMap(() => eff) as any;
   }
 
-  withLimitWaiting<A, S>(eff: Eff<A, S>): Eff<A, S> {
+  withLimitWaiting<A, S>(eff: Eff<A, S>): Eff<A, S | Throws<PostgresError>> {
     return (this.acquireWaiting as any).flatMap(() => eff) as any;
   }
 
-  get remaining(): Eff<number, never> {
+  get remaining(): Eff<number, Throws<PostgresError>> {
     return fromPromise(
       () => this._activeStats(),
-      (e) => e,
-    )
-      .orDie()
-      .map((s) => Math.max(0, this.limit - s.count));
+      (e) => toPostgresError("rateLimiter.remaining", e),
+    ).map((s) => Math.max(0, this.limit - s.count));
   }
 
-  get resetAt(): Eff<number, never> {
+  get resetAt(): Eff<number, Throws<PostgresError>> {
     return fromPromise(
       () => this._activeStats(),
-      (e) => e,
-    )
-      .orDie()
-      .map((s) => (s.count === 0 || s.oldest === null ? Date.now() : s.oldest + this.windowMs));
+      (e) => toPostgresError("rateLimiter.resetAt", e),
+    ).map((s) => (s.count === 0 || s.oldest === null ? Date.now() : s.oldest + this.windowMs));
   }
 
-  get nextSlotIn(): Eff<number, never> {
+  get nextSlotIn(): Eff<number, Throws<PostgresError>> {
     return fromPromise(
       () => this._activeStats(),
-      (e) => e,
-    )
-      .orDie()
-      .map((s) => {
-        const d = slidingWindowDecision({
-          count: s.count,
-          oldestTs: s.oldest,
-          now: Date.now(),
-          limit: this.limit,
-          windowMs: this.windowMs,
-        });
-        return d.granted ? 0 : d.retryAfterMs;
+      (e) => toPostgresError("rateLimiter.nextSlotIn", e),
+    ).map((s) => {
+      const d = slidingWindowDecision({
+        count: s.count,
+        oldestTs: s.oldest,
+        now: Date.now(),
+        limit: this.limit,
+        windowMs: this.windowMs,
       });
+      return d.granted ? 0 : d.retryAfterMs;
+    });
   }
 }

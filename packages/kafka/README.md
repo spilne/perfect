@@ -62,19 +62,22 @@ await orders
   .run();
 ```
 
-For explicit fs2-kafka-style batched commits, pipe through
-`commitBatchWithin({ maxBatchSize, maxWaitMs, consumer, topic })` — it batches
-ack'd envelopes by count or time and commits offset groups via a shared
-`OffsetTracker`, safe under `parEvalMap` reordering.
+For explicit fs2-kafka-style batched commits, create a
+`subscribeAckWithHandle({ autoCommit: false })` subscription and pass its `consumer` and
+`topic` to `commitBatchWithin`. The handle guarantees that consumption and commits use
+the same joined consumer group member. Commit failures remain typed as
+`Throws<KafkaCommitError>` instead of being swallowed. Handle-based subscriptions own
+their consumer explicitly, so call `subscription.close()` in a `finally` block.
 
 ## Features
 
 - `KafkaTopic<T>` — one class, all connect contracts:
   - `publish` / `publishBatch` (keyed, codec-encoded)
-  - `subscribe` / `subscribeFrom` (offset or timestamp replay)
+  - `subscribe` / `subscribeFrom` (earliest, latest, specific-offset, or timestamp replay)
   - `subscribeAck` — `Stream<Envelope<T>>` with background contiguous commits
+  - `subscribeAckWithHandle` — explicit consumer ownership for external commit pipes
   - checkpoint support for `@perfect/topology`
-- `commitBatchWithin` — batched offset-commit pipe (count or time window)
+- `commitBatchWithin` — typed batched offset-commit pipe (count or time window)
 - `KafkaShuffleTransport` — Kafka-backed `ShuffleTransport` for distributed
   topology stages
 - Driver-agnostic types — `KafkaClient`, `KafkaConsumer`, `KafkaProducer`,

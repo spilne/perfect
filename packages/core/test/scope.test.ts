@@ -14,6 +14,10 @@ import {
   Cause,
 } from "../src";
 
+class ReleaseFailure {
+  readonly _tag = "ReleaseFailure" as const;
+}
+
 describe("acquireRelease + scoped", () => {
   test("release runs on success", async () => {
     const log: string[] = [];
@@ -115,6 +119,14 @@ describe("acquireRelease + scoped", () => {
     if (exit._tag === "Failure") {
       expect(Cause.pretty(exit.cause)).toBe("Die(release failed)");
     }
+  });
+
+  test("typed release failure remains catchable", async () => {
+    const program = scoped(
+      acquireRelease(succeed("resource"), () => fail(new ReleaseFailure())),
+    ).catchTag("ReleaseFailure", () => succeed("recovered"));
+
+    expect(await run(program)).toBe("recovered");
   });
 
   test("release failure after scoped failure is sequentially composed", async () => {

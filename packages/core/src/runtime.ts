@@ -457,7 +457,7 @@ function runFiberLoop(fiber: Fiber<any>): void {
 
       case Op.AcqRel: {
         const acquire = cur.a;
-        const release = cur.b as (a: any) => Eff<void, never>;
+        const release = cur.b as (a: any) => Eff<void, unknown>;
 
         // acquire, then register release on the innermost active scope.
         // Without an enclosing scoped(), fall back to a lazily-created

@@ -3,7 +3,7 @@
 // without a broker.
 
 import { describe, it, expect } from "bun:test";
-import { run, sync } from "@perfect/core";
+import { die, run, succeed, sync } from "@perfect/core";
 import { Stream } from "@perfect/core/stream";
 import type { Envelope } from "@perfect/core/connect";
 import { commitBatchWithin } from "../src/commit-batch-within";
@@ -62,7 +62,8 @@ describe("commitBatchWithin", () => {
             topic: TopicName("t"),
           }),
         )
-        .toArray(),
+        .toArray()
+        .catchTag("KafkaCommitError", (error) => die(error)),
     );
 
     expect(values).toEqual(["v0", "v1", "v2", "v3"]);
@@ -83,7 +84,8 @@ describe("commitBatchWithin", () => {
             topic: TopicName("t"),
           }),
         )
-        .toArray(),
+        .toArray()
+        .catchTag("KafkaCommitError", (error) => die(error)),
     );
 
     expect(values).toEqual([0, 1, 2]);
@@ -105,7 +107,8 @@ describe("commitBatchWithin", () => {
             topic: TopicName("t"),
           }),
         )
-        .toArray(),
+        .toArray()
+        .catchTag("KafkaCommitError", (error) => die(error)),
     );
 
     expect(values).toEqual([0, 1, 3]);
@@ -126,7 +129,8 @@ describe("commitBatchWithin", () => {
             topic: TopicName("t"),
           }),
         )
-        .toArray(),
+        .toArray()
+        .catchTag("KafkaCommitError", (error) => die(error)),
     );
 
     expect(committed).toHaveLength(1);
@@ -148,7 +152,8 @@ describe("commitBatchWithin", () => {
         .through(
           commitBatchWithin({ maxBatchSize: 100, maxWaitMs: 50, consumer, topic: TopicName("t") }),
         )
-        .toArray(),
+        .toArray()
+        .catchTag("KafkaCommitError", (error) => die(error)),
     );
 
     // Let the stream start so the register callback captured emit/close.
@@ -163,11 +168,11 @@ describe("commitBatchWithin", () => {
     expect(values).toEqual(["only"]);
   });
 
-  it("a failed commit does not fail the stream; later commits subsume it", async () => {
+  it("a failed commit surfaces as typed KafkaCommitError", async () => {
     const { consumer, committed } = makeFakeConsumer({ failCommits: 1 });
     const envelopes = [0, 1, 2, 3].map((i) => envelope(i, 0, i));
 
-    const values = await run(
+    const message = await run(
       Stream.fromIterable(envelopes)
         .through(
           commitBatchWithin({
@@ -177,11 +182,15 @@ describe("commitBatchWithin", () => {
             topic: TopicName("t"),
           }),
         )
-        .toArray(),
+        .toArray()
+        .map(() => "unexpected")
+        .catchTag("KafkaCommitError", (error) => {
+          expect(error.offsets).toEqual([commit(0, "2")]);
+          return succeed((error.cause as Error).message);
+        }),
     );
 
-    expect(values).toEqual([0, 1, 2, 3]);
-    // First commit ("2") failed and was swallowed; the second ("4") subsumes it.
-    expect(committed).toEqual([[commit(0, "4")]]);
+    expect(message).toBe("commit failed");
+    expect(committed).toEqual([]);
   });
 });

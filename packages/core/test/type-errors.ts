@@ -6,8 +6,21 @@ import {
   type Eff,
   type Throws,
   type Needs,
+  type Ref,
+  type Deferred,
+  type Queue,
+  type Semaphore,
+  type CircuitBreaker,
+  type CircuitOpen,
+  type Singleflight,
+  type RateLimiter,
+  type RateLimitExceeded,
+  type Pool,
+  type PoolClosed,
+  QueueClosed,
   succeed,
   fail,
+  acquireRelease,
   service,
   provide,
   run,
@@ -17,6 +30,7 @@ import {
   Stream,
   Sinks,
 } from "../src";
+import { AckError, autoCommitBatchWithin, type Envelope } from "../src/connect";
 
 class NotFound {
   readonly _tag = "NotFound" as const;
@@ -26,6 +40,80 @@ class Forbidden {
 }
 class Unauthorized {
   readonly _tag = "Unauthorized" as const;
+}
+
+class BackendFailure {
+  readonly _tag = "BackendFailure" as const;
+}
+
+// ── Pluggable primitive backend effects ───────────────────────────
+
+{
+  type Backend = Throws<BackendFailure>;
+
+  const ref = null as unknown as Ref<number, Backend>;
+  const _refGet: Eff<number, Backend> = ref.get;
+  const _refUpdate: Eff<void, Backend> = ref.update((n) => n + 1);
+  const _refHandled: Eff<number, never> = ref.get.catchTag("BackendFailure", () => succeed(0));
+  // @ts-expect-error backend failure cannot be dropped
+  const _refUnsafe: Eff<number, never> = ref.get;
+  const _ensured: Eff<number, Backend> = succeed(1).ensuring(ref.set(2));
+  const _managed: Eff<string, Backend> = acquireRelease(succeed("resource"), () => ref.set(0));
+
+  const deferred = null as unknown as Deferred<number, Forbidden, Backend>;
+  const _deferredAwait: Eff<number, Backend | Throws<Forbidden>> = deferred.await;
+
+  const queue = null as unknown as Queue<number, Backend>;
+  const _queueTake: Eff<number, Backend | Throws<QueueClosed>> = queue.take();
+
+  const semaphore = null as unknown as Semaphore<Backend>;
+  const _withPermit: Eff<string, Backend | Throws<Forbidden>> = semaphore.withPermit(
+    fail(new Forbidden()),
+  );
+
+  const breaker = null as unknown as CircuitBreaker<Forbidden, Backend>;
+  const _breakerState: Eff<"closed" | "open" | "half-open", Backend> = breaker.state;
+  const _protected: Eff<number, Backend | Throws<Forbidden | CircuitOpen>> = breaker.protect(
+    fail(new Forbidden()),
+  );
+
+  const singleflight = null as unknown as Singleflight<Backend>;
+  const _singleflight: Eff<number, Backend | Throws<Forbidden>> = singleflight.do(
+    "key",
+    fail(new Forbidden()),
+  );
+
+  const limiter = null as unknown as RateLimiter<Backend>;
+  const _limited: Eff<string, Backend | Throws<Forbidden> | Throws<RateLimitExceeded>> =
+    limiter.withLimit(fail(new Forbidden()));
+
+  const pool = null as unknown as Pool<string, Backend>;
+  const _pooled: Eff<number, Backend | Throws<Forbidden> | Throws<PoolClosed>> = pool.use(() =>
+    fail(new Forbidden()),
+  );
+
+  const envelopes = null as unknown as Stream<Envelope<number>, Backend>;
+  const _acked: Stream<number, Backend | Throws<AckError>> = envelopes.through(
+    autoCommitBatchWithin<number>(10, 1000),
+  );
+
+  void [
+    _refGet,
+    _refUpdate,
+    _refHandled,
+    _refUnsafe,
+    _ensured,
+    _managed,
+    _deferredAwait,
+    _queueTake,
+    _withPermit,
+    _breakerState,
+    _protected,
+    _singleflight,
+    _limited,
+    _pooled,
+    _acked,
+  ];
 }
 interface UserRepo {
   find(id: string): Eff<string, Throws<NotFound>>;

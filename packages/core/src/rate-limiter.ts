@@ -35,23 +35,23 @@ export interface RateLimiterOptions {
   readonly strategy?: RateLimitStrategy;
 }
 
-export interface RateLimiter {
+export interface RateLimiter<S = never> {
   /** Take one slot. Fails with RateLimitExceeded if over limit. */
-  readonly acquire: Eff<void, Throws<RateLimitExceeded>>;
+  readonly acquire: Eff<void, S | Throws<RateLimitExceeded>>;
   /** Try to take a slot — returns true if obtained, false otherwise. */
-  readonly tryAcquire: Eff<boolean, never>;
+  readonly tryAcquire: Eff<boolean, S>;
   /** Take one slot, BLOCKING until available (wait-mode / "throttle"). */
-  readonly acquireWaiting: Eff<void, never>;
+  readonly acquireWaiting: Eff<void, S>;
   /** Run an effect within the rate limit. Fails with RateLimitExceeded if over. */
-  withLimit<A, S>(eff: Eff<A, S>): Eff<A, S | Throws<RateLimitExceeded>>;
+  withLimit<A, S2>(eff: Eff<A, S2>): Eff<A, S | S2 | Throws<RateLimitExceeded>>;
   /** Run an effect within the rate limit, BLOCKING until a slot is free. */
-  withLimitWaiting<A, S>(eff: Eff<A, S>): Eff<A, S>;
+  withLimitWaiting<A, S2>(eff: Eff<A, S2>): Eff<A, S | S2>;
   /** Remaining capacity right now. */
-  readonly remaining: Eff<number, never>;
+  readonly remaining: Eff<number, S>;
   /** Approximate timestamp (ms since epoch) when limit fully resets. */
-  readonly resetAt: Eff<number, never>;
+  readonly resetAt: Eff<number, S>;
   /** Milliseconds until the next slot opens (0 if a slot is available now). */
-  readonly nextSlotIn: Eff<number, never>;
+  readonly nextSlotIn: Eff<number, S>;
 }
 
 // ── Internal state shapes ──────────────────────────────────────────

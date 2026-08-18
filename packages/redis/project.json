@@ -1,0 +1,10 @@
+{
+  "name": "@perfect/redis",
+  "sourceRoot": "packages/redis/src",
+  "targets": {
+    "build": {},
+    "test": {},
+    "lint": {},
+    "typecheck": {}
+  }
+}
