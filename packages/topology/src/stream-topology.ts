@@ -55,7 +55,7 @@ export class StreamTopology<T> {
   constructor(readonly node: TopologyNode<T>) {}
 
   /** Start a topology from any Streamable + Acknowledgeable source. */
-  static source<T>(source: Streamable<T> & Acknowledgeable<T>): StreamTopology<T> {
+  static source<T, S>(source: Streamable<T, S> & Acknowledgeable<T, S>): StreamTopology<T> {
     return new StreamTopology({ type: "source", source });
   }
 

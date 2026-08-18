@@ -71,7 +71,7 @@ describe.skipIf(!dockerAvailable)("integration — postgres:17-alpine", () => {
     await queue.publish({ userId: "u_1" });
     await queue.publish({ userId: "u_2" });
 
-    const envelopes = await run(queue.subscribeAck().take(2).toArray());
+    const envelopes = await run(queue.subscribeAck().take(2).toArray().orDie());
     expect(envelopes.map((e) => e.value)).toEqual([{ userId: "u_1" }, { userId: "u_2" }]);
 
     for (const e of envelopes) await e.ack();
@@ -85,7 +85,7 @@ describe.skipIf(!dockerAvailable)("integration — postgres:17-alpine", () => {
     const queue = await PgQueue.create<string>(db, "claims", { pollIntervalMs: 50 });
     await queue.publish("only-once");
 
-    const [envelope] = await run(queue.subscribeAck().take(1).toArray());
+    const [envelope] = await run(queue.subscribeAck().take(1).toArray().orDie());
     expect(envelope!.value).toBe("only-once");
 
     // Message is now 'processing' with a visibility timeout — nothing to claim
@@ -100,7 +100,7 @@ describe.skipIf(!dockerAvailable)("integration — postgres:17-alpine", () => {
     const queue = await PgQueue.create<{ n: number }>(db, "pops", { pollIntervalMs: 50 });
     await queue.publish({ n: 1 });
 
-    const items = await run(queue.subscribe().take(1).toArray());
+    const items = await run(queue.subscribe().take(1).toArray().orDie());
     expect(items).toEqual([{ n: 1 }]);
     expect((await queue.metrics()).total).toBe(0);
   }, 20_000);
@@ -125,7 +125,7 @@ describe.skipIf(!dockerAvailable)("integration — postgres:17-alpine", () => {
       pollIntervalMs: 60_000, // poll fallback out of the picture — LISTEN only
     });
 
-    const received = run(stream.subscribe().take(1).toArray());
+    const received = run(stream.subscribe().take(1).toArray().orDie());
     // Give LISTEN a moment to register before notifying
     await new Promise((r) => setTimeout(r, 500));
     await stream.notify({ type: "hello" });
@@ -158,7 +158,8 @@ describe.skipIf(!dockerAvailable)("integration — postgres:17-alpine", () => {
       stream
         .subscribeFrom({ offset: { type: "earliest" } })
         .take(2)
-        .toArray(),
+        .toArray()
+        .orDie(),
     );
     expect(items).toEqual([{ n: 1 }, { n: 2 }]);
   }, 20_000);
@@ -279,7 +280,7 @@ describe.skipIf(!dockerAvailable)("integration — pgmq (ghcr.io/pgmq/pg17-pgmq)
     await queue.publish({ job: "a" });
     await queue.publish({ job: "b" });
 
-    const envelopes = await run(queue.subscribeAck().take(2).toArray());
+    const envelopes = await run(queue.subscribeAck().take(2).toArray().orDie());
     expect(envelopes.map((e) => e.value)).toEqual([{ job: "a" }, { job: "b" }]);
     expect(envelopes[0]!.metadata.msgId).toBeGreaterThan(0);
 
@@ -311,13 +312,52 @@ describe.skipIf(!dockerAvailable)("integration — pgmq (ghcr.io/pgmq/pg17-pgmq)
     const queue = await PgmqQueue.create<string>(db, "nacks", { defaultPollIntervalMs: 50 });
     await queue.publish("retry-me");
 
-    const [envelope] = await run(queue.subscribeAck().take(1).toArray());
+    const [envelope] = await run(queue.subscribeAck().take(1).toArray().orDie());
     await envelope!.nack(); // vt = 1s
 
     await new Promise((r) => setTimeout(r, 1_500));
-    const [again] = await run(queue.subscribeAck().take(1).toArray());
+    const [again] = await run(queue.subscribeAck().take(1).toArray().orDie());
     expect(again!.value).toBe("retry-me");
     expect(again!.metadata.readCt as number).toBeGreaterThanOrEqual(2);
     await again!.ack();
+  }, 60_000);
+
+  it("FIFO groups do not expose message 2 while message 1 is processing", async () => {
+    type Job = { userId: string; sequence: number };
+    const queue = await PgmqQueue.create<Job>(db, "ordered_users", {
+      fifo: true,
+      defaultQty: 10,
+      defaultPollIntervalMs: 50,
+    });
+    await queue.publish({ userId: "x", sequence: 1 }, { group: "x" });
+    await queue.publish({ userId: "x", sequence: 2 }, { group: "x" });
+    await queue.publish({ userId: "y", sequence: 1 }, { group: "y" });
+
+    const workerOne = PgmqQueue.wrap<Job>({
+      db,
+      queue: "ordered_users",
+      fifo: true,
+      defaultQty: 1,
+      defaultPollIntervalMs: 50,
+    });
+    const workerTwo = PgmqQueue.wrap<Job>({
+      db,
+      queue: "ordered_users",
+      fifo: true,
+      defaultQty: 10,
+      defaultPollIntervalMs: 50,
+    });
+
+    const [x1] = await run(workerOne.subscribeAck().take(1).toArray().orDie());
+    expect(x1!.value).toEqual({ userId: "x", sequence: 1 });
+
+    const [whileXIsBusy] = await run(workerTwo.subscribeAck().take(1).toArray().orDie());
+    expect(whileXIsBusy!.value).toEqual({ userId: "y", sequence: 1 });
+    await whileXIsBusy!.ack();
+
+    await x1!.ack();
+    const [x2] = await run(workerTwo.subscribeAck().take(1).toArray().orDie());
+    expect(x2!.value).toEqual({ userId: "x", sequence: 2 });
+    await x2!.ack();
   }, 60_000);
 });

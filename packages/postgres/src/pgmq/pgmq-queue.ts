@@ -4,12 +4,10 @@
 //
 // Ported from promin (Effect-TS StreamPipeline → perfect Stream): the
 // spaced-schedule poll loops became pollStream (sleep only after an empty
-// batch); per-record schema handling runs as an Eff-wrapped promise whose
-// rejection (onSchemaError: "throw") is a defect that kills the consumer
-// stream loudly — same behavior as promin's Effect.promise.
+// batch); database and schema failures remain in the Stream effect channel.
 // ---------------------------------------------------------------------------
 
-import { fromPromise } from "@perfect/core";
+import { fromPromise, type Eff, type Throws } from "@perfect/core";
 import { Stream, type SchemaParser } from "@perfect/core/stream";
 import { JsonCodec } from "@perfect/core/connect";
 import type {
@@ -22,6 +20,7 @@ import type {
 } from "@perfect/core/connect";
 import type { DrizzleDb } from "../lib/drizzle-db";
 import { pollStream } from "../lib/poll-stream";
+import { PostgresError, toPostgresError } from "../lib/postgres-error";
 import type { ReadMode, AckMode } from "./types";
 import * as pgmq from "./pgmq";
 
@@ -64,6 +63,12 @@ export class PgmqSchemaValidationError extends Error {
   }
 }
 
+export type PgmqQueueError = PostgresError | PgmqSchemaValidationError;
+
+function toPgmqQueueError(operation: string, cause: unknown): PgmqQueueError {
+  return cause instanceof PgmqSchemaValidationError ? cause : toPostgresError(operation, cause);
+}
+
 // ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
@@ -83,6 +88,8 @@ export interface PgmqQueueConfig<T> {
   defaultPollIntervalMs?: number;
   /** Default ack mode. Default: "delete". */
   defaultAckMode?: AckMode;
+  /** Enable per-group FIFO defaults and create the recommended FIFO index. */
+  fifo?: boolean;
   /**
    * Optional runtime schema validator for consumed messages. Zod, Valibot,
    * and ArkType all satisfy `SchemaParser<T>` out of the box. Applied AFTER
@@ -102,11 +109,20 @@ export interface PgmqQueueConfig<T> {
   onSchemaError?: PgmqOnSchemaError;
 }
 
+export interface PgmqEnvelope<T> extends Envelope<T, Throws<PgmqQueueError>> {
+  extendVisibility(vtSeconds: number): Eff<void, Throws<PgmqQueueError>>;
+}
+
 // ---------------------------------------------------------------------------
 // PgmqQueue
 // ---------------------------------------------------------------------------
 
-export class PgmqQueue<T> implements Streamable<T>, Sinkable<T>, Acknowledgeable<T> {
+export class PgmqQueue<T>
+  implements
+    Streamable<T, Throws<PgmqQueueError>>,
+    Sinkable<T, Throws<PgmqQueueError>>,
+    Acknowledgeable<T, Throws<PgmqQueueError>>
+{
   readonly codec: Codec<T>;
   private readonly db: DrizzleDb;
   readonly queue: string;
@@ -114,6 +130,7 @@ export class PgmqQueue<T> implements Streamable<T>, Sinkable<T>, Acknowledgeable
   private readonly defaultQty: number;
   private readonly defaultPollIntervalMs: number;
   private readonly defaultAckMode: AckMode;
+  private readonly fifo: boolean;
   private readonly schema?: SchemaParser<T>;
   private readonly onSchemaError: PgmqOnSchemaError;
   /** Lazy-init flag — DLQ queue is created the first time a message is routed there. */
@@ -127,6 +144,7 @@ export class PgmqQueue<T> implements Streamable<T>, Sinkable<T>, Acknowledgeable
     this.defaultQty = config.defaultQty ?? 10;
     this.defaultPollIntervalMs = config.defaultPollIntervalMs ?? 1000;
     this.defaultAckMode = config.defaultAckMode ?? "delete";
+    this.fifo = config.fifo ?? false;
     this.schema = config.schema;
     this.onSchemaError = config.onSchemaError ?? "throw";
   }
@@ -193,6 +211,7 @@ export class PgmqQueue<T> implements Streamable<T>, Sinkable<T>, Acknowledgeable
     config?: Omit<PgmqQueueConfig<T>, "db" | "queue">,
   ): Promise<PgmqQueue<T>> {
     await pgmq.createQueue(db, queue);
+    if (config?.fifo) await pgmq.createFifoIndex(db, queue);
     return new PgmqQueue({ db, queue, ...config });
   }
 
@@ -207,22 +226,38 @@ export class PgmqQueue<T> implements Streamable<T>, Sinkable<T>, Acknowledgeable
   // Sinkable<T> — publish messages
   // ---------------------------------------------------------------------------
 
-  async publish(
+  publish(
     value: T,
-    params?: { delay?: number; headers?: Record<string, string> },
-  ): Promise<void> {
-    await pgmq.send(this.db, this.queue, {
-      data: this.codec.encode(value),
-      delay: params?.delay,
-      headers: params?.headers,
-    });
+    params?: { delay?: number; headers?: Record<string, string>; group?: string },
+  ): Eff<void, Throws<PgmqQueueError>> {
+    return fromPromise(
+      async () => {
+        const headers =
+          params?.group === undefined
+            ? params?.headers
+            : { ...params.headers, "x-pgmq-group": params.group };
+        await pgmq.send(this.db, this.queue, {
+          data: this.codec.encode(value),
+          delay: params?.delay,
+          headers,
+        });
+      },
+      (cause) => toPgmqQueueError("pgmq.publish", cause),
+    );
   }
 
-  async publishBatch(values: T[], params?: { delay?: number }): Promise<number[]> {
+  async publishBatch(
+    values: T[],
+    params?: { delay?: number; groupBy?: (value: T) => string },
+  ): Promise<number[]> {
     return pgmq.sendBatch(
       this.db,
       this.queue,
-      values.map((v) => ({ data: this.codec.encode(v), delay: params?.delay })),
+      values.map((value) => ({
+        data: this.codec.encode(value),
+        delay: params?.delay,
+        headers: params?.groupBy ? { "x-pgmq-group": params.groupBy(value) } : undefined,
+      })),
     );
   }
 
@@ -230,10 +265,11 @@ export class PgmqQueue<T> implements Streamable<T>, Sinkable<T>, Acknowledgeable
   // Streamable<T> — subscribe to messages (auto-ack via pop)
   // ---------------------------------------------------------------------------
 
-  subscribe(_params?: { group?: ConsumerGroup }): Stream<T, never> {
+  subscribe(_params?: { group?: ConsumerGroup }): Stream<T, Throws<PgmqQueueError>> {
     return pollStream(
       () => pgmq.pop<unknown>(this.db, this.queue, this.defaultQty),
       this.defaultPollIntervalMs,
+      "pgmq.pop",
     ).flatMap((record) =>
       // Per-record effect that emits 0 values on schema failure (after
       // routing per onSchemaError) and 1 value on success.
@@ -251,8 +287,8 @@ export class PgmqQueue<T> implements Streamable<T>, Sinkable<T>, Acknowledgeable
             });
             return [];
           },
-          (e) => e,
-        ).orDie(),
+          (cause) => toPgmqQueueError("pgmq.decode", cause),
+        ),
       ).flatMap((values) => Stream.fromArray(values)),
     );
   }
@@ -266,16 +302,16 @@ export class PgmqQueue<T> implements Streamable<T>, Sinkable<T>, Acknowledgeable
     readMode?: ReadMode;
     pollIntervalMs?: number;
     ackMode?: AckMode;
-  }): Stream<Envelope<T>, never> {
+  }): Stream<PgmqEnvelope<T>, Throws<PgmqQueueError>> {
     const db = this.db;
     const queue = this.queue;
     const pollMs = params?.pollIntervalMs ?? this.defaultPollIntervalMs;
     const ackMode = params?.ackMode ?? this.defaultAckMode;
-    const readMode: ReadMode = params?.readMode ?? {
-      _tag: "standard",
-      vt: this.defaultVt,
-      qty: this.defaultQty,
-    };
+    const readMode: ReadMode =
+      params?.readMode ??
+      (this.fifo
+        ? { _tag: "grouped-head", vt: this.defaultVt, qty: this.defaultQty }
+        : { _tag: "standard", vt: this.defaultVt, qty: this.defaultQty });
 
     const ack = async (msgId: number): Promise<void> => {
       if (ackMode === "archive") {
@@ -285,40 +321,54 @@ export class PgmqQueue<T> implements Streamable<T>, Sinkable<T>, Acknowledgeable
       }
     };
 
-    return pollStream(() => pgmq.read<unknown>(db, queue, readMode), pollMs).flatMap((record) =>
-      Stream.fromEffect(
-        fromPromise(
-          async () => {
-            const res = this.decodeAndValidate(record.message);
-            if (res.ok) {
-              const envelope: Envelope<T> = {
-                value: res.value,
-                ack: () => ack(record.msgId),
-                nack: () => pgmq.setVt(db, queue, record.msgId, 1).then(() => {}),
-                metadata: {
-                  msgId: record.msgId,
-                  readCt: record.readCt,
-                  enqueuedAt: record.enqueuedAt,
-                  headers: record.headers,
-                },
-              };
-              return [envelope];
-            }
-            // read() kept the message in the queue (locked via vt) — we
-            // delete it ourselves for skip/dlq so it doesn't retry after
-            // vt expires. For "throw", leave the lock to expire naturally
-            // (the error surfaces again on retry, which is the point).
-            await this.handleSchemaError({
-              msgId: record.msgId,
-              rawMessage: record.message,
-              error: res.error,
-              deleteOriginal: true,
-            });
-            return [];
-          },
-          (e) => e,
-        ).orDie(),
-      ).flatMap((envelopes) => Stream.fromArray(envelopes)),
+    return pollStream(() => pgmq.read<unknown>(db, queue, readMode), pollMs, "pgmq.read").flatMap(
+      (record) =>
+        Stream.fromEffect(
+          fromPromise(
+            async () => {
+              const res = this.decodeAndValidate(record.message);
+              if (res.ok) {
+                const envelope: PgmqEnvelope<T> = {
+                  value: res.value,
+                  ack: () =>
+                    fromPromise(
+                      () => ack(record.msgId),
+                      (cause) => toPgmqQueueError("pgmq.ack", cause),
+                    ),
+                  nack: () =>
+                    fromPromise(
+                      () => pgmq.setVt(db, queue, record.msgId, 1).then(() => {}),
+                      (cause) => toPgmqQueueError("pgmq.nack", cause),
+                    ),
+                  extendVisibility: (vtSeconds) =>
+                    fromPromise(
+                      () => pgmq.setVt(db, queue, record.msgId, vtSeconds).then(() => {}),
+                      (cause) => toPgmqQueueError("pgmq.extendVisibility", cause),
+                    ),
+                  metadata: {
+                    msgId: record.msgId,
+                    readCt: record.readCt,
+                    enqueuedAt: record.enqueuedAt,
+                    headers: record.headers,
+                  },
+                };
+                return [envelope];
+              }
+              // read() kept the message in the queue (locked via vt) — we
+              // delete it ourselves for skip/dlq so it doesn't retry after
+              // vt expires. For "throw", leave the lock to expire naturally
+              // (the error surfaces again on retry, which is the point).
+              await this.handleSchemaError({
+                msgId: record.msgId,
+                rawMessage: record.message,
+                error: res.error,
+                deleteOriginal: true,
+              });
+              return [];
+            },
+            (cause) => toPgmqQueueError("pgmq.decode", cause),
+          ),
+        ).flatMap((envelopes) => Stream.fromArray(envelopes)),
     );
   }
 

@@ -17,13 +17,14 @@
 // scope a subscription's lifetime accordingly.
 // ---------------------------------------------------------------------------
 
-import { sync } from "@perfect/core";
+import { async as asyncEff, fail, succeed, type Throws } from "@perfect/core";
 import { Stream } from "@perfect/core/stream";
 import { sql } from "drizzle-orm";
 import { JsonCodec } from "@perfect/core/connect";
 import type { Streamable, Replayable, Offset, Codec, ConsumerGroup } from "@perfect/core/connect";
 import type { DrizzleDb } from "./drizzle-db";
 import { pollStream } from "./poll-stream";
+import { PostgresError, toPostgresError } from "./postgres-error";
 import type postgres from "postgres";
 
 // ---------------------------------------------------------------------------
@@ -75,7 +76,9 @@ export function offsetToDate(offset: Offset): Date {
 // PgChangeStream
 // ---------------------------------------------------------------------------
 
-export class PgChangeStream<T> implements Streamable<T>, Replayable<T> {
+export class PgChangeStream<T>
+  implements Streamable<T, Throws<PostgresError>>, Replayable<T, Throws<PostgresError>>
+{
   readonly codec: Codec<T>;
   private readonly db: DrizzleDb;
   private readonly sqlClient: ReturnType<typeof postgres>;
@@ -104,7 +107,7 @@ export class PgChangeStream<T> implements Streamable<T>, Replayable<T> {
   // Streamable<T> — LISTEN + poll merged stream
   // ---------------------------------------------------------------------------
 
-  subscribe(_params?: { group?: ConsumerGroup }): Stream<T, never> {
+  subscribe(_params?: { group?: ConsumerGroup }): Stream<T, Throws<PostgresError>> {
     return this.subscribeFrom({ offset: { type: "latest" } });
   }
 
@@ -112,7 +115,10 @@ export class PgChangeStream<T> implements Streamable<T>, Replayable<T> {
   // Replayable<T> — subscribe from offset
   // ---------------------------------------------------------------------------
 
-  subscribeFrom(params: { offset: Offset; group?: ConsumerGroup }): Stream<T, never> {
+  subscribeFrom(params: {
+    offset: Offset;
+    group?: ConsumerGroup;
+  }): Stream<T, Throws<PostgresError>> {
     const listenStream = this.createListenStream();
     const pollStream = this.createPollStream(params.offset);
 
@@ -124,25 +130,42 @@ export class PgChangeStream<T> implements Streamable<T>, Replayable<T> {
   // LISTEN stream — real-time notifications
   // ---------------------------------------------------------------------------
 
-  private createListenStream(): Stream<T, never> {
+  private createListenStream(): Stream<T, Throws<PostgresError>> {
     const codec = this.codec;
     const sqlClient = this.sqlClient;
     const channel = this.channel;
 
-    return Stream.async<T, never>((emit) =>
-      sync(() => {
-        const listenPromise = sqlClient.listen(channel, (payload: string) => {
-          try {
-            const parsed = JSON.parse(payload);
-            emit(codec.decode(parsed));
-          } catch {
-            // Skip malformed payloads
-          }
-        });
+    return Stream.async<T, Throws<PostgresError>>((emit) =>
+      asyncEff<() => void, PostgresError>((resume) => {
+        let canceled = false;
+        let listener: { unlisten(): Promise<void> } | undefined;
+        const close = () => {
+          if (listener) void listener.unlisten().catch(() => {});
+        };
 
-        // Cleanup must be synchronous for Stream.async — fire and forget.
+        void sqlClient
+          .listen(channel, (payload: string) => {
+            try {
+              const parsed = JSON.parse(payload);
+              emit(codec.decode(parsed));
+            } catch {
+              // Skip malformed payloads
+            }
+          })
+          .then(
+            (activeListener) => {
+              listener = activeListener;
+              if (canceled) close();
+              else resume(succeed(close));
+            },
+            (cause) => {
+              if (!canceled) resume(fail(toPostgresError("changeStream.listen", cause)));
+            },
+          );
+
         return () => {
-          void listenPromise.then((listener) => listener.unlisten()).catch(() => {});
+          canceled = true;
+          close();
         };
       }),
     );
@@ -152,18 +175,22 @@ export class PgChangeStream<T> implements Streamable<T>, Replayable<T> {
   // Poll stream — periodic catch-up for at-least-once delivery
   // ---------------------------------------------------------------------------
 
-  private createPollStream(offset: Offset): Stream<T, never> {
+  private createPollStream(offset: Offset): Stream<T, Throws<PostgresError>> {
     let cursor = offsetToDate(offset);
 
-    return pollStream(async () => {
-      const rows = await this.pollSince(cursor);
-      if (rows.length > 0) {
-        // Advance cursor to latest row's timestamp
-        const lastRow = rows[rows.length - 1]!;
-        cursor = new Date(lastRow.ts.getTime() + 1);
-      }
-      return rows.map((r) => r.value);
-    }, this.pollIntervalMs);
+    return pollStream(
+      async () => {
+        const rows = await this.pollSince(cursor);
+        if (rows.length > 0) {
+          // Advance cursor to latest row's timestamp
+          const lastRow = rows[rows.length - 1]!;
+          cursor = new Date(lastRow.ts.getTime() + 1);
+        }
+        return rows.map((r) => r.value);
+      },
+      this.pollIntervalMs,
+      "changeStream.poll",
+    );
   }
 
   private async pollSince(since: Date): Promise<{ value: T; ts: Date }[]> {

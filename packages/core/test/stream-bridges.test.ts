@@ -1,6 +1,8 @@
 import { describe, test, expect } from "bun:test";
-import { Chunk, Stream, run, sync } from "../src";
+import { Chunk, Stream, TaggedError, run, succeed, sync, type Throws } from "../src";
 import { EventEmitter } from "node:events";
+
+class BridgeError extends TaggedError("BridgeError")<{ readonly message: string }>() {}
 
 describe("Stream.fromCallback", () => {
   test("synchronous emits drain into chunks", async () => {
@@ -165,6 +167,32 @@ describe("Stream.async", () => {
     await run(s.toArray() as any);
     expect(cleaned).toBe(1);
   });
+
+  test("push failures enter the typed stream channel after buffered values", async () => {
+    const seen: number[] = [];
+    let cleaned = 0;
+    const stream = Stream.async<number, Throws<BridgeError>>((emit, _close, failStream) =>
+      sync(() => {
+        emit(1);
+        failStream(new BridgeError({ message: "source failed" }));
+        return () => {
+          cleaned++;
+        };
+      }),
+    );
+
+    const message = await run(
+      stream
+        .tap((value) => seen.push(value))
+        .drain()
+        .map(() => "unexpected")
+        .catchTag("BridgeError", (error) => succeed(error.message)),
+    );
+
+    expect(message).toBe("source failed");
+    expect(seen).toEqual([1]);
+    expect(cleaned).toBe(1);
+  });
 });
 
 describe("Stream.asyncChunks", () => {
@@ -191,6 +219,27 @@ describe("Stream.asyncChunks", () => {
     );
 
     expect(await run(stream.toArray())).toEqual([1]);
+  });
+
+  test("push failures preserve emitted chunks before failing", async () => {
+    const seen: number[] = [];
+    const stream = Stream.asyncChunks<number, Throws<BridgeError>>((emit, _close, failStream) =>
+      sync(() => {
+        emit(Chunk.fromArray([1, 2]));
+        failStream(new BridgeError({ message: "batch failed" }));
+      }),
+    );
+
+    const message = await run(
+      stream
+        .tap((value) => seen.push(value))
+        .drain()
+        .map(() => "unexpected")
+        .catchTag("BridgeError", (error) => succeed(error.message)),
+    );
+
+    expect(message).toBe("batch failed");
+    expect(seen).toEqual([1, 2]);
   });
 });
 

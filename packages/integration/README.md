@@ -19,14 +19,16 @@ skip unless `PERFECT_INTEGRATION=1` is set — this package is opt-in.
 
 `KAFKA_FULL=1` additionally runs the `@platformatic/kafka` adapter suite
 against real Apache Kafka (slow JVM startup; Redpanda has API gaps that
-adapter needs).
+adapter needs). That test bundles the probe and runs it with the package-local
+Node.js 24 binary because Platformatic Kafka 2.9 does not support Bun. The
+default Redpanda lane exercises the KafkaJS adapter.
 
 ## Containers
 
 | Backend              | Image                           | Used by                                         |
 | -------------------- | ------------------------------- | ----------------------------------------------- |
 | Kafka (default)      | `redpandadata/redpanda:v24.3.7` | `withKafka`                                     |
-| Kafka (full, opt-in) | `confluentinc/cp-kafka:7.9.1`   | `withApacheKafka` (`KAFKA_FULL=1`)              |
+| Kafka (full, opt-in) | `confluentinc/cp-kafka:8.2.2`   | `withApacheKafka` (`KAFKA_FULL=1`)              |
 | Redis                | `redis:7-alpine`                | `withRedis`; `@perfect/redis` integration tests |
 | Postgres             | `postgres:17-alpine`            | `withPostgres`; `@perfect/postgres` tests       |
 
@@ -34,8 +36,9 @@ adapter needs).
 
 - `src/infra.ts` — container lifecycle wrappers (`withKafka`, `withRedis`,
   `withPostgres`, `withAll`), Docker gating, `eventually()`, `uniqueName()`.
-- `src/adapters/kafkajs-adapter.ts` — kafkajs → `KafkaClient`, branding
-  identifiers (`TopicName`/`PartitionId`/`KafkaOffset`) at the driver boundary.
-- `src/adapters/stream-adapter.ts` — `@platformatic/kafka` → `KafkaClient`.
+- `@perfect/kafka-kafkajs` — KafkaJS → `KafkaClient`, branding identifiers at
+  the driver boundary.
+- `@perfect/kafka-platformatic` — Platformatic's event-emitting
+  `MessagesStream` → bounded Perfect stream bridge.
 - `test/kafka.test.ts` — round-trip, batched-commit, and shuffle-transport
   suites against a real broker.

@@ -22,11 +22,12 @@
 import type { Eff, Throws } from "@perfect/core";
 import { fromPromise } from "@perfect/core";
 import { Stream } from "@perfect/core/stream";
+import type { Pipe } from "@perfect/core/stream";
 import { OffsetTracker } from "@perfect/core/connect";
 import type { Envelope } from "@perfect/core/connect";
 import type { KafkaConsumer, KafkaOffsetCommit } from "./kafka-types";
 import { type TopicName, PartitionId, KafkaOffset } from "./brands";
-import { KafkaCommitError } from "./kafka-error";
+import { KafkaCommitError, type KafkaError } from "./kafka-error";
 
 export interface CommitBatchWithinConfig {
   /** Commit after this many messages. */
@@ -47,10 +48,10 @@ export interface CommitBatchWithinConfig {
  *
  * The pipe unwraps `Envelope<T>` → `T`, so downstream sees plain values.
  */
-export function commitBatchWithin<T>(
+export function commitBatchWithin<T, AckS = Throws<KafkaError>>(
   config: CommitBatchWithinConfig,
-): <S>(stream: Stream<Envelope<T>, S>) => Stream<T, S | Throws<KafkaCommitError>> {
-  return <S>(stream: Stream<Envelope<T>, S>) => {
+): Pipe<Envelope<T, AckS>, T, Throws<KafkaCommitError>> {
+  return <S>(stream: Stream<Envelope<T, AckS>, S>) => {
     const tracker = new OffsetTracker();
 
     return stream

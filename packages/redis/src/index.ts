@@ -22,5 +22,9 @@ export {
   type RedisStreamConfig,
   type RedisStreamInfo,
   type RedisClaimedMessage,
+  type RedisRecoveredMessage,
+  type RedisRecoveryResult,
+  type RedisStreamRecoveryConfig,
 } from "./redis-stream";
 export { RedisChannel, type RedisChannelConfig } from "./redis-channel";
+export { RedisStateBackend, type RedisStateBackendConfig } from "./redis-state-backend";

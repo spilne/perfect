@@ -35,6 +35,7 @@ const topology = StreamTopology.source(clicks)
 const handle = await TopologyRunner.run(topology, { group: "analytics" });
 
 console.log(handle.metrics().itemsProcessed);
+const exits = await handle.awaitExit();
 await handle.shutdown();
 ```
 
@@ -65,13 +66,15 @@ StreamTopology.source(readings)
 - **Joins** — windowed key joins between two keyed topologies (`JoinBuffer`)
 - **Dedup** — `.dedupe(keyFn)` per key
 - **Execution** — `TopologyRunner.run(topology, { group })` →
-  `TopologyHandle` with `shutdown()`, `isRunning()`, and `metrics()`
+  `TopologyHandle` with `shutdown()`, `awaitExit()`, `isRunning()`, and `metrics()`
   (throughput, buffer fill, backpressure stats)
 - **Distribution** — `DistributedRunner` + `planStages` split the DAG at
   `keyBy` boundaries into stages connected by a `ShuffleTransport`
   (Kafka-backed one in `@perfect/kafka`)
 - **State** — pluggable `StateBackend` (`InMemoryState` included) for keyed
-  state and checkpoints
+  state and checkpoints; restore completes before source fibers start
+- **Supervision** — sink, acknowledgement, checkpoint, and branch failures are
+  observable through `awaitExit()` and interrupt sibling branches
 - **Analysis** — `analyzeTopology` returns `TopologyWarning`s for suspect
   DAGs before you run them
 

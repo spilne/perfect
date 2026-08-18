@@ -57,3 +57,7 @@ export function numberResult(value: unknown): number {
   if (typeof value === "string") return Number(value);
   throw new TypeError(`Expected numeric Redis result, received ${String(value)}`);
 }
+
+export function redisKeyFamily(key: string): string {
+  return /\{[^{}]+\}/.test(key) ? key : `{${key}}`;
+}

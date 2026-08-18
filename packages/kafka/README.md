@@ -11,55 +11,59 @@ driver model) lives here; the queue-agnostic layer (`Envelope`,
 ## Install
 
 ```bash
-bun add @perfect/kafka
+bun add @perfect/kafka @perfect/kafka-kafkajs kafkajs
 ```
 
 > Not yet published to npm — install from the workspace for now.
 
-**No driver is bundled.** You inject a client implementing the small
-`KafkaClient` interface (`producer()` / `consumer()` / `admin()`) — kafkajs,
-`@confluentinc/kafka-javascript` (an optional peer dependency, kafkajs-
-compatible), and `@platformatic/kafka` all fit. Tests inject a fake, so no
-broker is needed there either.
+**No driver is bundled.** Install `@perfect/kafka-kafkajs` for KafkaJS on Bun
+or Node.js, or `@perfect/kafka-platformatic` for Platformatic Kafka on Node.js.
+You can also implement the small `KafkaClient` driver interface directly.
 
 ## Quickstart
 
 ```ts
-import { fromPromise } from "@perfect/core";
-import { KafkaTopic } from "@perfect/kafka";
-import { KafkaJS } from "@confluentinc/kafka-javascript"; // or kafkajs, or your own
+import { fromPromise, run } from "@perfect/core";
+import { kafkaConfig } from "@perfect/kafka";
+import { createKafkajsClient } from "@perfect/kafka-kafkajs";
 
 interface Order {
   id: string;
   amount: number;
 }
 
-const kafka = new KafkaJS.Kafka({ kafkaJS: { brokers: ["localhost:9092"] } });
-
-const orders = new KafkaTopic<Order>({
-  kafka,
-  topic: "orders",
-  groupId: "billing",
-});
+const orders = kafkaConfig<Order>()
+  .client(
+    createKafkajsClient({
+      brokers: ["localhost:9092"],
+      clientId: "billing-service",
+    }),
+  )
+  .topic("orders")
+  .group("billing")
+  .consumer({ sessionTimeout: 30_000 })
+  .build();
 
 // produce — JSON codec by default, pass codec: to override
-await orders.publish({ id: "o-1", amount: 42 }, { key: "o-1" });
+await run(orders.publish({ id: "o-1", amount: 42 }, { key: "o-1" }));
 
 // consume — decoded values as a core Stream; take() closes the consumer
 const first = await orders.subscribe().take(1).toArray().run();
 
 // at-least-once — Envelope<T> with ack/nack; acked offsets are committed
 // contiguously in the background (commitIntervalMs, default 1s)
-await orders
-  .subscribeAck()
-  .evalMap((env) =>
-    fromPromise(
-      () => handle(env.value).then(() => env.ack()),
-      (e) => e,
-    ),
-  )
-  .drain()
-  .run();
+await run(
+  orders
+    .subscribeAck()
+    .evalMap((env) =>
+      fromPromise(
+        () => handle(env.value),
+        (cause) => cause,
+      ).flatMap(() => env.ack()),
+    )
+    .drain()
+    .orDie(),
+);
 ```
 
 For explicit fs2-kafka-style batched commits, create a
@@ -79,11 +83,15 @@ their consumer explicitly, so call `subscription.close()` in a `finally` block.
   - `batchEmit: true` — preserve callback-driver fetch batches as native Stream chunks
   - checkpoint support for `@perfect/topology`
 - `commitBatchWithin` — typed batched offset-commit pipe (count or time window)
+- `KafkaConfigBuilder` / `kafkaConfig<T>()` — validated fluent construction
+  for the client, topic, group, codec, batch mode, and consumer tuning
 - `KafkaShuffleTransport` — Kafka-backed `ShuffleTransport` for distributed
   topology stages
 - Driver-agnostic types — `KafkaClient`, `KafkaConsumer`, `KafkaProducer`,
   `KafkaAdmin`, `KafkaConsumerOptions` (session/poll/heartbeat tuning knobs
   to avoid the slow-handler → rebalance → redelivery loop)
+- Driver failures remain typed as `Throws<KafkaError>` through publish,
+  consumption, acknowledgement, and commit operations
 
 ## Links
 

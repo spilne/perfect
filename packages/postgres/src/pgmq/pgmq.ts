@@ -152,6 +152,20 @@ export async function read<T>(
         sql`SELECT * FROM pgmq.read_grouped_rr_with_poll(${queue}, ${mode.vt}, ${mode.qty}, ${mode.maxPollSeconds ?? 5}, ${mode.pollIntervalMs ?? 100})`,
       );
       break;
+
+    case "grouped-head":
+      rows = await exec(
+        db,
+        sql`SELECT * FROM pgmq.read_grouped_head(${queue}, ${mode.vt}, ${mode.qty})`,
+      );
+      break;
+
+    case "grouped-head-poll":
+      rows = await exec(
+        db,
+        sql`SELECT * FROM pgmq.read_grouped_head_with_poll(${queue}, ${mode.vt}, ${mode.qty}, ${mode.maxPollSeconds ?? 5}, ${mode.pollIntervalMs ?? 100})`,
+      );
+      break;
   }
 
   return parseRecords<T>(rows);

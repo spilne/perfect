@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "emitDeclarationOnly": true,
+    "rootDir": "src",
+    "declarationDir": "dist/types",
+    "paths": {
+      "@perfect/core": ["../core/dist/types/index.d.ts"],
+      "@perfect/core/*": ["../core/dist/types/*"],
+      "@perfect/kafka": ["../kafka/dist/types/index.d.ts"],
+      "@perfect/kafka/*": ["../kafka/dist/types/*"]
+    }
+  },
+  "include": ["src"]
+}

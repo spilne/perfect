@@ -1,6 +1,6 @@
 import { succeed } from "@perfect/core";
 import type { Barrier, Eff, Throws } from "@perfect/core";
-import { numberResult, redisBlocking, redisEff } from "./internal";
+import { numberResult, redisBlocking, redisEff, redisKeyFamily } from "./internal";
 import type { RedisClient } from "./redis-client";
 import { RedisError } from "./redis-error";
 
@@ -32,14 +32,10 @@ export class RedisBarrier implements Barrier<Throws<RedisError>> {
     if (!Number.isInteger(config.parties) || config.parties < 1) {
       throw new Error("RedisBarrier.make: parties must be a positive integer");
     }
-    const barrier = new RedisBarrier(
-      config.redis,
-      `${config.key}:count`,
-      `${config.key}:notify`,
-      config.parties,
-    );
+    const key = redisKeyFamily(config.key);
+    const barrier = new RedisBarrier(config.redis, `${key}:count`, `${key}:notify`, config.parties);
     return redisEff("barrier.initialize", async () => {
-      await config.redis.set(`${config.key}:count`, "0", "NX");
+      await config.redis.set(`${key}:count`, "0", "NX");
       return barrier;
     });
   }

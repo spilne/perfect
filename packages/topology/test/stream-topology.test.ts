@@ -1,7 +1,16 @@
 import { describe, test, expect } from "bun:test";
+import { fail, succeed, sync } from "@perfect/core";
 import { Stream } from "@perfect/core/stream";
 import type { Streamable, Acknowledgeable, Sinkable, Codec } from "@perfect/core/connect";
-import { StreamTopology, TopologyRunner, WindowManager, JoinBuffer, ConsumerGroup } from "../src";
+import {
+  StreamTopology,
+  TopologyRunner,
+  WindowManager,
+  JoinBuffer,
+  ConsumerGroup,
+  CheckpointName,
+  InMemoryState,
+} from "../src";
 
 // ---------------------------------------------------------------------------
 // Test helpers — in-memory source/sink that implement the connect contracts
@@ -19,8 +28,8 @@ function createTestSource<T>(items: T[]): Streamable<T> & Acknowledgeable<T> {
       Stream.fromIterable(
         items.map((value) => ({
           value,
-          ack: async () => {},
-          nack: async () => {},
+          ack: () => succeed(undefined),
+          nack: () => succeed(undefined),
           metadata: {},
         })),
       ),
@@ -35,9 +44,7 @@ function createTestSink<T>(): Sinkable<T> & { items: T[] } {
       encode: (v: T) => JSON.stringify(v),
       decode: (raw: unknown) => JSON.parse(raw as string),
     },
-    publish: async (value: T) => {
-      items.push(value);
-    },
+    publish: (value: T) => sync(() => void items.push(value)),
   };
 }
 
@@ -198,6 +205,65 @@ describe("StreamTopology builder — declarative processing DAG", () => {
 // ---------------------------------------------------------------------------
 
 describe("TopologyRunner — compiles and runs a topology", () => {
+  test("reports natural completion through awaitExit", async () => {
+    const topology = StreamTopology.source(createTestSource([1])).to(createTestSink<number>());
+    const handle = await TopologyRunner.run(topology, { group: ConsumerGroup("test-exit") });
+
+    const exits = await handle.awaitExit();
+
+    expect(exits).toHaveLength(1);
+    expect(exits[0]?._tag).toBe("Success");
+    expect(handle.isRunning()).toBe(false);
+    await handle.shutdown();
+  });
+
+  test("reports acknowledgement failures through awaitExit", async () => {
+    const source = createTestSource([1]);
+    source.subscribeAck = () =>
+      Stream.fromIterable([
+        {
+          value: 1,
+          ack: () => fail(new Error("ack failed")),
+          nack: () => succeed(undefined),
+          metadata: {},
+        },
+      ]) as any;
+    const handle = await TopologyRunner.run(
+      StreamTopology.source(source).to(createTestSink<number>()),
+      { group: ConsumerGroup("test-ack-failure"), ackBatchSize: 1 },
+    );
+
+    const exits = await handle.awaitExit();
+
+    expect(exits[0]?._tag).toBe("Failure");
+    expect(handle.isRunning()).toBe(false);
+    await handle.shutdown();
+  });
+
+  test("restores keyed process state before consuming the first item", async () => {
+    const group = ConsumerGroup("test-restore-before-run");
+    const state = new InMemoryState<string, unknown>();
+    await state.put("process-map:0", [["sensor", { count: 41 }]]);
+    await state.checkpoint({ name: CheckpointName(`topology:${group}`) });
+    const sink = createTestSink<number>();
+    const topology = StreamTopology.source(createTestSource([{ id: "sensor" }]))
+      .keyBy((event) => event.id)
+      .process<{ count: number }, number>({
+        init: () => ({ count: 0 }),
+        process: (current) => ({
+          state: { count: current.count + 1 },
+          emit: current.count + 1,
+        }),
+      })
+      .to(sink);
+
+    const handle = await TopologyRunner.run(topology, { group, stateBackend: state });
+    await handle.awaitExit();
+
+    expect(sink.items).toEqual([42]);
+    await handle.shutdown();
+  });
+
   test("runs source → map → sink", async () => {
     const source = createTestSource([1, 2, 3, 4, 5]);
     const sink = createTestSink<number>();

@@ -16,6 +16,8 @@ export interface RedisClient {
   hset(key: string, ...args: Array<string | Record<string, string>>): Promise<number>;
   hget(key: string, field: string): Promise<string | null>;
   hgetall(key: string): Promise<Record<string, string>>;
+  hdel(key: string, ...fields: string[]): Promise<number>;
+  hkeys(key: string): Promise<string[]>;
 
   xadd(key: string, ...args: Array<string | number>): Promise<string | null>;
   xgroup(...args: Array<string | number>): Promise<unknown>;
@@ -29,6 +31,15 @@ export interface RedisClient {
     minIdleMs: number,
     ...ids: string[]
   ): Promise<unknown>;
+  xautoclaim?(
+    key: string,
+    group: string,
+    consumer: string,
+    minIdleMs: number,
+    start: string,
+    ...args: Array<string | number>
+  ): Promise<unknown>;
+  xdel?(key: string, ...ids: string[]): Promise<number>;
   xinfo(...args: Array<string | number>): Promise<unknown>;
 
   publish(channel: string, message: string): Promise<number>;

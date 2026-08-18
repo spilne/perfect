@@ -5,8 +5,8 @@
 // Ported from promin's typeclasses/state-backend.ts + adapters/memory.
 // Lives in core/connect so durable backends (Postgres/Redis/SQLite) can
 // implement the checkpoint interface without depending on @perfect/topology.
-// Promise-based like Envelope.ack — this is a driver-facing boundary; the
-// Eff layer wraps at call sites.
+// Persistence remains a Promise-based driver boundary; stateful operators
+// wrap it in an Eff when typed failures need to be exposed.
 // ---------------------------------------------------------------------------
 
 import { type Brand, nominal } from "../brand";

@@ -32,6 +32,13 @@ import { Cause } from "../cause";
 import { clockNow } from "../clock";
 import type { Exit } from "../exit";
 import type { Fiber } from "../fiber";
+import type { StateBackend } from "../connect/state-backend";
+
+export interface StatefulMapOptions<A, K, V, B, S> {
+  readonly stateBackend: StateBackend<K, V>;
+  readonly keyBy: (value: A) => K;
+  readonly process: (value: A, state: StateBackend<K, V>, key: K) => Eff<B, S>;
+}
 
 // Run an effect to its Exit without an error channel — worker fibers carry
 // full Causes to the consumer this way.
@@ -50,6 +57,15 @@ function interruptAllEff(drivers: Fiber<any>[]): Eff<void, never> {
       succeed(undefined) as any,
     );
   }) as any;
+}
+
+function combineFinalizers(
+  first: Eff<void, unknown> | null,
+  second: Eff<void, unknown> | null,
+): Eff<void, unknown> | null {
+  if (first === null) return second;
+  if (second === null) return first;
+  return new Suspend(Op.Ensuring, first, second) as any;
 }
 import { Chunk } from "./chunk";
 import { type FusibleOp, compileFused, hasFilterOps, SKIP } from "./fusion";
@@ -145,10 +161,7 @@ export class Stream<A, S = never> {
   }
 
   private _withFinalizer<S2>(finalizer: Eff<void, S2>): Stream<A, S | S2> {
-    const combined =
-      this._finalizer === null
-        ? finalizer
-        : (new Suspend(Op.Ensuring, this._finalizer, finalizer) as any);
+    const combined = combineFinalizers(this._finalizer, finalizer);
     const s = new Stream<A, any>(this._rawStep, combined as any);
     s._pending = this._pending.slice();
     return s as Stream<A, S | S2>;
@@ -444,7 +457,11 @@ export class Stream<A, S = never> {
    * The cleanup effect runs when the stream terminates.
    */
   static async<A, S>(
-    register: (emit: (value: A) => void, close: () => void) => Eff<(() => void) | void, S>,
+    register: (
+      emit: (value: A) => void,
+      close: () => void,
+      failStream: (error: unknown) => void,
+    ) => Eff<(() => void) | void, S>,
     bufferSize = 1024,
   ): Stream<A, S> {
     // the finalizer lives on the OUTER stream (via onFinalize below) so
@@ -456,7 +473,8 @@ export class Stream<A, S = never> {
       (succeed(null) as any).flatMap(() => {
         const buffer: A[] = [];
         let closed = false;
-        let waiter: ((step: Step<A>) => void) | null = null;
+        let failure: { readonly error: unknown } | null = null;
+        let waiter: ((effect: Eff<Step<A>, unknown>) => void) | null = null;
         let cleanup: (() => void) | void;
         let cleaned = false;
 
@@ -472,7 +490,7 @@ export class Stream<A, S = never> {
           if (waiter !== null) {
             const w = waiter;
             waiter = null;
-            w(emit(Chunk.single(value), next()));
+            w(succeed(emit(Chunk.single(value), next())));
             return;
           }
           if (buffer.length < bufferSize) buffer.push(value);
@@ -484,11 +502,23 @@ export class Stream<A, S = never> {
             const w = waiter;
             waiter = null;
             cleanupOnce();
-            w(DONE);
+            w(succeed(DONE));
           }
         };
 
-        function next(): Stream<A, never> {
+        const pushFail = (error: unknown) => {
+          if (closed) return;
+          closed = true;
+          failure = { error };
+          if (waiter !== null && buffer.length === 0) {
+            const w = waiter;
+            waiter = null;
+            cleanupOnce();
+            w(fail(error));
+          }
+        };
+
+        function next(): Stream<A, S> {
           return new Stream(
             new Suspend(
               Op.Async,
@@ -498,12 +528,17 @@ export class Stream<A, S = never> {
                   resume(succeed(emit(Chunk.fromArray(chunkArr), next())));
                   return;
                 }
+                if (failure !== null) {
+                  cleanupOnce();
+                  resume(fail(failure.error));
+                  return;
+                }
                 if (closed) {
                   cleanupOnce();
                   resume(succeed(DONE));
                   return;
                 }
-                waiter = (step) => resume(succeed(step));
+                waiter = (effect) => resume(effect);
                 return () => {
                   closed = true;
                   buffer.length = 0;
@@ -516,7 +551,7 @@ export class Stream<A, S = never> {
           );
         }
 
-        return (register(pushEmit, pushClose) as any)
+        return (register(pushEmit, pushClose, pushFail) as any)
           .map((c: (() => void) | void) => {
             cleanup = c ?? undefined;
             return next().step;
@@ -541,7 +576,11 @@ export class Stream<A, S = never> {
    * their native batch boundaries.
    */
   static asyncChunks<A, S>(
-    register: (emit: (chunk: Chunk<A>) => void, close: () => void) => Eff<(() => void) | void, S>,
+    register: (
+      emit: (chunk: Chunk<A>) => void,
+      close: () => void,
+      failStream: (error: unknown) => void,
+    ) => Eff<(() => void) | void, S>,
     bufferSize = 1024,
   ): Stream<A, S> {
     let activeCleanup: (() => void) | null = null;
@@ -550,7 +589,8 @@ export class Stream<A, S = never> {
       (succeed(null) as any).flatMap(() => {
         const buffer: Chunk<A>[] = [];
         let closed = false;
-        let waiter: ((step: Step<A>) => void) | null = null;
+        let failure: { readonly error: unknown } | null = null;
+        let waiter: ((effect: Eff<Step<A>, unknown>) => void) | null = null;
         let cleanup: (() => void) | void;
         let cleaned = false;
 
@@ -566,7 +606,7 @@ export class Stream<A, S = never> {
           if (waiter !== null) {
             const w = waiter;
             waiter = null;
-            w(emit(chunk, next()));
+            w(succeed(emit(chunk, next())));
             return;
           }
           if (buffer.length < bufferSize) buffer.push(chunk);
@@ -578,11 +618,23 @@ export class Stream<A, S = never> {
             const w = waiter;
             waiter = null;
             cleanupOnce();
-            w(DONE);
+            w(succeed(DONE));
           }
         };
 
-        function next(): Stream<A, never> {
+        const pushFail = (error: unknown) => {
+          if (closed) return;
+          closed = true;
+          failure = { error };
+          if (waiter !== null && buffer.length === 0) {
+            const w = waiter;
+            waiter = null;
+            cleanupOnce();
+            w(fail(error));
+          }
+        };
+
+        function next(): Stream<A, S> {
           return new Stream(
             new Suspend(
               Op.Async,
@@ -592,12 +644,17 @@ export class Stream<A, S = never> {
                   resume(succeed(emit(chunk, next())));
                   return;
                 }
+                if (failure !== null) {
+                  cleanupOnce();
+                  resume(fail(failure.error));
+                  return;
+                }
                 if (closed) {
                   cleanupOnce();
                   resume(succeed(DONE));
                   return;
                 }
-                waiter = (step) => resume(succeed(step));
+                waiter = (effect) => resume(effect);
                 return () => {
                   closed = true;
                   buffer.length = 0;
@@ -610,7 +667,7 @@ export class Stream<A, S = never> {
           );
         }
 
-        return (register(pushEmit, pushClose) as any)
+        return (register(pushEmit, pushClose, pushFail) as any)
           .map((c: (() => void) | void) => {
             cleanup = c ?? undefined;
             return next().step;
@@ -630,12 +687,16 @@ export class Stream<A, S = never> {
   }
 
   static bracket<A, S>(acquire: Eff<A, S>, release: (a: A) => Eff<void, never>): Stream<A, S> {
+    let activeFinalizer: Eff<void, never> | null = null;
     return new Stream(
       (acquire as any).map((resource: A) => {
-        const done = new Stream<A, never>(
-          new Suspend(Op.Ensuring, succeed(DONE), release(resource)) as any,
-        );
-        return emit(Chunk.single(resource), done);
+        activeFinalizer = release(resource);
+        return emit(Chunk.single(resource), Stream.empty());
+      }),
+      suspend(() => {
+        const finalizer = activeFinalizer;
+        activeFinalizer = null;
+        return finalizer ?? succeed(undefined);
       }),
     );
   }
@@ -689,6 +750,13 @@ export class Stream<A, S = never> {
     // Avoids the O(N²) concat-reduce the previous implementation used.
     type OuterS = S;
     const self = this;
+    let activeInnerFinalizer: Eff<void, unknown> | null = null;
+
+    const releaseInner = (): Eff<void, unknown> => {
+      const finalizer = activeInnerFinalizer;
+      activeInnerFinalizer = null;
+      return finalizer ?? succeed(undefined);
+    };
 
     const drainInner = (
       inner: Stream<B, S2>,
@@ -701,7 +769,7 @@ export class Stream<A, S = never> {
           if (s._tag === "Emit") {
             return succeed(emit(s.chunk, drainInner(s.next as any, outer, pending, idx + 0)));
           }
-          return nextElement(outer, pending, idx + 1).step;
+          return releaseInner().flatMap(() => nextElement(outer, pending, idx + 1).step);
         }),
       );
 
@@ -711,7 +779,9 @@ export class Stream<A, S = never> {
       idx: number,
     ): Stream<B, OuterS | S2> => {
       if (idx < pending.length) {
-        return drainInner(f(pending.get(idx)), outer, pending, idx);
+        const inner = f(pending.get(idx));
+        activeInnerFinalizer = inner._finalizer;
+        return drainInner(inner, outer, pending, idx);
       }
       return new Stream(
         (outer.step as any).flatMap((s: Step<A>) => {
@@ -721,7 +791,11 @@ export class Stream<A, S = never> {
       );
     };
 
-    return nextElement(self, Chunk.empty(), 0);
+    const source = nextElement(self, Chunk.empty(), 0);
+    return new Stream(
+      source.step,
+      combineFinalizers(suspend(releaseInner), self._finalizer),
+    ) as Stream<B, S | S2>;
   }
 
   evalMap<B, S2>(f: (a: A) => Eff<B, S2>): Stream<B, S | S2> {
@@ -850,9 +924,17 @@ export class Stream<A, S = never> {
     return go(initial, this);
   }
 
-  /** Alias of {@link mapAccumulate} — pure running state, emits the mapped value. */
-  statefulMap<St, B>(initial: St, f: (state: St, a: A) => readonly [St, B]): Stream<B, S> {
-    return this.mapAccumulate(initial, f);
+  statefulMap<K, V, B, S2>(options: StatefulMapOptions<A, K, V, B, S2>): Stream<B, S | S2>;
+  statefulMap<St, B>(initial: St, f: (state: St, value: A) => readonly [St, B]): Stream<B, S>;
+  statefulMap<K, V, B, S2, St>(
+    optionsOrInitial: StatefulMapOptions<A, K, V, B, S2> | St,
+    accumulate?: (state: St, value: A) => readonly [St, B],
+  ): Stream<B, S | S2> {
+    if (accumulate) return this.mapAccumulate(optionsOrInitial as St, accumulate);
+    const options = optionsOrInitial as StatefulMapOptions<A, K, V, B, S2>;
+    return this.evalMap((value) =>
+      options.process(value, options.stateBackend, options.keyBy(value)),
+    );
   }
 
   tap(f: (a: A) => void): Stream<A, S> {
@@ -1052,7 +1134,11 @@ export class Stream<A, S = never> {
       );
     }
 
-    return go(this, that, Chunk.empty(), Chunk.empty());
+    const source = go(this, that, Chunk.empty(), Chunk.empty());
+    return new Stream(source.step, combineFinalizers(this._finalizer, that._finalizer)) as Stream<
+      C,
+      S | S2
+    >;
   }
 
   interleave<S2>(that: Stream<A, S2>): Stream<A, S | S2> {
@@ -1105,8 +1191,12 @@ export class Stream<A, S = never> {
         ),
     );
 
-    return new Stream<A, any>(suspend(() => setup) as any).onFinalize(
-      interruptAllEff(drivers),
+    return new Stream<A, any>(
+      suspend(() => setup) as any,
+      combineFinalizers(
+        interruptAllEff(drivers),
+        combineFinalizers(self._finalizer, that._finalizer),
+      ),
     ) as any;
   }
 
@@ -1190,8 +1280,9 @@ export class Stream<A, S = never> {
         }),
     );
 
-    return new Stream<B, any>(suspend(() => setup) as any).onFinalize(
-      interruptAllEff(drivers),
+    return new Stream<B, any>(
+      suspend(() => setup) as any,
+      combineFinalizers(interruptAllEff(drivers), self._finalizer),
     ) as any;
   }
 
@@ -1258,8 +1349,9 @@ export class Stream<A, S = never> {
         }),
     );
 
-    return new Stream<B, any>(suspend(() => setup) as any).onFinalize(
-      interruptAllEff(drivers),
+    return new Stream<B, any>(
+      suspend(() => setup) as any,
+      combineFinalizers(interruptAllEff(drivers), self._finalizer),
     ) as any;
   }
 
@@ -1337,8 +1429,9 @@ export class Stream<A, S = never> {
       },
     );
 
-    return new Stream<Chunk<A>, any>(suspend(() => setup) as any).onFinalize(
-      interruptAllEff(drivers),
+    return new Stream<Chunk<A>, any>(
+      suspend(() => setup) as any,
+      combineFinalizers(interruptAllEff(drivers), self._finalizer),
     ) as any;
   }
 
@@ -1393,8 +1486,9 @@ export class Stream<A, S = never> {
       },
     );
 
-    return new Stream<A, any>(suspend(() => setup) as any).onFinalize(
-      interruptAllEff(drivers),
+    return new Stream<A, any>(
+      suspend(() => setup) as any,
+      combineFinalizers(interruptAllEff(drivers), self._finalizer),
     ) as any;
   }
 
@@ -1466,8 +1560,9 @@ export class Stream<A, S = never> {
       },
     );
 
-    return new Stream<A, any>(suspend(() => setup) as any).onFinalize(
-      interruptAllEff(drivers),
+    return new Stream<A, any>(
+      suspend(() => setup) as any,
+      combineFinalizers(interruptAllEff(drivers), self._finalizer),
     ) as any;
   }
 
@@ -1706,7 +1801,10 @@ export class Stream<A, S = never> {
 // Polymorphic in the input's effect union: a pipe THREADS the upstream S
 // through to its output (adding its own S2, e.g. a parse error) instead of
 // erasing it. `.through()` therefore preserves requirements end to end.
-export type Pipe<I, O, S2 = never> = <S>(input: Stream<I, S>) => Stream<O, S | S2>;
+export type Pipe<I, O, S2 = never> = (<S>(input: Stream<I, S>) => Stream<O, S | S2>) & {
+  readonly "~perfect/PipeOutput"?: O;
+  readonly "~perfect/PipeEffects"?: S2;
+};
 
 // ── Helpers ────────────────────────────────────────────────────────
 

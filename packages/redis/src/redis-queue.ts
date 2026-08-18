@@ -3,7 +3,7 @@ import type { Codec } from "@perfect/core/connect";
 import { JsonCodec } from "@perfect/core/connect";
 import type { Eff, Queue, Throws } from "@perfect/core";
 import { QueueClosed } from "@perfect/core";
-import { decode, encode, numberResult, redisBlocking, redisEff } from "./internal";
+import { decode, encode, numberResult, redisBlocking, redisEff, redisKeyFamily } from "./internal";
 import type { RedisClient } from "./redis-client";
 import { RedisError } from "./redis-error";
 
@@ -40,8 +40,9 @@ export class RedisQueue<A> implements Queue<A, Throws<RedisError>> {
     private readonly redis: RedisClient,
     config: Omit<RedisQueueConfig<A>, "redis">,
   ) {
-    this.dataKey = `${config.key}:data`;
-    this.metaKey = `${config.key}:meta`;
+    const key = redisKeyFamily(config.key);
+    this.dataKey = `${key}:data`;
+    this.metaKey = `${key}:meta`;
     this.capacity = config.capacity ?? -1;
     this.pollIntervalMs = config.pollIntervalMs ?? 100;
     this.codec = config.codec ?? (JsonCodec as Codec<A>);

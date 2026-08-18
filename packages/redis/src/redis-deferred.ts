@@ -2,7 +2,7 @@ import { fail as failEff, succeed as succeedEff } from "@perfect/core";
 import type { Codec } from "@perfect/core/connect";
 import { JsonCodec } from "@perfect/core/connect";
 import type { Deferred, Eff, Throws } from "@perfect/core";
-import { numberResult, redisBlocking, redisEff } from "./internal";
+import { numberResult, redisBlocking, redisEff, redisKeyFamily } from "./internal";
 import type { RedisClient } from "./redis-client";
 import { RedisError } from "./redis-error";
 
@@ -39,8 +39,9 @@ export class RedisDeferred<A, E = never> implements Deferred<A, E, Throws<RedisE
 
   private constructor(config: RedisDeferredConfig<A, E>) {
     this.redis = config.redis;
-    this.valueKey = `${config.key}:value`;
-    this.notifyKey = `${config.key}:notify`;
+    const key = redisKeyFamily(config.key);
+    this.valueKey = `${key}:value`;
+    this.notifyKey = `${key}:notify`;
     this.valueCodec = config.valueCodec ?? (JsonCodec as Codec<A>);
     this.errorCodec = config.errorCodec ?? (JsonCodec as Codec<E>);
     this.timeoutMs = config.timeoutMs ?? 0;

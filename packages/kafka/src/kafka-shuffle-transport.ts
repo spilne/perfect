@@ -14,9 +14,11 @@ import type {
   Acknowledgeable,
   KeyedSinkable,
 } from "@perfect/core/connect";
+import type { Throws } from "@perfect/core";
 import { KafkaTopic } from "./kafka-topic";
 import type { KafkaClient } from "./kafka-types";
 import { TopicName } from "./brands";
+import type { KafkaError } from "./kafka-error";
 
 export interface KafkaShuffleTransportConfig {
   /** Kafka client instance. */
@@ -25,7 +27,7 @@ export interface KafkaShuffleTransportConfig {
   partitions?: number;
 }
 
-export class KafkaShuffleTransport implements ShuffleTransport {
+export class KafkaShuffleTransport implements ShuffleTransport<unknown, Throws<KafkaError>> {
   private readonly kafka: KafkaClient;
   private readonly partitions: number;
   private readonly topics = new Map<ChannelName, KafkaTopic<unknown>>();
@@ -40,8 +42,8 @@ export class KafkaShuffleTransport implements ShuffleTransport {
     group: ConsumerGroup;
     codec: Codec<T>;
   }): Promise<{
-    source: Streamable<T> & Acknowledgeable<T>;
-    sink: KeyedSinkable<T>;
+    source: Streamable<T, Throws<KafkaError>> & Acknowledgeable<T, Throws<KafkaError>>;
+    sink: KeyedSinkable<T, Throws<KafkaError>>;
   }> {
     // A repartition channel is realized as a Kafka topic of the same name.
     const topicName = TopicName(params.name);

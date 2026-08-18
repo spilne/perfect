@@ -13,6 +13,8 @@ export {
 } from "./kafka-topic";
 export { commitBatchWithin, type CommitBatchWithinConfig } from "./commit-batch-within";
 export { KafkaCommitError } from "./kafka-error";
+export { KafkaError } from "./kafka-error";
+export { KafkaConfigBuilder, kafkaConfig } from "./kafka-config-builder";
 export { KafkaShuffleTransport, type KafkaShuffleTransportConfig } from "./kafka-shuffle-transport";
 export type {
   KafkaClient,

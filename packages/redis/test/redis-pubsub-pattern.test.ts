@@ -41,3 +41,39 @@ test("RedisPubSub exposes typed pattern subscriptions", async () => {
   expect(await received).toEqual([{ n: 1 }]);
   expect(listeners.size).toBe(0);
 });
+
+test("RedisPubSub fails a subscription on malformed messages", async () => {
+  const listeners = new Map<string, Set<(...args: any[]) => void>>();
+  const subscriber: Partial<RedisClient> = {
+    async subscribe() {},
+    async unsubscribe() {},
+    on(event, listener) {
+      const eventListeners = listeners.get(event) ?? new Set();
+      eventListeners.add(listener);
+      listeners.set(event, eventListeners);
+    },
+    off(event, listener) {
+      listeners.get(event)?.delete(listener);
+    },
+    disconnect() {},
+  };
+  const client: Partial<RedisClient> = {
+    duplicate() {
+      return subscriber as RedisClient;
+    },
+  };
+  const pubsub = RedisPubSub.make<number>({
+    redis: client as RedisClient,
+    channel: "events",
+  });
+
+  const stream = await unsafeRun(pubsub.subscribe);
+  const received = unsafeRun(stream.take(1).toArray());
+  for (const listener of listeners.get("message") ?? []) listener("events", "{");
+
+  await expect(received).rejects.toMatchObject({
+    _tag: "RedisError",
+    operation: "pubsub.decode",
+  });
+  expect(listeners.get("message")?.size).toBe(0);
+});

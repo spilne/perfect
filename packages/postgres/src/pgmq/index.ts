@@ -1,5 +1,6 @@
 // Drizzle DB type (re-export for convenience)
 export type { DrizzleDb } from "../lib/drizzle-db";
+export { PostgresError } from "../lib/postgres-error";
 
 // Types
 export {
@@ -15,6 +16,8 @@ export {
 export {
   PgmqQueue,
   type PgmqQueueConfig,
+  type PgmqQueueError,
+  type PgmqEnvelope,
   type PgmqOnSchemaError,
   PgmqSchemaValidationError,
 } from "./pgmq-queue";

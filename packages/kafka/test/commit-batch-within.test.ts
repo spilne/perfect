@@ -41,8 +41,8 @@ function makeFakeConsumer(opts?: { failCommits?: number }): {
 function envelope<T>(value: T, partition: number, offset: number): Envelope<T> {
   return {
     value,
-    ack: async () => {},
-    nack: async () => {},
+    ack: () => succeed(undefined),
+    nack: () => succeed(undefined),
     metadata: { topic: "t", partition, offset: String(offset) },
   };
 }

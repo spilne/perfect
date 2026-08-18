@@ -1,0 +1,10 @@
+{
+  "name": "@perfect/kafka-kafkajs",
+  "sourceRoot": "packages/kafka-kafkajs/src",
+  "targets": {
+    "build": {},
+    "test": {},
+    "lint": {},
+    "typecheck": {}
+  }
+}
