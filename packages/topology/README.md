@@ -20,8 +20,8 @@ bun add @perfect/topology
 ```ts
 import { ConsumerGroup, StreamTopology, TopologyRunner } from "@perfect/topology";
 
-// clicks / counts: anything implementing the connect contracts —
-// e.g. new KafkaTopic({ kafka, topic: "clicks", groupId: "analytics" })
+// clicks / counts: configured KafkaTopic, RedisStream, PgmqQueue, or any
+// application endpoint implementing the connect contracts.
 const topology = StreamTopology.source(clicks)
   .keyBy((e) => e.userId)
   .tumbling(60_000)
@@ -56,10 +56,13 @@ StreamTopology.source(readings)
   .process({
     // per-key state machine
     init: () => ({ avg: 0 }),
-    process: (state, r) => ({
-      state: { avg: state.avg * 0.7 + r.temp * 0.3 },
-      emit: { sensorId: r.sensorId, movingAvg: state.avg },
-    }),
+    process: (state, r) => {
+      const avg = state.avg * 0.7 + r.temp * 0.3;
+      return {
+        state: { avg },
+        emit: { sensorId: r.sensorId, movingAvg: avg },
+      };
+    },
   })
   .to(sink);
 ```
@@ -76,7 +79,7 @@ StreamTopology.source(readings)
   `TopologyHandle` with `shutdown()`, `awaitExit()`, `isRunning()`, and `metrics()`
   (throughput, buffer fill, backpressure stats)
 - **Distribution** — `DistributedRunner` + `planStages` split the DAG at
-  `keyBy` boundaries into stages connected by a `ShuffleTransport`
+  explicit `shuffle()` boundaries into stages connected by a `ShuffleTransport`
   (Kafka-backed one in `@perfect/kafka`)
 - **Partition state** — state is namespaced by topology, stage, operator, and
   partition; fenced lease epochs prevent stale instances from committing.
@@ -97,4 +100,6 @@ StreamTopology.source(readings)
 - Repo: https://github.com/spilne/perfect
 - Connect contracts: `@perfect/core/connect`
 - Kafka source/sink: `@perfect/kafka`
-- Streams chapter of the guide: [`documentation/09-streams.md`](../../documentation/09-streams.md)
+- Stateful topology guide: [`documentation/18-topologies.md`](../../documentation/18-topologies.md)
+- Messaging contracts: [`documentation/16-messaging.md`](../../documentation/16-messaging.md)
+- Redis/PostgreSQL state backends: [`documentation/17-distributed-backends.md`](../../documentation/17-distributed-backends.md)

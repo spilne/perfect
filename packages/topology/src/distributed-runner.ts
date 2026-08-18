@@ -35,7 +35,7 @@ import type { Eff } from "@perfect/core";
 export interface DistributedTopologyConfig {
   group: ConsumerGroup;
   deliveryGuarantee?: "at-least-once" | "exactly-once";
-  shuffleTransport: ShuffleTransport;
+  shuffleTransport: ShuffleTransport<unknown, unknown>;
   stateBackend?: StateBackend<string, unknown>;
   partitionedStateBackend?: PartitionedStateBackend<unknown>;
   topologyId?: TopologyId;
@@ -69,7 +69,7 @@ export interface DistributedTopologyConfig {
  *   .to(output);
  *
  * const handle = await DistributedRunner.run(topology, {
- *   group: "counter",
+ *   group: ConsumerGroup("counter"),
  *   shuffleTransport: new KafkaShuffleTransport({ kafka }),
  * });
  * ```
@@ -106,7 +106,10 @@ export class DistributedRunner {
     // Create repartition channels
     const channels = new Map<
       ChannelName,
-      { source: Streamable<unknown> & Acknowledgeable<unknown>; sink: KeyedSinkable<unknown> }
+      {
+        source: Streamable<unknown, unknown> & Acknowledgeable<unknown, unknown>;
+        sink: KeyedSinkable<unknown, unknown>;
+      }
     >();
 
     for (const topicName of plan.repartitionTopics) {
@@ -123,7 +126,9 @@ export class DistributedRunner {
 
     for (const stage of plan.stages) {
       // Build stage source
-      let stageSource: (Streamable<unknown> & Acknowledgeable<unknown>) | undefined;
+      let stageSource:
+        | (Streamable<unknown, unknown> & Acknowledgeable<unknown, unknown>)
+        | undefined;
       if (stage.source === "original") {
         // Use the original source from the topology
         stageSource = undefined; // TopologyRunner will use the source node
@@ -132,7 +137,7 @@ export class DistributedRunner {
       }
 
       // Build stage sink (repartition publish)
-      let stageSink: KeyedSinkable<unknown> | undefined;
+      let stageSink: KeyedSinkable<unknown, unknown> | undefined;
       if (stage.sink !== "terminal") {
         stageSink = channels.get(stage.sink.repartitionTopic)!.sink;
       }
@@ -205,8 +210,8 @@ export class DistributedRunner {
  */
 function buildStageTopology(params: {
   stage: ReturnType<typeof planStages>["stages"][number];
-  stageSource?: Streamable<unknown> & Acknowledgeable<unknown>;
-  stageSink?: KeyedSinkable<unknown>;
+  stageSource?: Streamable<unknown, unknown> & Acknowledgeable<unknown, unknown>;
+  stageSink?: KeyedSinkable<unknown, unknown>;
   originalTopology: BuiltTopology;
 }): BuiltTopology {
   const { stage, stageSource, stageSink, originalTopology } = params;

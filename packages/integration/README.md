@@ -1,8 +1,9 @@
 # @perfect/integration
 
-Testcontainers-based integration tests for the Kafka, Redis, and Postgres backends.
-Private package — never published, and deliberately **not** wired into CI or the
-default release/test pipelines.
+Testcontainers-based Kafka integration tests and shared Redis/PostgreSQL
+container helpers. This package is private and never published. The default
+test command can discover it, but CI skips its container-backed suites unless
+`PERFECT_INTEGRATION=1` is set.
 
 ## Running
 
@@ -25,12 +26,12 @@ default Redpanda lane exercises the KafkaJS adapter.
 
 ## Containers
 
-| Backend              | Image                           | Used by                                         |
-| -------------------- | ------------------------------- | ----------------------------------------------- |
-| Kafka (default)      | `redpandadata/redpanda:v24.3.7` | `withKafka`                                     |
-| Kafka (full, opt-in) | `confluentinc/cp-kafka:8.2.2`   | `withApacheKafka` (`KAFKA_FULL=1`)              |
-| Redis                | `redis:7-alpine`                | `withRedis`; `@perfect/redis` integration tests |
-| Postgres             | `postgres:17-alpine`            | `withPostgres`; `@perfect/postgres` tests       |
+| Backend              | Image                           | Used by                                                                     |
+| -------------------- | ------------------------------- | --------------------------------------------------------------------------- |
+| Kafka (default)      | `redpandadata/redpanda:v24.3.7` | `withKafka`                                                                 |
+| Kafka (full, opt-in) | `confluentinc/cp-kafka:8.2.2`   | `withApacheKafka` (`KAFKA_FULL=1`)                                          |
+| Redis                | `redis:7-alpine`                | `withRedis`; the Redis package has its own suite using the same image       |
+| Postgres             | `postgres:17-alpine`            | `withPostgres`; the PostgreSQL package has its own Postgres and PGMQ suites |
 
 ## Layout
 
@@ -42,3 +43,9 @@ default Redpanda lane exercises the KafkaJS adapter.
   `MessagesStream` → bounded Perfect stream bridge.
 - `test/kafka.test.ts` — round-trip, batched-commit, and shuffle-transport
   suites against a real broker.
+
+The Redis and PostgreSQL real-service tests live in
+`packages/redis/test/integration.test.ts` and
+`packages/postgres/test/integration.test.ts`, respectively. They are reported
+by the recursive repository test command and skip cleanly when Docker is not
+available.

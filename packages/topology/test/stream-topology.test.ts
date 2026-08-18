@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { fail, fromPromise, succeed, sync } from "@perfect/core";
+import { fail, fromPromise, succeed, sync, type Throws } from "@perfect/core";
 import { Stream } from "@perfect/core/stream";
 import type { Streamable, Acknowledgeable, Sinkable, Codec } from "@perfect/core/connect";
 import {
@@ -59,6 +59,21 @@ function createTestSink<T>(): Sinkable<T> & { items: T[] } {
 // ---------------------------------------------------------------------------
 
 describe("StreamTopology builder — declarative processing DAG", () => {
+  test("accepts a sink with typed backend errors", () => {
+    interface RemoteError {
+      readonly _tag: "RemoteError";
+    }
+
+    const error: RemoteError = { _tag: "RemoteError" };
+    const sink: Sinkable<number, Throws<RemoteError>> = {
+      codec: { encode: (value) => value, decode: (value) => value as number },
+      publish: () => fail(error),
+    };
+
+    const topology = StreamTopology.source(createTestSource([1])).to(sink);
+    expect(topology.compiled.sinks).toHaveLength(1);
+  });
+
   test("builds a source → map → filter → sink topology", () => {
     const source = createTestSource([1, 2, 3]);
     const sink = createTestSink<number>();

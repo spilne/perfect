@@ -2,7 +2,7 @@
 // ShuffleTransport; no real broker.
 
 import { describe, test, expect } from "bun:test";
-import { succeed, sync } from "@perfect/core";
+import { fail, succeed, sync, type Throws } from "@perfect/core";
 import { Stream } from "@perfect/core/stream";
 import type {
   Streamable,
@@ -11,7 +11,14 @@ import type {
   Codec,
   ShuffleTransport,
 } from "@perfect/core/connect";
-import { StreamTopology, DistributedRunner, planStages, ConsumerGroup, ChannelName } from "../src";
+import {
+  StreamTopology,
+  DistributedRunner,
+  planStages,
+  ConsumerGroup,
+  ChannelName,
+  type DistributedTopologyConfig,
+} from "../src";
 
 // ---------------------------------------------------------------------------
 // In-memory ShuffleTransport for testing
@@ -86,6 +93,35 @@ function createTestSink<T>(): Sinkable<T> & { items: T[] } {
 // ---------------------------------------------------------------------------
 
 describe("DistributedRunner", () => {
+  test("accepts a shuffle transport with typed backend errors", () => {
+    interface RemoteError {
+      readonly _tag: "RemoteError";
+    }
+
+    const error: RemoteError = { _tag: "RemoteError" };
+    const transport: ShuffleTransport<unknown, Throws<RemoteError>> = {
+      async getOrCreateRepartitionChannel({ codec }) {
+        return {
+          source: {
+            codec,
+            subscribe: () => Stream.empty(),
+            subscribeAck: () => Stream.empty(),
+          },
+          sink: {
+            codec,
+            publish: () => fail(error),
+          },
+        };
+      },
+    };
+    const config: DistributedTopologyConfig = {
+      group: ConsumerGroup("typed-transport"),
+      shuffleTransport: transport,
+    };
+
+    expect(config.shuffleTransport).toBe(transport);
+  });
+
   test("single stage (no shuffle) delegates to TopologyRunner", async () => {
     const source = createTestSource([{ v: 1 }, { v: 2 }, { v: 3 }]);
     const sink = createTestSink<number>();

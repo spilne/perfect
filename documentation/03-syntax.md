@@ -4,11 +4,11 @@ Perfect supports three ways to express effect pipelines. They all compile to
 the same fiber walk; choose by readability and tradeoff. The full bench is in
 [`bench/await-vs-flatmap-vs-dollar.md`](../packages/core/bench/await-vs-flatmap-vs-dollar.md).
 
-| Style | Build step? | Per-step (ns) | Best for |
+| Style | Build step? | Relative cost | Best for |
 |---|---|---|---|
-| Composed `.flatMap` | none | 14.5 | hot loops |
-| `eff(function*)` (recommended) | none | 64 | most code |
-| `eff(($) => ...)` (rewriter) | SWC plugin | 34 | when you want max readability + native speed |
+| Composed `.flatMap` | none | lowest | hot loops |
+| `eff(function*)` (recommended) | none | generator dispatch per bind | most code |
+| `eff(($) => ...)` (rewriter) | SWC/Bun plugin | compiles to method chains | readability without generator dispatch |
 
 ## Composed `.flatMap`
 
@@ -69,13 +69,15 @@ console.log(await (safe as any).run()); // → "caught: boom"
 ```
 <!-- @end -->
 
-Pros: looks like async/await, no build step, native `try/catch`. Cons: ~4×
-slower than `.flatMap` per step (still 2× faster than `await effect`).
+Pros: looks like async/await, no build step, native `try/catch`. Cons: generator
+dispatch costs more than a direct `.flatMap` chain; use the benchmark linked
+above when the difference matters.
 
 ## `eff($)` rewriter
 
-The cleanest source syntax — but requires the SWC plugin / TS rewriter from
-`@perfect/transform`.
+The cleanest source syntax — but requires a transform. The canonical compiler
+is the AST-based `@perfect/swc-plugin`; `@perfect/transform` supplies the Bun
+preload/source-text fallback.
 
 ```ts
 import { eff, succeed, run } from "@perfect/core";
@@ -87,9 +89,16 @@ const program = eff(($) => {
 });
 ```
 
-The rewriter transforms this at build time into a composed `.flatMap` chain,
-so runtime cost matches `.flatMap`. Only the declaration form
-`const x = $(e)` is recognized today.
+The compiler transforms this at build time into a composed `.flatMap` chain,
+so runtime cost matches the generated methods. The SWC plugin supports binds,
+object/array destructuring, expression bodies, and `if`/`else` branches that
+contain `$()`. Unsupported placements are build diagnostics rather than code
+containing a dangling `$`.
+
+The Bun source-text rewriter intentionally supports a narrower subset and
+directs unsupported control flow to the SWC plugin. The separate
+`for { x <- e } yield x` syntax is Bun-rewriter-only because it is not valid
+TypeScript for an AST plugin to parse.
 
 ## Mixing styles
 

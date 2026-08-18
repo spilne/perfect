@@ -1,12 +1,17 @@
 # Resilience + Coordination Primitives
 
-Eight interface-first primitives for the patterns you actually need in
-production: rate limiting, circuit breaking, request deduplication,
-broadcast, reactive state, and resource pooling.
+Interface-first primitives for production coordination: rate limiting,
+circuit breaking, request deduplication, weighted permits, queues, broadcast,
+reactive state, barriers, latches, deferred values, and resource pooling.
 
 All are **interface-first** — the in-process implementation ships with
 `@perfect/core`, but distributed backends (Redis, Postgres, etc.) can
 implement the same `Eff`-typed interface and slot in via Layer.
+
+The backend effect parameter defaults to `never` for in-process use. Remote
+implementations keep their failures visible, such as `Throws<RedisError>` or
+`Throws<PostgresError>`, without changing callers that depend on the shared
+interface.
 
 ## CircuitBreaker
 
@@ -392,7 +397,26 @@ and acquires fresh.
   `never`, while distributed implementations retain typed failures. `@perfect/redis`
   provides Redis-backed implementations with `Throws<RedisError>`.
 
+## Distributed implementations
+
+| Shared capability | Redis | PostgreSQL |
+| --- | --- | --- |
+| `Ref` | `RedisRef` / `RedisSubscriptionRef` | `PgRef` |
+| `Queue` | `RedisQueue` | `PgQueue`, `PgmqQueue` |
+| `PubSub` | `RedisPubSub`, `RedisChannel` | `PgChangeStream` (LISTEN/NOTIFY + polling) |
+| `Semaphore`, `Latch`, `Barrier`, `Deferred` | Redis implementations | — |
+| `RateLimiter`, `Throttle`, `Singleflight` | Redis implementations | PostgreSQL implementations |
+| `CircuitBreaker`, `CacheStore` | Redis implementations | — |
+| `StateBackend` / partitioned topology state | Redis implementations | PostgreSQL implementations |
+| Leader election | — | `PgLeaderElection` |
+
+Use [`@perfect/redis`](./17-distributed-backends.md#redis) for the broadest
+distributed primitive set. Use
+[`@perfect/postgres`](./17-distributed-backends.md#postgresql) when state,
+queue acknowledgement, and sink publication need one PostgreSQL transaction.
+
 ## Next
 
 - [Utilities — Duration, CacheStore](./12-utilities.md)
 - [Resources and scopes](./07-resources-and-scopes.md)
+- [Distributed backends](./17-distributed-backends.md)

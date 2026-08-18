@@ -20,8 +20,9 @@ Same model (typed errors, services, fibers, scopes, streams). Differences:
 When to pick which:
 - **effect-ts** — established ecosystem, more batteries (Schema, HttpApi,
   RPC, Cluster).
-- **Perfect** — fluent API, flat union, lighter type ergonomics, faster
-  per-step (~14 ns vs ~30 ns for `.flatMap`), explicit syntactic styles.
+- **Perfect** — fluent API, flat union, lighter type ergonomics, a small
+  runtime, and explicit syntactic styles. See the linked benchmark for current
+  machine-specific measurements.
 
 ## vs RxJS
 
@@ -55,8 +56,9 @@ Promises are great until you need:
 | Race | `Promise.race` (winner only, others orphaned) | `race` (interrupts losers) |
 | Testing time | mock `setTimeout` | `TestClock` |
 
-Perf cost: a composed `.flatMap` chain is ~14 ns per step vs ~28 ns for
-`Promise.then` — Perfect is *faster* for chains in the JS event loop.
+Performance depends on runtime and hardware. The repository performance gate
+tracks direct `.flatMap`, generator, Promise, and stream paths so regressions
+are measured instead of frozen into documentation claims.
 
 ## When NOT to use Perfect
 

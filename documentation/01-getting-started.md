@@ -88,8 +88,10 @@ const program = eff(($) => {
 });
 ```
 
-This form is rewritten at build time into the composed `.flatMap` chain. See
-[`@perfect/transform`](../packages/transform/) for setup.
+This form is rewritten at build time into the composed `.flatMap` chain. Use
+the canonical [`@perfect/swc-plugin`](../packages/swc-plugin/) in SWC-based
+builds, or [`@perfect/transform`](../packages/transform/) for Bun preload and
+the experimental `for { ... } yield` syntax.
 
 ## Running
 

@@ -72,6 +72,6 @@ repeatedly and returns the snapshot it exported.
 ## Links
 
 - Repo: https://github.com/spilne/perfect
-- Core observability APIs (`withSpan`, `Metrics`): see the guide in
-  [`documentation/`](../../documentation/)
+- Core observability APIs (`Log`, `withSpan`, `Metrics`):
+  [`documentation/15-observability.md`](../../documentation/15-observability.md)
 - HTTP client tracing: `@perfect/http-otel`

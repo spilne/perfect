@@ -38,7 +38,7 @@ const program = eff(($) => {
 });
 
 // for-comprehension — monad-generic; desugars to plain .flatMap/.map,
-// so it works on Eff, Array, Promise, Stream, or any type with those methods
+// so it works on Eff, Array, Stream, or any type with those methods
 const doubled = for {
   a <- succeed(21)
   b <- succeed(2)
@@ -68,8 +68,9 @@ const output = rewriteEffBlocks(source);
 
 ## What it handles
 
-- `eff(($) => { const x = $(e); … return x })` — binds, destructuring,
-  `if`/`else` with `$()`, sync statements wrapped automatically
+- `eff(($) => { const x = $(e); … return x })` — direct binds,
+  destructuring, multiline bind expressions, and sync statements wrapped
+  automatically
 - `for { a <- e1; b <- e2 } yield a + b` →
   `e1.flatMap((a) => e2.map((b) => a + b))`
 - Strings and comments are masked before scanning — code-looking text inside
@@ -78,7 +79,11 @@ const output = rewriteEffBlocks(source);
 ## Limitations
 
 - Guards (`if cond` inside `for {}`) are not supported — they'd need a
-  type-specific `filter`/`fail`. Use `.filter()` on the monad, or `eff($)`
+  type-specific `filter`/`fail`. Use `.filter()` on the monad, or the
+  SWC-compiled `eff($)` form
+- `$()` inside loops, `try` blocks, callbacks, `if` statements, function-call
+  arguments, or larger expressions is rejected with a `RewriteError`. Use the
+  AST-based `@perfect/swc-plugin` for supported `if`/`else` control flow
 - Comprehensions inside template-literal `${…}` interpolations are not
   transformed
 - Source-text rewriting means no source maps — for `eff($)` with source maps

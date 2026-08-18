@@ -97,4 +97,5 @@ their consumer explicitly, so call `subscription.close()` in a `finally` block.
 
 - Repo: https://github.com/spilne/perfect
 - Connect contracts: `@perfect/core/connect`
-- Streams and the full guide: [`documentation/`](../../documentation/)
+- Messaging guide: [`documentation/16-messaging.md`](../../documentation/16-messaging.md)
+- Stateful topology guide: [`documentation/18-topologies.md`](../../documentation/18-topologies.md)

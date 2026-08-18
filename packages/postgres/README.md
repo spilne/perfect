@@ -7,6 +7,8 @@ coordination primitives, and durable topology state.
 bun add @perfect/postgres drizzle-orm postgres
 ```
 
+> Not yet published to npm — install from the workspace for now.
+
 ## Atomic topology delivery
 
 `PgPartitionedStateBackend` stores state by topology, stage, and partition. It
@@ -26,7 +28,8 @@ and source delete/archive in one PostgreSQL transaction.
 
 ```ts
 import { ConsumerGroup, StreamTopology, TopologyRunner } from "@perfect/topology";
-import { PgPartitionedStateBackend, PgmqQueue } from "@perfect/postgres";
+import { PgPartitionedStateBackend } from "@perfect/postgres";
+import { PgmqQueue } from "@perfect/postgres/pgmq";
 
 const state = new PgPartitionedStateBackend({ db });
 await state.ensureTables();
@@ -48,3 +51,14 @@ For Kafka, Redis Streams, or mixed connector domains, use the default
 `"at-least-once"` mode and make the sink idempotent. Perfect rejects
 `"exactly-once"` when the source, sink, and state backend cannot prove that
 they share one transaction domain.
+
+## Other adapters
+
+- `PgQueue` — `SKIP LOCKED` work queue
+- `PgChangeStream` — LISTEN/NOTIFY with polling replay fallback
+- `PgRateLimiter`, `PgThrottle`, `PgSingleflight`, `PgRef`
+- `PgLeaderElection` — session advisory-lock leadership
+- `PgStateBackend` / `PgPartitionedStateBackend` — durable stream/topology state
+
+See [Redis and PostgreSQL backends](../../documentation/17-distributed-backends.md)
+and [Stateful topologies](../../documentation/18-topologies.md).

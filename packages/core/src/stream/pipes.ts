@@ -24,8 +24,158 @@ export const lines: Pipe<string, string> = (input) => {
     );
 };
 
-export const csv: Pipe<string, string[]> = (input) =>
-  input.through(lines).map((line) => line.split(",").map((cell) => cell.trim()));
+export interface CsvOptions {
+  /** Use the first record as object keys. Default: false. */
+  header?: boolean;
+  /** Field separator. Must be one character. Default: `,`. */
+  separator?: string;
+  /** Quote character. Must be one character. Default: `"`. */
+  quote?: string;
+  /** Trim every parsed field. Default: false. */
+  trim?: boolean;
+}
+
+function csvPipe(options: CsvOptions): Pipe<string, string[] | Record<string, string>> {
+  const separator = options.separator ?? ",";
+  const quote = options.quote ?? '"';
+  if (separator.length !== 1) throw new RangeError("csv separator must be one character");
+  if (quote.length !== 1) throw new RangeError("csv quote must be one character");
+  if (separator === quote) throw new RangeError("csv separator and quote must differ");
+
+  return (input) => {
+    let field = "";
+    let row: string[] = [];
+    let inQuotes = false;
+    let pendingQuote = false;
+    let skipLf = false;
+    let headers: string[] | null = null;
+
+    const finishField = () => {
+      row.push(options.trim ? field.trim() : field);
+      field = "";
+    };
+
+    const finishRow = (rows: string[][]) => {
+      finishField();
+      rows.push(row);
+      row = [];
+    };
+
+    const parseChunk = (chunk: string): string[][] => {
+      const rows: string[][] = [];
+      let index = 0;
+
+      while (index < chunk.length) {
+        const char = chunk[index]!;
+
+        if (skipLf) {
+          skipLf = false;
+          if (char === "\n") {
+            index++;
+            continue;
+          }
+        }
+
+        if (pendingQuote) {
+          pendingQuote = false;
+          if (char === quote) {
+            field += quote;
+            index++;
+            continue;
+          }
+          inQuotes = false;
+          continue;
+        }
+
+        if (inQuotes) {
+          if (char !== quote) {
+            field += char;
+            index++;
+            continue;
+          }
+          if (index + 1 >= chunk.length) {
+            pendingQuote = true;
+            index++;
+            continue;
+          }
+          if (chunk[index + 1] === quote) {
+            field += quote;
+            index += 2;
+            continue;
+          }
+          inQuotes = false;
+          index++;
+          continue;
+        }
+
+        if (char === quote && field.length === 0) {
+          inQuotes = true;
+          index++;
+          continue;
+        }
+        if (char === separator) {
+          finishField();
+          index++;
+          continue;
+        }
+        if (char === "\n") {
+          finishRow(rows);
+          index++;
+          continue;
+        }
+        if (char === "\r") {
+          finishRow(rows);
+          skipLf = true;
+          index++;
+          continue;
+        }
+        field += char;
+        index++;
+      }
+
+      return rows;
+    };
+
+    const finish = (): string[][] => {
+      const hasRecord = pendingQuote || inQuotes || field.length > 0 || row.length > 0;
+      pendingQuote = false;
+      inQuotes = false;
+      if (!hasRecord) return [];
+      const rows: string[][] = [];
+      finishRow(rows);
+      return rows;
+    };
+
+    const parsed = input
+      .flatMap((chunk) => Stream.fromArray(parseChunk(chunk)))
+      .concat(Stream.suspend(() => Stream.fromArray(finish())));
+
+    if (!options.header) return parsed;
+    return parsed.filterMap((values) => {
+      if (headers === null) {
+        headers = values;
+        return undefined;
+      }
+      return Object.fromEntries(headers.map((name, index) => [name, values[index] ?? ""]));
+    });
+  };
+}
+
+/** Parse CSV text chunks directly. Passing the function to `through` keeps
+ * the historical array output; calling `csv({ header: true })` emits records. */
+export function csv<S>(input: Stream<string, S>): Stream<string[], S>;
+export function csv(options: CsvOptions & { header: true }): Pipe<string, Record<string, string>>;
+export function csv(options?: CsvOptions & { header?: false }): Pipe<string, string[]>;
+export function csv<S>(
+  inputOrOptions?: Stream<string, S> | CsvOptions,
+): Stream<string[], S> | Pipe<string, string[]> | Pipe<string, Record<string, string>> {
+  if (inputOrOptions instanceof Stream) {
+    return csvPipe({})(inputOrOptions) as Stream<string[], S>;
+  }
+  return csvPipe(inputOrOptions ?? {}) as
+    | Pipe<string, string[]>
+    | Pipe<string, Record<string, string>>;
+}
 
 export const jsonl: Pipe<string, unknown> = (input) =>
   input.through(lines).collect((line) => {
@@ -180,9 +330,35 @@ export const utf8Decode: Pipe<Uint8Array, string> = (input) => {
 export const utf8Encode: Pipe<string, Uint8Array> = (input) =>
   input.map((str) => new TextEncoder().encode(str));
 
-export const base64Encode: Pipe<string, string> = (input) => input.map((str) => btoa(str));
+function encodeBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const blockSize = 32_768;
+  for (let offset = 0; offset < bytes.length; offset += blockSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + blockSize));
+  }
+  return btoa(binary);
+}
 
-export const base64Decode: Pipe<string, string> = (input) => input.map((str) => atob(str));
+function decodeBase64(value: string): Uint8Array {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
+  return bytes;
+}
+
+/** Encode each binary chunk as an independent base64 value. */
+export const base64Encode: Pipe<Uint8Array, string> = (input) => input.map(encodeBase64);
+
+/** Decode each base64 value into its original binary chunk. */
+export const base64Decode: Pipe<string, Uint8Array> = (input) => input.map(decodeBase64);
+
+/** UTF-8 text convenience wrapper around {@link base64Encode}. */
+export const base64EncodeText: Pipe<string, string> = (input) =>
+  input.through(utf8Encode).through(base64Encode);
+
+/** UTF-8 text convenience wrapper around {@link base64Decode}. */
+export const base64DecodeText: Pipe<string, string> = (input) =>
+  input.through(base64Decode).through(utf8Decode);
 
 export function take<A>(n: number): Pipe<A, A> {
   return (input) => input.take(n);

@@ -70,6 +70,11 @@ export default defineConfig({
           { text: "Utilities", link: "/12-utilities" },
           { text: "HTTP", link: "/13-http" },
           { text: "HTTP — OpenTelemetry", link: "/14-http-otel" },
+          { text: "Observability", link: "/15-observability" },
+          { text: "Messaging and Kafka", link: "/16-messaging" },
+          { text: "Redis and PostgreSQL", link: "/17-distributed-backends" },
+          { text: "Stateful topologies", link: "/18-topologies" },
+          { text: "Package map", link: "/19-packages" },
         ],
       },
       {
