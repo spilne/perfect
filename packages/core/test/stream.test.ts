@@ -206,6 +206,22 @@ describe("Stream transforms", () => {
     expect(await run(Stream.of(1, 1, 2, 2, 2, 3, 1, 1).changes().toArray())).toEqual([1, 2, 3, 1]);
   });
 
+  test("changes accepts a custom equality comparator", async () => {
+    const values = [
+      { id: 1, value: "a" },
+      { id: 1, value: "b" },
+      { id: 2, value: "c" },
+    ];
+
+    expect(
+      await run(
+        Stream.fromArray(values)
+          .changes((a, b) => a.id === b.id)
+          .toArray(),
+      ),
+    ).toEqual([values[0], values[2]]);
+  });
+
   test("collect", async () => {
     const s = Stream.of(1, 2, 3, 4, 5).collect((x) => (x % 2 === 0 ? `even:${x}` : undefined));
     expect(await run(s.toArray())).toEqual(["even:2", "even:4"]);

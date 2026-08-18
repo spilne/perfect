@@ -29,6 +29,7 @@ import {
   race,
   RetryPolicy,
   Stream,
+  StreamDeadlineError,
   Chunk,
   Sinks,
 } from "../src";
@@ -61,6 +62,7 @@ class Unauthorized {
 class BackendFailure {
   readonly _tag = "BackendFailure" as const;
 }
+class RetryableDefect extends Error {}
 
 // ── Durable topology identifiers ──────────────────────────────────
 
@@ -233,6 +235,18 @@ const Logger = service<Logger>("Logger");
     () => numbers,
     RetryPolicy.recurs(3),
   );
+  const _deadline: Stream<number, Throws<NotFound> | Throws<StreamDeadlineError>> =
+    numbers.deadline(100);
+  const _trapped: Stream<number, Throws<NotFound> | Throws<RetryableDefect>> =
+    numbers.trapError(RetryableDefect);
+  const _mergedAll: Stream<number | string, Throws<NotFound> | Throws<Forbidden>> = Stream.mergeAll(
+    numbers,
+    strings,
+  );
+  const _repeated: Stream<number, Throws<NotFound>> = Stream.repeatForever(() => numbers);
+  const _forkTapped: Stream<number, Throws<NotFound>> = numbers.tapEffectFork(() =>
+    fail(new Forbidden()),
+  );
 
   // @ts-expect-error either source may fail
   const _unsafeCombined: Stream<[number, string], never> = numbers.combineLatest(strings);
@@ -263,6 +277,11 @@ const Logger = service<Logger>("Logger");
     _until,
     _observed,
     _retried,
+    _deadline,
+    _trapped,
+    _mergedAll,
+    _repeated,
+    _forkTapped,
     _unsafeCombined,
     _unsafeAsync,
     _unsafeBroadcast,

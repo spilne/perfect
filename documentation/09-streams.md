@@ -22,6 +22,9 @@ Lazy, fused, effect-typed sequences. Adjacent pure operators (`map` /
 | `Stream.asyncChunks(register)`            | effectful callback registration preserving emitted chunks |
 | `Stream.bracket(acquire, release)`         | one resource with guaranteed release                      |
 | `Stream.retryFrom(factory, policy)`        | reacquire and retry a whole source                         |
+| `Stream.repeatN(factory, n)`               | reacquire and concatenate a source `n` times               |
+| `Stream.repeatForever(factory)`            | reacquire a whole source until downstream stops            |
+| `Stream.mergeAll(...streams)`              | concurrently merge any number of streams                   |
 | `Stream.tick(ms)`                         | a `void` every `ms`                                       |
 
 `Stream.fromQueue` treats `QueueClosed` as normal stream completion and
@@ -46,6 +49,8 @@ becomes `Stream<A, Throws<RedisError>>` rather than losing its error type.
 | `.evalMap(f)`    | map with an effect                                  |
 | `.evalFilter(f)` | filter with an effectful predicate                  |
 | `.tapEffect(f)`  | effectful action while retaining the element        |
+| `.tapEffectFork(f)` | detached, fire-and-forget effect per element      |
+| `.pauseWhen(ref, pollMs?)` | pause delivery while a shared boolean Ref is true |
 | `.through(pipe)` | run a `Pipe<A, B>` stream-to-stream transformer     |
 
 ## Stateful, concurrent, and reactive operators
@@ -59,7 +64,7 @@ stream whose effect type contains both errors.
 | `.mapAccumulate(initial, f)` | thread local state and emit one value per input |
 | `.statefulMap(initial, f)` | local-state shorthand for `mapAccumulate` |
 | `.statefulMap({ stateBackend, keyBy, process })` | use a pluggable keyed `StateBackend` |
-| `.changes()` / `.dedupe(key?)` / `.distinctBy(key)` | suppress repeated or previously seen values |
+| `.changes(compare?)` / `.dedupe(key?)` / `.distinctBy(key)` | suppress repeated or previously seen values |
 | `.grouped(n)` / `.sliding(n, step?)` | fixed batches and sliding windows |
 | `.parEvalMap(n, f)` | bounded parallel evaluation in input order |
 | `.parEvalMapUnordered(n, f)` | bounded parallel evaluation in completion order |
@@ -113,6 +118,10 @@ completion waits for its finalizer. It is not fire-and-forget telemetry; use an
 explicit bounded queue with a chosen overflow policy when dropping telemetry is
 acceptable.
 
+`tapEffectFork` is deliberately detached: it neither waits for fork completion
+nor adds fork failures to the stream error type. Prefer `observe` for reliable
+work and reserve the forked form for best-effort telemetry.
+
 ## Time and buffering
 
 | Operator | Semantics |
@@ -121,8 +130,10 @@ acceptable.
 | `.debounce(ms)` | emit after an inactivity gap |
 | `.sample(ms)` | emit the latest dirty value on each sampling boundary |
 | `.audit(ms)` | emit the latest value after a non-resetting window |
-| `.throttle(ms)` | allow at most one value per interval |
+| `.throttle(ms)` / `.metered(ms)` | pace delivery to at most one value per interval |
+| `.spaced(ms)` | delay every value, including the first |
 | `.timeout(ms)` | fail with typed `StreamTimeoutError` when a producing pull is too slow |
+| `.deadline(ms)` / `.timeoutTotal(ms)` | fail with typed `StreamDeadlineError` when total runtime expires |
 | `.interruptAfter(ms)` | end normally after the duration |
 | `.interruptOn(signal)` | end when an `AbortSignal` fires |
 | `.takeUntil(signalStream)` | end when another stream emits; propagate its failure |
@@ -143,7 +154,9 @@ requirements such as `Needs<Service>`:
 | `.catchSome(f)` | recover only when `f` returns a stream |
 | `.catchAllCause(f)` | recover typed failures, defects, or interruption |
 | `.mapError(f)` | transform typed errors |
-| `.tapError(f)` / `.tapErrorCause(f)` | observe failure without consuming it |
+| `.tapError(f)` / `.tapErrorCause(f)` | observe typed errors or the full Cause |
+| `.tapAnyError(f)` | observe every typed failure and defect without consuming it |
+| `.trapError(...classes)` | move matching defects into the typed error channel |
 | `.either()` / `.attempt()` | emit `Right` values and a terminal `Left` typed error |
 | `.exit()` / `.attemptCause()` | emit `Exit.Success` values or a terminal full `Cause` |
 
@@ -158,6 +171,8 @@ source and the recovery stream.
 | `.drain()`       | run for side effects, return `void`   |
 | `.forEach(f)`    | apply effect per element              |
 | `.head()`        | first element, or `undefined`         |
+| `.collectFirst(p)` | first matching element, or `undefined` |
+| `.collectWhile(p)` | matching prefix as an array          |
 | `.last()`        | last element, or `undefined`          |
 | `.count()`       | count emitted elements                |
 | `.runSink(sink)` | run a reusable terminal postprocessor |
@@ -339,7 +354,7 @@ source:
 ```ts
 const robust = Stream.retryFrom(
   () => kafkaTopic.subscribe(),
-  RetryPolicy.exponential(100).withMaxRetries(5),
+  RetryPolicy.exponential({ initial: 100, factor: 2 }).withMaxRetries(5),
 );
 ```
 

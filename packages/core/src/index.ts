@@ -139,7 +139,16 @@ export { Schedule, retryWith, repeat } from "./schedule";
 export type { Scheduler } from "./scheduler";
 export { AsyncScheduler, BunScheduler, SyncScheduler, setDefaultScheduler } from "./scheduler";
 export { WorkerPool } from "./worker";
-export { Chunk, Stream, StreamTimeoutError, SchemaParseError, Sink, Pipes, Sinks } from "./stream";
+export {
+  Chunk,
+  Stream,
+  StreamDeadlineError,
+  StreamTimeoutError,
+  SchemaParseError,
+  Sink,
+  Pipes,
+  Sinks,
+} from "./stream";
 export type { CsvOptions, Pipe, SchemaParser, StatefulMapOptions } from "./stream";
 
 export { eff } from "./syntax";
