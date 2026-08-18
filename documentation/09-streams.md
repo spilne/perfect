@@ -5,56 +5,58 @@ Lazy, fused, effect-typed sequences. Adjacent pure operators (`map` /
 
 ## Build a stream
 
-| | |
-|---|---|
-| `Stream.of(...vals)` | from explicit values |
-| `Stream.fromArray(arr)` | from a fixed array |
-| `Stream.fromIterable(iter)` | from any iterable |
-| `Stream.fromEffect(eff)` | one element produced by an effect |
-| `Stream.range(start, end, step?)` | numeric range |
-| `Stream.iterate(seed, f)` | infinite — `seed, f(seed), f(f(seed)), …` |
-| `Stream.unfold(seed, f)` | finite — `f` returns `null` to stop |
-| `Stream.fromQueue(q)` | bridge from a Queue |
-| `Stream.fromCallback(register)` | bridge from a callback API |
-| `Stream.fromEventEmitter(emitter, event)` | EventEmitter bridge |
-| `Stream.tick(ms)` | a `void` every `ms` |
+|                                           |                                                           |
+| ----------------------------------------- | --------------------------------------------------------- |
+| `Stream.of(...vals)`                      | from explicit values                                      |
+| `Stream.fromArray(arr)`                   | from a fixed array                                        |
+| `Stream.fromIterable(iter)`               | from any iterable                                         |
+| `Stream.fromEffect(eff)`                  | one element produced by an effect                         |
+| `Stream.range(start, end, step?)`         | numeric range                                             |
+| `Stream.iterate(seed, f)`                 | infinite — `seed, f(seed), f(f(seed)), …`                 |
+| `Stream.unfold(seed, f)`                  | finite — `f` returns `null` to stop                       |
+| `Stream.fromQueue(q)`                     | bridge from a Queue                                       |
+| `Stream.fromCallback(register)`           | bridge from a callback API                                |
+| `Stream.fromEventEmitter(emitter, event)` | EventEmitter bridge                                       |
+| `Stream.async(register)`                  | effectful callback registration                           |
+| `Stream.asyncChunks(register)`            | effectful callback registration preserving emitted chunks |
+| `Stream.tick(ms)`                         | a `void` every `ms`                                       |
 
 ## Transform
 
-| | |
-|---|---|
-| `.map(f)` | element-wise transform (fused) |
-| `.filter(p)` | keep elements matching predicate (fused) |
-| `.filterMap(f)` | map + filter — keep `f(a)` if not undefined (fused) |
-| `.tap(f)` | side-effect per element (fused) |
-| `.scan(zero, f)` | running fold |
-| `.take(n)` | first n elements (short-circuits) |
-| `.takeWhile(p)` | until predicate fails |
-| `.drop(n)` | skip first n |
-| `.flatMap(f)` | flatten one stream per element |
-| `.mapEffect(f)` | map with an effect |
-| `.through(pipe)` | run a `Pipe<A, B>` stream-to-stream transformer |
+|                  |                                                     |
+| ---------------- | --------------------------------------------------- |
+| `.map(f)`        | element-wise transform (fused)                      |
+| `.filter(p)`     | keep elements matching predicate (fused)            |
+| `.filterMap(f)`  | map + filter — keep `f(a)` if not undefined (fused) |
+| `.tap(f)`        | side-effect per element (fused)                     |
+| `.scan(zero, f)` | running fold                                        |
+| `.take(n)`       | first n elements (short-circuits)                   |
+| `.takeWhile(p)`  | until predicate fails                               |
+| `.drop(n)`       | skip first n                                        |
+| `.flatMap(f)`    | flatten one stream per element                      |
+| `.mapEffect(f)`  | map with an effect                                  |
+| `.through(pipe)` | run a `Pipe<A, B>` stream-to-stream transformer     |
 
 ## Run
 
-| | |
-|---|---|
-| `.toArray()` | collect into `A[]` |
-| `.drain()` | run for side effects, return `void` |
-| `.forEach(f)` | apply effect per element |
-| `.head()` | first element, or `undefined` |
-| `.last()` | last element, or `undefined` |
-| `.count()` | count emitted elements |
+|                  |                                       |
+| ---------------- | ------------------------------------- |
+| `.toArray()`     | collect into `A[]`                    |
+| `.drain()`       | run for side effects, return `void`   |
+| `.forEach(f)`    | apply effect per element              |
+| `.head()`        | first element, or `undefined`         |
+| `.last()`        | last element, or `undefined`          |
+| `.count()`       | count emitted elements                |
 | `.runSink(sink)` | run a reusable terminal postprocessor |
 
 ## Pipes vs sinks
 
 `Pipe` and `Sink` solve different problems:
 
-| | |
-|---|---|
+|                 |                                                           |
+| --------------- | --------------------------------------------------------- |
 | `Pipe<I, O, S>` | stream-to-stream transformation: `Stream<I> -> Stream<O>` |
-| `Sink<A, B, S>` | terminal postprocessor: `Stream<A> -> Eff<B, S>` |
+| `Sink<A, B, S>` | terminal postprocessor: `Stream<A> -> Eff<B, S>`          |
 
 Use a pipe when more streaming should happen after the operation. Use a sink
 when you want one final value or side effect.
@@ -72,20 +74,20 @@ console.log(words); // → ["a", "b", "c"]
 
 Built-in sinks:
 
-| | |
-|---|---|
-| `Sinks.collectAll<A>()` | collect all elements into `A[]` |
-| `Sinks.collectN<A>(n)` | collect up to `n` elements, then stop |
-| `Sinks.drain<A>()` | consume and discard |
-| `Sinks.drainWith(eff)` | drain, then return another effect's result |
-| `Sinks.forEach(f)` | effectful action per element |
-| `Sinks.forEachWhile(f)` | run effectful predicate until it returns false |
-| `Sinks.fold(zero, f)` | fold to one value |
-| `Sinks.foldEffect(zero, f)` | effectful fold |
-| `Sinks.fromEffect(eff)` | ignore input and return an effect |
-| `Sinks.head<A>()` | first element |
-| `Sinks.last<A>()` | last element |
-| `Sinks.count<A>()` | element count |
+|                             |                                                |
+| --------------------------- | ---------------------------------------------- |
+| `Sinks.collectAll<A>()`     | collect all elements into `A[]`                |
+| `Sinks.collectN<A>(n)`      | collect up to `n` elements, then stop          |
+| `Sinks.drain<A>()`          | consume and discard                            |
+| `Sinks.drainWith(eff)`      | drain, then return another effect's result     |
+| `Sinks.forEach(f)`          | effectful action per element                   |
+| `Sinks.forEachWhile(f)`     | run effectful predicate until it returns false |
+| `Sinks.fold(zero, f)`       | fold to one value                              |
+| `Sinks.foldEffect(zero, f)` | effectful fold                                 |
+| `Sinks.fromEffect(eff)`     | ignore input and return an effect              |
+| `Sinks.head<A>()`           | first element                                  |
+| `Sinks.last<A>()`           | last element                                   |
+| `Sinks.count<A>()`          | element count                                  |
 
 Sinks are composable values:
 
@@ -103,6 +105,7 @@ console.log(result); // → "total:3"
 ### Collect after transform
 
 <!-- @embed packages/core/examples/10-streams.ts#stream-collect -->
+
 ```ts
 import { Stream } from "@perfect/core";
 
@@ -115,11 +118,13 @@ const collected = await Stream.fromArray([1, 2, 3, 4, 5])
 
 console.log(collected); // → [30, 40, 50]
 ```
+
 <!-- @end -->
 
 ### Side-effect per element
 
 <!-- @embed packages/core/examples/10-streams.ts#stream-foreach -->
+
 ```ts
 import { Stream, succeed } from "@perfect/core";
 
@@ -133,11 +138,13 @@ await Stream.range(1, 4)
   .run();
 console.log(seen); // → [1, 2, 3]
 ```
+
 <!-- @end -->
 
 ### Lazy infinite + take
 
 <!-- @embed packages/core/examples/10-streams.ts#stream-mapchunks -->
+
 ```ts
 import { Stream } from "@perfect/core";
 
@@ -148,11 +155,13 @@ const first3 = await Stream.iterate(0, (n) => n + 1)
   .run();
 console.log(first3); // → [0, 1, 2]
 ```
+
 <!-- @end -->
 
 ### A fuller pipeline
 
 <!-- @embed packages/core/examples/11-stream-pipeline.ts#pipeline-etl -->
+
 ```ts
 import { Stream } from "@perfect/core";
 
@@ -184,6 +193,7 @@ const top3RunningTotals = await Stream.fromArray(rawCsv)
 console.log(kept); // → ["tokyo", "delhi", "shanghai"]
 console.log(top3RunningTotals); // → [0, 37_000_000, 69_000_000, 97_000_000]
 ```
+
 <!-- @end -->
 
 ## Retry
@@ -192,9 +202,7 @@ console.log(top3RunningTotals); // → [0, 37_000_000, 69_000_000, 97_000_000]
 `Stream.suspend(() => ...)` if your source has per-attempt state:
 
 ```ts
-const flaky = Stream.suspend(() =>
-  Stream.fromEffect(maybeFail()),
-);
+const flaky = Stream.suspend(() => Stream.fromEffect(maybeFail()));
 const robust = flaky.retry(RetryPolicy.recurs(3));
 ```
 
@@ -210,9 +218,11 @@ import { Stream, sync } from "@perfect/core";
 let finalized = 0;
 
 await Stream.fromArray([1, 2, 3])
-  .onFinalize(sync(() => {
-    finalized++;
-  }))
+  .onFinalize(
+    sync(() => {
+      finalized++;
+    }),
+  )
   .take(1)
   .drain()
   .run();
@@ -220,10 +230,12 @@ await Stream.fromArray([1, 2, 3])
 console.log(finalized); // → 1
 ```
 
-Push-source bridges use the same mechanism. `Stream.fromCallback` and
-`Stream.fromEventEmitter` unregister their waiter/listeners when the consumer
-short-circuits with `take`, `head`, `runSink(Sinks.head())`, or any other
-terminal operation that stops before natural source completion.
+Push-source bridges use the same mechanism. `Stream.fromCallback`,
+`Stream.fromEventEmitter`, `Stream.async`, and `Stream.asyncChunks` unregister
+their waiter/listeners when the consumer short-circuits with `take`, `head`,
+`runSink(Sinks.head())`, or any other terminal operation that stops before
+natural source completion. `asyncChunks` retains every emitted `Chunk` as one
+stream step, which lets batch-oriented drivers avoid per-element scheduling.
 
 Parallel stream operators preserve failures. A failed upstream pull or failed
 `parEvalMap` mapper produces a failed stream pull with the original `Cause`

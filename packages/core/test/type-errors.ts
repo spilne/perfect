@@ -28,6 +28,7 @@ import {
   all,
   race,
   Stream,
+  Chunk,
   Sinks,
 } from "../src";
 import { AckError, autoCommitBatchWithin, type Envelope } from "../src/connect";
@@ -96,6 +97,11 @@ class BackendFailure {
   const _acked: Stream<number, Backend | Throws<AckError>> = envelopes.through(
     autoCommitBatchWithin<number>(10, 1000),
   );
+  const _chunkSource: Stream<number, Backend> = Stream.asyncChunks((emit) =>
+    ref.get.map((value) => {
+      emit(Chunk.single(value));
+    }),
+  );
 
   void [
     _refGet,
@@ -113,6 +119,7 @@ class BackendFailure {
     _limited,
     _pooled,
     _acked,
+    _chunkSource,
   ];
 }
 interface UserRepo {

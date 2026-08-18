@@ -7,15 +7,13 @@
 //   - kafkajs / @confluentinc/kafka-javascript (callback-based consumer)
 //   - @platformatic/kafka (stream-based consumer)
 //
-// Ported from promin's kafka-topic.ts (Effect-TS → Eff): StreamPipeline.from
-// dropped (Stream is used directly), `Stream.async((emit) => ... Effect.promise)`
-// became perfect's `Stream.async((emit) => sync(...))`. Emission is per-message;
-// promin's opt-in `batchEmit` (chunk-per-FetchResponse) is deferred — perfect's
-// `Stream.async` emit is per-value.
+// Ported from promin's kafka-topic.ts (Effect-TS → Eff). Callback drivers use
+// Stream.asyncChunks when batchEmit is enabled so one Kafka fetch batch remains
+// one native Stream chunk.
 // ---------------------------------------------------------------------------
 
 import { sync } from "@perfect/core";
-import { Stream } from "@perfect/core/stream";
+import { Chunk, Stream } from "@perfect/core/stream";
 import { JsonCodec, OffsetTracker } from "@perfect/core/connect";
 import type {
   KeyedSinkable,
@@ -36,6 +34,7 @@ import type {
   KafkaConsumerOptions,
   KafkaProducer,
   KafkaMessage,
+  KafkaBatchPayload,
 } from "./kafka-types";
 import { type TopicName, type GroupId, PartitionId, KafkaOffset } from "./brands";
 
@@ -48,6 +47,12 @@ export interface KafkaTopicConfig<T> {
   groupId: GroupId;
   /** Codec for message serialization. Default: JsonCodec. */
   codec?: Codec<T>;
+  /**
+   * Preserve callback-driver fetch batches as Stream chunks. This opts into
+   * `eachBatch`; drivers must support it. Stream-based drivers remain
+   * per-message. Default: false.
+   */
+  batchEmit?: boolean;
   /**
    * Consumer timeout tuning (sessionTimeout / maxPollInterval /
    * heartbeatInterval), passed to every consumer this topic creates. Raise
@@ -84,6 +89,7 @@ export class KafkaTopic<T>
   private readonly kafka: KafkaClient;
   private readonly topic: TopicName;
   private readonly groupId: GroupId;
+  private readonly batchEmit: boolean;
   private readonly consumerOptions?: Omit<KafkaConsumerOptions, "groupId">;
 
   private producer?: KafkaProducer;
@@ -94,6 +100,7 @@ export class KafkaTopic<T>
     this.topic = config.topic;
     this.groupId = config.groupId;
     this.codec = config.codec ?? (JsonCodec as Codec<T>);
+    this.batchEmit = config.batchEmit ?? false;
     this.consumerOptions = config.consumerOptions;
   }
 
@@ -183,6 +190,7 @@ export class KafkaTopic<T>
     const groupId = params?.group ?? this.groupId;
     const commitIntervalMs = params?.commitIntervalMs ?? 1000;
     const autoCommit = params?.autoCommit ?? true;
+    const batchEmit = this.batchEmit;
     const offset = params?.offset ?? (params?.fromBeginning ? { type: "earliest" } : undefined);
     const consumerOptions = this.consumerOptions;
     const consumer = kafka.consumer({ groupId, ...consumerOptions });
@@ -229,35 +237,32 @@ export class KafkaTopic<T>
       return closePromise;
     };
 
-    const stream = Stream.async<Envelope<T>, never>((emit) => {
-      const makeEnvelope = (msg: KafkaMessage): Envelope<T> => {
-        const raw = msg.message.value;
-        const str = raw instanceof Buffer ? raw.toString() : (raw as string);
-        const value = codec.decode(JSON.parse(str));
-        const offset = Number(msg.message.offset);
-        const partition = msg.partition;
+    const makeEnvelope = (msg: KafkaMessage): Envelope<T> => {
+      const raw = msg.message.value;
+      const str = raw instanceof Buffer ? raw.toString() : (raw as string);
+      const value = codec.decode(JSON.parse(str));
+      const offset = Number(msg.message.offset);
+      const partition = msg.partition;
 
-        // Seed the frontier in delivery order (before any concurrent acks),
-        // so commits resume from the right offset on a non-zero start or a
-        // rebalance/seek rewind.
-        tracker.observe(partition, offset);
+      tracker.observe(partition, offset);
 
-        return {
-          value,
-          ack: async () => {
-            tracker.complete(partition, offset);
-          },
-          nack: async () => {},
-          metadata: {
-            topic: msg.topic,
-            partition,
-            offset: msg.message.offset,
-            key: msg.message.key?.toString(),
-            timestamp: msg.message.timestamp,
-          },
-        };
+      return {
+        value,
+        ack: async () => {
+          tracker.complete(partition, offset);
+        },
+        nack: async () => {},
+        metadata: {
+          topic: msg.topic,
+          partition,
+          offset: msg.message.offset,
+          key: msg.message.key?.toString(),
+          timestamp: msg.message.timestamp,
+        },
       };
+    };
 
+    const register = (emitBatch: (batch: Envelope<T>[]) => void) => {
       const run = async () => {
         await consumer.connect();
         await consumer.subscribe({ topic, fromBeginning: offset?.type === "earliest" });
@@ -271,18 +276,34 @@ export class KafkaTopic<T>
           await this.seekConsumer(consumer, offset);
           for await (const msg of consumer.stream()) {
             if (stopped) break;
-            emit(makeEnvelope(msg));
+            emitBatch([makeEnvelope(msg)]);
           }
         } else if (consumer.run) {
-          await this.runCallbackConsumer({
-            consumer,
-            offset,
-            autoCommit: false,
-            onMessage: async (msg) => {
-              if (stopped) return;
-              emit(makeEnvelope(msg));
-            },
-          });
+          if (batchEmit) {
+            await this.runCallbackConsumer({
+              consumer,
+              offset,
+              autoCommit: false,
+              onBatch: async ({ batch }) => {
+                if (stopped || batch.messages.length === 0) return;
+                emitBatch(
+                  batch.messages.map((message) =>
+                    makeEnvelope({ topic: batch.topic, partition: batch.partition, message }),
+                  ),
+                );
+              },
+            });
+          } else {
+            await this.runCallbackConsumer({
+              consumer,
+              offset,
+              autoCommit: false,
+              onMessage: async (msg) => {
+                if (stopped) return;
+                emitBatch([makeEnvelope(msg)]);
+              },
+            });
+          }
         }
       };
 
@@ -290,7 +311,17 @@ export class KafkaTopic<T>
         run().catch(() => {});
         return () => {};
       });
-    });
+    };
+
+    const stream = batchEmit
+      ? Stream.asyncChunks<Envelope<T>, never>((emit) =>
+          register((batch) => emit(Chunk.fromArray(batch))),
+        )
+      : Stream.async<Envelope<T>, never>((emit) =>
+          register((batch) => {
+            for (const envelope of batch) emit(envelope);
+          }),
+        );
 
     return {
       stream,
@@ -366,13 +397,36 @@ export class KafkaTopic<T>
     consumer: KafkaConsumer;
     offset?: Offset;
     autoCommit?: boolean;
-    onMessage: (message: KafkaMessage) => Promise<void>;
+    onMessage?: (message: KafkaMessage) => Promise<void>;
+    onBatch?: (payload: KafkaBatchPayload) => Promise<void>;
   }): Promise<void> {
-    const { consumer, offset, autoCommit, onMessage } = params;
+    const { consumer, offset, autoCommit, onMessage, onBatch } = params;
     if (!consumer.run) return;
 
+    const run = (beforeDelivery?: () => Promise<boolean>): Promise<void> => {
+      if (onBatch) {
+        return consumer.run!({
+          autoCommit,
+          eachBatch: beforeDelivery
+            ? async (payload) => {
+                if (await beforeDelivery()) await onBatch(payload);
+              }
+            : onBatch,
+        });
+      }
+      if (!onMessage) return Promise.resolve();
+      return consumer.run!({
+        autoCommit,
+        eachMessage: beforeDelivery
+          ? async (message) => {
+              if (await beforeDelivery()) await onMessage(message);
+            }
+          : onMessage,
+      });
+    };
+
     if (!offset || !consumer.seek) {
-      await consumer.run({ autoCommit, eachMessage: onMessage });
+      await run();
       return;
     }
 
@@ -386,16 +440,13 @@ export class KafkaTopic<T>
       releaseBuffered = resolve;
     });
 
-    const running = consumer.run({
-      autoCommit,
-      eachMessage: async (message) => {
-        if (!replayReady) {
-          notifyStarted();
-          await buffered;
-          return;
-        }
-        await onMessage(message);
-      },
+    const running = run(async () => {
+      if (!replayReady) {
+        notifyStarted();
+        await buffered;
+        return false;
+      }
+      return true;
     });
 
     await Promise.race([running, started]);
@@ -413,12 +464,10 @@ export class KafkaTopic<T>
     const kafka = this.kafka;
     const topic = this.topic;
     const groupId = group ?? this.groupId;
+    const batchEmit = this.batchEmit;
     const consumerOptions = this.consumerOptions;
 
-    // Same double-wiring as subscribeAck — see the comment there.
-    let cleanup: (() => void) | undefined;
-
-    const stream = Stream.async<T, never>((emit) => {
+    const register = (emitBatch: (batch: T[]) => void) => {
       const consumer = kafka.consumer({ groupId, ...consumerOptions });
       let stopped = false;
 
@@ -440,22 +489,37 @@ export class KafkaTopic<T>
           await this.seekConsumer(consumer, offset);
           for await (const msg of consumer.stream()) {
             if (stopped) break;
-            emit(decodeMessage(msg));
+            emitBatch([decodeMessage(msg)]);
           }
         } else if (consumer.run) {
-          await this.runCallbackConsumer({
-            consumer,
-            offset,
-            onMessage: async (msg) => {
-              if (stopped) return;
-              emit(decodeMessage(msg));
-            },
-          });
+          if (batchEmit) {
+            await this.runCallbackConsumer({
+              consumer,
+              offset,
+              onBatch: async ({ batch }) => {
+                if (stopped || batch.messages.length === 0) return;
+                emitBatch(
+                  batch.messages.map((message) =>
+                    decodeMessage({ topic: batch.topic, partition: batch.partition, message }),
+                  ),
+                );
+              },
+            });
+          } else {
+            await this.runCallbackConsumer({
+              consumer,
+              offset,
+              onMessage: async (msg) => {
+                if (stopped) return;
+                emitBatch([decodeMessage(msg)]);
+              },
+            });
+          }
         }
       };
 
       let cleaned = false;
-      cleanup = () => {
+      const cleanup = () => {
         if (cleaned) return;
         cleaned = true;
         stopped = true;
@@ -466,9 +530,15 @@ export class KafkaTopic<T>
         run().catch(() => {});
         return cleanup;
       });
-    });
+    };
 
-    return stream.onFinalize(sync(() => cleanup?.()));
+    return batchEmit
+      ? Stream.asyncChunks<T, never>((emit) => register((batch) => emit(Chunk.fromArray(batch))))
+      : Stream.async<T, never>((emit) =>
+          register((batch) => {
+            for (const value of batch) emit(value);
+          }),
+        );
   }
 
   // =========================================================================

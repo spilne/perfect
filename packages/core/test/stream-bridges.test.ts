@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { Stream, run, sync } from "../src";
+import { Chunk, Stream, run, sync } from "../src";
 import { EventEmitter } from "node:events";
 
 describe("Stream.fromCallback", () => {
@@ -164,6 +164,33 @@ describe("Stream.async", () => {
     );
     await run(s.toArray() as any);
     expect(cleaned).toBe(1);
+  });
+});
+
+describe("Stream.asyncChunks", () => {
+  test("preserves callback batch boundaries", async () => {
+    const stream = Stream.asyncChunks<number, never>((emit, close) =>
+      sync(() => {
+        emit(Chunk.fromArray([1, 2]));
+        emit(Chunk.fromArray([3, 4, 5]));
+        close();
+      }),
+    );
+
+    const sizes = await run(stream.mapChunks((chunk) => Chunk.single(chunk.length)).toArray());
+    expect(sizes).toEqual([2, 3]);
+  });
+
+  test("drops empty chunks", async () => {
+    const stream = Stream.asyncChunks<number, never>((emit, close) =>
+      sync(() => {
+        emit(Chunk.empty());
+        emit(Chunk.single(1));
+        close();
+      }),
+    );
+
+    expect(await run(stream.toArray())).toEqual([1]);
   });
 });
 

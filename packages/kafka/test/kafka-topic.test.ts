@@ -2,15 +2,14 @@
 // consumer callback with canned batches, so we can assert ordering and
 // dispatch without booting a real broker.
 //
-// Ported from promin's kafka-topic.test.ts. promin's batchEmit-flag tests
-// became eachMessage-dispatch tests: perfect's v1 port is per-message only
-// (batchEmit / chunk-emit deferred — see kafka-topic.ts header).
+// Ported from promin's kafka-topic.test.ts.
 
 import { describe, it, expect } from "bun:test";
-import { fromPromise, run } from "@perfect/core";
+import { Chunk, fromPromise, run } from "@perfect/core";
 import { KafkaTopic } from "../src/kafka-topic";
 import type {
   KafkaAdmin,
+  KafkaBatchPayload,
   KafkaClient,
   KafkaConsumer,
   KafkaMessage,
@@ -70,6 +69,22 @@ function makeFakeKafka(opts: {
       }
       if (hasBatch) {
         dispatchedVia.current = "eachBatch";
+        for (let partition = 0; partition < opts.batches.length; partition++) {
+          const batch = opts.batches[partition]!;
+          const payload: KafkaBatchPayload = {
+            batch: {
+              topic: opts.topic,
+              partition: PartitionId(partition),
+              messages: batch.map((message) => ({
+                key: message.key ?? null,
+                value: JSON.stringify(message.value),
+                offset: KafkaOffset(message.offset),
+                timestamp: "0",
+              })),
+            },
+          };
+          await params.eachBatch!(payload);
+        }
       } else if (hasMessage) {
         dispatchedVia.current = "eachMessage";
         for (let partition = 0; partition < opts.batches.length; partition++) {
@@ -145,6 +160,40 @@ describe("KafkaTopic — subscribe", () => {
     expect(dispatchedVia.current).toBe("eachMessage");
   });
 
+  it("preserves eachBatch boundaries when batchEmit is enabled", async () => {
+    const { client, dispatchedVia } = makeFakeKafka({
+      topic: TopicName("orders"),
+      batches: [
+        [
+          { value: { n: 1 }, offset: "0" },
+          { value: { n: 2 }, offset: "1" },
+        ],
+        [
+          { value: { n: 3 }, offset: "0" },
+          { value: { n: 4 }, offset: "1" },
+          { value: { n: 5 }, offset: "2" },
+        ],
+      ],
+    });
+    const topic = new KafkaTopic<{ n: number }>({
+      kafka: client,
+      topic: TopicName("orders"),
+      groupId: GroupId("g"),
+      batchEmit: true,
+    });
+
+    const chunkSizes = await run(
+      topic
+        .subscribe()
+        .take(5)
+        .mapChunks((chunk) => Chunk.single(chunk.length))
+        .toArray(),
+    );
+
+    expect(chunkSizes).toEqual([2, 3]);
+    expect(dispatchedVia.current).toBe("eachBatch");
+  });
+
   it("delivers messages from multiple partitions", async () => {
     const { client } = makeFakeKafka({
       topic: TopicName("orders"),
@@ -191,6 +240,41 @@ describe("KafkaTopic — subscribe", () => {
 });
 
 describe("KafkaTopic — subscribeAck", () => {
+  it("preserves acknowledgement envelope batches", async () => {
+    const { client, dispatchedVia } = makeFakeKafka({
+      topic: TopicName("orders"),
+      batches: [
+        [
+          { value: { n: 1 }, offset: "0" },
+          { value: { n: 2 }, offset: "1" },
+          { value: { n: 3 }, offset: "2" },
+        ],
+      ],
+    });
+    const topic = new KafkaTopic<{ n: number }>({
+      kafka: client,
+      topic: TopicName("orders"),
+      groupId: GroupId("g"),
+      batchEmit: true,
+    });
+    const chunkSizes: number[] = [];
+
+    const envelopes = await run(
+      topic
+        .subscribeAck()
+        .take(3)
+        .mapChunks((chunk) => {
+          chunkSizes.push(chunk.length);
+          return chunk;
+        })
+        .toArray(),
+    );
+
+    expect(envelopes.map((envelope) => envelope.value.n)).toEqual([1, 2, 3]);
+    expect(chunkSizes).toEqual([3]);
+    expect(dispatchedVia.current).toBe("eachBatch");
+  });
+
   it("exposes the subscription consumer as a commit handle", async () => {
     const { client, consumer, subscriptions } = makeFakeKafka({
       topic: TopicName("orders"),
@@ -218,7 +302,7 @@ describe("KafkaTopic — subscribeAck", () => {
   });
 
   it("applies specific replay offsets to every partition", async () => {
-    const { client, sought } = makeFakeKafka({
+    const { client, sought, dispatchedVia } = makeFakeKafka({
       topic: TopicName("orders"),
       batches: [[{ value: { n: 1 }, offset: "7" }], [{ value: { n: 2 }, offset: "7" }]],
     });
@@ -226,6 +310,7 @@ describe("KafkaTopic — subscribeAck", () => {
       kafka: client,
       topic: TopicName("orders"),
       groupId: GroupId("g"),
+      batchEmit: true,
     });
 
     await run(
@@ -239,6 +324,7 @@ describe("KafkaTopic — subscribeAck", () => {
       { topic: TopicName("orders"), partition: PartitionId(0), offset: KafkaOffset("7") },
       { topic: TopicName("orders"), partition: PartitionId(1), offset: KafkaOffset("7") },
     ]);
+    expect(dispatchedVia.current).toBe("eachBatch");
   });
 
   it("delivers envelopes in order with offset metadata", async () => {
