@@ -535,6 +535,100 @@ export class Stream<A, S = never> {
     ) as any;
   }
 
+  /**
+   * Chunk-preserving variant of {@link Stream.async}. Each emitted chunk
+   * remains one stream step, allowing callback-based batch sources to retain
+   * their native batch boundaries.
+   */
+  static asyncChunks<A, S>(
+    register: (emit: (chunk: Chunk<A>) => void, close: () => void) => Eff<(() => void) | void, S>,
+    bufferSize = 1024,
+  ): Stream<A, S> {
+    let activeCleanup: (() => void) | null = null;
+
+    const source = new Stream(
+      (succeed(null) as any).flatMap(() => {
+        const buffer: Chunk<A>[] = [];
+        let closed = false;
+        let waiter: ((step: Step<A>) => void) | null = null;
+        let cleanup: (() => void) | void;
+        let cleaned = false;
+
+        const cleanupOnce = (): void => {
+          if (cleaned) return;
+          cleaned = true;
+          if (cleanup) cleanup();
+        };
+        activeCleanup = cleanupOnce;
+
+        const pushEmit = (chunk: Chunk<A>) => {
+          if (closed || chunk.isEmpty) return;
+          if (waiter !== null) {
+            const w = waiter;
+            waiter = null;
+            w(emit(chunk, next()));
+            return;
+          }
+          if (buffer.length < bufferSize) buffer.push(chunk);
+        };
+        const pushClose = () => {
+          if (closed) return;
+          closed = true;
+          if (waiter !== null && buffer.length === 0) {
+            const w = waiter;
+            waiter = null;
+            cleanupOnce();
+            w(DONE);
+          }
+        };
+
+        function next(): Stream<A, never> {
+          return new Stream(
+            new Suspend(
+              Op.Async,
+              (resume: (eff: any) => void) => {
+                const chunk = buffer.shift();
+                if (chunk) {
+                  resume(succeed(emit(chunk, next())));
+                  return;
+                }
+                if (closed) {
+                  cleanupOnce();
+                  resume(succeed(DONE));
+                  return;
+                }
+                waiter = (step) => resume(succeed(step));
+                return () => {
+                  closed = true;
+                  buffer.length = 0;
+                  waiter = null;
+                  cleanupOnce();
+                };
+              },
+              null,
+            ) as any,
+          );
+        }
+
+        return (register(pushEmit, pushClose) as any)
+          .map((c: (() => void) | void) => {
+            cleanup = c ?? undefined;
+            return next().step;
+          })
+          .flatMap((s: any) => s);
+      }),
+    );
+
+    return source.onFinalize(
+      suspend(() =>
+        sync(() => {
+          activeCleanup?.();
+          activeCleanup = null;
+        }),
+      ) as any,
+    ) as any;
+  }
+
   static bracket<A, S>(acquire: Eff<A, S>, release: (a: A) => Eff<void, never>): Stream<A, S> {
     return new Stream(
       (acquire as any).map((resource: A) => {

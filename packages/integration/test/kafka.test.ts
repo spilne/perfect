@@ -167,6 +167,40 @@ withKafka("Kafka integration (Redpanda)", (ctx) => {
     });
   });
 
+  describe("batch emission", () => {
+    it("consumes callback-driver fetch batches as Stream chunks", async () => {
+      const client = createKafkajsClient(ctx.broker);
+      const topic = TopicName(uniqueName("batch-emit"));
+      await createTopic(ctx.broker, topic);
+      const kt = new KafkaTopic<{ v: number }>({
+        kafka: client,
+        topic,
+        groupId: GroupId(uniqueName("batch-group")),
+        batchEmit: true,
+      });
+      await kt.publishBatch(Array.from({ length: 6 }, (_, value) => ({ value: { v: value + 1 } })));
+      const chunkSizes: number[] = [];
+
+      const values = await run(
+        kt
+          .subscribeFrom({
+            offset: { type: "earliest" },
+            group: ConsumerGroup(uniqueName("batch-consumer")),
+          })
+          .mapChunks((chunk) => {
+            chunkSizes.push(chunk.length);
+            return chunk;
+          })
+          .take(6)
+          .toArray(),
+      );
+
+      expect(values.map((value) => value.v)).toEqual([1, 2, 3, 4, 5, 6]);
+      expect(chunkSizes.reduce((total, size) => total + size, 0)).toBeGreaterThanOrEqual(6);
+      await kt.disconnect();
+    });
+  });
+
   // -- subscribeAck + autoCommitBatchWithin: the production ack flow --
   describe("subscribeAck + autoCommitBatchWithin — batched ack flow", () => {
     it("processes all messages and commits acked offsets for the group", async () => {
@@ -182,8 +216,7 @@ withKafka("Kafka integration (Redpanda)", (ctx) => {
 
       // take() sits AFTER the commit pipe so all 10 envelopes are acked
       // before the source is finalized — the shutdown flush then commits
-      // the full watermark. The `as any` mirrors core's own connect tests:
-      // through(pipe) erases S to `unknown`, which run()'s EffectCheck rejects.
+      // the full watermark.
       const values: { v: number }[] = await run(
         kt
           .subscribeAck({ group, fromBeginning: true, commitIntervalMs: 200 })

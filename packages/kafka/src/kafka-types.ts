@@ -78,9 +78,9 @@ export interface KafkaConsumer {
   subscribe(params: { topic: TopicName; fromBeginning?: boolean }): Promise<void>;
 
   /**
-   * Start consuming messages. Three patterns supported, in preference order:
+   * Start consuming messages. Three patterns are supported:
    *
-   * **Batch callback** (kafkajs-compatible, preferred for callback drivers):
+   * **Batch callback** (kafkajs-compatible, selected by `batchEmit`):
    * ```ts
    * await consumer.run({ eachBatch: async ({ batch }) => { ... } });
    * ```
@@ -91,7 +91,7 @@ export interface KafkaConsumer {
    * ```ts
    * await consumer.run({ eachMessage: async (msg) => { ... } });
    * ```
-   * Fallback when the driver doesn't expose eachBatch.
+   * The default callback mode.
    *
    * **Stream mode** (platformatic-compatible):
    * ```ts
@@ -99,8 +99,8 @@ export interface KafkaConsumer {
    * for await (const msg of stream) { ... }
    * ```
    *
-   * Implementations must support at least one. KafkaTopic picks based on
-   * what the consumer actually exposes.
+   * Implementations must support stream mode or the callback mode selected by
+   * the topic configuration.
    */
   run?(params: {
     autoCommit?: boolean;
@@ -108,10 +108,7 @@ export interface KafkaConsumer {
     /**
      * Batch callback. Payload shape matches kafkajs's own:
      * `{ batch: { topic, partition, messages: [{key,value,offset,...}] } }`.
-     * Drivers that don't support this simply ignore the param — their
-     * run() still returns, having processed nothing, and KafkaTopic's
-     * feature-detection (see kafka-topic.ts) never dispatches to
-     * eachBatch on such drivers.
+     * Drivers used with `batchEmit: true` must implement this callback.
      */
     eachBatch?: (payload: KafkaBatchPayload) => Promise<void>;
   }): Promise<void>;

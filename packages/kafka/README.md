@@ -76,6 +76,7 @@ their consumer explicitly, so call `subscription.close()` in a `finally` block.
   - `subscribe` / `subscribeFrom` (earliest, latest, specific-offset, or timestamp replay)
   - `subscribeAck` — `Stream<Envelope<T>>` with background contiguous commits
   - `subscribeAckWithHandle` — explicit consumer ownership for external commit pipes
+  - `batchEmit: true` — preserve callback-driver fetch batches as native Stream chunks
   - checkpoint support for `@perfect/topology`
 - `commitBatchWithin` — typed batched offset-commit pipe (count or time window)
 - `KafkaShuffleTransport` — Kafka-backed `ShuffleTransport` for distributed
