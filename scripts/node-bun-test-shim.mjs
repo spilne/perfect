@@ -15,5 +15,24 @@ export const {
 
 export { expect };
 
-export const setDefaultTimeout = () => {};
+export const skipIf = (condition) => {
+  if (condition) {
+    return describe.skip;
+  }
 
+  return describe;
+};
+
+export const testSkipIf = (condition) => {
+  if (condition) {
+    return test.skip;
+  }
+
+  return test;
+};
+
+it.skipIf = testSkipIf;
+test.skipIf = testSkipIf;
+describe.skipIf = skipIf;
+
+export const setDefaultTimeout = () => {};
