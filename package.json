@@ -2,20 +2,23 @@
   "name": "perfect",
   "private": true,
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "templates/*"
   ],
   "scripts": {
     "test": "bun test --recursive packages/",
     "test:core": "cd packages/core && bun test",
     "test:transform": "cd packages/transform && bun test",
-    "typecheck": "bun run typecheck:core && bun run typecheck:packages",
+    "typecheck": "bun run typecheck:core && bun run typecheck:packages && bun run typecheck:templates",
     "typecheck:core": "cd packages/core && bun run typecheck && bun run typecheck:types",
     "typecheck:packages": "cd packages/http && bun run typecheck && cd ../http-otel && bun run typecheck && cd ../kafka && bun run typecheck && cd ../kafka-kafkajs && bun run typecheck && cd ../kafka-platformatic && bun run typecheck && cd ../otel && bun run typecheck && cd ../postgres && bun run typecheck && cd ../redis && bun run typecheck && cd ../topology && bun run typecheck && cd ../transform && bun run typecheck",
+    "typecheck:templates": "tsc -p templates/stackblitz/tsconfig.repo.json --noEmit",
     "build:packages": "cd packages/core && bun run build && cd ../http && bun run build && cd ../http-otel && bun run build && cd ../kafka && bun run build && cd ../kafka-kafkajs && bun run build && cd ../kafka-platformatic && bun run build && cd ../otel && bun run build && cd ../postgres && bun run build && cd ../redis && bun run build && cd ../topology && bun run build && cd ../transform && bun run build",
     "smoke:packages": "bun scripts/smoke-package-exports.ts",
-    "lint": "oxlint -c .oxlintrc.json packages/",
-    "fmt": "oxfmt packages/ '!**/dist/**'",
-    "fmt:check": "oxfmt --check packages/ '!**/dist/**'",
+    "smoke:stackblitz": "vite build templates/stackblitz && bun test templates/stackblitz/test/",
+    "lint": "oxlint -c .oxlintrc.json packages/ templates/",
+    "fmt": "oxfmt packages/ templates/ '!**/dist/**'",
+    "fmt:check": "oxfmt --check packages/ templates/ '!**/dist/**'",
     "format": "bun run fmt",
     "bench": "cd packages/core && bun run bench/index.ts",
     "bench:vs-effect": "cd packages/core && bun run bench/vs-effect-ts.ts",
@@ -34,7 +37,7 @@
     "release:dry": "bun run release:check",
     "release:publish": "bun run build:release && bun scripts/publish-packages.ts",
     "check": "bun run lint && bun run typecheck && bun run test",
-    "ci": "bun run fmt:check && bun run lint && bun run typecheck && bun run test && bun run build:packages && bun run smoke:packages && bun run documentation:check && bun run perf:gate",
+    "ci": "bun run fmt:check && bun run lint && bun run typecheck && bun run test && bun run build:packages && bun run smoke:packages && bun run smoke:stackblitz && bun run documentation:check && bun run perf:gate",
     "test:integration": "(cd packages/integration && bun test) && (cd packages/redis && bun test) && (cd packages/postgres && bun test)"
   },
   "devDependencies": {
@@ -48,6 +51,7 @@
     "oxlint": "^1.78.0",
     "rxjs": "^7.8.2",
     "typescript": "^7.0.2",
+    "vite": "^8.2.1",
     "vitepress": "^1.6.4"
   },
   "packageManager": "bun@1.3.14"

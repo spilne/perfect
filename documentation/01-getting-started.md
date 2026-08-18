@@ -11,6 +11,18 @@ five minutes.
 > repo and use the Bun workspace. The commands below describe the
 > post-publish shape.
 
+The [built-in playground](./playground.md) includes editable examples for typed
+errors, concurrency, retry, state, cancellation, and observation. Programs run
+in an isolated worker directly inside this guide. Its
+[StackBlitz project](https://stackblitz.com/fork/github/spilne/perfect/tree/main/templates/stackblitz?title=Perfect%20Playground)
+becomes independently installable with the first npm release. Until then, run
+the same template locally from the repository:
+
+```bash
+bun run build:packages
+bun run smoke:stackblitz
+```
+
 ```bash
 bun add @perfect/core
 ```
@@ -27,6 +39,7 @@ bun add @perfect/transform    # Bun-plugin rewriter — eff(($) => …) and for 
 The smallest possible Eff:
 
 <!-- @embed packages/core/examples/01-hello.ts#hello-sync -->
+
 ```ts
 import { succeed } from "@perfect/core";
 
@@ -34,6 +47,7 @@ import { succeed } from "@perfect/core";
 const greet = succeed("hello, perfect");
 console.log(greet.runSync()); // → "hello, perfect"
 ```
+
 <!-- @end -->
 
 `runSync` works for any program that doesn't suspend (no `sleep`, no `Fork`,
@@ -48,6 +62,7 @@ same fiber walk. Pick by readability — the perf table is in
 ### Generator (recommended — no build step)
 
 <!-- @embed packages/core/examples/01-hello.ts#hello-generator -->
+
 ```ts
 import { eff, succeed } from "@perfect/core";
 
@@ -61,11 +76,13 @@ const program = eff(function* () {
 
 console.log(await program.run()); // → 42
 ```
+
 <!-- @end -->
 
 ### Composed `.flatMap` (fastest)
 
 <!-- @embed packages/core/examples/01-hello.ts#hello-flatmap -->
+
 ```ts
 import { succeed } from "@perfect/core";
 
@@ -76,6 +93,7 @@ const composed = succeed(21)
 
 console.log(composed.runSync()); // → 42
 ```
+
 <!-- @end -->
 
 ### `eff($)` source syntax (cleanest, requires SWC plugin)
@@ -95,12 +113,12 @@ the experimental `for { ... } yield` syntax.
 
 ## Running
 
-| Function | When to use |
-|---|---|
-| `runSync(eff)` | Sync only — throws if the effect suspends. |
-| `run(eff)` | Returns `Promise<A>`, rejects with squashed cause on failure. |
-| `runExit(eff)` | Returns `Promise<Exit<E, A>>` — never throws. |
-| `runFiber(eff)` | Returns a `Fiber<A>` you can join, interrupt, race. |
+| Function        | When to use                                                   |
+| --------------- | ------------------------------------------------------------- |
+| `runSync(eff)`  | Sync only — throws if the effect suspends.                    |
+| `run(eff)`      | Returns `Promise<A>`, rejects with squashed cause on failure. |
+| `runExit(eff)`  | Returns `Promise<Exit<E, A>>` — never throws.                 |
+| `runFiber(eff)` | Returns a `Fiber<A>` you can join, interrupt, race.           |
 
 Each runner is also available as a fluent method, so a chain can close on
 itself instead of wrapping in a call:

@@ -1,6 +1,7 @@
 import { defineConfig } from "vitepress";
 import container from "markdown-it-container";
 import type { RenderRule } from "markdown-it/lib/renderer.mjs";
+import { fileURLToPath } from "node:url";
 
 const REPO_URL = "https://github.com/spilne/perfect";
 const BRANCH = "main";
@@ -45,6 +46,7 @@ export default defineConfig({
   themeConfig: {
     nav: [
       { text: "Guide", link: "/01-getting-started" },
+      { text: "Playground", link: "/playground" },
       { text: "Comparison", link: "/comparison" },
       { text: "GitHub", link: REPO_URL },
     ],
@@ -79,7 +81,10 @@ export default defineConfig({
       },
       {
         text: "Reference",
-        items: [{ text: "Comparison", link: "/comparison" }],
+        items: [
+          { text: "Playground", link: "/playground" },
+          { text: "Comparison", link: "/comparison" },
+        ],
       },
     ],
 
@@ -124,6 +129,29 @@ export default defineConfig({
         },
         render: renderSyntax,
       });
+    },
+  },
+
+  vite: {
+    resolve: {
+      alias: [
+        {
+          find: "@perfect/core/stream",
+          replacement: fileURLToPath(
+            new URL("../../packages/core/src/stream/index.ts", import.meta.url),
+          ),
+        },
+        {
+          find: "@perfect/core/retry",
+          replacement: fileURLToPath(
+            new URL("../../packages/core/src/retry/index.ts", import.meta.url),
+          ),
+        },
+        {
+          find: "@perfect/core",
+          replacement: fileURLToPath(new URL("../../packages/core/src/index.ts", import.meta.url)),
+        },
+      ],
     },
   },
 });

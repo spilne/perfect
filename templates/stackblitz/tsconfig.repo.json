@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["bun"],
+    "paths": {
+      "@perfect/core": ["../../packages/core/src/index.ts"],
+      "@perfect/core/*": ["../../packages/core/src/*/index.ts"]
+    }
+  }
+}

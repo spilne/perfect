@@ -5,8 +5,9 @@ const packages = [
   {
     dir: "packages/core",
     imports: [
-      "dist/index.js",
       "dist/stream/index.js",
+      "dist/retry/index.js",
+      "dist/index.js",
       "dist/worker/index.js",
       "dist/syntax/index.js",
     ],
@@ -69,7 +70,15 @@ for (const pkg of packages) {
   }
 
   for (const entry of pkg.imports) {
-    await import(new URL(`../${pkg.dir}/${entry}`, import.meta.url).href);
+    const imported = await import(new URL(`../${pkg.dir}/${entry}`, import.meta.url).href);
+    if (pkg.dir === "packages/core" && entry === "dist/stream/index.js") {
+      const values = await imported.Stream.of(1, 2, 3)
+        .map((value: number) => value * 2)
+        .toArray()
+        .run();
+      if (values.join(",") !== "2,4,6")
+        throw new Error("@perfect/core/stream runtime smoke failed");
+    }
   }
 }
 
