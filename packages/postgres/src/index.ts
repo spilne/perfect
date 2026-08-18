@@ -9,6 +9,7 @@
 export type { DrizzleDb } from "./lib/drizzle-db";
 export { createPostgresDb, execRaw } from "./lib/drizzle-db";
 export { ensureTable } from "./lib/schema-utils";
+export { PostgresError } from "./lib/postgres-error";
 
 // Queues
 export { PgQueue, type PgQueueConfig } from "./lib/pg-queue";

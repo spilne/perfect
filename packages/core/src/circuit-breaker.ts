@@ -40,19 +40,19 @@ export interface CircuitBreakerOptions<E = unknown> {
  * default) or distributed (Redis, Postgres, etc.) supplied by downstream
  * packages. Either way, callers depend on this interface.
  */
-export interface CircuitBreaker<E = unknown> {
+export interface CircuitBreaker<E = unknown, S = never> {
   /** Current state — `"closed" | "open" | "half-open"`. */
-  readonly state: CircuitState;
+  readonly state: Eff<CircuitState, S>;
   /** Consecutive failures since last success. */
-  readonly failures: number;
+  readonly failures: Eff<number, S>;
   /**
    * Wrap an effect with breaker semantics.
    * If state is Open: rejects fast with CircuitOpen.
    * Otherwise: runs the effect; on success → close; on failure → count.
    */
-  protect<A, S>(eff: Eff<A, S | Throws<E>>): Eff<A, S | Throws<E | CircuitOpen>>;
+  protect<A, S2>(eff: Eff<A, S2 | Throws<E>>): Eff<A, S | S2 | Throws<E | CircuitOpen>>;
   /** Manually reset to Closed. */
-  reset(): Eff<void, never>;
+  reset(): Eff<void, S>;
 }
 
 // ── In-process implementation ──────────────────────────────────────
@@ -78,13 +78,15 @@ class InProcessCircuitBreaker<E> implements CircuitBreaker<E> {
 
   constructor(private readonly opts: CircuitBreakerOptions<E>) {}
 
-  get state(): CircuitState {
-    this.maybeTransitionToHalfOpen(this.nowFn());
-    return this.internal.state;
+  get state(): Eff<CircuitState, never> {
+    return sync(() => {
+      this.maybeTransitionToHalfOpen(this.nowFn());
+      return this.internal.state;
+    });
   }
 
-  get failures(): number {
-    return this.internal.consecutiveFailures;
+  get failures(): Eff<number, never> {
+    return sync(() => this.internal.consecutiveFailures);
   }
 
   protect<A, S>(eff: Eff<A, S | Throws<E>>): Eff<A, S | Throws<E | CircuitOpen>> {

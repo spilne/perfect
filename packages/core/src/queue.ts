@@ -21,29 +21,29 @@ type TakeWaiter<A> = { canceled: boolean; resume: TakeResume<A> };
 type OfferWaiter<A> = { canceled: boolean; value: A; resume: OfferResume };
 type CloseWaiter = { canceled: boolean; resume: () => void };
 
-export interface Queue<A> {
+export interface Queue<A, S = never> {
   /** Push a value. Blocks if bounded and full. Fails with QueueClosed if closed. */
-  offer(value: A): Eff<boolean, Throws<QueueClosed>>;
+  offer(value: A): Eff<boolean, S | Throws<QueueClosed>>;
   /** Pop a value. Blocks if empty. Fails with QueueClosed if closed AND empty. */
-  take(): Eff<A, Throws<QueueClosed>>;
+  take(): Eff<A, S | Throws<QueueClosed>>;
   /** Drain everything immediately, including queued offerers' values. */
-  takeAll(): Eff<A[], never>;
+  takeAll(): Eff<A[], S>;
   /** Push many — sequentially, respecting backpressure. */
-  offerAll(values: A[]): Eff<void, Throws<QueueClosed>>;
+  offerAll(values: A[]): Eff<void, S | Throws<QueueClosed>>;
   /** Number of buffered items (not including pending offerers). */
-  readonly size: Eff<number, never>;
+  readonly size: Eff<number, S>;
   /** Has close() been called? */
-  readonly isClosed: Eff<boolean, never>;
+  readonly isClosed: Eff<boolean, S>;
   /** Backwards-compat alias for `isClosed`. */
-  readonly isShutdown: Eff<boolean, never>;
+  readonly isShutdown: Eff<boolean, S>;
   /** Signal "no more values" — wakes pending takers/offerers with QueueClosed. */
-  close(): Eff<void, never>;
+  close(): Eff<void, S>;
   /** Backwards-compat alias for `close`. */
-  shutdown(): Eff<void, never>;
+  shutdown(): Eff<void, S>;
   /** Block until close() is called. */
-  readonly awaitClose: Eff<void, never>;
+  readonly awaitClose: Eff<void, S>;
   /** Backwards-compat alias for `awaitClose`. */
-  readonly awaitShutdown: Eff<void, never>;
+  readonly awaitShutdown: Eff<void, S>;
 }
 
 class InProcessQueue<A> implements Queue<A> {

@@ -19,6 +19,7 @@
     { "path": "./packages/topology" },
     { "path": "./packages/kafka" },
     { "path": "./packages/postgres" },
+    { "path": "./packages/redis" },
     { "path": "./packages/integration" }
   ]
 }

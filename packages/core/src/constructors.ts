@@ -209,7 +209,7 @@ export function timeout<A, S, E>(
 
 // ── Resource safety ────────────────────────────────────────────────
 
-export function ensuring<A, S>(eff: Eff<A, S>, finalizer: Eff<void, never>): Eff<A, S> {
+export function ensuring<A, S, S2>(eff: Eff<A, S>, finalizer: Eff<void, S2>): Eff<A, S | S2> {
   return new Suspend(Op.Ensuring, eff, finalizer) as any;
 }
 
@@ -235,10 +235,10 @@ export function onExit<A, S, S2>(
   ) as any;
 }
 
-export function acquireRelease<A, S>(
+export function acquireRelease<A, S, S2>(
   acquire: Eff<A, S>,
-  release: (a: A) => Eff<void, never>,
-): Eff<A, S> {
+  release: (a: A) => Eff<void, S2>,
+): Eff<A, S | S2> {
   return new Suspend(Op.AcqRel, acquire, release) as any;
 }
 

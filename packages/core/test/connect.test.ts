@@ -3,7 +3,7 @@
 // (streaming-typeclasses.test.ts, offset-tracker.test.ts).
 
 import { describe, test, expect } from "bun:test";
-import { run } from "../src";
+import { die, run, succeed } from "../src";
 import { Stream } from "../src/stream";
 import {
   isStreamable,
@@ -224,7 +224,10 @@ describe("autoCommitBatchWithin", () => {
     const envelopes = [1, 2, 3, 4, 5].map((n) => makeEnvelope(n, acked));
 
     const out = await run(
-      Stream.fromArray(envelopes).through(autoCommitBatchWithin<number>(2, 1000)).toArray() as any,
+      Stream.fromArray(envelopes)
+        .through(autoCommitBatchWithin<number>(2, 1000))
+        .toArray()
+        .catchTag("AckError", (error) => die(error)),
     );
 
     expect(out).toEqual([1, 2, 3, 4, 5]);
@@ -254,10 +257,31 @@ describe("autoCommitBatchWithin", () => {
         }
       });
 
-    await run(stream.drain() as any);
+    await run(stream.drain().catchTag("AckError", (error) => die(error)));
     if (current.length > 0) ackBatches.push(current);
 
     expect(ackBatches.flat().sort()).toEqual([1, 2, 3, 4]);
     expect(ackBatches[0]!.length).toBeGreaterThanOrEqual(2);
+  });
+
+  test("ack rejection is a typed AckError", async () => {
+    const envelope: Envelope<number> = {
+      value: 1,
+      ack: async () => {
+        throw new Error("ack failed");
+      },
+      nack: async () => {},
+      metadata: {},
+    };
+
+    const result = await run(
+      Stream.of(envelope)
+        .through(autoCommitBatchWithin<number>(1, 1000))
+        .toArray()
+        .map(() => "unexpected")
+        .catchTag("AckError", (error) => succeed((error.cause as Error).message)),
+    );
+
+    expect(result).toBe("ack failed");
   });
 });

@@ -12,15 +12,15 @@ type DeferredResult<A, E> =
   | { readonly ok: true; readonly value: A }
   | { readonly ok: false; readonly error: E };
 
-export interface Deferred<A, E = never> {
+export interface Deferred<A, E = never, S = never> {
   /** Complete with success. Returns true if this call set the value, false if already done. */
-  succeed(value: A): Eff<boolean, never>;
+  succeed(value: A): Eff<boolean, S>;
   /** Complete with failure. Returns true if this call set the error, false if already done. */
-  fail(error: E): Eff<boolean, never>;
+  fail(error: E): Eff<boolean, S>;
   /** Block until completed. */
-  readonly await: Eff<A, Throws<E>>;
+  readonly await: Eff<A, S | Throws<E>>;
   /** True if already settled. */
-  readonly isDone: Eff<boolean, never>;
+  readonly isDone: Eff<boolean, S>;
 }
 
 /**

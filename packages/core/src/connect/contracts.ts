@@ -135,8 +135,13 @@ export interface Envelope<T> {
   readonly metadata: Record<string, unknown>;
 }
 
+export interface AcknowledgeOptions {
+  readonly group?: ConsumerGroup;
+  readonly offset?: Offset;
+}
+
 export interface Acknowledgeable<T> extends Streamable<T> {
-  subscribeAck(params?: { group?: ConsumerGroup }): Stream<Envelope<T>, never>;
+  subscribeAck(params?: AcknowledgeOptions): Stream<Envelope<T>, never>;
 }
 
 export function isAcknowledgeable<T>(value: unknown): value is Acknowledgeable<T> {

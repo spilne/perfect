@@ -21,61 +21,61 @@ export class PoolClosed {
   readonly _tag = "PoolClosed" as const;
 }
 
-export interface PoolOptions<R> {
+export interface PoolOptions<R, S = never> {
   /** Build a fresh resource. Called up to `size` times. */
-  readonly acquire: Eff<R, never>;
+  readonly acquire: Eff<R, S>;
   /** Tear down a resource (called on `shutdown` and on validate-fail). */
-  readonly release: (resource: R) => Eff<void, never>;
+  readonly release: (resource: R) => Eff<void, S>;
   /** Max simultaneous resources held by the pool. */
   readonly size: number;
   /**
    * Optional check before handing a reused resource to a caller. If false,
    * the resource is released and a fresh one is acquired.
    */
-  readonly validate?: (resource: R) => Eff<boolean, never>;
+  readonly validate?: (resource: R) => Eff<boolean, S>;
 }
 
-export interface Pool<R> {
+export interface Pool<R, S = never> {
   /**
    * Acquire a resource, run `fn`, auto-release. The resource is returned
    * to the pool on success, failure, OR interrupt.
    */
-  use<A, S>(fn: (resource: R) => Eff<A, S>): Eff<A, S | Throws<PoolClosed>>;
+  use<A, S2>(fn: (resource: R) => Eff<A, S2>): Eff<A, S | S2 | Throws<PoolClosed>>;
   /** Resources currently checked out by users. */
-  readonly inUse: Eff<number, never>;
+  readonly inUse: Eff<number, S>;
   /** Resources sitting idle in the pool, ready for reuse. */
-  readonly idle: Eff<number, never>;
+  readonly idle: Eff<number, S>;
   /** Total resources allocated (in-use + idle). */
-  readonly size: Eff<number, never>;
+  readonly size: Eff<number, S>;
   /** Drain all idle resources and reject pending waiters. */
-  shutdown(): Eff<void, never>;
+  shutdown(): Eff<void, S>;
 }
 
-class InProcessPool<R> implements Pool<R> {
+class InProcessPool<R, S> implements Pool<R, S> {
   private readonly idleList: R[] = [];
   private inUseCount = 0;
   private waiters: Array<{ canceled: boolean; resume: (r: R | PoolClosed) => void }> = [];
   private closed = false;
 
-  constructor(private readonly opts: PoolOptions<R>) {}
+  constructor(private readonly opts: PoolOptions<R, S>) {}
 
-  use<A, S>(fn: (resource: R) => Eff<A, S>): Eff<A, S | Throws<PoolClosed>> {
+  use<A, S2>(fn: (resource: R) => Eff<A, S2>): Eff<A, S | S2 | Throws<PoolClosed>> {
     return (this.acquireOne() as any).flatMap((r: R) => ensuring(fn(r), this.releaseOne(r))) as any;
   }
 
-  get inUse(): Eff<number, never> {
+  get inUse(): Eff<number, S> {
     return sync(() => this.inUseCount);
   }
 
-  get idle(): Eff<number, never> {
+  get idle(): Eff<number, S> {
     return sync(() => this.idleList.length);
   }
 
-  get size(): Eff<number, never> {
+  get size(): Eff<number, S> {
     return sync(() => this.inUseCount + this.idleList.length);
   }
 
-  shutdown(): Eff<void, never> {
+  shutdown(): Eff<void, S> {
     return sync(() => {
       if (this.closed) return [];
       this.closed = true;
@@ -97,7 +97,7 @@ class InProcessPool<R> implements Pool<R> {
 
   // ── internals ──────────────────────────────────────────────────────
 
-  private acquireOne(): Eff<R, Throws<PoolClosed>> {
+  private acquireOne(): Eff<R, S | Throws<PoolClosed>> {
     return sync(() => {
       if (this.closed) return { kind: "closed" as const };
       // Try to reuse an idle resource
@@ -113,7 +113,7 @@ class InProcessPool<R> implements Pool<R> {
       }
       // At capacity: must wait
       return { kind: "wait" as const };
-    }).flatMap((decision: any): Eff<R, Throws<PoolClosed>> => {
+    }).flatMap((decision: any): Eff<R, S | Throws<PoolClosed>> => {
       if (decision.kind === "closed") return fail(new PoolClosed()) as any;
       if (decision.kind === "ready") {
         const r = decision.resource as R;
@@ -150,7 +150,7 @@ class InProcessPool<R> implements Pool<R> {
     }) as Eff<R, Throws<PoolClosed>>;
   }
 
-  private releaseOne(r: R): Eff<void, never> {
+  private releaseOne(r: R): Eff<void, S> {
     return sync(() => {
       this.inUseCount--;
       if (this.closed) {
@@ -182,8 +182,8 @@ class InProcessPool<R> implements Pool<R> {
 }
 
 export const Pool = {
-  make<R>(opts: PoolOptions<R>): Eff<Pool<R>, never> {
+  make<R, S = never>(opts: PoolOptions<R, S>): Eff<Pool<R, S>, never> {
     if (opts.size < 1) throw new Error("Pool.make: size must be >= 1");
-    return sync(() => new InProcessPool<R>(opts) as Pool<R>);
+    return sync(() => new InProcessPool<R, S>(opts) as Pool<R, S>);
   },
 } as const;

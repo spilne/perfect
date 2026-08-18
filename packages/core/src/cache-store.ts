@@ -12,19 +12,19 @@ import { type Eff } from "./eff";
 import { sync } from "./constructors";
 import { clockNow } from "./clock";
 
-export interface CacheStore<K, V> {
+export interface CacheStore<K, V, S = never> {
   /** Read a value. Returns `undefined` if missing or expired. */
-  get(key: K): Eff<V | undefined, never>;
+  get(key: K): Eff<V | undefined, S>;
   /** Write a value with optional per-entry TTL (overrides store default). */
-  set(key: K, value: V, ttlMs?: number): Eff<void, never>;
+  set(key: K, value: V, ttlMs?: number): Eff<void, S>;
   /** Remove a single entry. */
-  delete(key: K): Eff<void, never>;
+  delete(key: K): Eff<void, S>;
   /** Cheaper than `get` when you only care about presence. */
-  has(key: K): Eff<boolean, never>;
+  has(key: K): Eff<boolean, S>;
   /** Drop everything. */
-  clear(): Eff<void, never>;
+  clear(): Eff<void, S>;
   /** Current entry count. */
-  readonly size: Eff<number, never>;
+  readonly size: Eff<number, S>;
 }
 
 export interface MemoryCacheStoreOptions {

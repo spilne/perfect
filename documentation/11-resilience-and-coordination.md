@@ -16,6 +16,7 @@ to **HalfOpen** after `resetTimeoutMs`, and to **Closed** on the first
 success.
 
 <!-- @embed packages/core/examples/14-primitives.ts#circuit-breaker -->
+
 ```ts
 import { succeed, CircuitBreaker, type Eff, type Throws } from "@perfect/core";
 
@@ -32,14 +33,15 @@ const safeCall = (n: number): Eff<number, Throws<string | { _tag: "CircuitOpen" 
 
 console.log(await (safeCall(21) as any).run()); // → 42
 ```
+
 <!-- @end -->
 
-| | |
-|---|---|
-| `CircuitBreaker.make({ failureThreshold, resetTimeoutMs, isFailure? })` | construct |
-| `cb.protect(eff)` | wrap with breaker semantics |
-| `cb.state` / `cb.failures` | inspection |
-| `cb.reset()` | force back to Closed |
+|                                                                         |                             |
+| ----------------------------------------------------------------------- | --------------------------- |
+| `CircuitBreaker.make({ failureThreshold, resetTimeoutMs, isFailure? })` | construct                   |
+| `cb.protect(eff)`                                                       | wrap with breaker semantics |
+| `cb.state` / `cb.failures`                                              | effectful inspection        |
+| `cb.reset()`                                                            | force back to Closed        |
 
 **Defects don't trip the breaker** — only typed `Throws<E>` failures do.
 Pass `isFailure` to filter further (e.g. only count 5xx, not 4xx).
@@ -51,6 +53,7 @@ cache-stampede protection ("ten requests hit a cold cache, only one
 should query the DB").
 
 <!-- @embed packages/core/examples/14-primitives.ts#singleflight -->
+
 ```ts
 import { eff, sleep, all, Singleflight } from "@perfect/core";
 
@@ -79,12 +82,13 @@ const users = await all([
 console.log(fetchCount); // → 1
 console.log(users[0]!.id); // → 7
 ```
+
 <!-- @end -->
 
-| | |
-|---|---|
-| `Singleflight.make()` | construct |
-| `sf.do(key, eff)` | dedupe by key |
+|                       |               |
+| --------------------- | ------------- |
+| `Singleflight.make()` | construct     |
+| `sf.do(key, eff)`     | dedupe by key |
 
 **No caching** — once the eff settles, the key is cleared so the next
 call re-runs. For caching, use `cached` / `cachedBy` (see [Cache](./12-utilities.md#cachestore)).
@@ -96,6 +100,7 @@ has fail-fast (`tryAcquire` / `acquire`) and blocking (`acquireWaiting`)
 modes.
 
 <!-- @embed packages/core/examples/14-primitives.ts#rate-limiter -->
+
 ```ts
 import { eff, RateLimiter } from "@perfect/core";
 
@@ -112,21 +117,22 @@ const attempts = await (
 ).run();
 console.log(attempts.filter(Boolean).length); // → 5
 ```
+
 <!-- @end -->
 
-| Strategy | When to use |
-|---|---|
-| `slidingWindow` | most accurate; true rate over a moving window |
-| `fixedWindow` | simpler, allows bursts at window boundaries |
-| `tokenBucket` | smooth rate with a configurable burst capacity |
+| Strategy        | When to use                                    |
+| --------------- | ---------------------------------------------- |
+| `slidingWindow` | most accurate; true rate over a moving window  |
+| `fixedWindow`   | simpler, allows bursts at window boundaries    |
+| `tokenBucket`   | smooth rate with a configurable burst capacity |
 
-| | |
-|---|---|
-| `rl.tryAcquire` | non-blocking, returns boolean |
-| `rl.acquire` | fails with typed `RateLimitExceeded` (with `retryAfterMs`) |
-| `rl.acquireWaiting` | blocks until a slot opens |
-| `rl.withLimit(eff)` / `rl.withLimitWaiting(eff)` | wrap an effect |
-| `rl.remaining` / `rl.resetAt` / `rl.nextSlotIn` | inspection |
+|                                                  |                                                            |
+| ------------------------------------------------ | ---------------------------------------------------------- |
+| `rl.tryAcquire`                                  | non-blocking, returns boolean                              |
+| `rl.acquire`                                     | fails with typed `RateLimitExceeded` (with `retryAfterMs`) |
+| `rl.acquireWaiting`                              | blocks until a slot opens                                  |
+| `rl.withLimit(eff)` / `rl.withLimitWaiting(eff)` | wrap an effect                                             |
+| `rl.remaining` / `rl.resetAt` / `rl.nextSlotIn`  | inspection                                                 |
 
 `Throttle` is an alias for "always-blocking RateLimiter" — see
 `Throttle.make({ permits, windowMs })`.
@@ -137,6 +143,7 @@ console.log(attempts.filter(Boolean).length); // → 5
 zero. Single-shot.
 
 <!-- @embed packages/core/examples/14-primitives.ts#latch -->
+
 ```ts
 import { eff, sync, sleep, fork, join, Latch } from "@perfect/core";
 
@@ -165,14 +172,15 @@ await (
 ).run();
 console.log(events); // → ["released"]
 ```
+
 <!-- @end -->
 
-| | |
-|---|---|
-| `Latch.make({ count })` | construct |
-| `latch.countDown` / `latch.countDownBy(n)` | decrement |
-| `latch.await` | block until count = 0 |
-| `latch.remaining` | inspection |
+|                                            |                       |
+| ------------------------------------------ | --------------------- |
+| `Latch.make({ count })`                    | construct             |
+| `latch.countDown` / `latch.countDownBy(n)` | decrement             |
+| `latch.await`                              | block until count = 0 |
+| `latch.remaining`                          | inspection            |
 
 ## Barrier
 
@@ -181,6 +189,7 @@ proceed simultaneously. Useful for coordinated worker startup or
 multi-phase tests.
 
 <!-- @embed packages/core/examples/14-primitives.ts#barrier -->
+
 ```ts
 import { eff, sleep, fork, join, Barrier } from "@perfect/core";
 
@@ -205,19 +214,21 @@ await (
 ).run();
 console.log(arrived.sort()); // → [1, 2, 3]
 ```
+
 <!-- @end -->
 
-| | |
-|---|---|
-| `Barrier.make({ parties })` | construct |
-| `barrier.await` | arrive AND block until all parties have arrived |
-| `barrier.arrived` | how many have arrived so far |
+|                             |                                                 |
+| --------------------------- | ----------------------------------------------- |
+| `Barrier.make({ parties })` | construct                                       |
+| `barrier.await`             | arrive AND block until all parties have arrived |
+| `barrier.arrived`           | how many have arrived so far                    |
 
 ## PubSub
 
 Broadcast channel. Every subscriber sees every message via its own queue.
 
 <!-- @embed packages/core/examples/14-primitives.ts#pubsub -->
+
 ```ts
 import { eff, sync, sleep, fork, join, PubSub } from "@perfect/core";
 
@@ -263,15 +274,16 @@ console.log(seen[0]); // → [1, 2, 3]
 console.log(seen[1]); // → [1, 2, 3]
 console.log(seen[2]); // → [1, 2, 3]
 ```
+
 <!-- @end -->
 
-| | |
-|---|---|
-| `PubSub.bounded(capacity)` / `PubSub.unbounded()` | construct |
-| `ps.publish(value)` | broadcast |
-| `ps.subscribe` | get a `Stream<T>` (also Eff — wraps queue allocation) |
-| `ps.shutdown()` | close all subscriber streams |
-| `ps.subscriberCount` | inspection |
+|                                                   |                                                       |
+| ------------------------------------------------- | ----------------------------------------------------- |
+| `PubSub.bounded(capacity)` / `PubSub.unbounded()` | construct                                             |
+| `ps.publish(value)`                               | broadcast                                             |
+| `ps.subscribe`                                    | get a `Stream<T>` (also Eff — wraps queue allocation) |
+| `ps.shutdown()`                                   | close all subscriber streams                          |
+| `ps.subscriberCount`                              | inspection                                            |
 
 ## SubscriptionRef
 
@@ -279,6 +291,7 @@ A `Ref<A>` that also exposes a change `Stream<A>`. The stream emits the
 **current value** first, then every subsequent set/update.
 
 <!-- @embed packages/core/examples/14-primitives.ts#subscription-ref -->
+
 ```ts
 import { eff, sync, sleep, fork, join, SubscriptionRef } from "@perfect/core";
 
@@ -304,13 +317,14 @@ await (
 ).run();
 console.log(observed); // → ["v1", "v2", "v2-patched"]
 ```
+
 <!-- @end -->
 
-| | |
-|---|---|
-| `SubscriptionRef.make(initial)` | construct |
-| `ref.get` / `ref.set(v)` / `ref.update(f)` | normal Ref ops |
-| `ref.changes` | get a `Stream<A>` of state transitions |
+|                                            |                                        |
+| ------------------------------------------ | -------------------------------------- |
+| `SubscriptionRef.make(initial)`            | construct                              |
+| `ref.get` / `ref.set(v)` / `ref.update(f)` | normal Ref ops                         |
+| `ref.changes`                              | get a `Stream<A>` of state transitions |
 
 ## Pool
 
@@ -320,6 +334,7 @@ otherwise creates a new one (up to `size`). At capacity, acquires block
 until a release frees a slot.
 
 <!-- @embed packages/core/examples/14-primitives.ts#pool -->
+
 ```ts
 import { eff, sync, Pool } from "@perfect/core";
 
@@ -348,14 +363,15 @@ await (
 // All 5 ops used conn id=1 (reuse)
 console.log(conns); // → [1, 1, 1, 1, 1]
 ```
+
 <!-- @end -->
 
-| | |
-|---|---|
-| `Pool.make({ acquire, release, size, validate? })` | construct |
-| `pool.use(fn)` | acquire → run → auto-release (LIFO release ordering) |
-| `pool.shutdown()` | release idle, reject pending waiters with `PoolClosed` |
-| `pool.inUse` / `pool.idle` / `pool.size` | inspection |
+|                                                    |                                                        |
+| -------------------------------------------------- | ------------------------------------------------------ |
+| `Pool.make({ acquire, release, size, validate? })` | construct                                              |
+| `pool.use(fn)`                                     | acquire → run → auto-release (LIFO release ordering)   |
+| `pool.shutdown()`                                  | release idle, reject pending waiters with `PoolClosed` |
+| `pool.inUse` / `pool.idle` / `pool.size`           | inspection                                             |
 
 `validate?: (r) => Eff<boolean, never>` runs before handing a reused
 resource to a caller — failed validation discards it (calls `release`)
@@ -372,9 +388,9 @@ and acquires fresh.
   publishers when its queue fills (bounded). Use `unbounded` for
   fire-and-forget at the cost of memory.
 - **Pool's `validate` runs ONLY on reuse.** A fresh `acquire` is trusted.
-- **All primitives are interface-first** — distributed backends (Redis,
-  etc.) drop in as Layer-injected swaps. Look for `@perfect-ext/*`
-  packages or roll your own.
+- **All primitives are interface-first** — their backend effect parameter defaults to
+  `never`, while distributed implementations retain typed failures. `@perfect/redis`
+  provides Redis-backed implementations with `Throws<RedisError>`.
 
 ## Next
 

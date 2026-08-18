@@ -7,9 +7,10 @@
 // (acquireAsync/withPermitAsync + per-call resource suffix).
 // ---------------------------------------------------------------------------
 
-import type { Eff, Throttle } from "@perfect/core";
+import type { Eff, Throttle, Throws } from "@perfect/core";
 import { type DrizzleDb } from "./drizzle-db";
 import { PgRateLimiter } from "./pg-rate-limiter";
+import type { PostgresError } from "./postgres-error";
 
 export interface PgThrottleConfig {
   db: DrizzleDb;
@@ -19,7 +20,7 @@ export interface PgThrottleConfig {
   table?: string;
 }
 
-export class PgThrottle implements Throttle {
+export class PgThrottle implements Throttle<Throws<PostgresError>> {
   private readonly rl: PgRateLimiter;
 
   constructor(config: PgThrottleConfig) {
@@ -39,23 +40,23 @@ export class PgThrottle implements Throttle {
     return t;
   }
 
-  get acquire(): Eff<void, never> {
+  get acquire(): Eff<void, Throws<PostgresError>> {
     return this.rl.acquireWaiting;
   }
 
-  get tryAcquire(): Eff<boolean, never> {
+  get tryAcquire(): Eff<boolean, Throws<PostgresError>> {
     return this.rl.tryAcquire;
   }
 
-  withPermit<A, S>(eff: Eff<A, S>): Eff<A, S> {
+  withPermit<A, S>(eff: Eff<A, S>): Eff<A, S | Throws<PostgresError>> {
     return this.rl.withLimitWaiting(eff);
   }
 
-  get remaining(): Eff<number, never> {
+  get remaining(): Eff<number, Throws<PostgresError>> {
     return this.rl.remaining;
   }
 
-  get nextSlotIn(): Eff<number, never> {
+  get nextSlotIn(): Eff<number, Throws<PostgresError>> {
     return this.rl.nextSlotIn;
   }
 }

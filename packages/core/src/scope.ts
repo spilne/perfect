@@ -2,7 +2,7 @@ import type { Eff } from "./eff";
 import { Suspend, Op } from "./eff";
 import { succeed } from "./constructors";
 
-export type Finalizer = () => Eff<void, never>;
+export type Finalizer = () => Eff<void, unknown>;
 
 export class Scope {
   private finalizers: Finalizer[] = [];
@@ -13,7 +13,7 @@ export class Scope {
     this.finalizers.push(f);
   }
 
-  close(): Eff<void, never> {
+  close(): Eff<void, unknown> {
     if (this.closed) return succeed(undefined);
     this.closed = true;
     // run in reverse order (LIFO) — last acquired, first released
@@ -22,7 +22,7 @@ export class Scope {
 
     // chain: run fns[0], then fns[1], ... via flatMap — every finalizer
     // (including the first) is invoked only when the returned Eff runs
-    let chain: Eff<void, never> = new Suspend(
+    let chain: Eff<void, unknown> = new Suspend(
       Op.FlatMap,
       new Suspend(Op.Succeed, undefined, null),
       () => fns[0]!(),

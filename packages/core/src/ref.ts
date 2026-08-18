@@ -7,21 +7,21 @@
 import { type Eff } from "./eff";
 import { sync } from "./constructors";
 
-export interface Ref<A> {
+export interface Ref<A, S = never> {
   /** Read the current value. */
-  readonly get: Eff<A, never>;
+  readonly get: Eff<A, S>;
   /** Replace the value. */
-  set(value: A): Eff<void, never>;
+  set(value: A): Eff<void, S>;
   /** Apply a transformation to the current value. */
-  update(f: (a: A) => A): Eff<void, never>;
+  update(f: (a: A) => A): Eff<void, S>;
   /** Atomic compute-and-return — returns the second tuple element, sets the first. */
-  modify<B>(f: (a: A) => [B, A]): Eff<B, never>;
+  modify<B>(f: (a: A) => [B, A]): Eff<B, S>;
   /** Replace and return the previous value. */
-  getAndSet(value: A): Eff<A, never>;
+  getAndSet(value: A): Eff<A, S>;
   /** Update and return the previous value. */
-  getAndUpdate(f: (a: A) => A): Eff<A, never>;
+  getAndUpdate(f: (a: A) => A): Eff<A, S>;
   /** Update and return the new value. */
-  updateAndGet(f: (a: A) => A): Eff<A, never>;
+  updateAndGet(f: (a: A) => A): Eff<A, S>;
 }
 
 class InProcessRef<A> implements Ref<A> {

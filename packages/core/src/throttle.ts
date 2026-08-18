@@ -13,17 +13,17 @@
 import { type Eff } from "./eff";
 import { type RateLimiter, RateLimiter as RateLimiterNS } from "./rate-limiter";
 
-export interface Throttle {
+export interface Throttle<S = never> {
   /** Block until a permit is available. */
-  readonly acquire: Eff<void, never>;
+  readonly acquire: Eff<void, S>;
   /** Try to acquire a permit without blocking. */
-  readonly tryAcquire: Eff<boolean, never>;
+  readonly tryAcquire: Eff<boolean, S>;
   /** Acquire then run (blocking). */
-  withPermit<A, S>(eff: Eff<A, S>): Eff<A, S>;
+  withPermit<A, S2>(eff: Eff<A, S2>): Eff<A, S | S2>;
   /** Permits remaining in the current window. */
-  readonly remaining: Eff<number, never>;
+  readonly remaining: Eff<number, S>;
   /** Milliseconds until the next permit opens. */
-  readonly nextSlotIn: Eff<number, never>;
+  readonly nextSlotIn: Eff<number, S>;
 }
 
 class ThrottleAdapter implements Throttle {

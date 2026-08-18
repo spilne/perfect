@@ -5,14 +5,15 @@
 // from a SELECT ... FOR UPDATE transaction per mutation. Adapted from
 // promin's Promise-typed AtomicRef (getAsync/setAsync/updateAsync):
 // perfect's Ref adds modify/getAndSet/getAndUpdate/updateAndGet, all
-// derived here from one transactional modify. Members are Eff<_, never>,
-// so driver failures surface as defects.
+// derived here from one transactional modify. Driver failures remain typed
+// as PostgresError in the effect union.
 // ---------------------------------------------------------------------------
 
 import { fromPromise } from "@perfect/core";
-import type { Eff, Ref } from "@perfect/core";
+import type { Eff, Ref, Throws } from "@perfect/core";
 import { sql } from "drizzle-orm";
 import { type DrizzleDb, execRaw } from "./drizzle-db";
+import { PostgresError, toPostgresError } from "./postgres-error";
 
 export interface PgRefConfig<T> {
   db: DrizzleDb;
@@ -21,7 +22,7 @@ export interface PgRefConfig<T> {
   table?: string;
 }
 
-export class PgRef<T> implements Ref<T> {
+export class PgRef<T> implements Ref<T, Throws<PostgresError>> {
   private readonly db: DrizzleDb;
   private readonly name: string;
   private readonly table: string;
@@ -115,56 +116,56 @@ export class PgRef<T> implements Ref<T> {
   // Ref<T> (Eff-typed contract)
   // ---------------------------------------------------------------------------
 
-  get get(): Eff<T, never> {
+  get get(): Eff<T, Throws<PostgresError>> {
     return fromPromise(
       () => this.getAsync(),
-      (e) => e,
-    ).orDie();
+      (e) => toPostgresError("ref.get", e),
+    );
   }
 
-  set(value: T): Eff<void, never> {
+  set(value: T): Eff<void, Throws<PostgresError>> {
     return fromPromise(
       () => this.setAsync(value),
-      (e) => e,
-    ).orDie();
+      (e) => toPostgresError("ref.set", e),
+    );
   }
 
-  update(f: (a: T) => T): Eff<void, never> {
+  update(f: (a: T) => T): Eff<void, Throws<PostgresError>> {
     return fromPromise(
       () => this.modifyAsync<void>((a) => [undefined, f(a)]),
-      (e) => e,
-    ).orDie();
+      (e) => toPostgresError("ref.update", e),
+    );
   }
 
-  modify<B>(f: (a: T) => [B, T]): Eff<B, never> {
+  modify<B>(f: (a: T) => [B, T]): Eff<B, Throws<PostgresError>> {
     return fromPromise(
       () => this.modifyAsync(f),
-      (e) => e,
-    ).orDie();
+      (e) => toPostgresError("ref.modify", e),
+    );
   }
 
-  getAndSet(value: T): Eff<T, never> {
+  getAndSet(value: T): Eff<T, Throws<PostgresError>> {
     return fromPromise(
       () => this.modifyAsync<T>((a) => [a, value]),
-      (e) => e,
-    ).orDie();
+      (e) => toPostgresError("ref.getAndSet", e),
+    );
   }
 
-  getAndUpdate(f: (a: T) => T): Eff<T, never> {
+  getAndUpdate(f: (a: T) => T): Eff<T, Throws<PostgresError>> {
     return fromPromise(
       () => this.modifyAsync<T>((a) => [a, f(a)]),
-      (e) => e,
-    ).orDie();
+      (e) => toPostgresError("ref.getAndUpdate", e),
+    );
   }
 
-  updateAndGet(f: (a: T) => T): Eff<T, never> {
+  updateAndGet(f: (a: T) => T): Eff<T, Throws<PostgresError>> {
     return fromPromise(
       () =>
         this.modifyAsync<T>((a) => {
           const next = f(a);
           return [next, next];
         }),
-      (e) => e,
-    ).orDie();
+      (e) => toPostgresError("ref.updateAndGet", e),
+    );
   }
 }

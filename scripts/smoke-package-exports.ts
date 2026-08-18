@@ -11,6 +11,7 @@ const packages = [
   { dir: "packages/kafka", imports: ["dist/index.js"] },
   { dir: "packages/otel", imports: ["dist/index.js"] },
   { dir: "packages/postgres", imports: ["dist/index.js", "dist/pgmq/index.js"] },
+  { dir: "packages/redis", imports: ["dist/index.js"] },
   { dir: "packages/topology", imports: ["dist/index.js"] },
   { dir: "packages/transform", imports: ["dist/rewrite.js", "dist/bun-plugin.js", "dist/plugin.js"] },
 ];

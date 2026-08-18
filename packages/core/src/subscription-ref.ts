@@ -15,18 +15,18 @@ import { type PubSub, PubSub as PubSubNS } from "./pubsub";
 import { Stream } from "./stream";
 import { type QueueClosed } from "./queue";
 
-export interface SubscriptionRef<A> {
+export interface SubscriptionRef<A, S = never> {
   /** Read the current value. */
-  readonly get: Eff<A, never>;
+  readonly get: Eff<A, S>;
   /** Set a new value — notifies all subscribers. */
-  set(value: A): Eff<void, never>;
+  set(value: A): Eff<void, S>;
   /** Update with a function — notifies all subscribers. */
-  update(f: (a: A) => A): Eff<void, never>;
+  update(f: (a: A) => A): Eff<void, S>;
   /**
    * Stream of changes. Emits the current value as the first element,
    * then every subsequent set/update.
    */
-  readonly changes: Eff<Stream<A, Throws<QueueClosed>>, never>;
+  readonly changes: Eff<Stream<A, S | Throws<QueueClosed>>, S>;
 }
 
 class InProcessSubscriptionRef<A> implements SubscriptionRef<A> {

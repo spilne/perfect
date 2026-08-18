@@ -9,7 +9,7 @@ import { describe, it, expect, setDefaultTimeout } from "bun:test";
 // Kafka operations (consumer group join, rebalancing, commits) need generous timeouts
 setDefaultTimeout(300_000);
 
-import { run, fromPromise } from "@perfect/core";
+import { die, run, fromPromise } from "@perfect/core";
 import {
   autoCommitBatchWithin,
   ChannelName,
@@ -23,7 +23,6 @@ import {
   commitBatchWithin,
   TopicName,
   GroupId,
-  PartitionId,
   KafkaOffset,
   type KafkaClient,
 } from "@perfect/kafka";
@@ -126,6 +125,48 @@ withKafka("Kafka integration (Redpanda)", (ctx) => {
 
   adapterTests("kafkajs adapter (callback-based)", getBroker, createKafkajsClient);
 
+  describe("replay controls", () => {
+    it("rewinds a committed consumer group to the earliest offset", async () => {
+      const client = createKafkajsClient(ctx.broker);
+      const topic = TopicName(uniqueName("replay"));
+      await createTopic(ctx.broker, topic);
+      const group = GroupId(uniqueName("replay-group"));
+      const kt = new KafkaTopic<{ v: number }>({ kafka: client, topic, groupId: group });
+      await kt.publishBatch([{ value: { v: 1 } }, { value: { v: 2 } }, { value: { v: 3 } }]);
+
+      const subscription = kt.subscribeAckWithHandle({
+        group,
+        offset: { type: "earliest" },
+        autoCommit: false,
+      });
+      await run(
+        subscription.stream
+          .take(3)
+          .through(
+            commitBatchWithin<{ v: number }>({
+              maxBatchSize: 3,
+              maxWaitMs: 1000,
+              consumer: subscription.consumer,
+              topic: subscription.topic,
+            }),
+          )
+          .drain()
+          .catchTag("KafkaCommitError", (error) => die(error)),
+      );
+      await subscription.close();
+
+      const replayed = await run(
+        kt
+          .subscribeFrom({ offset: { type: "earliest" }, group })
+          .take(3)
+          .toArray(),
+      );
+
+      expect(replayed).toEqual([{ v: 1 }, { v: 2 }, { v: 3 }]);
+      await kt.disconnect();
+    });
+  });
+
   // -- subscribeAck + autoCommitBatchWithin: the production ack flow --
   describe("subscribeAck + autoCommitBatchWithin — batched ack flow", () => {
     it("processes all messages and commits acked offsets for the group", async () => {
@@ -148,7 +189,8 @@ withKafka("Kafka integration (Redpanda)", (ctx) => {
           .subscribeAck({ group, fromBeginning: true, commitIntervalMs: 200 })
           .through(autoCommitBatchWithin<{ v: number }>(5, 300))
           .take(10)
-          .toArray() as any,
+          .toArray()
+          .catchTag("AckError", (error) => die(error)),
       );
 
       for (const v of values) seen.push(v.v);
@@ -181,27 +223,17 @@ withKafka("Kafka integration (Redpanda)", (ctx) => {
       });
       for (let i = 0; i < 10; i++) await kt.publish({ v: i });
 
-      // commitBatchWithin writes offsets through an explicit consumer. Use a
-      // dedicated committer group: sole member, assigned all partitions, so
-      // its commits are accepted by the broker.
       const commitGroup = GroupId(uniqueName("committer"));
-      const committer = client.consumer({ groupId: commitGroup });
-      await committer.connect();
-      await committer.subscribe({ topic });
-      void committer.run?.({ autoCommit: false, eachMessage: async () => {} });
-
-      // kafkajs rejects commitOffsets until the group is joined — probe first.
-      await eventually(
-        () =>
-          committer.commitOffsets([{ topic, partition: PartitionId(0), offset: KafkaOffset("0") }]),
-        { timeoutMs: 60_000, intervalMs: 500 },
-      );
+      const subscription = kt.subscribeAckWithHandle({
+        group: commitGroup,
+        offset: { type: "earliest" },
+        autoCommit: false,
+      });
 
       const seen: number[] = [];
 
       await run(
-        kt
-          .subscribeAck({ group: ConsumerGroup(uniqueName("g")), fromBeginning: true })
+        subscription.stream
           .take(10)
           .evalMap((env) =>
             fromPromise(
@@ -213,9 +245,15 @@ withKafka("Kafka integration (Redpanda)", (ctx) => {
             ),
           )
           .through(
-            commitBatchWithin({ maxBatchSize: 4, maxWaitMs: 1_000, consumer: committer, topic }),
+            commitBatchWithin({
+              maxBatchSize: 4,
+              maxWaitMs: 1_000,
+              consumer: subscription.consumer,
+              topic: subscription.topic,
+            }),
           )
-          .drain() as any,
+          .drain()
+          .catchTag("KafkaCommitError", (error) => die(error)),
       );
 
       expect(seen.sort((a, b) => a - b)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
@@ -232,7 +270,7 @@ withKafka("Kafka integration (Redpanda)", (ctx) => {
         { timeoutMs: 20_000, intervalMs: 500 },
       );
 
-      await committer.disconnect();
+      await subscription.close();
       await kt.disconnect();
     });
   });
