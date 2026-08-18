@@ -210,6 +210,44 @@ withKafka("Kafka integration (Redpanda)", (ctx) => {
     });
   });
 
+  describe("managed partition lifecycle", () => {
+    it("blocks delivery until assignment restore and awaits revocation on close", async () => {
+      const client = createKafkajsClient(ctx.broker);
+      const topic = TopicName(uniqueName("lifecycle"));
+      await createKafkajsTopic(ctx.broker, topic);
+      const kt = new KafkaTopic<{ v: number }>({
+        kafka: client,
+        topic,
+        groupId: GroupId(uniqueName("lifecycle-group")),
+      });
+      await kt.publish({ v: 1 });
+
+      const events: string[] = [];
+      const subscription = kt.subscribeAckWithHandle({ fromBeginning: true, autoCommit: false });
+      subscription.setPartitionLifecycle({
+        assigned: async () => {
+          events.push("restore:start");
+          await Bun.sleep(25);
+          events.push("restore:end");
+        },
+        revoking: async () => {
+          events.push("revoke:start");
+          await Bun.sleep(25);
+          events.push("revoke:end");
+        },
+      });
+
+      const envelopes = await run(subscription.stream.take(1).toArray().orDie());
+      events.push("delivery");
+      expect(envelopes.map((envelope) => envelope.value)).toEqual([{ v: 1 }]);
+      expect(events.slice(0, 3)).toEqual(["restore:start", "restore:end", "delivery"]);
+
+      await subscription.close();
+      expect(events.slice(-2)).toEqual(["revoke:start", "revoke:end"]);
+      await kt.disconnect();
+    });
+  });
+
   // -- subscribeAck + autoCommitBatchWithin: the production ack flow --
   describe("subscribeAck + autoCommitBatchWithin — batched ack flow", () => {
     it("processes all messages and commits acked offsets for the group", async () => {

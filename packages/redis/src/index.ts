@@ -28,3 +28,7 @@ export {
 } from "./redis-stream";
 export { RedisChannel, type RedisChannelConfig } from "./redis-channel";
 export { RedisStateBackend, type RedisStateBackendConfig } from "./redis-state-backend";
+export {
+  RedisPartitionedStateBackend,
+  type RedisPartitionedStateBackendConfig,
+} from "./redis-partitioned-state-backend";

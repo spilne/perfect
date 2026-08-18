@@ -22,6 +22,10 @@ import type {
   Replayable,
   Acknowledgeable,
   AcknowledgeOptions,
+  ManagedAcknowledgeable,
+  ManagedAcknowledgementSubscription,
+  PartitionAssignment,
+  PartitionLifecycle,
   Checkpointable,
   ConsumerGroup,
   Envelope,
@@ -70,7 +74,10 @@ export interface KafkaAckOptions extends AcknowledgeOptions {
   readonly fromBeginning?: boolean;
 }
 
-export interface KafkaAckSubscription<T> {
+export interface KafkaAckSubscription<T> extends ManagedAcknowledgementSubscription<
+  T,
+  Throws<KafkaError>
+> {
   readonly stream: Stream<Envelope<T, Throws<KafkaError>>, Throws<KafkaError>>;
   readonly consumer: KafkaConsumer;
   readonly topic: TopicName;
@@ -84,6 +91,7 @@ export class KafkaTopic<T>
     Partitionable<T, Throws<KafkaError>>,
     Replayable<T, Throws<KafkaError>>,
     Acknowledgeable<T, Throws<KafkaError>>,
+    ManagedAcknowledgeable<T, Throws<KafkaError>>,
     KeyedSinkable<T, Throws<KafkaError>>,
     Checkpointable<T, Throws<KafkaError>>
 {
@@ -205,6 +213,10 @@ export class KafkaTopic<T>
     );
   }
 
+  subscribeAckManaged(params?: AcknowledgeOptions): KafkaAckSubscription<T> {
+    return this.subscribeAckWithHandle(params);
+  }
+
   subscribeAckWithHandle(params?: KafkaAckOptions): KafkaAckSubscription<T> {
     const codec = this.codec;
     const kafka = this.kafka;
@@ -226,6 +238,26 @@ export class KafkaTopic<T>
       partition: PartitionId;
       offset: KafkaOffset;
     }> | null = null;
+    let lifecycle: PartitionLifecycle | undefined;
+    const activePartitions = new Set<Partition>();
+    let activeGeneration: number | undefined;
+    const removeAssigned = consumer.onPartitionsAssigned?.(async (assignment) => {
+      for (const partition of assignment.partitions) activePartitions.add(partition);
+      activeGeneration = assignment.generation;
+      await lifecycle?.assigned({
+        partitions: assignment.partitions,
+        generation: assignment.generation,
+      });
+    });
+    const handleRevocation = async (assignment: PartitionAssignment) => {
+      await lifecycle?.revoking({
+        partitions: assignment.partitions,
+        generation: assignment.generation,
+      });
+      await flushCommits();
+      for (const partition of assignment.partitions) activePartitions.delete(partition);
+    };
+    const removeRevoked = consumer.onPartitionsRevoked?.(handleRevocation);
 
     const flushCommits = (): Promise<void> => {
       if (!autoCommit) return Promise.resolve();
@@ -256,10 +288,19 @@ export class KafkaTopic<T>
       closePromise = (async () => {
         let failure: unknown;
         try {
-          await flushCommits();
+          if (activePartitions.size > 0) {
+            await handleRevocation({
+              partitions: [...activePartitions],
+              generation: activeGeneration,
+            });
+          } else {
+            await flushCommits();
+          }
         } catch (cause) {
           failure = cause;
         }
+        removeAssigned?.();
+        removeRevoked?.();
         try {
           await consumer.disconnect();
         } catch (cause) {
@@ -380,6 +421,9 @@ export class KafkaTopic<T>
       consumer,
       topic,
       groupId,
+      setPartitionLifecycle(next) {
+        lifecycle = next;
+      },
       close,
     };
   }

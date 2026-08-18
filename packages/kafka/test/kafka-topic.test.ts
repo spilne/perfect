@@ -14,6 +14,7 @@ import type {
   KafkaConsumer,
   KafkaMessage,
   KafkaOffsetCommit,
+  KafkaPartitionAssignment,
   KafkaProducer,
 } from "../src/kafka-types";
 import { TopicName, GroupId, PartitionId, KafkaOffset } from "../src/brands";
@@ -43,10 +44,17 @@ function makeFakeKafka(opts: {
   const committed: KafkaOffsetCommit[][] = [];
   const subscriptions: Array<{ topic: TopicName; fromBeginning?: boolean }> = [];
   const sought: Array<{ topic: TopicName; partition: PartitionId; offset: KafkaOffset }> = [];
+  let assigned: ((assignment: KafkaPartitionAssignment) => void | Promise<void>) | undefined;
+  let revoked: ((assignment: KafkaPartitionAssignment) => void | Promise<void>) | undefined;
 
   const consumer: KafkaConsumer = {
     async connect() {},
-    async disconnect() {},
+    async disconnect() {
+      await revoked?.({
+        topic: opts.topic,
+        partitions: opts.batches.map((_, partition) => PartitionId(partition)),
+      });
+    },
     async subscribe(params) {
       subscriptions.push(params);
     },
@@ -55,6 +63,18 @@ function makeFakeKafka(opts: {
     },
     async commitOffsets(offsets) {
       committed.push(offsets);
+    },
+    onPartitionsAssigned(listener) {
+      assigned = listener;
+      return () => {
+        assigned = undefined;
+      };
+    },
+    onPartitionsRevoked(listener) {
+      revoked = listener;
+      return () => {
+        revoked = undefined;
+      };
     },
     async run(params) {
       // kafkajs-style dispatch: use whichever callback is set. If both,
@@ -67,6 +87,10 @@ function makeFakeKafka(opts: {
           "KafkaTopic passed both eachMessage and eachBatch — kafkajs would reject this as a ConfigurationError",
         );
       }
+      await assigned?.({
+        topic: opts.topic,
+        partitions: opts.batches.map((_, partition) => PartitionId(partition)),
+      });
       if (hasBatch) {
         dispatchedVia.current = "eachBatch";
         for (let partition = 0; partition < opts.batches.length; partition++) {
@@ -240,6 +264,58 @@ describe("KafkaTopic — subscribe", () => {
 });
 
 describe("KafkaTopic — subscribeAck", () => {
+  it("restores assignments before delivery and checkpoints before disconnect", async () => {
+    const { client, consumer } = makeFakeKafka({
+      topic: TopicName("orders"),
+      batches: [[{ value: { n: 1 }, offset: "0" }]],
+    });
+    const topic = new KafkaTopic<{ n: number }>({
+      kafka: client,
+      topic: TopicName("orders"),
+      groupId: GroupId("managed"),
+    });
+    const subscription = topic.subscribeAckManaged();
+    const events: string[] = [];
+    const commitOffsets = consumer.commitOffsets.bind(consumer);
+    consumer.commitOffsets = async (offsets) => {
+      events.push("commit");
+      await commitOffsets(offsets);
+    };
+    subscription.setPartitionLifecycle({
+      assigned: async () => {
+        events.push("restore-start");
+        await Bun.sleep(10);
+        events.push("restore-end");
+      },
+      revoking: async () => {
+        events.push("checkpoint-start");
+        await Bun.sleep(10);
+        events.push("checkpoint-end");
+      },
+    });
+
+    const envelopes = await run(
+      subscription.stream
+        .map((envelope) => {
+          events.push(`deliver:${envelope.value.n}`);
+          return envelope;
+        })
+        .take(1)
+        .toArray(),
+    );
+    await run(envelopes[0]!.ack());
+    await subscription.close();
+
+    expect(events).toEqual([
+      "restore-start",
+      "restore-end",
+      "deliver:1",
+      "checkpoint-start",
+      "checkpoint-end",
+      "commit",
+    ]);
+  });
+
   it("preserves acknowledgement envelope batches", async () => {
     const { client, dispatchedVia } = makeFakeKafka({
       topic: TopicName("orders"),

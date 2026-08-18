@@ -108,15 +108,86 @@ export function createPlatformaticClient(
       let stopped = false;
       let activeStream: MessagesStream<Buffer, Buffer, Buffer, Buffer> | null = null;
       const offsets = new Map<number, bigint>();
+      type AssignmentListener = (assignment: {
+        topic: TopicName;
+        partitions: readonly ReturnType<typeof PartitionId>[];
+        generation?: number;
+      }) => void | Promise<void>;
+      const assignedListeners = new Set<AssignmentListener>();
+      const revokedListeners = new Set<AssignmentListener>();
+      const assignments = new Map<string, Set<number>>();
+      let assignmentBarrier = Promise.resolve();
+
+      const notify = (
+        listeners: Set<AssignmentListener>,
+        topic: string,
+        partitions: readonly number[],
+        generation?: number,
+      ) => {
+        if (partitions.length === 0) return;
+        const assignment = {
+          topic: TopicName(topic),
+          partitions: partitions.map(PartitionId),
+          generation,
+        };
+        assignmentBarrier = assignmentBarrier.then(() =>
+          Promise.all([...listeners].map((listener) => listener(assignment))).then(() => {}),
+        );
+      };
+
+      consumer.on("consumer:group:join", (payload) => {
+        for (const assignment of payload.assignments ?? []) {
+          assignments.set(assignment.topic, new Set(assignment.partitions));
+          notify(assignedListeners, assignment.topic, assignment.partitions, payload.generationId);
+        }
+      });
+      consumer.on("consumer:group:rebalance", () => {
+        for (const [topic, partitions] of assignments) {
+          notify(revokedListeners, topic, [...partitions]);
+        }
+        assignments.clear();
+      });
+
+      const ensureAssigned = async (topic: string, partition: number) => {
+        let topicAssignments = assignments.get(topic);
+        if (!topicAssignments) {
+          topicAssignments = new Set();
+          assignments.set(topic, topicAssignments);
+        }
+        if (!topicAssignments.has(partition)) {
+          topicAssignments.add(partition);
+          notify(assignedListeners, topic, [partition]);
+        }
+        await assignmentBarrier;
+      };
 
       return {
         connect: async () => {},
         disconnect: async () => {
           stopped = true;
+          for (const [topic, partitions] of assignments) {
+            notify(revokedListeners, topic, [...partitions]);
+          }
+          assignments.clear();
+          let failure: unknown;
+          try {
+            await assignmentBarrier;
+          } catch (cause) {
+            failure = cause;
+          }
           const stream = activeStream;
           activeStream = null;
-          if (stream?.isActive()) await stream.close();
-          await consumer.close();
+          try {
+            if (stream?.isActive()) await stream.close();
+          } catch (cause) {
+            if (failure === undefined) failure = cause;
+          }
+          try {
+            await consumer.close();
+          } catch (cause) {
+            if (failure === undefined) failure = cause;
+          }
+          if (failure !== undefined) throw failure;
         },
         subscribe: async (params) => {
           subscribedTopic = params.topic;
@@ -146,6 +217,7 @@ export function createPlatformaticClient(
           try {
             for await (const message of eventIterable(stream, streamBufferCapacity)) {
               if (stopped) break;
+              await ensureAssigned(message.topic, message.partition);
               yield toKafkaMessage(message);
             }
           } finally {
@@ -173,6 +245,14 @@ export function createPlatformaticClient(
           } else {
             offsets.set(params.partition, BigInt(params.offset));
           }
+        },
+        onPartitionsAssigned: (listener) => {
+          assignedListeners.add(listener);
+          return () => assignedListeners.delete(listener);
+        },
+        onPartitionsRevoked: (listener) => {
+          revokedListeners.add(listener);
+          return () => revokedListeners.delete(listener);
         },
       };
     },

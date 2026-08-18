@@ -31,17 +31,88 @@ export function createKafkajsClient(
         heartbeatInterval: config.heartbeatInterval,
         rebalanceTimeout: config.maxPollInterval,
       });
+      type AssignmentListener = (assignment: {
+        topic: TopicName;
+        partitions: readonly ReturnType<typeof PartitionId>[];
+        generation?: number;
+      }) => void | Promise<void>;
+      const assignedListeners = new Set<AssignmentListener>();
+      const revokedListeners = new Set<AssignmentListener>();
+      const assignments = new Map<string, Set<number>>();
+      let assignmentBarrier = Promise.resolve();
+
+      const notify = (
+        listeners: Set<AssignmentListener>,
+        topic: string,
+        partitions: readonly number[],
+        generation?: number,
+      ) => {
+        if (partitions.length === 0) return;
+        const assignment = {
+          topic: TopicName(topic),
+          partitions: partitions.map(PartitionId),
+          generation,
+        };
+        assignmentBarrier = assignmentBarrier.then(() =>
+          Promise.all([...listeners].map((listener) => listener(assignment))).then(() => {}),
+        );
+      };
+
+      consumer.on(consumer.events.GROUP_JOIN, ({ payload }) => {
+        assignments.clear();
+        for (const [topic, partitions] of Object.entries(payload.memberAssignment)) {
+          assignments.set(topic, new Set(partitions));
+          notify(assignedListeners, topic, partitions);
+        }
+      });
+      consumer.on(consumer.events.REBALANCING, () => {
+        for (const [topic, partitions] of assignments) {
+          notify(revokedListeners, topic, [...partitions]);
+        }
+        assignments.clear();
+      });
+
+      const ensureAssigned = async (topic: string, partition: number) => {
+        let topicAssignments = assignments.get(topic);
+        if (!topicAssignments) {
+          topicAssignments = new Set();
+          assignments.set(topic, topicAssignments);
+        }
+        if (!topicAssignments.has(partition)) {
+          topicAssignments.add(partition);
+          notify(assignedListeners, topic, [partition]);
+        }
+        await assignmentBarrier;
+      };
 
       return {
         connect: () => consumer.connect(),
-        disconnect: () => consumer.disconnect(),
+        disconnect: async () => {
+          for (const [topic, partitions] of assignments) {
+            notify(revokedListeners, topic, [...partitions]);
+          }
+          assignments.clear();
+          let failure: unknown;
+          try {
+            await assignmentBarrier;
+          } catch (cause) {
+            failure = cause;
+          }
+          try {
+            await consumer.disconnect();
+          } catch (cause) {
+            if (failure === undefined) failure = cause;
+          }
+          if (failure !== undefined) throw failure;
+        },
         subscribe: (params) => consumer.subscribe(params),
         run: (params) =>
           consumer.run({
             autoCommit: params.autoCommit,
             eachMessage: params.eachMessage
-              ? (payload) =>
-                  params.eachMessage!({
+              ? async (payload) => {
+                  await ensureAssigned(payload.topic, payload.partition);
+                  await params.eachMessage!({
                     topic: TopicName(payload.topic),
                     partition: PartitionId(payload.partition),
                     message: {
@@ -51,11 +122,13 @@ export function createKafkajsClient(
                       timestamp: payload.message.timestamp ?? "",
                       headers: payload.message.headers,
                     },
-                  })
+                  });
+                }
               : undefined,
             eachBatch: params.eachBatch
-              ? (payload) =>
-                  params.eachBatch!({
+              ? async (payload) => {
+                  await ensureAssigned(payload.batch.topic, payload.batch.partition);
+                  await params.eachBatch!({
                     batch: {
                       topic: TopicName(payload.batch.topic),
                       partition: PartitionId(payload.batch.partition),
@@ -67,11 +140,20 @@ export function createKafkajsClient(
                         headers: message.headers,
                       })),
                     },
-                  })
+                  });
+                }
               : undefined,
           }),
         commitOffsets: (offsets) => consumer.commitOffsets(offsets),
         seek: (params) => consumer.seek(params),
+        onPartitionsAssigned: (listener) => {
+          assignedListeners.add(listener);
+          return () => assignedListeners.delete(listener);
+        },
+        onPartitionsRevoked: (listener) => {
+          revokedListeners.add(listener);
+          return () => revokedListeners.delete(listener);
+        },
       };
     },
 

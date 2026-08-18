@@ -2,9 +2,16 @@
 // StreamTopology types — stateful stream processing with windows, joins, checkpointing
 // ---------------------------------------------------------------------------
 
-import type { ChannelName, ConsumerGroup } from "@perfect/core/connect";
+import type {
+  ChannelName,
+  ConsumerGroup,
+  StageId,
+  TopologyId,
+  TopologyInstanceId,
+} from "@perfect/core/connect";
 import type { ExitT } from "@perfect/core";
 import type { StateBackend } from "./state-backend";
+import type { PartitionedStateBackend } from "@perfect/core/connect";
 
 export interface TimeWindow {
   start: number;
@@ -33,7 +40,19 @@ export interface JoinConfig {
 
 export interface TopologyConfig {
   group: ConsumerGroup;
+  /** Requires source, sink, and partition state to share one transaction domain. */
+  deliveryGuarantee?: "at-least-once" | "exactly-once";
+  /** Stable identity used to namespace durable state. Defaults to `group`. */
+  topologyId?: TopologyId;
+  /** Stable stage identity. DistributedRunner supplies this automatically. */
+  stageId?: StageId;
+  /** Unique process identity used to own fenced partition leases. */
+  instanceId?: TopologyInstanceId;
   stateBackend?: StateBackend<string, unknown>;
+  /** Atomic, partition-scoped state. Required for hardened distributed state. */
+  partitionedStateBackend?: PartitionedStateBackend<unknown>;
+  /** Lease duration for partition ownership. Default: 30 seconds. */
+  partitionLeaseMs?: number;
   checkpointIntervalMs?: number;
   /** Max items buffered between stages before backpressure kicks in. Default: unbounded. */
   maxBufferSize?: number;

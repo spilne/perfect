@@ -22,8 +22,11 @@ import type {
   KeyedSinkable,
   ShuffleTransport,
   ChannelName,
+  PartitionedStateBackend,
+  TopologyId,
+  TopologyInstanceId,
 } from "@perfect/core/connect";
-import { JsonCodec, ConsumerGroup } from "@perfect/core/connect";
+import { JsonCodec, ConsumerGroup, TopologyId as makeTopologyId } from "@perfect/core/connect";
 import type { Eff } from "@perfect/core";
 
 /**
@@ -31,8 +34,13 @@ import type { Eff } from "@perfect/core";
  */
 export interface DistributedTopologyConfig {
   group: ConsumerGroup;
+  deliveryGuarantee?: "at-least-once" | "exactly-once";
   shuffleTransport: ShuffleTransport;
   stateBackend?: StateBackend<string, unknown>;
+  partitionedStateBackend?: PartitionedStateBackend<unknown>;
+  topologyId?: TopologyId;
+  instanceId?: TopologyInstanceId;
+  partitionLeaseMs?: number;
   checkpointIntervalMs?: number;
   maxBufferSize?: number;
   maxItemsPerSecond?: number;
@@ -75,6 +83,20 @@ export class DistributedRunner {
       compiled: topology.compiled,
       group: config.group,
     });
+
+    const hasDistributedState = plan.stages.some((stage) =>
+      stage.nodes.some((node) => ["aggregate", "process", "dedupe", "join"].includes(node.type)),
+    );
+    if (
+      config.stateBackend &&
+      !config.partitionedStateBackend &&
+      plan.stages.length > 1 &&
+      hasDistributedState
+    ) {
+      throw new TypeError(
+        "DistributedRunner requires partitionedStateBackend for stateful multi-stage execution",
+      );
+    }
 
     // No shuffles — delegate to TopologyRunner
     if (plan.stages.length === 1 && plan.repartitionTopics.length === 0) {
@@ -126,7 +148,13 @@ export class DistributedRunner {
       const handle = await TopologyRunner.run(stageTopology, {
         // Each stage is its own consumer group — derived, so rebrand.
         group: ConsumerGroup(`${config.group}-${stage.id}`),
+        deliveryGuarantee: config.deliveryGuarantee,
+        topologyId: config.topologyId ?? makeTopologyId(config.group),
+        stageId: stage.id,
+        instanceId: config.instanceId,
         stateBackend: config.stateBackend,
+        partitionedStateBackend: config.partitionedStateBackend,
+        partitionLeaseMs: config.partitionLeaseMs,
         checkpointIntervalMs: config.checkpointIntervalMs,
         maxBufferSize: config.maxBufferSize,
         maxItemsPerSecond: config.maxItemsPerSecond,

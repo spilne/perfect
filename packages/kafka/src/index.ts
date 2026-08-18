@@ -20,6 +20,7 @@ export type {
   KafkaClient,
   KafkaConsumer,
   KafkaConsumerOptions,
+  KafkaPartitionAssignment,
   KafkaProducer,
   KafkaAdmin,
   KafkaMessage,

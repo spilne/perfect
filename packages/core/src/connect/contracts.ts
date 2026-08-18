@@ -44,6 +44,31 @@ export const Partition = refined<Partition>(
 export type ChannelName = Brand<string, "ChannelName">;
 export const ChannelName = nominal<ChannelName>() as (value: string) => ChannelName;
 
+export type TopologyId = Brand<string, "TopologyId">;
+export const TopologyId = nominal<TopologyId>() as (value: string) => TopologyId;
+
+export type StageId = Brand<string, "StageId">;
+export const StageId = nominal<StageId>() as (value: string) => StageId;
+
+export type TopologyInstanceId = Brand<string, "TopologyInstanceId">;
+export const TopologyInstanceId = nominal<TopologyInstanceId>() as (
+  value: string,
+) => TopologyInstanceId;
+
+export type SourceRecordId = Brand<string, "SourceRecordId">;
+export const SourceRecordId = nominal<SourceRecordId>() as (value: string) => SourceRecordId;
+
+export type StateCheckpointId = Brand<string, "StateCheckpointId">;
+export const StateCheckpointId = nominal<StateCheckpointId>() as (
+  value: string,
+) => StateCheckpointId;
+
+export type LeaseEpoch = Brand<number, "LeaseEpoch">;
+export const LeaseEpoch = refined<LeaseEpoch>(
+  (value) => Number.isSafeInteger(value) && value > 0,
+  (value) => `LeaseEpoch must be a positive safe integer, got ${value}`,
+) as (value: number) => LeaseEpoch;
+
 // ── Streamable<T> — "I can produce a stream of T" ──────────────────
 
 export interface Streamable<T, S = never> {
@@ -68,6 +93,11 @@ export interface Sinkable<T, S = never> {
   codec: Codec<T>;
 }
 
+export interface TransactionalSinkable<T, S = never, Transaction = unknown> extends Sinkable<T, S> {
+  readonly transactionDomain: object;
+  publishInTransaction(transaction: Transaction, value: T): Promise<void>;
+}
+
 export function isSinkable<T, S = never>(value: unknown): value is Sinkable<T, S> {
   return (
     value !== null &&
@@ -75,6 +105,19 @@ export function isSinkable<T, S = never>(value: unknown): value is Sinkable<T, S
     "publish" in value &&
     typeof (value as any).publish === "function" &&
     "codec" in value
+  );
+}
+
+export function isTransactionalSinkable<T, S = never, Transaction = unknown>(
+  value: unknown,
+): value is TransactionalSinkable<T, S, Transaction> {
+  return (
+    isSinkable(value) &&
+    "transactionDomain" in value &&
+    typeof (value as any).transactionDomain === "object" &&
+    (value as any).transactionDomain !== null &&
+    "publishInTransaction" in value &&
+    typeof (value as any).publishInTransaction === "function"
   );
 }
 
@@ -136,6 +179,23 @@ export interface Envelope<T, S = never> {
   readonly metadata: Record<string, unknown>;
 }
 
+export interface TransactionalEnvelope<T, S = never, Transaction = unknown> extends Envelope<T, S> {
+  readonly transactionDomain: object;
+  ackInTransaction(transaction: Transaction): Promise<void>;
+}
+
+export function isTransactionalEnvelope<T, S = never, Transaction = unknown>(
+  value: Envelope<T, S>,
+): value is TransactionalEnvelope<T, S, Transaction> {
+  return (
+    "transactionDomain" in value &&
+    typeof (value as any).transactionDomain === "object" &&
+    (value as any).transactionDomain !== null &&
+    "ackInTransaction" in value &&
+    typeof (value as any).ackInTransaction === "function"
+  );
+}
+
 export interface AcknowledgeOptions {
   readonly group?: ConsumerGroup;
   readonly offset?: Offset;
@@ -145,11 +205,41 @@ export interface Acknowledgeable<T, S = never> extends Streamable<T, S> {
   subscribeAck(params?: AcknowledgeOptions): Stream<Envelope<T, S>, S>;
 }
 
+export interface PartitionAssignment {
+  readonly partitions: readonly Partition[];
+  readonly generation?: number;
+}
+
+export interface PartitionLifecycle {
+  assigned(assignment: PartitionAssignment): Promise<void>;
+  revoking(assignment: PartitionAssignment): Promise<void>;
+}
+
+export interface ManagedAcknowledgementSubscription<T, S = never> {
+  readonly stream: Stream<Envelope<T, S>, S>;
+  setPartitionLifecycle(lifecycle: PartitionLifecycle): void;
+  close(): Promise<void>;
+}
+
+export interface ManagedAcknowledgeable<T, S = never> extends Acknowledgeable<T, S> {
+  subscribeAckManaged(params?: AcknowledgeOptions): ManagedAcknowledgementSubscription<T, S>;
+}
+
 export function isAcknowledgeable<T, S = never>(value: unknown): value is Acknowledgeable<T, S> {
   return (
     isStreamable(value) &&
     "subscribeAck" in value &&
     typeof (value as any).subscribeAck === "function"
+  );
+}
+
+export function isManagedAcknowledgeable<T, S = never>(
+  value: unknown,
+): value is ManagedAcknowledgeable<T, S> {
+  return (
+    isAcknowledgeable(value) &&
+    "subscribeAckManaged" in value &&
+    typeof (value as any).subscribeAckManaged === "function"
   );
 }
 
