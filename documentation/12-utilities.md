@@ -147,20 +147,22 @@ console.log(lru.has("b").runSync()); // → false
 
 ### Distributed backends
 
-Implement the `CacheStore<K, V>` interface — methods return `Eff`. A
-Redis-backed store would internally use `tryPromise` to bridge the
-Redis client:
+`@perfect/redis` ships the distributed implementation. It preserves the same
+interface while adding `Throws<RedisError>` to each effect:
 
 ```ts
-class RedisCacheStore<V> implements CacheStore<string, V> {
-  constructor(private redis: RedisClient) {}
-  get(k) { return tryPromise(() => this.redis.get(k), ...); }
-  set(k, v, ttlMs?) { /* ... */ }
-  // ... etc
-}
+import { RedisCacheStore } from "@perfect/redis";
+
+const store = RedisCacheStore.make<string, User>({
+  redis,
+  prefix: "users:",
+  ttlMs: 60_000,
+});
 ```
 
-Then it slots in via Layer wherever a `CacheStore` is needed.
+The implementation uses prefix-scoped scanning for `clear()` and supports a
+custom value codec and key encoder. See
+[Distributed backends](./17-distributed-backends.md#redis).
 
 ## Next
 

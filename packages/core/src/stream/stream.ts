@@ -7,7 +7,7 @@
 // Consumer drives: upstream only runs when downstream pulls.
 // Backpressure is structural — no buffering, no highWaterMark.
 
-import { type Eff, type Throws, Suspend, Op } from "../eff";
+import { type Eff, type Throws, type ErrorsOf, type ExcludeTags, Suspend, Op } from "../eff";
 import {
   succeed,
   fail,
@@ -34,7 +34,7 @@ import { type Deferred, Deferred as DeferredNS } from "../deferred";
 import { Semaphore } from "../semaphore";
 import { Cause } from "../cause";
 import { clockNow } from "../clock";
-import type { Exit } from "../exit";
+import { Exit } from "../exit";
 import type { Fiber } from "../fiber";
 import type { StateBackend } from "../connect/state-backend";
 
@@ -43,6 +43,13 @@ export interface StatefulMapOptions<A, K, V, B, S> {
   readonly keyBy: (value: A) => K;
   readonly process: (value: A, state: StateBackend<K, V>, key: K) => Eff<B, S>;
 }
+
+type BroadcastBranch<A, S> = (stream: Stream<A, S>) => Stream<any, any>;
+type StreamValue<T> = T extends Stream<infer A, any> ? A : never;
+type StreamEffects<T> = T extends Stream<any, infer S> ? S : never;
+type Either<E, A> =
+  | { readonly _tag: "Left"; readonly left: E }
+  | { readonly _tag: "Right"; readonly right: A };
 
 // Run an effect to its Exit without an error channel — worker fibers carry
 // full Causes to the consumer this way.
@@ -57,7 +64,11 @@ function interruptAllEff(drivers: Fiber<any>[]): Eff<void, never> {
   return suspend(() => {
     const fs = drivers.splice(0);
     return fs.reduce<Eff<void, never>>(
-      (acc, f) => (acc as any).flatMap(() => interrupt(f)),
+      (acc, f) =>
+        (acc as any)
+          .flatMap(() => interrupt(f))
+          .flatMap(() => awaitFiber(f))
+          .map(() => undefined),
       succeed(undefined) as any,
     );
   }) as any;
@@ -343,6 +354,77 @@ export class Stream<A, S = never> {
     return go(count);
   }
 
+  /**
+   * Retry a factory-built stream from its source acquisition when it fails.
+   * Values emitted before a failure remain emitted, so restarting a source can
+   * produce duplicates unless the source resumes from a durable offset.
+   *
+   * The retry policy resets after the restarted stream emits a chunk. Every
+   * failed attempt is finalized before the next source is acquired, and an
+   * active attempt is finalized when downstream stops early.
+   */
+  static retryFrom<A, S>(
+    factory: () => Stream<A, S>,
+    policy: RetryPolicy | RetryConfig,
+  ): Stream<A, S> {
+    let activeFinalizer: Eff<void, unknown> | null = null;
+
+    const releaseActive = (): Eff<void, unknown> =>
+      suspend(() => {
+        const finalizer = activeFinalizer;
+        activeFinalizer = null;
+        return finalizer ?? succeed(undefined);
+      });
+
+    const acquire = (): Eff<Step<A>, S> =>
+      suspend(() => {
+        const source = factory();
+        activeFinalizer = source._finalizer;
+        return (source.step as any)
+          .flatMap((step: Step<A>) =>
+            step._tag === "Done" ? (releaseActive() as any).map(() => DONE) : succeed(step),
+          )
+          .catchAllCause((cause: Cause) =>
+            (releaseActive() as any).flatMap(() => failCause(cause)),
+          );
+      }) as any;
+
+    const wrapStep = (stepEffect: Eff<Step<A>, S>): Eff<Step<A>, S> =>
+      (stepEffect as any).map((step: Step<A>) =>
+        step._tag === "Done" ? DONE : emit(step.chunk, follow(step.next as Stream<A, S>)),
+      );
+
+    const retryAfter = (cause: Cause): Eff<Step<A>, S> => {
+      let first = true;
+      const attempt: Eff<Step<A>, S> = suspend(() => {
+        if (first) {
+          first = false;
+          return failCause(cause) as any;
+        }
+        return acquire();
+      }) as any;
+      return wrapStep(effRetry(attempt, policy as any) as Eff<Step<A>, S>);
+    };
+
+    function follow(current: Stream<A, S>): Stream<A, S> {
+      return new Stream(
+        (current.step as any)
+          .flatMap((step: Step<A>) => {
+            if (step._tag === "Done") {
+              return (releaseActive() as any).map(() => DONE);
+            }
+            return succeed(emit(step.chunk, follow(step.next as Stream<A, S>)));
+          })
+          .catchAllCause((cause: Cause) =>
+            (releaseActive() as any).flatMap(() => retryAfter(cause)),
+          ),
+      );
+    }
+
+    const initial = suspend(() => wrapStep(effRetry(acquire(), policy as any) as Eff<Step<A>, S>));
+    return new Stream(initial as Eff<Step<A>, S>, suspend(releaseActive) as any);
+  }
+
   static tick(intervalMs: number): Stream<void, never> {
     function go(): Stream<void, never> {
       return new Stream(
@@ -352,16 +434,12 @@ export class Stream<A, S = never> {
     return go();
   }
 
-  // Return S is `any` by design: the queue's effect union is erased here
-  // (shutdown becomes end-of-stream, other failures re-propagate untyped);
-  // `unknown` would make every downstream run() fail the EffectCheck.
-  static fromQueue<A>(queue: { take(): Eff<A, unknown> }): Stream<A, any> {
-    function go(): Stream<A, any> {
+  static fromQueue<A, S>(queue: { take(): Eff<A, S> }): Stream<A, ExcludeTags<S, "QueueClosed">> {
+    function go(): Stream<A, ExcludeTags<S, "QueueClosed">> {
       return new Stream(
         (queue.take() as any)
           .map((a: A) => emit(Chunk.single(a), go()))
-          // queue shutdown ends the stream; any other failure propagates
-          .catch((e: unknown) => (e instanceof QueueClosed ? DONE : fail(e))),
+          .catchTag("QueueClosed", () => succeed(DONE)),
       );
     }
     return go();
@@ -1050,6 +1128,100 @@ export class Stream<A, S = never> {
     );
   }
 
+  /**
+   * Emit values until `signal` emits its first value. An empty signal leaves
+   * the source unchanged; a failing signal fails the result. Source and signal
+   * finalizers are awaited when either side wins or downstream stops.
+   */
+  takeUntil<S2>(signal: Stream<unknown, S2>): Stream<A, S | S2> {
+    type SignalEvent =
+      | { readonly _tag: "stop" }
+      | { readonly _tag: "empty" }
+      | { readonly _tag: "failure"; readonly cause: Cause };
+    type RaceEvent =
+      | { readonly _tag: "source"; readonly step: Step<A> }
+      | { readonly _tag: "signal"; readonly event: SignalEvent };
+
+    const self = this;
+    const drivers: Fiber<any>[] = [];
+    let signalFinalizer = signal._finalizer;
+
+    const releaseSignal = (): Eff<void, unknown> =>
+      suspend(() => {
+        const finalizer = signalFinalizer;
+        signalFinalizer = null;
+        return finalizer ?? succeed(undefined);
+      });
+
+    const setup: Eff<Step<A>, any> = (DeferredNS.make<SignalEvent>() as any).flatMap(
+      (control: Deferred<SignalEvent>) => {
+        let signalFinished = false;
+
+        const watchSignal = (
+          ensuring(
+            (signal.step as any).flatMap((step: Step<unknown>) =>
+              (releaseSignal() as any).map(
+                (): SignalEvent => (step._tag === "Done" ? { _tag: "empty" } : { _tag: "stop" }),
+              ),
+            ),
+            suspend(releaseSignal),
+          ) as any
+        )
+          .catchAllCause((cause: Cause) => succeed<SignalEvent>({ _tag: "failure", cause }))
+          .flatMap((event: SignalEvent) => control.succeed(event).map(() => undefined));
+
+        const pullSource = (
+          source: Stream<A, any>,
+        ): Eff<Extract<RaceEvent, { readonly _tag: "source" }>, any> =>
+          (source.step as any).map((step: Step<A>) => ({ _tag: "source" as const, step }));
+
+        const pull = (source: Stream<A, any>): Eff<Step<A>, any> => {
+          if (signalFinished) {
+            return pullSource(source).map((event) => {
+              const step = event.step;
+              return step._tag === "Done"
+                ? DONE
+                : emit(step.chunk, new Stream(suspend(() => pull(step.next))));
+            });
+          }
+
+          return (
+            race([
+              pullSource(source),
+              (control.await as any).map(
+                (event: SignalEvent): RaceEvent => ({ _tag: "signal", event }),
+              ),
+            ]) as any
+          ).flatMap((winner: RaceEvent): Eff<Step<A>, any> => {
+            if (winner._tag === "source") {
+              const step = winner.step;
+              return succeed(
+                step._tag === "Done"
+                  ? DONE
+                  : emit(step.chunk, new Stream(suspend(() => pull(step.next)))),
+              );
+            }
+
+            if (winner.event._tag === "stop") return succeed(DONE);
+            if (winner.event._tag === "failure") return failCause(winner.event.cause);
+            signalFinished = true;
+            return pull(source);
+          });
+        };
+
+        return (fork(watchSignal) as any).flatMap((fiber: Fiber<any>) => {
+          drivers.push(fiber);
+          return pull(self);
+        });
+      },
+    );
+
+    return new Stream(
+      suspend(() => setup) as any,
+      combineFinalizers(interruptAllEff(drivers), self._finalizer),
+    ) as any;
+  }
+
   dropWhile(p: (a: A) => boolean): Stream<A, S> {
     return new Stream(
       (this.step as any)
@@ -1589,6 +1761,167 @@ export class Stream<A, S = never> {
         combineFinalizers(self._finalizer, that._finalizer),
       ),
     ) as any;
+  }
+
+  /**
+   * Pull the source once, fan every chunk out to every branch, and merge the
+   * branch outputs. Each branch has a one-chunk bounded input queue, so the
+   * slowest active branch backpressures the source.
+   */
+  broadcastThrough(): Stream<A, S>;
+  broadcastThrough<
+    const Branches extends readonly [BroadcastBranch<A, S>, ...BroadcastBranch<A, S>[]],
+  >(
+    ...branches: Branches
+  ): Stream<
+    StreamValue<ReturnType<Branches[number]>>,
+    S | StreamEffects<ReturnType<Branches[number]>>
+  >;
+  broadcastThrough(...branches: readonly BroadcastBranch<A, S>[]): Stream<any, any> {
+    if (branches.length === 0) return this;
+
+    const self = this;
+    type InputSlot =
+      | { readonly _tag: "chunk"; readonly chunk: Chunk<A> }
+      | { readonly _tag: "end" }
+      | { readonly _tag: "fail"; readonly cause: Cause };
+    type OutputSlot =
+      | { readonly _tag: "item"; readonly value: unknown }
+      | { readonly _tag: "end" }
+      | { readonly _tag: "fail"; readonly cause: Cause };
+
+    const drivers: Fiber<any>[] = [];
+
+    const setup: Eff<Step<unknown>, any> = (
+      branches.reduce<Eff<Queue<InputSlot>[], never>>(
+        (acc) =>
+          (acc as any).flatMap((queues: Queue<InputSlot>[]) =>
+            QueueNS.bounded<InputSlot>(1).map((queue) => {
+              queues.push(queue);
+              return queues;
+            }),
+          ),
+        succeed([]) as Eff<Queue<InputSlot>[], never>,
+      ) as any
+    ).flatMap((inputs: Queue<InputSlot>[]) =>
+      (QueueNS.bounded<OutputSlot>(branches.length) as any).flatMap(
+        (outputs: Queue<OutputSlot>) => {
+          const active = branches.map(() => true);
+
+          const inputStream = (queue: Queue<InputSlot>): Stream<A, S> => {
+            const pull = (): Eff<Step<A>, any> =>
+              (queue.take() as any)
+                .flatMap((slot: InputSlot): any => {
+                  if (slot._tag === "fail") return failCause(slot.cause);
+                  if (slot._tag === "end") return succeed(DONE);
+                  return succeed(
+                    emit(slot.chunk, new Stream<A, any>(suspend(() => pull()) as any)),
+                  );
+                })
+                .catch((error: unknown) =>
+                  error instanceof QueueClosed ? succeed(DONE) : fail(error),
+                );
+            return new Stream(suspend(() => pull()) as any) as Stream<A, S>;
+          };
+
+          const closeInput = (index: number): Eff<void, never> =>
+            sync(() => {
+              active[index] = false;
+            }).flatMap(() => inputs[index]!.close());
+
+          const branchDriver = (index: number): Eff<void, any> => {
+            const branch = branches[index]!(inputStream(inputs[index]!));
+            const drain = branch.forEach((value) =>
+              (outputs.offer({ _tag: "item", value }) as any).map(() => undefined),
+            );
+            return (exitOf(ensuring(drain, closeInput(index))) as any).flatMap(
+              (exit: Exit<unknown, void>) => {
+                if (exit._tag === "Success") return outputs.offer({ _tag: "end" });
+                return Cause.isInterruptedOnly(exit.cause)
+                  ? failCause(exit.cause)
+                  : outputs.offer({ _tag: "fail", cause: exit.cause });
+              },
+            );
+          };
+
+          const startBranches = (index: number): Eff<void, never> =>
+            index >= branches.length
+              ? succeed(undefined)
+              : (fork(branchDriver(index)) as any).flatMap((fiber: Fiber<any>) => {
+                  drivers.push(fiber);
+                  return startBranches(index + 1);
+                });
+
+          const offerInput = (slot: InputSlot, index = 0): Eff<void, any> => {
+            if (index >= inputs.length) return succeed(undefined);
+            if (!active[index]) return offerInput(slot, index + 1);
+            return (inputs[index]!.offer(slot) as any)
+              .catch((error: unknown) =>
+                error instanceof QueueClosed ? succeed(false) : fail(error),
+              )
+              .flatMap(() => offerInput(slot, index + 1));
+          };
+
+          const drainUpstream = (stream: Stream<A, any>): Eff<void, any> =>
+            (stream.step as any).flatMap((step: Step<A>) => {
+              if (step._tag === "Done") return offerInput({ _tag: "end" });
+              return (offerInput({ _tag: "chunk", chunk: step.chunk }) as any).flatMap(() =>
+                active.some(Boolean) ? drainUpstream(step.next) : succeed(undefined),
+              );
+            });
+
+          const upstreamDriver = (drainUpstream(self) as any).catchAllCause((cause: Cause) =>
+            Cause.isInterruptedOnly(cause) ? failCause(cause) : offerInput({ _tag: "fail", cause }),
+          );
+
+          const pullOutput = (open: { count: number }): Eff<Step<unknown>, any> =>
+            (outputs.take() as any).flatMap((slot: OutputSlot): any => {
+              if (slot._tag === "fail") return failCause(slot.cause);
+              if (slot._tag === "end") {
+                open.count--;
+                return open.count === 0 ? succeed(DONE) : pullOutput(open);
+              }
+              return succeed(
+                emit(
+                  Chunk.single(slot.value),
+                  new Stream<unknown, any>(suspend(() => pullOutput(open)) as any),
+                ),
+              );
+            });
+
+          return (startBranches(0) as any).flatMap(() =>
+            (fork(upstreamDriver) as any).flatMap((fiber: Fiber<any>) => {
+              drivers.push(fiber);
+              return pullOutput({ count: branches.length });
+            }),
+          );
+        },
+      ),
+    );
+
+    return new Stream<unknown, any>(
+      suspend(() => setup) as any,
+      combineFinalizers(interruptAllEff(drivers), self._finalizer),
+    );
+  }
+
+  /**
+   * Run a side pipeline over the same single-pass source while preserving only
+   * the source values in the result. The observer is reliable and
+   * backpressured: its failure fails the stream, and downstream completion
+   * waits for its interruption and finalization.
+   */
+  observe<B, S2>(observer: (stream: Stream<A, S>) => Stream<B, S2>): Stream<A, S | S2> {
+    type Observed = { readonly _tag: "source"; readonly value: A } | { readonly _tag: "observer" };
+
+    return this.broadcastThrough(
+      (stream) =>
+        stream.map<Observed>((value) => ({
+          _tag: "source",
+          value,
+        })),
+      (stream) => observer(stream).map<Observed>(() => ({ _tag: "observer" })),
+    ).filterMap((event: Observed) => (event._tag === "source" ? event.value : undefined)) as any;
   }
 
   // ── Concurrency ──────────────────────────────────────────────────
@@ -2202,16 +2535,122 @@ export class Stream<A, S = never> {
 
   // ── Error handling ───────────────────────────────────────────────
 
-  catch<B, S2>(handler: (error: unknown) => Stream<B, S2>): Stream<A | B, S2> {
+  catch<B, S2>(
+    handler: (error: ErrorsOf<S>) => Stream<B, S2>,
+  ): Stream<A | B, Exclude<S, Throws<unknown>> | S2> {
+    const self = this;
+    let recoveryFinalizer: Eff<void, unknown> | null = null;
+
+    const releaseRecovery = (): Eff<void, unknown> =>
+      suspend(() => {
+        const finalizer = recoveryFinalizer;
+        recoveryFinalizer = null;
+        return finalizer ?? succeed(undefined);
+      });
+
+    const wrap = (source: Stream<A, any>): Stream<A | B, any> =>
+      new Stream(
+        (source.step as any)
+          .map((step: Step<A>) =>
+            step._tag === "Done" ? DONE : emit(step.chunk, wrap(step.next as Stream<A, any>)),
+          )
+          .catch((error: ErrorsOf<S>) => {
+            const recovery = handler(error);
+            recoveryFinalizer = recovery._finalizer;
+            return recovery.step;
+          }),
+      );
+
     return new Stream(
-      (this.step as any)
-        .map((s: Step<A>) => {
-          if (s._tag === "Done") return DONE;
-          return emit(s.chunk, s.next.catch(handler));
-        })
-        .catch((e: any) => handler(e).step),
-      this._finalizer,
-    );
+      wrap(self).step,
+      combineFinalizers(self._finalizer, suspend(releaseRecovery)),
+    ) as any;
+  }
+
+  catchTag<Tag extends string, B, S2>(
+    tag: Tag,
+    handler: (error: Extract<ErrorsOf<S>, { readonly _tag: Tag }>) => Stream<B, S2>,
+  ): Stream<A | B, ExcludeTags<S, Tag> | S2> {
+    return this.catch(((error: ErrorsOf<S>) => {
+      if (error !== null && typeof error === "object" && (error as any)._tag === tag) {
+        return handler(error as Extract<ErrorsOf<S>, { readonly _tag: Tag }>);
+      }
+      return Stream.fail(error);
+    }) as any) as any;
+  }
+
+  catchSome<B, S2>(
+    handler: (error: ErrorsOf<S>) => Stream<B, S2> | undefined,
+  ): Stream<A | B, S | S2> {
+    return this.catch(((error: ErrorsOf<S>) => handler(error) ?? Stream.fail(error)) as any) as any;
+  }
+
+  catchAllCause<B, S2>(
+    handler: (cause: Cause<ErrorsOf<S>>) => Stream<B, S2>,
+  ): Stream<A | B, Exclude<S, Throws<unknown>> | S2> {
+    const self = this;
+    let recoveryFinalizer: Eff<void, unknown> | null = null;
+
+    const releaseRecovery = (): Eff<void, unknown> =>
+      suspend(() => {
+        const finalizer = recoveryFinalizer;
+        recoveryFinalizer = null;
+        return finalizer ?? succeed(undefined);
+      });
+
+    const wrap = (source: Stream<A, any>): Stream<A | B, any> =>
+      new Stream(
+        (source.step as any)
+          .map((step: Step<A>) =>
+            step._tag === "Done" ? DONE : emit(step.chunk, wrap(step.next as Stream<A, any>)),
+          )
+          .catchAllCause((cause: Cause<ErrorsOf<S>>) => {
+            const recovery = handler(cause);
+            recoveryFinalizer = recovery._finalizer;
+            return recovery.step;
+          }),
+      );
+
+    return new Stream(
+      wrap(self).step,
+      combineFinalizers(self._finalizer, suspend(releaseRecovery)),
+    ) as any;
+  }
+
+  mapError<E2>(f: (error: ErrorsOf<S>) => E2): Stream<A, Exclude<S, Throws<unknown>> | Throws<E2>> {
+    return this.catch((error) => Stream.fail(f(error))) as any;
+  }
+
+  tapError<S2>(f: (error: ErrorsOf<S>) => Eff<unknown, S2>): Stream<A, S | S2> {
+    return this.catch((error) =>
+      Stream.fromEffect(f(error)).flatMap(() => Stream.fail(error)),
+    ) as any;
+  }
+
+  tapErrorCause<S2>(f: (cause: Cause<ErrorsOf<S>>) => Eff<unknown, S2>): Stream<A, S | S2> {
+    return this.catchAllCause((cause) =>
+      Stream.fromEffect(f(cause)).flatMap(() => Stream.fromEffect(failCause(cause))),
+    ) as any;
+  }
+
+  either(): Stream<Either<ErrorsOf<S>, A>, Exclude<S, Throws<unknown>>> {
+    return this.map<Either<ErrorsOf<S>, A>>((value) => ({ _tag: "Right", right: value })).catch(
+      (error) => Stream.succeed({ _tag: "Left", left: error } as Either<ErrorsOf<S>, A>),
+    ) as any;
+  }
+
+  attempt(): Stream<Either<ErrorsOf<S>, A>, Exclude<S, Throws<unknown>>> {
+    return this.either();
+  }
+
+  exit(): Stream<Exit<ErrorsOf<S>, A>, Exclude<S, Throws<unknown>>> {
+    return this.map<Exit<ErrorsOf<S>, A>>((value) => Exit.succeed(value)).catchAllCause((cause) =>
+      Stream.succeed(Exit.failure(cause)),
+    ) as any;
+  }
+
+  attemptCause(): Stream<Exit<ErrorsOf<S>, A>, Exclude<S, Throws<unknown>>> {
+    return this.exit();
   }
 
   /**
@@ -2219,7 +2658,7 @@ export class Stream<A, S = never> {
    * before the failure are preserved; the failure itself is replaced by
    * whatever the (lazily built) fallback produces.
    */
-  orElse<B, S2>(that: () => Stream<B, S2>): Stream<A | B, S2> {
+  orElse<B, S2>(that: () => Stream<B, S2>): Stream<A | B, Exclude<S, Throws<unknown>> | S2> {
     return this.catch(() => that());
   }
 
@@ -2232,9 +2671,8 @@ export class Stream<A, S = never> {
    * up to the policy's limit. Once a chunk emits, retry resets — failures in
    * the next pull are retried independently.
    *
-   * For "restart the entire stream from scratch on failure" semantics, build
-   * the stream inside `Stream.suspend(() => makeStream())` and apply retry
-   * around that — the suspend re-creates the source on each retry.
+   * Use {@link Stream.retryFrom} when failure must reacquire and restart the
+   * whole source rather than retrying only its current pull.
    */
   retry(policy: RetryPolicy | RetryConfig): Stream<A, S> {
     const wrap = (s: Stream<A, S>): Stream<A, S> =>

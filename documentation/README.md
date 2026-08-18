@@ -32,6 +32,11 @@ console.log(await run(program)); // 42
 12. [Utilities](./12-utilities.md) — `Duration`, `CacheStore`
 13. [HTTP](./13-http.md) — typed-effect HTTP client, retry, streaming, mock
 14. [HTTP — OpenTelemetry](./14-http-otel.md) — tracing middleware + W3C `traceparent` injection
+15. [Observability](./15-observability.md) — structured logging, spans, metrics, general OTel bridge
+16. [Messaging contracts and Kafka](./16-messaging.md) — connector capabilities, codecs, acknowledgements, drivers
+17. [Redis and PostgreSQL backends](./17-distributed-backends.md) — distributed primitives, Redis Streams, PGMQ
+18. [Stateful topologies](./18-topologies.md) — keyed state, windows, shuffle stages, delivery guarantees
+19. [Package map](./19-packages.md) — every public package, adapter, internal validation workspace, and subpath export
 
 ## Reference
 
@@ -40,8 +45,9 @@ console.log(await run(program)); // 42
 
 ## Examples
 
-Every code snippet in these docs is extracted from a real, compilable file in
-[`packages/core/examples/`](../packages/core/examples/). To run any of them:
+The core tutorial examples embedded between `@embed` markers are extracted
+from real, executable files in
+[`packages/core/examples/`](../packages/core/examples/). To run one:
 
 ```bash
 bun packages/core/examples/01-hello.ts
@@ -55,11 +61,15 @@ bun test packages/core/test/examples.test.ts
 
 ## How these docs work
 
-Code blocks in `.md` files are auto-generated from `examples/` files via
+Embedded code blocks in `.md` files are generated from `examples/` via
 `bun documentation/build.ts`. CI runs `bun documentation/build.ts --check` —
-if anyone edits an example without rerunning the build, the docs go red.
-This means the snippets you see are always the actual code that compiles
-and runs.
+if anyone edits an embedded example without rebuilding, the docs go red.
+Connector examples that require Redis, PostgreSQL, or Kafka are verified by
+their package unit and opt-in real-service integration suites.
+
+The documentation build also checks the [package map](./19-packages.md)
+against every workspace manifest and requires every package to carry its own
+README.
 
 If you're contributing: edit the `examples/` file, run `bun documentation:build`,
 commit both.

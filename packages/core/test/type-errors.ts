@@ -27,6 +27,7 @@ import {
   runSync,
   all,
   race,
+  RetryPolicy,
   Stream,
   Chunk,
   Sinks,
@@ -102,6 +103,9 @@ class BackendFailure {
 
   const queue = null as unknown as Queue<number, Backend>;
   const _queueTake: Eff<number, Backend | Throws<QueueClosed>> = queue.take();
+  const _queueStream: Stream<number, Backend> = Stream.fromQueue(queue);
+  // @ts-expect-error queue backend failures cannot be dropped by Stream.fromQueue
+  const _queueStreamUnsafe: Stream<number, never> = Stream.fromQueue(queue);
 
   const semaphore = null as unknown as Semaphore<Backend>;
   const _withPermit: Eff<string, Backend | Throws<Forbidden>> = semaphore.withPermit(
@@ -154,6 +158,8 @@ class BackendFailure {
     _managed,
     _deferredAwait,
     _queueTake,
+    _queueStream,
+    _queueStreamUnsafe,
     _withPermit,
     _breakerState,
     _protected,
@@ -198,11 +204,48 @@ const Logger = service<Logger>("Logger");
     null as unknown as AsyncIterable<number>,
     () => new BackendFailure(),
   );
+  const _broadcast: Stream<number | string, Throws<NotFound> | Throws<Forbidden>> =
+    numbers.broadcastThrough(
+      (stream) => stream,
+      (stream) =>
+        stream.evalMap((value) => (value > 0 ? succeed(String(value)) : fail(new Forbidden()))),
+    );
+  const _emptyBroadcast: Stream<number, Throws<NotFound>> = numbers.broadcastThrough();
+  const controlled = null as unknown as Stream<
+    number,
+    Needs<Logger> | Throws<NotFound | Forbidden>
+  >;
+  const _caughtTag: Stream<number | string, Needs<Logger> | Throws<Forbidden>> =
+    controlled.catchTag("NotFound", () => Stream.succeed("missing"));
+  const _caughtAll: Stream<number | string, Needs<Logger>> = controlled.catch(() =>
+    Stream.succeed("recovered"),
+  );
+  const _attempted: Stream<
+    | { readonly _tag: "Right"; readonly right: number }
+    | { readonly _tag: "Left"; readonly left: NotFound | Forbidden },
+    Needs<Logger>
+  > = controlled.attempt();
+  const _until: Stream<number, Throws<NotFound> | Throws<Forbidden>> = numbers.takeUntil(strings);
+  const _observed: Stream<number, Throws<NotFound> | Throws<Forbidden>> = numbers.observe(
+    (stream) => stream.evalMap(() => fail(new Forbidden())),
+  );
+  const _retried: Stream<number, Throws<NotFound>> = Stream.retryFrom(
+    () => numbers,
+    RetryPolicy.recurs(3),
+  );
 
   // @ts-expect-error either source may fail
   const _unsafeCombined: Stream<[number, string], never> = numbers.combineLatest(strings);
   // @ts-expect-error iterator failures cannot be dropped
   const _unsafeAsync: Stream<number, never> = _async;
+  // @ts-expect-error a broadcast branch failure cannot be dropped
+  const _unsafeBroadcast: Stream<number | string, Throws<NotFound>> = _broadcast;
+  // @ts-expect-error catch must preserve non-error requirements
+  const _unsafeCaught: Stream<number | string, never> = _caughtAll;
+  // @ts-expect-error the takeUntil signal may fail
+  const _unsafeUntil: Stream<number, Throws<NotFound>> = _until;
+  // @ts-expect-error the observer may fail
+  const _unsafeObserved: Stream<number, Throws<NotFound>> = _observed;
 
   void [
     _combined,
@@ -212,8 +255,20 @@ const Logger = service<Logger>("Logger");
     _sampled,
     _audited,
     _async,
+    _broadcast,
+    _emptyBroadcast,
+    _caughtTag,
+    _caughtAll,
+    _attempted,
+    _until,
+    _observed,
+    _retried,
     _unsafeCombined,
     _unsafeAsync,
+    _unsafeBroadcast,
+    _unsafeCaught,
+    _unsafeUntil,
+    _unsafeObserved,
   ];
 }
 

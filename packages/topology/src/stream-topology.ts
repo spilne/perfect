@@ -85,7 +85,7 @@ export class StreamTopology<T> {
   }
 
   /** Sink to any Sinkable. Returns a BuiltTopology ready to run. */
-  to(sink: Sinkable<T>): BuiltTopology {
+  to<S>(sink: Sinkable<T, S>): BuiltTopology {
     const sinkNode = { type: "sink" as const, parent: this.node, sink };
     return new BuiltTopology({ nodes: [this.node, sinkNode], sinks: [sinkNode] });
   }
@@ -190,7 +190,7 @@ export class KeyedTopology<K extends string, T> {
   }
 
   /** Sink to any Sinkable. */
-  to(sink: Sinkable<T>): BuiltTopology {
+  to<S>(sink: Sinkable<T, S>): BuiltTopology {
     const sinkNode = { type: "sink" as const, parent: this.node, sink };
     return new BuiltTopology({ nodes: [this.node, sinkNode], sinks: [sinkNode] });
   }

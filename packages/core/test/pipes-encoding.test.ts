@@ -1,13 +1,5 @@
-// Encoding pipes: utf8Decode / utf8Encode / base64Encode / base64Decode.
-//
-// utf8Decode shares one TextDecoder with { stream: true }, so multi-byte
-// codepoints split across chunks decode correctly. base64Encode/Decode are
-// per-chunk btoa/atob maps over strings — NOT streaming encoders: each chunk
-// is encoded independently, so a multi-chunk encode is not the same as
-// encoding the concatenated input.
-
 import { describe, test, expect } from "bun:test";
-import { run, runExit, Stream, Pipes, Cause } from "../src";
+import { run, Stream, Pipes } from "../src";
 
 describe("utf8Encode / utf8Decode", () => {
   test("round-trips a string with multi-byte characters", async () => {
@@ -59,63 +51,51 @@ describe("utf8Encode / utf8Decode", () => {
 });
 
 describe("base64Encode / base64Decode", () => {
-  test("round-trips an ASCII string", async () => {
+  test("round-trips arbitrary binary bytes", async () => {
+    const bytes = new Uint8Array(256);
+    for (let index = 0; index < bytes.length; index++) bytes[index] = index;
+
+    const encoded = await run(Stream.succeed(bytes).through(Pipes.base64Encode).toArray());
+    const decoded = await run(Stream.fromArray(encoded).through(Pipes.base64Decode).toArray());
+
+    expect(decoded).toHaveLength(1);
+    expect(Array.from(decoded[0]!)).toEqual(Array.from(bytes));
+  });
+
+  test("uses the standard base64 representation", async () => {
     const encoded = await run(
-      (Stream.succeed("hello") as any).through(Pipes.base64Encode).toArray(),
+      Stream.succeed(new TextEncoder().encode("hello")).through(Pipes.base64Encode).toArray(),
     );
     expect(encoded).toEqual(["aGVsbG8="]);
+  });
 
+  test("encodes each binary chunk independently", async () => {
+    const chunks = [new TextEncoder().encode("he"), new TextEncoder().encode("llo")];
+    const encoded = await run(Stream.fromArray(chunks).through(Pipes.base64Encode).toArray());
+    expect(encoded).toEqual(["aGU=", "bGxv"]);
+
+    const decoded = await run(Stream.fromArray(encoded).through(Pipes.base64Decode).toArray());
+    expect(new TextDecoder().decode(concatBytes(decoded))).toBe("hello");
+  });
+
+  test("text helpers round-trip Unicode through UTF-8", async () => {
     const decoded = await run(
-      (Stream.succeed("hello") as any)
-        .through(Pipes.base64Encode)
-        .through(Pipes.base64Decode)
+      Stream.of("héllo ", "🚀 日本語")
+        .through(Pipes.base64EncodeText)
+        .through(Pipes.base64DecodeText)
         .toArray(),
     );
-    expect(decoded.join("")).toBe("hello");
-  });
-
-  test("round-trips arbitrary bytes represented as a latin1 binary string", async () => {
-    const bytes = new Uint8Array(256);
-    for (let i = 0; i < 256; i++) bytes[i] = i;
-    const binary = String.fromCharCode(...bytes);
-
-    const decoded: string[] = await run(
-      (Stream.succeed(binary) as any)
-        .through(Pipes.base64Encode)
-        .through(Pipes.base64Decode)
-        .toArray(),
-    );
-    const out = decoded.join("");
-    expect(out.length).toBe(256);
-    for (let i = 0; i < 256; i++) expect(out.charCodeAt(i)).toBe(i);
-  });
-
-  test("encodes each chunk independently (per-chunk map, not a streaming encoder)", async () => {
-    // NOTE: base64Encode is `input.map(btoa)` — each chunk gets its own
-    // padding, so ["he","llo"] does NOT encode to btoa("hello"). Decoding
-    // chunk-wise still round-trips.
-    const encoded: string[] = await run(
-      (Stream.of("he", "llo") as any).through(Pipes.base64Encode).toArray(),
-    );
-    expect(encoded).toEqual([btoa("he"), btoa("llo")]);
-    expect(encoded.join("")).not.toBe(btoa("hello"));
-
-    const decoded: string[] = await run(
-      (Stream.of("he", "llo") as any)
-        .through(Pipes.base64Encode)
-        .through(Pipes.base64Decode)
-        .toArray(),
-    );
-    expect(decoded.join("")).toBe("hello");
-  });
-
-  test("base64Encode fails with a Die cause on non-latin1 input (btoa limitation)", async () => {
-    // btoa throws on codepoints > 0xFF; the throw happens inside a `.map`
-    // callback and surfaces as a defect (Die), not an interpreter crash
-    const exit = await runExit((Stream.succeed("🚀") as any).through(Pipes.base64Encode).toArray());
-    expect(exit._tag).toBe("Failure");
-    if (exit._tag === "Failure") {
-      expect(Cause.hasDie(exit.cause)).toBe(true);
-    }
+    expect(decoded.join("")).toBe("héllo 🚀 日本語");
   });
 });
+
+function concatBytes(chunks: Uint8Array[]): Uint8Array {
+  const length = chunks.reduce((total, chunk) => total + chunk.length, 0);
+  const output = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    output.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return output;
+}

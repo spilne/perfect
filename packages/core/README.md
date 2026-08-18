@@ -101,8 +101,11 @@ Each is also a fluent method: `program.run()`, `.runSync()`, `.runExit()`, `.run
 - **Retry + schedule** — `retry`, `RetryPolicy`, `Schedule`, `repeat`,
   `repeatUntilWithBackoff`, `hedged`
 - **Streams** — `Stream` / `Chunk` / `Sink` / `Pipes`: fused, lazy,
-  effect-typed; `scan`, `mapAccumulate`, backend-powered `statefulMap`,
-  `parEvalMap`, `groupWithin`, `throttle`, SSE/lines/CSV pipes
+  effect-typed; lazy `fromAsyncIterable`, `mapAccumulate`, backend-powered
+  `statefulMap`, ordered/unordered `parEvalMap`, `switchMap`, `exhaustMap`,
+  `combineLatest`, `withLatest`, single-pass `broadcastThrough`, reliable
+  `observe`/`takeUntil`, typed stream recovery, source-reacquiring `retryFrom`,
+  Clock-driven time operators, and CSV/base64/binary pipes
 - **Coordination** — `Ref`, `Deferred`, `Queue`, `Semaphore`, `Latch`,
   `Barrier`, `PubSub`, `SubscriptionRef`, `Pool`, `WorkerPool`
 - **Resilience** — `CircuitBreaker`, `RateLimiter`, `Throttle`,
@@ -126,6 +129,7 @@ Each is also a fluent method: `program.run()`, `.runSync()`, `.runExit()`, `.run
 ## Links
 
 - Repo: https://github.com/spilne/perfect
-- Full guide: [`documentation/`](../../documentation/) — 14 chapters, every
-  snippet extracted from compilable files in [`examples/`](./examples/)
+- Full guide: [`documentation/`](../../documentation/) — core, HTTP,
+  observability, messaging, distributed backends, and topologies; embedded
+  tutorial snippets are extracted from executable files in [`examples/`](./examples/)
 - Syntax bench: [`bench/await-vs-flatmap-vs-dollar.md`](./bench/await-vs-flatmap-vs-dollar.md)

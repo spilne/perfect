@@ -29,7 +29,7 @@
 //   bun documentation/build.ts          # rewrite all .md in documentation/
 //   bun documentation/build.ts --check  # exit 1 if anything would change
 
-import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 
 const ROOT = join(import.meta.dir, "..");
@@ -120,7 +120,9 @@ function parseSingleImport(stmt: string): ParsedImport | null {
   const sourceMatch = stmt.match(/from\s+["']([^"']+)["']/);
   if (!sourceMatch) return null;
   const source = sourceMatch[1]!;
-  const bindings = stmt.replace(/^\s*import\s+/, "").replace(/\s*from\s+["'][^"']+["']\s*;?\s*$/, "");
+  const bindings = stmt
+    .replace(/^\s*import\s+/, "")
+    .replace(/\s*from\s+["'][^"']+["']\s*;?\s*$/, "");
 
   const out: ParsedImport = { source, named: [] };
   let rest = bindings;
@@ -180,7 +182,8 @@ function renderImports(imports: ParsedImport[], body: string, packageName: strin
 
     const namedKept = imp.named.filter((n) => used.has(n.alias ?? n.name));
     const defaultKept = imp.defaultName && used.has(imp.defaultName) ? imp.defaultName : undefined;
-    const namespaceKept = imp.namespaceName && used.has(imp.namespaceName) ? imp.namespaceName : undefined;
+    const namespaceKept =
+      imp.namespaceName && used.has(imp.namespaceName) ? imp.namespaceName : undefined;
 
     if (!namedKept.length && !defaultKept && !namespaceKept) continue;
 
@@ -307,6 +310,53 @@ function extractRegion(file: string, region: string): string {
 let changed = 0;
 let errors = 0;
 
+function verifyPackageCoverage(): void {
+  const packagesDir = join(ROOT, "packages");
+  const coverageFile = join(DOC_DIR, "19-packages.md");
+  const coverage = readFileSync(coverageFile, "utf8");
+  const start = coverage.indexOf("<!-- package-coverage:start -->");
+  const end = coverage.indexOf("<!-- package-coverage:end -->");
+
+  if (start === -1 || end === -1 || end <= start) {
+    errors++;
+    console.error("✗ documentation/19-packages.md: package coverage markers are missing");
+    return;
+  }
+
+  const documented = new Set(
+    [...coverage.slice(start, end).matchAll(/`(@perfect\/[\w-]+)`/g)].map((match) => match[1]!),
+  );
+  const discovered = new Set<string>();
+
+  for (const entry of readdirSync(packagesDir)) {
+    const dir = join(packagesDir, entry);
+    const manifest = join(dir, "package.json");
+    if (!statSync(dir).isDirectory() || !existsSync(manifest)) continue;
+
+    const parsed = JSON.parse(readFileSync(manifest, "utf8")) as { name?: string };
+    if (!parsed.name) continue;
+    discovered.add(parsed.name);
+
+    if (!existsSync(join(dir, "README.md"))) {
+      errors++;
+      console.error(`✗ packages/${entry}: ${parsed.name} has no README.md`);
+    }
+    if (!documented.has(parsed.name)) {
+      errors++;
+      console.error(`✗ documentation/19-packages.md: ${parsed.name} is not listed`);
+    }
+  }
+
+  for (const packageName of documented) {
+    if (!discovered.has(packageName)) {
+      errors++;
+      console.error(`✗ documentation/19-packages.md: ${packageName} is not a workspace package`);
+    }
+  }
+}
+
+verifyPackageCoverage();
+
 for (const md of walkMarkdown(DOC_DIR)) {
   const original = readFileSync(md, "utf8");
   const rewritten = original.replace(EMBED_RE, (_match, ...args) => {
@@ -339,9 +389,7 @@ if (errors > 0) {
 }
 
 if (CHECK_MODE && changed > 0) {
-  console.error(
-    `\n${changed} file(s) out of sync. Run \`bun documentation/build.ts\` and commit.`,
-  );
+  console.error(`\n${changed} file(s) out of sync. Run \`bun documentation/build.ts\` and commit.`);
   process.exit(1);
 }
 

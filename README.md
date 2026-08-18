@@ -5,12 +5,34 @@ errors, typed dependencies, structured concurrency, and pull-based streams,
 behind a fluent API with no `pipe()`.
 
 ```ts
-import { eff, succeed, fail, provide, service, run } from "@perfect/core";
+import {
+  TaggedError,
+  eff,
+  fail,
+  provide,
+  service,
+  succeed,
+  type Eff,
+  type Throws,
+} from "@perfect/core";
+
+interface User {
+  name: string;
+}
+
+class NotFound extends TaggedError("NotFound")<{ id: string }>() {}
 
 interface Db {
   findUser(id: string): Eff<User, Throws<NotFound>>;
 }
 const Db = service<Db>("Db");
+
+const liveDb: Db = {
+  findUser: (id) =>
+    id === "u1"
+      ? succeed({ name: "Ada" })
+      : fail(new NotFound({ id })),
+};
 
 const program = eff(function* () {
   const db = yield* Db.get;
@@ -18,7 +40,7 @@ const program = eff(function* () {
   return user.name;
 }).catchTag("NotFound", () => succeed("anonymous"));
 
-await run(provide(program, Db, liveDb));
+console.log(await provide(program, Db, liveDb).run()); // Ada
 ```
 
 > **Pre-release.** The packages are not on npm yet — clone the repo and use
@@ -67,7 +89,11 @@ bun test --recursive packages/
 ```
 
 Rust toolchain needed only for `bun run build:swc` (the SWC WASM plugin).
-The full guide lives in `documentation/` (VitePress site).
+The [full guide](documentation/README.md) covers the core runtime, HTTP,
+observability, connector contracts, Kafka, Redis/PostgreSQL backends, and
+stateful topologies. The [package map](documentation/19-packages.md) tracks
+every public adapter, compiler integration, subpath export, and the private
+real-service test workspace.
 Package versioning and publication are documented in [`RELEASING.md`](RELEASING.md).
 
 ## Status

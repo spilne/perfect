@@ -12,6 +12,8 @@ Distributed Redis implementations of the concurrency and coordination contracts 
 bun add @perfect/redis ioredis
 ```
 
+> Not yet published to npm — install from the workspace for now.
+
 The package is driver-agnostic. Inject any client implementing `RedisClient`; ioredis is
 used by the integration suite but is not bundled at runtime.
 
@@ -98,3 +100,6 @@ set `bufferCapacity` on `RedisPubSub` or `RedisChannel` for the workload. Multi-
 derive keys with a shared Redis Cluster hash tag, while preserving a caller-provided `{tag}`.
 `processedRetentionMs` optionally bounds source-record dedupe history; set it no shorter than the
 source system's replay/retention horizon.
+
+See [Redis and PostgreSQL backends](../../documentation/17-distributed-backends.md)
+and [Stateful topologies](../../documentation/18-topologies.md).
