@@ -1,6 +1,6 @@
 {
   "name": "@perfect/kafka-platformatic",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Platformatic Kafka driver adapter for @perfect/kafka.",
   "keywords": [
     "effect",
@@ -42,7 +42,7 @@
     "build": "bun ../../scripts/build-package.ts ."
   },
   "dependencies": {
-    "@perfect/kafka": "workspace:*"
+    "@perfect/kafka": "^0.1.0"
   },
   "devDependencies": {
     "@platformatic/kafka": "^2.9.0"

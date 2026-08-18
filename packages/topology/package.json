@@ -1,6 +1,6 @@
 {
   "name": "@perfect/topology",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Stream topology engine on the Perfect runtime — windows, joins, stage planning, distributed runs.",
   "keywords": [
     "effect",
@@ -43,6 +43,6 @@
     "build": "bun ../../scripts/build-package.ts ."
   },
   "dependencies": {
-    "@perfect/core": "workspace:*"
+    "@perfect/core": "^0.1.0"
   }
 }

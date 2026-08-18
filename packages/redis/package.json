@@ -1,6 +1,6 @@
 {
   "name": "@perfect/redis",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Redis-backed distributed coordination primitives and messaging connectors for @perfect/core.",
   "keywords": [
     "coordination",
@@ -44,7 +44,7 @@
     "build": "bun ../../scripts/build-package.ts ."
   },
   "dependencies": {
-    "@perfect/core": "workspace:*"
+    "@perfect/core": "^0.1.0"
   },
   "devDependencies": {
     "ioredis": "^5.7.0",

@@ -1,6 +1,6 @@
 {
   "name": "@perfect/kafka",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Kafka backend for @perfect/core's connect contracts — offset-safe parallel commits, injected driver interface.",
   "keywords": [
     "consumer",
@@ -43,6 +43,6 @@
     "build": "bun ../../scripts/build-package.ts ."
   },
   "dependencies": {
-    "@perfect/core": "workspace:*"
+    "@perfect/core": "^0.1.0"
   }
 }

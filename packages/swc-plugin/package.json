@@ -1,6 +1,6 @@
 {
   "name": "@perfect/swc-plugin",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "SWC WASM plugin that desugars Perfect's eff(($) => ...) syntax to .flatMap chains.",
   "keywords": [
     "effect",
@@ -28,5 +28,8 @@
   "main": "./dist/plugin.wasm",
   "exports": {
     ".": "./dist/plugin.wasm"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
