@@ -14,9 +14,10 @@ import type {
   Streamable,
   Sinkable,
   Acknowledgeable,
-  Envelope,
   Codec,
   ConsumerGroup,
+  TransactionalEnvelope,
+  TransactionalSinkable,
 } from "@perfect/core/connect";
 import type { DrizzleDb } from "../lib/drizzle-db";
 import { pollStream } from "../lib/poll-stream";
@@ -109,7 +110,11 @@ export interface PgmqQueueConfig<T> {
   onSchemaError?: PgmqOnSchemaError;
 }
 
-export interface PgmqEnvelope<T> extends Envelope<T, Throws<PgmqQueueError>> {
+export interface PgmqEnvelope<T> extends TransactionalEnvelope<
+  T,
+  Throws<PgmqQueueError>,
+  DrizzleDb
+> {
   extendVisibility(vtSeconds: number): Eff<void, Throws<PgmqQueueError>>;
 }
 
@@ -121,9 +126,11 @@ export class PgmqQueue<T>
   implements
     Streamable<T, Throws<PgmqQueueError>>,
     Sinkable<T, Throws<PgmqQueueError>>,
+    TransactionalSinkable<T, Throws<PgmqQueueError>, DrizzleDb>,
     Acknowledgeable<T, Throws<PgmqQueueError>>
 {
   readonly codec: Codec<T>;
+  readonly transactionDomain: object;
   private readonly db: DrizzleDb;
   readonly queue: string;
   private readonly defaultVt: number;
@@ -138,6 +145,7 @@ export class PgmqQueue<T>
 
   private constructor(config: PgmqQueueConfig<T>) {
     this.db = config.db;
+    this.transactionDomain = config.db;
     this.queue = config.queue;
     this.codec = config.codec ?? (JsonCodec as Codec<T>);
     this.defaultVt = config.defaultVt ?? 30;
@@ -246,6 +254,10 @@ export class PgmqQueue<T>
     );
   }
 
+  async publishInTransaction(transaction: DrizzleDb, value: T): Promise<void> {
+    await pgmq.send(transaction, this.queue, { data: this.codec.encode(value) });
+  }
+
   async publishBatch(
     values: T[],
     params?: { delay?: number; groupBy?: (value: T) => string },
@@ -313,11 +325,11 @@ export class PgmqQueue<T>
         ? { _tag: "grouped-head", vt: this.defaultVt, qty: this.defaultQty }
         : { _tag: "standard", vt: this.defaultVt, qty: this.defaultQty });
 
-    const ack = async (msgId: number): Promise<void> => {
+    const ack = async (target: DrizzleDb, msgId: number): Promise<void> => {
       if (ackMode === "archive") {
-        await pgmq.archive(db, queue, msgId);
+        await pgmq.archive(target, queue, msgId);
       } else {
-        await pgmq.deleteMessage(db, queue, msgId);
+        await pgmq.deleteMessage(target, queue, msgId);
       }
     };
 
@@ -330,11 +342,13 @@ export class PgmqQueue<T>
               if (res.ok) {
                 const envelope: PgmqEnvelope<T> = {
                   value: res.value,
+                  transactionDomain: this.transactionDomain,
                   ack: () =>
                     fromPromise(
-                      () => ack(record.msgId),
+                      () => ack(db, record.msgId),
                       (cause) => toPgmqQueueError("pgmq.ack", cause),
                     ),
+                  ackInTransaction: (transaction) => ack(transaction, record.msgId),
                   nack: () =>
                     fromPromise(
                       () => pgmq.setVt(db, queue, record.msgId, 1).then(() => {}),
@@ -346,6 +360,9 @@ export class PgmqQueue<T>
                       (cause) => toPgmqQueueError("pgmq.extendVisibility", cause),
                     ),
                   metadata: {
+                    topic: queue,
+                    partition: 0,
+                    offset: String(record.msgId),
                     msgId: record.msgId,
                     readCt: record.readCt,
                     enqueuedAt: record.enqueuedAt,

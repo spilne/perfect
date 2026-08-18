@@ -296,6 +296,9 @@ export class RedisStream<T>
         }),
       nack: () => succeed(undefined),
       metadata: {
+        topic: this.stream,
+        partition: 0,
+        offset: entry.id,
         id: entry.id,
         stream: this.stream,
         group,

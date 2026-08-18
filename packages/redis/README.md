@@ -44,6 +44,8 @@ const value = await run(
 - `RedisCacheStore`
 - `RedisStateBackend` — durable keyed state and atomic checkpoints for
   `Stream.statefulMap` and `@perfect/topology`
+- `RedisPartitionedStateBackend` — topology/stage/partition namespaces,
+  server-time leases, fencing epochs, and one-Lua state/progress/dedupe commits
 - `RedisStream` — durable consumer groups, replay, manual acknowledgement, claiming,
   keyed publish, and metrics
 - `RedisChannel` — non-durable Pub/Sub implementing `Streamable` and `Sinkable`, with
@@ -94,3 +96,5 @@ Pub/Sub subscriptions use a bounded buffer (1,024 messages by default). A subscr
 keep up fails with `RedisError` operation `pubsub.overflow` instead of consuming unbounded memory;
 set `bufferCapacity` on `RedisPubSub` or `RedisChannel` for the workload. Multi-key Lua primitives
 derive keys with a shared Redis Cluster hash tag, while preserving a caller-provided `{tag}`.
+`processedRetentionMs` optionally bounds source-record dedupe history; set it no shorter than the
+source system's replay/retention horizon.

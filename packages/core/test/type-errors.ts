@@ -34,8 +34,16 @@ import {
 import {
   AckError,
   autoCommitBatchWithin,
+  LeaseEpoch,
+  Partition,
+  SourceRecordId,
+  StageId,
+  StateCheckpointId,
+  TopologyId,
+  TopologyInstanceId,
   type Acknowledgeable,
   type Envelope,
+  type StatePartitionScope,
   type Streamable,
 } from "../src/connect";
 
@@ -51,6 +59,28 @@ class Unauthorized {
 
 class BackendFailure {
   readonly _tag = "BackendFailure" as const;
+}
+
+// ── Durable topology identifiers ──────────────────────────────────
+
+{
+  const topologyId = TopologyId("orders");
+  const stageId = StageId("totals");
+  const ownerId = TopologyInstanceId("worker-a");
+  const sourceId = SourceRecordId("orders:0:1");
+  const checkpointId = StateCheckpointId("checkpoint-1");
+  const partition = Partition(0);
+  const epoch = LeaseEpoch(1);
+  const scope: StatePartitionScope = { topologyId, stageId, partition };
+
+  // @ts-expect-error stage identity cannot be used as topology identity
+  const _swappedScope: StatePartitionScope = { topologyId: stageId, stageId, partition };
+  // @ts-expect-error checkpoint identity cannot be used as source-record identity
+  const _swappedRecord: SourceRecordId = checkpointId;
+  // @ts-expect-error partition identity cannot be used as a lease epoch
+  const _swappedEpoch: typeof epoch = partition;
+
+  void [ownerId, sourceId, scope, _swappedScope, _swappedRecord, _swappedEpoch];
 }
 
 // ── Pluggable primitive backend effects ───────────────────────────

@@ -1,6 +1,14 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { fail, fromPromise, run, sleep, succeed, type Eff } from "@perfect/core";
-import { CheckpointName } from "@perfect/core/connect";
+import {
+  CheckpointName,
+  Partition,
+  SourceRecordId,
+  StageId,
+  StateCheckpointId,
+  TopologyId,
+  TopologyInstanceId,
+} from "@perfect/core/connect";
 import Redis from "ioredis";
 import { GenericContainer, Wait, type StartedTestContainer } from "testcontainers";
 import {
@@ -11,6 +19,7 @@ import {
   RedisDeferred,
   RedisLatch,
   RedisPubSub,
+  RedisPartitionedStateBackend,
   RedisQueue,
   RedisRateLimiter,
   RedisRef,
@@ -261,6 +270,59 @@ describe.skipIf(!dockerAvailable)("integration — redis:7-alpine", () => {
 
     expect(await state.entries()).toEqual([["user-1", { count: 1 }]]);
     await state.clear();
+  });
+
+  test("partitioned state atomically fences owners, mutations, progress, and dedupe", async () => {
+    const state = new RedisPartitionedStateBackend({ redis, key: "partitioned-state" });
+    const scope = {
+      topologyId: TopologyId("orders"),
+      stageId: StageId("aggregate"),
+      partition: Partition(3),
+    };
+    const first = await state.acquire({
+      scope,
+      ownerId: TopologyInstanceId("worker-a"),
+      leaseMs: 30_000,
+    });
+    expect(first).toBeDefined();
+    expect(
+      await state.acquire({
+        scope,
+        ownerId: TopologyInstanceId("worker-b"),
+        leaseMs: 30_000,
+      }),
+    ).toBeUndefined();
+    expect(
+      await state.commit({
+        lease: first!,
+        mutations: [{ type: "put", key: "count", value: 9 }],
+        sourceId: SourceRecordId("orders:3:12"),
+        sourceOffset: "12",
+        checkpointId: StateCheckpointId("cp-12"),
+      }),
+    ).toBe("committed");
+    expect(
+      await state.commit({
+        lease: first!,
+        mutations: [],
+        sourceId: SourceRecordId("orders:3:12"),
+      }),
+    ).toBe("duplicate");
+    expect(
+      await state.isProcessed({ lease: first!, sourceId: SourceRecordId("orders:3:12") }),
+    ).toBe(true);
+    expect(await state.load(first!)).toMatchObject({ sourceOffset: "12", checkpointId: "cp-12" });
+    expect((await state.load(first!))?.values.get("count")).toBe(9);
+
+    expect(await state.release(first!)).toBe(true);
+    const second = await state.acquire({
+      scope,
+      ownerId: TopologyInstanceId("worker-b"),
+      leaseMs: 30_000,
+    });
+    expect(second?.epoch).toBe(first!.epoch + 1);
+    expect(await state.commit({ lease: first!, mutations: [] })).toBe("fenced");
+    await state.release(second!);
   });
 
   test("channel connector publishes to active stream subscribers", async () => {

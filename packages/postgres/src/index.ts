@@ -35,4 +35,8 @@ export {
 
 // Durable state
 export { PgStateBackend, type PgStateBackendConfig } from "./lib/pg-state-backend";
+export {
+  PgPartitionedStateBackend,
+  type PgPartitionedStateBackendConfig,
+} from "./lib/pg-partitioned-state-backend";
 export { createTopologyStateTable, topologyState } from "./lib/pg-state-schema";

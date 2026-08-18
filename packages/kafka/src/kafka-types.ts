@@ -121,6 +121,20 @@ export interface KafkaConsumer {
 
   /** Seek to a specific offset (runtime). Optional — not all clients support this. */
   seek?(params: { topic: TopicName; partition: PartitionId; offset: KafkaOffset }): void;
+
+  onPartitionsAssigned?(
+    listener: (assignment: KafkaPartitionAssignment) => void | Promise<void>,
+  ): () => void;
+
+  onPartitionsRevoked?(
+    listener: (assignment: KafkaPartitionAssignment) => void | Promise<void>,
+  ): () => void;
+}
+
+export interface KafkaPartitionAssignment {
+  readonly topic: TopicName;
+  readonly partitions: readonly PartitionId[];
+  readonly generation?: number;
 }
 
 // ---------------------------------------------------------------------------

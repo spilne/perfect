@@ -1,7 +1,13 @@
 import { describe, test, expect } from "bun:test";
-import { fail, succeed, sync } from "@perfect/core";
+import { fail, fromPromise, succeed, sync } from "@perfect/core";
 import { Stream } from "@perfect/core/stream";
 import type { Streamable, Acknowledgeable, Sinkable, Codec } from "@perfect/core/connect";
+import {
+  InMemoryPartitionedState,
+  Partition,
+  type PartitionStateCommit,
+  type TransactionalPartitionedStateBackend,
+} from "@perfect/core/connect";
 import {
   StreamTopology,
   TopologyRunner,
@@ -205,6 +211,287 @@ describe("StreamTopology builder — declarative processing DAG", () => {
 // ---------------------------------------------------------------------------
 
 describe("TopologyRunner — compiles and runs a topology", () => {
+  test("restores an assigned partition before delivery and releases it after revocation", async () => {
+    const events: string[] = [];
+    const state = new InMemoryPartitionedState();
+    const acquire = state.acquire.bind(state);
+    const load = state.load.bind(state);
+    const release = state.release.bind(state);
+    state.acquire = async (params) => {
+      events.push("acquire");
+      return acquire(params);
+    };
+    state.load = async (lease) => {
+      events.push("restore");
+      return load(lease);
+    };
+    state.release = async (lease) => {
+      events.push("release");
+      return release(lease);
+    };
+    let lifecycle:
+      | {
+          assigned(params: { partitions: readonly Partition[] }): Promise<void>;
+          revoking(params: { partitions: readonly Partition[] }): Promise<void>;
+        }
+      | undefined;
+    let closed = false;
+    const envelope = {
+      value: 1,
+      ack: () => sync(() => void events.push("ack")),
+      nack: () => succeed(undefined),
+      metadata: { topic: "managed", partition: 0, offset: "1" },
+    };
+    const managedSource = {
+      ...createTestSource([1]),
+      subscribeAck: () => Stream.fromIterable([envelope]),
+      subscribeAckManaged: () => ({
+        stream: Stream.fromEffect(
+          fromPromise(
+            async () => {
+              await lifecycle!.assigned({ partitions: [Partition(0)] });
+              return envelope;
+            },
+            (error) => error,
+          ),
+        ),
+        setPartitionLifecycle(value: typeof lifecycle) {
+          lifecycle = value;
+        },
+        async close() {
+          if (closed) return;
+          closed = true;
+          await lifecycle!.revoking({ partitions: [Partition(0)] });
+        },
+      }),
+    };
+    const sink = createTestSink<number>();
+    sink.publish = (value) =>
+      sync(() => {
+        events.push("publish");
+        sink.items.push(value);
+      });
+
+    const handle = await TopologyRunner.run(StreamTopology.source(managedSource).to(sink), {
+      group: ConsumerGroup("managed-lifecycle"),
+      partitionedStateBackend: state,
+    });
+    await handle.awaitExit();
+
+    expect(events.indexOf("restore")).toBeLessThan(events.indexOf("publish"));
+    expect(events.indexOf("ack")).toBeLessThan(events.indexOf("release"));
+    await handle.shutdown();
+  });
+
+  test("isolates keyed state by source partition", async () => {
+    const source = createTestSource([{ id: "same" }, { id: "same" }]);
+    source.subscribeAck = () =>
+      Stream.fromIterable(
+        [0, 1].map((partition) => ({
+          value: { id: "same" },
+          ack: () => succeed(undefined),
+          nack: () => succeed(undefined),
+          metadata: { topic: "partitioned", partition, offset: "1" },
+        })),
+      );
+    const sink = createTestSink<number>();
+    const topology = StreamTopology.source(source)
+      .keyBy((value) => value.id)
+      .process<number, number>({
+        init: () => 0,
+        process: (count) => ({ state: count + 1, emit: count + 1 }),
+      })
+      .to(sink);
+
+    const handle = await TopologyRunner.run(topology, {
+      group: ConsumerGroup("partition-isolation"),
+      partitionedStateBackend: new InMemoryPartitionedState(),
+    });
+    await handle.awaitExit();
+
+    expect(sink.items).toEqual([1, 1]);
+    await handle.shutdown();
+  });
+
+  test("publishes before committing progress and acknowledging the source", async () => {
+    const events: string[] = [];
+    const state = new InMemoryPartitionedState();
+    const commit = state.commit.bind(state);
+    state.commit = async (change) => {
+      events.push("state");
+      return commit(change);
+    };
+    const source = createTestSource([1]);
+    source.subscribeAck = () =>
+      Stream.fromIterable([
+        {
+          value: 1,
+          ack: () => sync(() => void events.push("ack")),
+          nack: () => succeed(undefined),
+          metadata: { topic: "input", partition: 0, offset: "1" },
+        },
+      ]);
+    const sink = createTestSink<number>();
+    sink.publish = (value) =>
+      sync(() => {
+        events.push("publish");
+        sink.items.push(value);
+      });
+
+    const handle = await TopologyRunner.run(StreamTopology.source(source).to(sink), {
+      group: ConsumerGroup("test-delivery-order"),
+      partitionedStateBackend: state,
+    });
+    await handle.awaitExit();
+
+    expect(events).toEqual(["publish", "state", "ack"]);
+    await handle.shutdown();
+  });
+
+  test("does not commit progress or acknowledge when publication fails", async () => {
+    const events: string[] = [];
+    const state = new InMemoryPartitionedState();
+    const commit = state.commit.bind(state);
+    state.commit = async (change) => {
+      events.push("state");
+      return commit(change);
+    };
+    const source = createTestSource([1]);
+    source.subscribeAck = () =>
+      Stream.fromIterable([
+        {
+          value: 1,
+          ack: () => sync(() => void events.push("ack")),
+          nack: () => succeed(undefined),
+          metadata: { topic: "input", partition: 0, offset: "1" },
+        },
+      ]);
+    const sink = createTestSink<number>();
+    sink.publish = () => fail(new Error("publish failed"));
+
+    const handle = await TopologyRunner.run(StreamTopology.source(source).to(sink), {
+      group: ConsumerGroup("test-publication-failure"),
+      partitionedStateBackend: state,
+    });
+    const exits = await handle.awaitExit();
+
+    expect(exits[0]?._tag).toBe("Failure");
+    expect(events).toEqual([]);
+    await handle.shutdown();
+  });
+
+  test("runs publication, state, and acknowledgement in one transaction domain", async () => {
+    const events: string[] = [];
+    const domain = {};
+    const memory = new InMemoryPartitionedState();
+    const state: TransactionalPartitionedStateBackend<unknown, object> = {
+      transactionDomain: domain,
+      acquire: (params) => memory.acquire(params),
+      renew: (params) => memory.renew(params),
+      load: (lease) => memory.load(lease),
+      isProcessed: (params) => memory.isProcessed(params),
+      commit: (change) => memory.commit(change),
+      release: (lease) => memory.release(lease),
+      transaction: async (work) => {
+        events.push("begin");
+        const value = await work(domain);
+        events.push("commit");
+        return value;
+      },
+      commitInTransaction: async (_transaction, change: PartitionStateCommit<unknown>) => {
+        events.push("state");
+        return memory.commit(change);
+      },
+    };
+    const source = createTestSource([1]);
+    source.subscribeAck = () =>
+      Stream.fromIterable([
+        {
+          value: 1,
+          transactionDomain: domain,
+          ack: () => fail(new Error("non-transactional ack must not run")),
+          ackInTransaction: async () => void events.push("ack"),
+          nack: () => succeed(undefined),
+          metadata: { topic: "input", partition: 0, offset: "1" },
+        },
+      ]);
+    const sink = {
+      ...createTestSink<number>(),
+      transactionDomain: domain,
+      publish: () => fail(new Error("non-transactional publish must not run")),
+      publishInTransaction: async (_transaction: object, value: number) => {
+        events.push(`publish:${value}`);
+      },
+    };
+
+    const handle = await TopologyRunner.run(StreamTopology.source(source).to(sink), {
+      group: ConsumerGroup("test-exactly-once"),
+      partitionedStateBackend: state,
+      deliveryGuarantee: "exactly-once",
+    });
+    await handle.awaitExit();
+
+    expect(events).toEqual(["begin", "state", "publish:1", "ack", "commit"]);
+    await handle.shutdown();
+  });
+
+  test("does not republish a known duplicate in exactly-once mode", async () => {
+    const events: string[] = [];
+    const domain = {};
+    const memory = new InMemoryPartitionedState();
+    const state: TransactionalPartitionedStateBackend<unknown, object> = {
+      transactionDomain: domain,
+      acquire: (params) => memory.acquire(params),
+      renew: (params) => memory.renew(params),
+      load: (lease) => memory.load(lease),
+      isProcessed: async () => true,
+      commit: (change) => memory.commit(change),
+      release: (lease) => memory.release(lease),
+      transaction: async (work) => work(domain),
+      commitInTransaction: async () => "duplicate",
+    };
+    const source = createTestSource([1]);
+    source.subscribeAck = () =>
+      Stream.fromIterable([
+        {
+          value: 1,
+          transactionDomain: domain,
+          ack: () => fail(new Error("non-transactional ack must not run")),
+          ackInTransaction: async () => void events.push("ack"),
+          nack: () => succeed(undefined),
+          metadata: { topic: "input", partition: 0, offset: "1" },
+        },
+      ]);
+    const sink = {
+      ...createTestSink<number>(),
+      transactionDomain: domain,
+      publish: () => fail(new Error("non-transactional publish must not run")),
+      publishInTransaction: async () => void events.push("publish"),
+    };
+
+    const handle = await TopologyRunner.run(StreamTopology.source(source).to(sink), {
+      group: ConsumerGroup("test-exactly-once-duplicate"),
+      partitionedStateBackend: state,
+      deliveryGuarantee: "exactly-once",
+    });
+    await handle.awaitExit();
+
+    expect(events).toEqual(["ack"]);
+    await handle.shutdown();
+  });
+
+  test("rejects exactly-once mode without a shared transactional backend", async () => {
+    await expect(
+      TopologyRunner.run(
+        StreamTopology.source(createTestSource([1])).to(createTestSink<number>()),
+        {
+          group: ConsumerGroup("test-invalid-exactly-once"),
+          deliveryGuarantee: "exactly-once",
+        },
+      ),
+    ).rejects.toThrow("transactional partitionedStateBackend");
+  });
+
   test("reports natural completion through awaitExit", async () => {
     const topology = StreamTopology.source(createTestSource([1])).to(createTestSink<number>());
     const handle = await TopologyRunner.run(topology, { group: ConsumerGroup("test-exit") });

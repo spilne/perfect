@@ -11,12 +11,21 @@ import { drizzle } from "drizzle-orm/postgres-js";
 import { sql } from "drizzle-orm";
 import postgres from "postgres";
 import { run } from "@perfect/core";
-import { CheckpointName } from "@perfect/core/connect";
+import {
+  CheckpointName,
+  Partition,
+  SourceRecordId,
+  StageId,
+  StateCheckpointId,
+  TopologyId,
+  TopologyInstanceId,
+} from "@perfect/core/connect";
 import type { DrizzleDb } from "../src/lib/drizzle-db";
 import { PgQueue } from "../src/lib/pg-queue";
 import { PgChangeStream } from "../src/lib/pg-change-stream";
 import { PgLeaderElection } from "../src/lib/pg-leader-election";
 import { PgStateBackend } from "../src/lib/pg-state-backend";
+import { PgPartitionedStateBackend } from "../src/lib/pg-partitioned-state-backend";
 import { PgRateLimiter } from "../src/lib/pg-rate-limiter";
 import { PgRef } from "../src/lib/pg-ref";
 import { PgSingleflight } from "../src/lib/pg-singleflight";
@@ -204,6 +213,57 @@ describe.skipIf(!dockerAvailable)("integration — postgres:17-alpine", () => {
     expect(await backend.keys()).toEqual(["a", "b"]);
   }, 20_000);
 
+  it("partitioned state: atomically fences owners and commits progress", async () => {
+    const backend = new PgPartitionedStateBackend({ db, table: "integration_partition_state" });
+    await backend.ensureTables();
+    const scope = {
+      topologyId: TopologyId("orders"),
+      stageId: StageId("aggregate"),
+      partition: Partition(0),
+    };
+    const first = await backend.acquire({
+      scope,
+      ownerId: TopologyInstanceId("worker-a"),
+      leaseMs: 30_000,
+    });
+    expect(first).toBeDefined();
+    expect(
+      await backend.acquire({
+        scope,
+        ownerId: TopologyInstanceId("worker-b"),
+        leaseMs: 30_000,
+      }),
+    ).toBeUndefined();
+
+    expect(
+      await backend.commit({
+        lease: first!,
+        mutations: [{ type: "put", key: "count", value: 42 }],
+        sourceId: SourceRecordId("orders:0:7"),
+        sourceOffset: "7",
+        checkpointId: StateCheckpointId("cp-7"),
+      }),
+    ).toBe("committed");
+    expect(
+      await backend.commit({
+        lease: first!,
+        mutations: [],
+        sourceId: SourceRecordId("orders:0:7"),
+      }),
+    ).toBe("duplicate");
+    expect((await backend.load(first!))?.values.get("count")).toBe(42);
+
+    expect(await backend.release(first!)).toBe(true);
+    const second = await backend.acquire({
+      scope,
+      ownerId: TopologyInstanceId("worker-b"),
+      leaseMs: 30_000,
+    });
+    expect(second?.epoch).toBe(first!.epoch + 1);
+    expect(await backend.commit({ lease: first!, mutations: [] })).toBe("fenced");
+    await backend.release(second!);
+  }, 20_000);
+
   it("rate limiter: grants up to the limit, then fails typed", async () => {
     const rl = await PgRateLimiter.create({ db, key: "api", limit: 2, windowMs: 60_000 });
 
@@ -306,6 +366,47 @@ describe.skipIf(!dockerAvailable)("integration — pgmq (ghcr.io/pgmq/pg17-pgmq)
 
     expect(await pgmq.deleteMessage(db, "lowlevel", msgId)).toBe(true);
     expect(await pgmq.read(db, "lowlevel", { _tag: "standard", vt: 30, qty: 10 })).toHaveLength(0);
+  }, 60_000);
+
+  it("PGMQ publish, partition progress, and source ack share one transaction", async () => {
+    const input = await PgmqQueue.create<{ value: number }>(db, "atomic_input", {
+      defaultPollIntervalMs: 50,
+    });
+    const output = await PgmqQueue.create<{ value: number }>(db, "atomic_output", {
+      defaultPollIntervalMs: 50,
+    });
+    const state = new PgPartitionedStateBackend({ db, table: "atomic_topology_state" });
+    await state.ensureTables();
+    const scope = {
+      topologyId: TopologyId("atomic"),
+      stageId: StageId("stage-0"),
+      partition: Partition(0),
+    };
+    const lease = await state.acquire({
+      scope,
+      ownerId: TopologyInstanceId("worker"),
+      leaseMs: 30_000,
+    });
+    await input.publish({ value: 21 });
+    const [envelope] = await run(input.subscribeAck().take(1).toArray().orDie());
+
+    await state.transaction(async (transaction) => {
+      await output.publishInTransaction(transaction, { value: envelope!.value.value * 2 });
+      expect(
+        await state.commitInTransaction(transaction, {
+          lease: lease!,
+          mutations: [{ type: "put", key: "last", value: envelope!.value.value }],
+          sourceId: SourceRecordId(`atomic:0:${String(envelope!.metadata.offset)}`),
+          sourceOffset: String(envelope!.metadata.offset),
+        }),
+      ).toBe("committed");
+      await envelope!.ackInTransaction(transaction);
+    });
+
+    expect((await input.metrics()).queueLength).toBe(0);
+    expect((await state.load(lease!))?.values.get("last")).toBe(21);
+    expect(await run(output.subscribe().take(1).toArray().orDie())).toEqual([{ value: 42 }]);
+    await state.release(lease!);
   }, 60_000);
 
   it("nack (setVt) makes the message re-readable", async () => {

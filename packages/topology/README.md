@@ -18,7 +18,7 @@ bun add @perfect/topology
 ## Quickstart
 
 ```ts
-import { StreamTopology, TopologyRunner } from "@perfect/topology";
+import { ConsumerGroup, StreamTopology, TopologyRunner } from "@perfect/topology";
 
 // clicks / counts: anything implementing the connect contracts —
 // e.g. new KafkaTopic({ kafka, topic: "clicks", groupId: "analytics" })
@@ -32,12 +32,19 @@ const topology = StreamTopology.source(clicks)
   })
   .to(counts);
 
-const handle = await TopologyRunner.run(topology, { group: "analytics" });
+const handle = await TopologyRunner.run(topology, {
+  group: ConsumerGroup("analytics"),
+});
 
 console.log(handle.metrics().itemsProcessed);
 const exits = await handle.awaitExit();
 await handle.shutdown();
 ```
+
+Durable identities use distinct constructors (`TopologyId`, `StageId`,
+`TopologyInstanceId`, `SourceRecordId`, and `StateCheckpointId`) so values
+cannot be accidentally swapped across state and connector APIs. Connector
+offsets remain plain strings because their representation is backend-specific.
 
 Stateless steps chain like a stream; keyed steps unlock windows and state:
 
@@ -71,8 +78,15 @@ StreamTopology.source(readings)
 - **Distribution** — `DistributedRunner` + `planStages` split the DAG at
   `keyBy` boundaries into stages connected by a `ShuffleTransport`
   (Kafka-backed one in `@perfect/kafka`)
-- **State** — pluggable `StateBackend` (`InMemoryState` included) for keyed
-  state and checkpoints; restore completes before source fibers start
+- **Partition state** — state is namespaced by topology, stage, operator, and
+  partition; fenced lease epochs prevent stale instances from committing.
+  Redis and PostgreSQL provide durable atomic state/progress/dedupe commits
+- **Rebalances** — assignment restores state before delivery; revocation drains
+  in-flight records, checkpoints, and releases the partition lease
+- **Delivery** — `at-least-once` publishes before committing state/progress and
+  acknowledging the source. `exactly-once` is accepted only when source, sink,
+  and state advertise the same transaction domain. PGMQ plus
+  `PgPartitionedStateBackend` is the first fully atomic implementation
 - **Supervision** — sink, acknowledgement, checkpoint, and branch failures are
   observable through `awaitExit()` and interrupt sibling branches
 - **Analysis** — `analyzeTopology` returns `TopologyWarning`s for suspect

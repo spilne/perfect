@@ -8,27 +8,46 @@
 export type {
   Streamable,
   Sinkable,
+  TransactionalSinkable,
   KeyedSinkable,
   Partitionable,
   Replayable,
   Acknowledgeable,
   AcknowledgeOptions,
+  ManagedAcknowledgeable,
+  ManagedAcknowledgementSubscription,
+  PartitionAssignment,
+  PartitionLifecycle,
   Checkpointable,
   Envelope,
+  TransactionalEnvelope,
   Offset,
   ShuffleTransport,
   LeaderElection,
 } from "./contracts";
 
-export { ConsumerGroup, Partition, ChannelName } from "./contracts";
+export {
+  ConsumerGroup,
+  Partition,
+  ChannelName,
+  TopologyId,
+  StageId,
+  TopologyInstanceId,
+  SourceRecordId,
+  StateCheckpointId,
+  LeaseEpoch,
+} from "./contracts";
 
 export {
   isStreamable,
   isSinkable,
+  isTransactionalSinkable,
   isKeyedSinkable,
   isPartitionable,
   isReplayable,
   isAcknowledgeable,
+  isManagedAcknowledgeable,
+  isTransactionalEnvelope,
   isCheckpointable,
 } from "./contracts";
 
@@ -39,4 +58,16 @@ export { canonicalJSON, payloadHash } from "./canonicalize";
 
 export { OffsetTracker } from "./offset-tracker";
 export { type StateBackend, CheckpointName, InMemoryState } from "./state-backend";
+export {
+  type StatePartitionScope,
+  type StatePartitionLease,
+  type StateMutation,
+  type PartitionStateCommit,
+  type PartitionCommitResult,
+  type PartitionStateSnapshot,
+  type PartitionedStateBackend,
+  type TransactionalPartitionedStateBackend,
+  InMemoryPartitionedState,
+  isTransactionalPartitionedStateBackend,
+} from "./partitioned-state-backend";
 export { AckError, autoCommitBatchWithin } from "./auto-commit";
