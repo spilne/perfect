@@ -176,6 +176,47 @@ interface Logger {
 const UserRepo = service<UserRepo>("UserRepo");
 const Logger = service<Logger>("Logger");
 
+// ── Reactive stream requirement propagation ──────────────────────
+
+{
+  const numbers = null as unknown as Stream<number, Throws<NotFound>>;
+  const strings = null as unknown as Stream<string, Throws<Forbidden>>;
+
+  const _combined: Stream<[number, string], Throws<NotFound> | Throws<Forbidden>> =
+    numbers.combineLatest(strings);
+  const _withLatest: Stream<[number, string], Throws<NotFound> | Throws<Forbidden>> =
+    numbers.withLatest(strings);
+  const _switched: Stream<string, Throws<NotFound> | Throws<Forbidden>> = numbers.switchMap(
+    () => strings,
+  );
+  const _exhausted: Stream<string, Throws<NotFound> | Throws<Forbidden>> = numbers.exhaustMap(
+    () => strings,
+  );
+  const _sampled: Stream<number, Throws<NotFound>> = numbers.sample(100);
+  const _audited: Stream<number, Throws<NotFound>> = numbers.audit(100);
+  const _async: Stream<number, Throws<BackendFailure>> = Stream.fromAsyncIterable(
+    null as unknown as AsyncIterable<number>,
+    () => new BackendFailure(),
+  );
+
+  // @ts-expect-error either source may fail
+  const _unsafeCombined: Stream<[number, string], never> = numbers.combineLatest(strings);
+  // @ts-expect-error iterator failures cannot be dropped
+  const _unsafeAsync: Stream<number, never> = _async;
+
+  void [
+    _combined,
+    _withLatest,
+    _switched,
+    _exhausted,
+    _sampled,
+    _audited,
+    _async,
+    _unsafeCombined,
+    _unsafeAsync,
+  ];
+}
+
 // ── These should compile fine ──────────────────────────────────────
 
 // Fully handled: no effects remaining
