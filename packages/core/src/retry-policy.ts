@@ -22,10 +22,6 @@ interface PolicyImpl {
   readonly whenError?: (error: unknown) => boolean;
   readonly whenCause?: (cause: Cause) => boolean;
   readonly onRetry?: (details: RetryDetails<Cause, unknown>) => Eff<void, unknown>;
-  // Time budget is applied by intersecting a whileOutput(cumulativeDelay, < budget)
-  // onto the schedule at build time. Stored so multiple withTimeBudget() calls
-  // are idempotent (the last one wins rather than compounding).
-  readonly timeBudgetMs?: number;
 }
 
 // ── RetryPolicy class ──────────────────────────────────────────────
@@ -50,9 +46,18 @@ export class RetryPolicy {
     return RetryPolicy.spaced(ms);
   }
 
-  /** Exponential backoff: base * factor^attempt. */
-  static exponential(base: number, factor = 2): RetryPolicy {
-    return new RetryPolicy({ schedule: Schedule.exponential(base, factor) });
+  /** Exponential backoff: initial * factor^attempt. */
+  static exponential(options: { readonly initial: number; readonly factor?: number }): RetryPolicy;
+  static exponential(initial: number, factor?: number): RetryPolicy;
+  static exponential(
+    optionsOrInitial: number | { readonly initial: number; readonly factor?: number },
+    factor = 2,
+  ): RetryPolicy {
+    const initial =
+      typeof optionsOrInitial === "number" ? optionsOrInitial : optionsOrInitial.initial;
+    const resolvedFactor =
+      typeof optionsOrInitial === "number" ? factor : (optionsOrInitial.factor ?? 2);
+    return new RetryPolicy({ schedule: Schedule.exponential(initial, resolvedFactor) });
   }
 
   /** Fibonacci backoff: base * fib(attempt). Smoother than exponential. */
@@ -88,19 +93,23 @@ export class RetryPolicy {
     return this.copy({ schedule: Schedule.maxDelay(this.impl.schedule, ms) });
   }
 
-  /** Total wall-clock budget across all retries; fail once exceeded. */
+  /** Cap the cumulative scheduled delay across retries. */
   withTimeBudget(ms: number): RetryPolicy {
-    // whileOutput on a cumulative-delay schedule terminates when total exceeds budget.
     const bounded = Schedule.whileOutput(
       Schedule.cumulativeDelay(this.impl.schedule),
       (total) => total < ms,
     );
-    return this.copy({ schedule: bounded, timeBudgetMs: ms });
+    return this.copy({ schedule: bounded });
   }
 
-  /** Equal jitter: random factor in [min, max], default ±20%. */
+  /** Randomize each delay by a factor in [min, max], default ±20%. */
   withJitter(min = 0.8, max = 1.2): RetryPolicy {
     return this.copy({ schedule: Schedule.jittered(this.impl.schedule, min, max) });
+  }
+
+  /** Equal jitter: randomize each delay into its upper half. */
+  withEqualJitter(): RetryPolicy {
+    return this.withJitter(0.5, 1);
   }
 
   /** Full jitter: each delay is random in [0, scheduled_delay]. */

@@ -122,6 +122,7 @@ Each is also a fluent method: `program.run()`, `.runSync()`, `.runExit()`, `.run
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `@perfect/core`         | Everything above                                                                                                                                                         |
 | `@perfect/core/stream`  | `Stream`, `Chunk`, `Sink`, `Pipes` (also re-exported from root)                                                                                                          |
+| `@perfect/core/retry`   | `RetryPolicy`, `Schedule`, `retryWith`, and scheduled repetition                                                                                                         |
 | `@perfect/core/connect` | Queue-agnostic endpoint contracts (`Streamable`, `Sinkable`, `Envelope`, `Codec`, `OffsetTracker`, …) — implemented by `@perfect/kafka`, consumed by `@perfect/topology` |
 | `@perfect/core/syntax`  | The `eff` comprehension entry point                                                                                                                                      |
 | `@perfect/core/worker`  | `WorkerPool`                                                                                                                                                             |

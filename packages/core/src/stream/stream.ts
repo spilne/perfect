@@ -17,6 +17,7 @@ import {
   async,
   sleep,
   fork,
+  forkDaemon,
   interrupt,
   race,
   timeoutOption,
@@ -47,6 +48,9 @@ export interface StatefulMapOptions<A, K, V, B, S> {
 type BroadcastBranch<A, S> = (stream: Stream<A, S>) => Stream<any, any>;
 type StreamValue<T> = T extends Stream<infer A, any> ? A : never;
 type StreamEffects<T> = T extends Stream<any, infer S> ? S : never;
+type DefectClass = abstract new (...args: any[]) => unknown;
+type DefectInstances<Classes extends readonly DefectClass[]> =
+  Classes[number] extends abstract new (...args: any[]) => infer E ? E : never;
 type Either<E, A> =
   | { readonly _tag: "Left"; readonly left: E }
   | { readonly _tag: "Right"; readonly right: A };
@@ -90,6 +94,12 @@ import { type FusibleOp, compileFused, hasFilterOps, SKIP } from "./fusion";
 /** Typed failure produced by {@link Stream.timeout} when the gap between
  *  element-producing pulls exceeds the limit. */
 export class StreamTimeoutError extends TaggedError("StreamTimeoutError")<{
+  readonly ms: number;
+}>() {}
+
+/** Typed failure produced by {@link Stream.deadline} when the entire stream
+ *  remains active beyond its total time budget. */
+export class StreamDeadlineError extends TaggedError("StreamDeadlineError")<{
   readonly ms: number;
 }>() {}
 
@@ -352,6 +362,27 @@ export class Stream<A, S = never> {
         ? Stream.suspend(factory)
         : (Stream.suspend(factory).concat(Stream.suspend(() => go(remaining - 1))) as any);
     return go(count);
+  }
+
+  /** Alias for {@link Stream.repeatWith}. The factory is required so every
+   *  repetition reacquires single-shot sources safely. */
+  static repeatN<A, S>(factory: () => Stream<A, S>, n: number): Stream<A, S> {
+    return Stream.repeatWith(factory, n);
+  }
+
+  /** Repeatedly build and drain a fresh whole stream until downstream stops. */
+  static repeatForever<A, S>(factory: () => Stream<A, S>): Stream<A, S> {
+    const go = (): Stream<A, S> =>
+      Stream.suspend(factory).concat(Stream.suspend(go)) as Stream<A, S>;
+    return Stream.suspend(go);
+  }
+
+  /** Concurrently merge any number of streams. */
+  static mergeAll<const Streams extends readonly Stream<any, any>[]>(
+    ...streams: Streams
+  ): Stream<StreamValue<Streams[number]>, StreamEffects<Streams[number]>> {
+    if (streams.length === 0) return Stream.empty() as any;
+    return streams.slice(1).reduce((acc, stream) => acc.merge(stream), streams[0]!) as any;
   }
 
   /**
@@ -1308,15 +1339,27 @@ export class Stream<A, S = never> {
     return this.evalMap((a) => (f(a) as any).map(() => a));
   }
 
+  /** Start a fire-and-forget effect for every value without delaying delivery.
+   *  Fork failures are detached; use `observe` when completion and failures must
+   *  remain coupled to the stream. */
+  tapEffectFork<S2>(f: (a: A) => Eff<unknown, S2>): Stream<A, S> {
+    return this.rechunk(1).evalMap((a) => (forkDaemon(f(a)) as any).map(() => a)) as Stream<A, S>;
+  }
+
   zipWithIndex(): Stream<[A, number], S> {
     let index = 0;
     return this.map((a) => [a, index++] as [A, number]);
   }
 
-  changes(): Stream<A, S> {
+  changes(
+    eq: (previous: A, current: A) => boolean = (previous, current) => previous === current,
+  ): Stream<A, S> {
     let last: A | typeof SENTINEL = SENTINEL;
     return this.filter((a) => {
-      if (a === last) return false;
+      if (last !== SENTINEL && eq(last, a)) {
+        last = a;
+        return false;
+      }
       last = a;
       return true;
     });
@@ -2428,15 +2471,29 @@ export class Stream<A, S = never> {
   }
 
   throttle(ms: number): Stream<A, S> {
-    let lastEmit = 0;
-    return this.evalMap(
+    let nextAt: number | undefined;
+    return this.rechunk(1).evalMap(
       (a) =>
         (clockNow as any).flatMap((now: number) => {
-          const wait = Math.max(0, ms - (now - lastEmit));
-          lastEmit = now + wait;
+          if (nextAt === undefined) {
+            nextAt = now + ms;
+            return succeed(a);
+          }
+          const wait = Math.max(0, nextAt - now);
+          nextAt = Math.max(now, nextAt) + ms;
           return wait > 0 ? sleep(wait).map(() => a) : succeed(a);
         }) as any,
     );
+  }
+
+  /** Pace delivery to at most one element per interval. */
+  metered(ms: number): Stream<A, S> {
+    return this.throttle(ms);
+  }
+
+  /** Delay every element, including the first, by the given interval. */
+  spaced(ms: number): Stream<A, S> {
+    return this.rechunk(1).evalMap((a) => sleep(ms).map(() => a));
   }
 
   /**
@@ -2459,6 +2516,38 @@ export class Stream<A, S = never> {
         s._finalizer,
       );
     return wrap(this) as any;
+  }
+
+  /** Fail if the whole stream is still active `ms` after its first pull.
+   *  Unlike {@link Stream.timeout}, successful intermediate pulls do not reset
+   *  this deadline. */
+  deadline(ms: number): Stream<A, S | Throws<StreamDeadlineError>> {
+    const self = this;
+    const wrap = (expiresAt: number, source: Stream<A, any>): Stream<A, any> =>
+      new Stream(
+        (clockNow as any).flatMap((now: number) => {
+          const remaining = expiresAt - now;
+          if (remaining <= 0) return fail(new StreamDeadlineError({ ms }));
+          return (timeoutOption(source.step as any, remaining) as any).flatMap(
+            (step: Step<A> | undefined) => {
+              if (step === undefined) return fail(new StreamDeadlineError({ ms }));
+              if (step._tag === "Done") return succeed(DONE);
+              return succeed(emit(step.chunk, wrap(expiresAt, step.next)));
+            },
+          );
+        }),
+        source._finalizer,
+      );
+
+    return new Stream(
+      (clockNow as any).flatMap((now: number) => wrap(now + ms, self).step),
+      self._finalizer,
+    ) as any;
+  }
+
+  /** Alias emphasizing that this is a total-stream timeout. */
+  timeoutTotal(ms: number): Stream<A, S | Throws<StreamDeadlineError>> {
+    return this.deadline(ms);
   }
 
   /**
@@ -2521,6 +2610,19 @@ export class Stream<A, S = never> {
       (clockNow as any).flatMap((now: number) => wrap(now + ms, self).step),
       self._finalizer,
     );
+  }
+
+  /** Pause delivery while `state.get` is true, polling through the Clock
+   *  service so local and distributed Ref implementations share the API. */
+  pauseWhen<S2>(state: { readonly get: Eff<boolean, S2> }, pollMs = 50): Stream<A, S | S2> {
+    const interval = Math.max(1, pollMs);
+    const awaitResumed = (): Eff<void, S2> =>
+      suspend(() =>
+        (state.get as any).flatMap((paused: boolean) =>
+          paused ? sleep(interval).flatMap(awaitResumed) : succeed(undefined),
+        ),
+      ) as Eff<void, S2>;
+    return this.rechunk(1).evalMap((value) => awaitResumed().map(() => value));
   }
 
   // ── Pipe ─────────────────────────────────────────────────────────
@@ -2630,6 +2732,26 @@ export class Stream<A, S = never> {
   tapErrorCause<S2>(f: (cause: Cause<ErrorsOf<S>>) => Eff<unknown, S2>): Stream<A, S | S2> {
     return this.catchAllCause((cause) =>
       Stream.fromEffect(f(cause)).flatMap(() => Stream.fromEffect(failCause(cause))),
+    ) as any;
+  }
+
+  /** Observe every typed failure and defect while preserving the full Cause. */
+  tapAnyError<S2>(f: (error: unknown) => Eff<unknown, S2>): Stream<A, S | S2> {
+    return this.tapErrorCause((cause) => {
+      const errors = [...Cause.failures(cause), ...Cause.defects(cause)];
+      return errors.reduce<Eff<void, S2>>(
+        (effect, error) => (effect as any).flatMap(() => (f(error) as any).map(() => undefined)),
+        succeed(undefined) as Eff<void, S2>,
+      );
+    });
+  }
+
+  /** Move matching defects into the typed error channel. */
+  trapError<const Classes extends readonly DefectClass[]>(
+    ...classes: Classes
+  ): Stream<A, S | Throws<DefectInstances<Classes>>> {
+    return this.catchAllCause((cause) =>
+      Stream.fromEffect(failCause(trapDefects(cause, classes))),
     ) as any;
   }
 
@@ -2747,6 +2869,16 @@ export class Stream<A, S = never> {
     ) as any;
   }
 
+  /** Consume through the first matching element and return it. */
+  collectFirst(predicate: (value: A) => boolean): Eff<A | undefined, S> {
+    return this.filter(predicate).head();
+  }
+
+  /** Consume values while the predicate remains true. */
+  collectWhile(predicate: (value: A) => boolean): Eff<A[], S> {
+    return this.takeWhile(predicate).toArray();
+  }
+
   last(): Eff<A | undefined, S> {
     function go(lastSeen: A | undefined, stream: Stream<A, any>): Eff<A | undefined, any> {
       return (stream.step as any).flatMap((s: Step<A>) => {
@@ -2776,6 +2908,22 @@ export type Pipe<I, O, S2 = never> = (<S>(input: Stream<I, S>) => Stream<O, S | 
 
 const SENTINEL = Symbol("sentinel");
 const FILTER_SENTINEL = Symbol("filter-sentinel");
+
+function trapDefects<E>(cause: Cause<E>, classes: readonly DefectClass[]): Cause<E | unknown> {
+  switch (cause._tag) {
+    case "Fail":
+    case "Interrupt":
+      return cause;
+    case "Die":
+      return classes.some((errorClass) => cause.defect instanceof errorClass)
+        ? Cause.fail(cause.defect)
+        : cause;
+    case "Both":
+      return Cause.both(trapDefects(cause.left, classes), trapDefects(cause.right, classes));
+    case "Then":
+      return Cause.then(trapDefects(cause.left, classes), trapDefects(cause.right, classes));
+  }
+}
 
 function evalMapChunk<A, B, S>(chunk: Chunk<A>, f: (a: A) => Eff<B, S>): Eff<Chunk<B>, S> {
   if (chunk.isEmpty) return succeed(Chunk.empty()) as any;

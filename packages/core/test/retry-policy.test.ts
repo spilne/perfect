@@ -32,6 +32,30 @@ describe("RetryPolicy — fluent builder", () => {
     expect(attempts).toBe(4); // 1 initial + 3 retries
   });
 
+  test("exponential accepts fluent object options", () => {
+    const schedule = RetryPolicy.exponential({ initial: 10, factor: 3 }).impl.schedule;
+    const first = schedule.step(undefined, schedule.initial);
+    expect(first._tag).toBe("Continue");
+    if (first._tag !== "Continue") return;
+    expect(first.delay).toBe(10);
+
+    const second = schedule.step(undefined, first.state);
+    expect(second._tag).toBe("Continue");
+    if (second._tag !== "Continue") return;
+    expect(second.delay).toBe(30);
+  });
+
+  test("withEqualJitter keeps delays in the upper half", () => {
+    const schedule = RetryPolicy.spaced(100).withEqualJitter().impl.schedule;
+    for (let i = 0; i < 30; i++) {
+      const decision = schedule.step(undefined, schedule.initial);
+      if (decision._tag === "Continue") {
+        expect(decision.delay).toBeGreaterThanOrEqual(50);
+        expect(decision.delay).toBeLessThanOrEqual(100);
+      }
+    }
+  });
+
   test("fibonacci schedule produces 1, 1, 2, 3, 5, ...", () => {
     const s = Schedule.fibonacci(10);
     const delays: number[] = [];

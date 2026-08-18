@@ -42,6 +42,10 @@
       "types": "./dist/types/stream/index.d.ts",
       "default": "./dist/stream/index.js"
     },
+    "./retry": {
+      "types": "./dist/types/retry/index.d.ts",
+      "default": "./dist/retry/index.js"
+    },
     "./connect": {
       "types": "./dist/types/connect/index.d.ts",
       "default": "./dist/connect/index.js"

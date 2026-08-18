@@ -89,8 +89,12 @@ console.log(calls); // → 3
 |---|---|
 | `RetryPolicy.recurs(n)` | retry up to n times, no delay |
 | `RetryPolicy.spaced(ms)` | fixed delay between retries |
-| `RetryPolicy.exponential({ initial, factor })` | exponential backoff |
-| `RetryPolicy.fibonacci({ initial })` | fibonacci sequence delays |
+| `RetryPolicy.constant(ms)` / `.spaced(ms)` | fixed delay between retries |
+| `RetryPolicy.exponential({ initial, factor? })` | exponential backoff |
+| `RetryPolicy.fibonacci(initial)` | fibonacci sequence delays |
+| `RetryPolicy.linear(initial)` | linearly increasing delays |
+| `RetryPolicy.forever` / `.none` | retry without a limit / never retry |
+| `RetryPolicy.fromSchedule(schedule)` | adapt a custom `Schedule` |
 
 ### Modifiers (chainable)
 
@@ -98,11 +102,14 @@ console.log(calls); // → 3
 |---|---|
 | `.withMaxRetries(n)` | cap retry count |
 | `.withMaxDelay(ms)` | cap per-retry delay |
+| `.withTimeBudget(ms)` | cap cumulative scheduled retry delay |
 | `.withFullJitter()` | randomize each delay in `[0, computed]` |
 | `.withEqualJitter()` | randomize in `[computed/2, computed]` |
+| `.withJitter(min, max)` | multiply delays by a custom random range |
 | `.whenError(p)` | predicate on the typed error |
 | `.whenCause(p)` | predicate on the full Cause |
 | `.onRetry(f)` | callback before each retry attempt |
+| `.and(policy)` / `.or(policy)` | intersect or union retry schedules |
 
 ## Defects don't retry by default
 
@@ -127,7 +134,8 @@ console.log(failed); // → "gave up: cause=Die"
 ```
 <!-- @end -->
 
-If you really want to retry defects, use `retryAllCause(eff, policy)`.
+If you really want to retry defects, opt in with `.whenCause(...)` or use
+`retryAllCause(eff, options)`.
 
 ## Schedule (for repetition, not retry)
 
@@ -136,7 +144,7 @@ it. You can also use it directly with `repeat(eff, schedule)` — useful for
 periodic jobs:
 
 ```ts
-import { repeat, Schedule } from "@perfect/core";
+import { repeat, run, Schedule, sync } from "@perfect/core";
 
 const heartbeat = sync(() => console.log("alive"));
 await run(repeat(heartbeat, Schedule.spaced(1000)));
