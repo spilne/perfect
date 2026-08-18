@@ -68,6 +68,7 @@ bun test --recursive packages/
 
 Rust toolchain needed only for `bun run build:swc` (the SWC WASM plugin).
 The full guide lives in `documentation/` (VitePress site).
+Package versioning and publication are documented in [`RELEASING.md`](RELEASING.md).
 
 ## Status
 

@@ -1,6 +1,6 @@
 {
   "name": "@perfect/otel",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "OpenTelemetry bridge for @perfect/core observability — Tracer spans and metrics export.",
   "keywords": [
     "effect",
@@ -43,7 +43,7 @@
   },
   "dependencies": {
     "@opentelemetry/api": "^1.9.0",
-    "@perfect/core": "workspace:*"
+    "@perfect/core": "^0.1.0"
   },
   "devDependencies": {}
 }

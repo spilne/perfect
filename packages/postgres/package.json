@@ -1,6 +1,6 @@
 {
   "name": "@perfect/postgres",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Postgres coordination backends for @perfect/core — pgmq + SKIP LOCKED queues, LISTEN/NOTIFY change streams, distributed rate limiting, leader election, durable state.",
   "keywords": [
     "change-stream",
@@ -48,7 +48,7 @@
     "build": "bun ../../scripts/build-package.ts ."
   },
   "dependencies": {
-    "@perfect/core": "workspace:*",
+    "@perfect/core": "^0.1.0",
     "drizzle-orm": "^0.44.0",
     "postgres": "^3.4.5"
   },

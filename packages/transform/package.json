@@ -1,6 +1,6 @@
 {
   "name": "@perfect/transform",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Build-time compiler for Perfect's eff(($) => …) and for-comprehension syntaxes (Bun plugin).",
   "keywords": [
     "bun-plugin",

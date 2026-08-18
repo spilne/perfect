@@ -1,6 +1,6 @@
 {
   "name": "@perfect/http",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "HTTP client on the Perfect effect runtime — typed errors, retries, streaming (SSE/NDJSON), mockable transport.",
   "keywords": [
     "client",
@@ -44,7 +44,7 @@
     "build": "bun ../../scripts/build-package.ts ."
   },
   "dependencies": {
-    "@perfect/core": "workspace:*"
+    "@perfect/core": "^0.1.0"
   },
   "devDependencies": {
     "valibot": "^1.3.1",

@@ -27,12 +27,18 @@
     "documentation:build:html": "bun documentation/build.ts && vitepress build documentation",
     "documentation:preview": "vitepress preview documentation",
     "build:swc": "rustup target add wasm32-wasip1 && cd crates/swc-plugin-perfect && cargo build --locked --target wasm32-wasip1 --release && mkdir -p ../../packages/swc-plugin/dist && cp target/wasm32-wasip1/release/swc_plugin_perfect.wasm ../../packages/swc-plugin/dist/plugin.wasm",
-    "release:dry": "(cd packages/core && bun pm pack --dry-run) && (cd packages/http && bun pm pack --dry-run) && (cd packages/http-otel && bun pm pack --dry-run) && (cd packages/kafka && bun pm pack --dry-run) && (cd packages/kafka-kafkajs && bun pm pack --dry-run) && (cd packages/kafka-platformatic && bun pm pack --dry-run) && (cd packages/otel && bun pm pack --dry-run) && (cd packages/postgres && bun pm pack --dry-run) && (cd packages/redis && bun pm pack --dry-run) && (cd packages/topology && bun pm pack --dry-run) && (cd packages/transform && bun pm pack --dry-run) && (cd packages/swc-plugin && bun pm pack --dry-run)",
+    "changeset": "bun ./node_modules/@changesets/cli/bin.js",
+    "version-packages": "bun ./node_modules/@changesets/cli/bin.js version",
+    "build:release": "bun run build:packages && bun run build:swc",
+    "release:check": "bun run build:release && bun scripts/publish-packages.ts --dry-run",
+    "release:dry": "bun run release:check",
+    "release:publish": "bun run build:release && bun scripts/publish-packages.ts",
     "check": "bun run lint && bun run typecheck && bun run test",
     "ci": "bun run fmt:check && bun run lint && bun run typecheck && bun run test && bun run build:packages && bun run smoke:packages && bun run documentation:check && bun run perf:gate",
     "test:integration": "(cd packages/integration && bun test) && (cd packages/redis && bun test) && (cd packages/postgres && bun test)"
   },
   "devDependencies": {
+    "@changesets/cli": "3.0.0",
     "@nx/js": "^23.1.1",
     "@types/bun": "latest",
     "@types/markdown-it-container": "^4.0.0",
@@ -43,5 +49,6 @@
     "rxjs": "^7.8.2",
     "typescript": "^7.0.2",
     "vitepress": "^1.6.4"
-  }
+  },
+  "packageManager": "bun@1.3.14"
 }
