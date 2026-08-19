@@ -18,14 +18,10 @@ import {
   type Eff,
   RetryAttempt as CoreRetryAttempt,
   type RetryAttempt as CoreRetryAttemptType,
+  RetryDecision,
+  type RetryAttemptHandler as CoreRetryAttemptHandler,
   type Throws,
-  type CauseT,
-  Cause,
-  succeed,
-  fail,
-  failCause,
-  die,
-  retry,
+  retryAllBy,
   RetryPolicy,
 } from "@perfect/core";
 import { type HttpClientError, HTTP_RETRYABLE } from "./errors";
@@ -55,6 +51,10 @@ export const RetryAttempt = {
   ) => r is { readonly _tag: "error"; readonly error: HttpClientError },
 } as const;
 
+export { RetryDecision };
+
+export type RetryAttemptHandler<T> = CoreRetryAttemptHandler<T, HttpClientError>;
+
 // ── withRetryAll ───────────────────────────────────────────────────
 
 export interface RetryAllOptions<T = unknown> {
@@ -78,17 +78,18 @@ export interface RetryAllOptions<T = unknown> {
 
 const DEFAULT_SHOULD_RETRY = <T>(r: RetryAttempt<T>): boolean => r._tag !== "success";
 
-const isRetryAttempt = <T>(value: unknown): value is RetryAttempt<T> =>
-  !!value &&
-  typeof value === "object" &&
-  (() => {
-    const candidate = value as { readonly _tag?: unknown };
-    return (
-      candidate._tag === "success" ||
-      candidate._tag === "error" ||
-      candidate._tag === "thrown"
-    );
-  })();
+export interface RetryAllByOptions<T = unknown> {
+  /** Max number of retries (excluding the initial attempt). Default: 3. */
+  readonly maxRetries?: number;
+  /** Base delay for exponential backoff in ms. Default: 250. */
+  readonly baseDelayMs?: number;
+  /** Cap on per-attempt delay in ms. Default: 30 000. */
+  readonly maxDelayMs?: number;
+  /** Full retry policy override. If provided, base/max timing options are ignored. */
+  readonly policy?: RetryPolicy;
+  /** Inspect outcome and decide whether to retry (`RetryDecision.retry`) or stop (`RetryDecision.stop`). */
+  readonly handle: RetryAttemptHandler<T>;
+}
 
 /**
  * Retry that observes every outcome. The `shouldRetry` predicate sees the
@@ -98,55 +99,22 @@ export function withRetryAll<T>(
   eff: Eff<T, Throws<HttpClientError>>,
   options: RetryAllOptions<T> = {},
 ): Eff<T, Throws<HttpClientError>> {
-  const {
-    maxRetries = 3,
-    baseDelayMs = 250,
-    maxDelayMs = 30_000,
-    shouldRetry = DEFAULT_SHOULD_RETRY,
-    policy,
-  } = options;
+  const { shouldRetry = DEFAULT_SHOULD_RETRY, ...rest } = options;
+  return withRetryAllBy(eff, {
+    ...rest,
+    handle: (result) => (shouldRetry(result) ? RetryDecision.retry() : RetryDecision.stop()),
+  });
+}
 
-  // Normalize: map success/failure/defect into RetryAttempt<T> on the success channel,
-  // then turn only retryable outcomes into typed failures handled by RetryPolicy.
-  const normalized = (eff as any)
-    .map((value: T) => RetryAttempt.success(value))
-    .catchAllCause((cause: CauseT): Eff<RetryAttempt<T>, never> => {
-      const f = Cause.firstFail(cause);
-      if (f !== null) return succeed(RetryAttempt.error(f.value as HttpClientError));
-      const d = Cause.firstDie(cause);
-      if (d !== null) return succeed(RetryAttempt.thrown(d.value));
-      // Interrupt (or composite of interrupts) — propagate as typed cause
-      return failCause(cause) as any;
-    }) as Eff<RetryAttempt<T>, never>;
-
-  const normalizedForRetry = (normalized as any).flatMap((r: RetryAttempt<T>) =>
-    shouldRetry(r) ? fail(r) : succeed(r),
-  ) as Eff<RetryAttempt<T>, Throws<RetryAttempt<T>>>;
-
-  const retryPolicy =
-    policy ??
-    RetryPolicy.exponential(baseDelayMs).withMaxRetries(maxRetries).withMaxDelay(maxDelayMs);
-
-  const ran = retry(normalizedForRetry, retryPolicy);
-
-  const unwrap = (r: RetryAttempt<T>): Eff<T, Throws<HttpClientError>> => {
-    switch (r._tag) {
-      case "success":
-        return succeed(r.value);
-      case "error":
-        return fail(r.error) as Eff<T, Throws<HttpClientError>>;
-      case "thrown":
-        return die(r.error) as Eff<T, Throws<HttpClientError>>;
-    }
-  };
-
-  return ran
-    .flatMap((r: RetryAttempt<T>) => unwrap(r))
-    .catchAllCause((cause: CauseT): Eff<T, Throws<HttpClientError>> => {
-      const failValue = Cause.firstFail(cause);
-      if (failValue === null || !isRetryAttempt<T>(failValue.value)) return failCause(cause) as any;
-      return unwrap(failValue.value);
-    }) as Eff<T, Throws<HttpClientError>>;
+/**
+ * Cats-like handler style: `handle` inspects each outcome and decides
+ * whether to retry (`RetryDecision.retry`) or return now (`RetryDecision.stop`).
+ */
+export function withRetryAllBy<T>(
+  eff: Eff<T, Throws<HttpClientError>>,
+  options: RetryAllByOptions<T>,
+): Eff<T, Throws<HttpClientError>> {
+  return retryAllBy(eff, options);
 }
 
 // ── withRetry (HTTP-aware default) ────────────────────────────────
@@ -184,9 +152,3 @@ export function withRetry<T>(
     shouldRetry: (r) => RetryAttempt.isHttpError(r) && when(r.error),
   });
 }
-
-/**
- * @deprecated Use `RetryAttempt` directly. Kept for compatibility with old docs/source.
- */
-// Compatibility alias for existing Promin-era names.
-export const PipelineResult = RetryAttempt;

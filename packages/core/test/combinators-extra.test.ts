@@ -10,11 +10,14 @@ import {
   repeatUntil,
   repeatUntilWithBackoff,
   retryAllCause,
+  retryAllBy,
   retry,
   Cause,
   Clock,
   TestClock,
   provide,
+  RetryAttempt,
+  RetryDecision,
 } from "../src";
 
 // ── trapError ──────────────────────────────────────────────────────
@@ -302,5 +305,47 @@ describe("retry enhancements", () => {
     );
     expect(result).toBe("ok");
     expect(attempts).toBe(3);
+  });
+});
+
+describe("retryAllBy", () => {
+  test("retries pending success outcomes via handler", async () => {
+    let calls = 0;
+    const poller = sync(() => {
+      calls++;
+      return { state: calls === 3 ? "done" : "pending" };
+    }) as any;
+
+    const result = await run(
+      retryAllBy(poller, {
+        baseDelayMs: 1,
+        handle: (r) =>
+          RetryAttempt.isSuccess(r) && r.value.state === "pending"
+            ? RetryDecision.retry()
+            : RetryDecision.stop(),
+      }) as any,
+    );
+    expect(result).toEqual({ state: "done" });
+    expect(calls).toBe(3);
+  });
+
+  test("stops when handler returns stop", async () => {
+    let calls = 0;
+    const unstable = sync(() => {
+      calls++;
+      return calls < 2 ? fail("retry") : succeed("done");
+    }).flatMap((v: any) =>
+      v === "retry" ? fail("retry") : succeed(v),
+    ) as any;
+
+    await expect(
+      run(
+        retryAllBy(unstable, {
+          baseDelayMs: 1,
+          handle: (r) => (RetryAttempt.isError(r) && r.error === "go-on" ? RetryDecision.retry() : RetryDecision.stop()),
+        }) as any,
+      ),
+    ).rejects.toBe("retry");
+    expect(calls).toBe(1);
   });
 });

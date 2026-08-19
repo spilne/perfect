@@ -1,4 +1,4 @@
-import { type Eff, type Throws, type Needs, Suspend, Op } from "../eff";
+import { type Eff, type Throws, type Needs, type ErrorsOf, Suspend, Op } from "../eff";
 import { type Fiber } from "../fiber";
 import { type Exit } from "../exit";
 import {
@@ -18,7 +18,13 @@ import {
 import { provide, type ServiceTag } from "../service";
 import { type RetryPolicy } from "../retry-policy";
 import { type Schedule, repeat, retryWith } from "../schedule";
-import { repeatUntil, repeatUntilWithBackoff, type RepeatTimeoutError } from "../combinators-extra";
+import {
+  retryAllBy,
+  repeatUntil,
+  repeatUntilWithBackoff,
+  type RepeatTimeoutError,
+} from "../combinators-extra";
+import { type RetryAllByOptions } from "../combinators-extra";
 import { withSpan } from "../tracing";
 
 declare module "../eff" {
@@ -55,6 +61,10 @@ declare module "../eff" {
       impl: T,
     ): Eff<A, Exclude<S, Needs<T>>>;
     retry<A, S>(this: Eff<A, S>, policy: RetryPolicy | RetryConfig): Eff<A, S>;
+    retryAllBy<A, S, E = ErrorsOf<S>>(
+      this: Eff<A, S>,
+      options: RetryAllByOptions<A, E>,
+    ): Eff<A, S>;
     repeat<A, S>(this: Eff<A, S>, schedule: Schedule<A>): Eff<A, S>;
     retryWith<A, S, In = unknown, Out = unknown>(
       this: Eff<A, S>,
@@ -164,6 +174,10 @@ Suspend.prototype.provide = function (tag: any, impl: any) {
 
 Suspend.prototype.retry = function (policy: any) {
   return retry(this as any, policy) as any;
+};
+
+Suspend.prototype.retryAllBy = function (options: any) {
+  return retryAllBy(this as any, options) as any;
 };
 
 Suspend.prototype.repeat = function (schedule: any) {

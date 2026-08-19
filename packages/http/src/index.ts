@@ -53,8 +53,13 @@ export { HttpClient as HttpClientService } from "./service";
 // withRetry = HTTP-aware transient retry; withRetryAll = full outcome ADT.
 // For polling use core's `.repeatUntil` / `.repeatUntilWithBackoff` — they
 // subsume the `poll` helper promin has separately.
-export { withRetry, withRetryAll, RetryAttempt } from "./retry";
-export type { RetryOptions, RetryAllOptions } from "./retry";
+export { withRetry, withRetryAll, withRetryAllBy, RetryAttempt, RetryDecision } from "./retry";
+export type {
+  RetryOptions,
+  RetryAllOptions,
+  RetryAllByOptions,
+  RetryAttemptHandler,
+} from "./retry";
 
 // ── Phase 4 — streaming ──────────────────────────────────────────
 // One base (httpStream) + composable pipes (parseSSE, parseNDJSON), with

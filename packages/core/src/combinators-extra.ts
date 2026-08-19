@@ -1,11 +1,13 @@
 // Ported from promin's Pipeline: combinators that go beyond the core algebra.
 // These are standalone functions, not methods — they take an Eff and return an Eff.
 
-import { type Eff, type Throws, Suspend, Op } from "./eff";
+import { type Eff, type Throws, type ErrorsOf, Suspend, Op } from "./eff";
 import { Cause } from "./cause";
-import { succeed, fail, sleep } from "./constructors";
+import { succeed, fail, sleep, die, retry } from "./constructors";
 import { clockNow } from "./clock";
 import { all as allParallel } from "./combinators";
+import { RetryAttempt } from "./retry-attempt";
+import { RetryPolicy } from "./retry-policy";
 
 // ── trapError ──────────────────────────────────────────────────────
 //
@@ -136,6 +138,94 @@ export function retryAllCause<A, S>(
     }) as any;
   }
   return attempt(times, delayMs);
+}
+
+export type RetryDecision = { readonly _tag: "retry" } | { readonly _tag: "stop" };
+
+export const RetryDecision = {
+  retry: () => ({ _tag: "retry" }) as RetryDecision,
+  stop: () => ({ _tag: "stop" }) as RetryDecision,
+};
+
+export type RetryAttemptHandler<T, E = unknown> = (result: RetryAttempt<T, E>) => RetryDecision;
+
+export interface RetryAllByOptions<T = unknown, E = unknown> {
+  /** Max number of retries (excluding the initial attempt). Default: 3. */
+  readonly maxRetries?: number;
+  /** Base delay for exponential backoff in ms. Default: 250. */
+  readonly baseDelayMs?: number;
+  /** Cap on per-attempt delay in ms. Default: 30 000. */
+  readonly maxDelayMs?: number;
+  /** Full retry policy override. If provided, base/max timing options are ignored. */
+  readonly policy?: RetryPolicy;
+  /**
+   * Decide whether to retry (`RetryDecision.retry`) or stop (`RetryDecision.stop`)
+   * for every observed outcome: success, typed failure, or thrown defect.
+   */
+  readonly handle: RetryAttemptHandler<T, E>;
+}
+
+function isRetryAttempt<T, E>(value: unknown): value is RetryAttempt<T, E> {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as { readonly _tag?: unknown };
+  return (
+    candidate._tag === "success" || candidate._tag === "error" || candidate._tag === "thrown"
+  );
+}
+
+export function retryAllBy<A, S>(
+  eff: Eff<A, S>,
+  options: RetryAllByOptions<A, ErrorsOf<S>>,
+): Eff<A, S> {
+  const {
+    maxRetries = 3,
+    baseDelayMs = 250,
+    maxDelayMs = 30_000,
+    handle,
+    policy,
+  } = options;
+
+  // Normalize each attempt into a tagged outcome object on the success channel.
+  const normalized = (eff as any)
+    .map((value: A) => RetryAttempt.success(value))
+    .catchAllCause((cause: Cause): Eff<RetryAttempt<A, ErrorsOf<S>>, never> => {
+      const f = Cause.firstFail(cause);
+      if (f !== null) return succeed(RetryAttempt.error(f.value as ErrorsOf<S>));
+      const d = Cause.firstDie(cause);
+      if (d !== null) return succeed(RetryAttempt.thrown(d.value));
+      return new Suspend(Op.Fail, cause, null) as Eff<never, Throws<never>>;
+    }) as Eff<RetryAttempt<A, ErrorsOf<S>>, never>;
+
+  const normalizedForRetry = (normalized as any).flatMap((r: RetryAttempt<A, ErrorsOf<S>>) =>
+    handle(r)._tag === "retry" ? fail(r) : succeed(r),
+  ) as Eff<RetryAttempt<A, ErrorsOf<S>>, Throws<RetryAttempt<A, ErrorsOf<S>>>>;
+
+  const retryPolicy =
+    policy ??
+    RetryPolicy.exponential(baseDelayMs).withMaxRetries(maxRetries).withMaxDelay(maxDelayMs);
+
+  const ran = retry(normalizedForRetry, retryPolicy);
+
+  const unwrap = (r: RetryAttempt<A, ErrorsOf<S>>): Eff<A, S> => {
+    switch (r._tag) {
+      case "success":
+        return succeed(r.value) as Eff<A, S>;
+      case "error":
+        return fail(r.error) as Eff<A, S>;
+      case "thrown":
+        return die(r.error) as Eff<A, S>;
+    }
+  };
+
+  return ran
+    .flatMap((r: RetryAttempt<A, ErrorsOf<S>>) => unwrap(r))
+    .catchAllCause((cause: Cause): Eff<A, S> => {
+      const failValue = Cause.firstFail(cause);
+      if (failValue === null || !isRetryAttempt<A, ErrorsOf<S>>(failValue.value)) {
+        return new Suspend(Op.Fail, cause, null) as Eff<A, S>;
+      }
+      return unwrap(failValue.value);
+    }) as Eff<A, S>;
 }
 
 // ── repeatUntil / repeatUntilWithBackoff ───────────────────────────────
