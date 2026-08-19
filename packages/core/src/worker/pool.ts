@@ -63,7 +63,7 @@ export class WorkerPool {
     return sync(() => {
       const poolSize = size ?? detectCoreCount();
       const pool = new WorkerPool(poolSize);
-      const executorPath = new URL("./executor.ts", import.meta.url).href;
+      const executorPath = new URL("./executor.ts", import.meta.url);
 
       for (let i = 0; i < poolSize; i++) {
         const worker = new Worker(executorPath);
