@@ -3,7 +3,7 @@
 //
 // Run: bun packages/core/examples/09-retry-schedule.ts
 
-import { eff, succeed, fail, sync, RetryPolicy, type Eff, type Throws } from "../src";
+import { eff, succeed, fail, sync, RetryPolicy, RetryDecision, type Eff, type Throws } from "../src";
 import { assertEq } from "./_assert";
 
 // >>> example: retry-config
@@ -59,4 +59,31 @@ const failed = await probablyABug
   .catchAllCause((c: any) => succeed(`gave up: cause=${c._tag}`))
   .run();
 assertEq(failed, "gave up: cause=Die"); // no retries — defects don't retry
+// <<< example
+
+// >>> example: retry-all-by
+// Retry typed failures and defects with per-outcome logic.
+let unstable = 0;
+const mayFail: Eff<string, Throws<string>> = eff(function* () {
+  unstable++;
+  if (unstable < 2) {
+    throw new Error("ephemeral network issue");
+  }
+  if (unstable < 4) {
+    yield* fail("transient typed bridge issue") as Eff<never, Throws<string>>;
+  }
+  return "ok";
+});
+
+const recovered = await mayFail
+  .retryAllBy({
+    maxRetries: 4,
+    handle: (attempt) => {
+      if (attempt._tag === "success") return RetryDecision.stop();
+      return RetryDecision.retry();
+    },
+  })
+  .run();
+
+assertEq(recovered, "ok");
 // <<< example

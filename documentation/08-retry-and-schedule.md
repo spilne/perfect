@@ -135,7 +135,43 @@ console.log(failed); // → "gave up: cause=Die"
 <!-- @end -->
 
 If you really want to retry defects, opt in with `.whenCause(...)` or use
-`retryAllCause(eff, options)`.
+`.retryAllBy(...)`.
+
+## Retry everything (typed failures + defects)
+
+Use `.retryAllBy(...)` when you want retry decisions to inspect both typed
+errors and defects from thrown exceptions.
+
+<!-- @embed packages/core/examples/09-retry-schedule.ts#retry-all-by -->
+```ts
+import { eff, fail, RetryDecision, type Eff, type Throws } from "@perfect/core";
+
+// Retry typed failures and defects with per-outcome logic.
+let unstable = 0;
+const mayFail: Eff<string, Throws<string>> = eff(function* () {
+  unstable++;
+  if (unstable < 2) {
+    throw new Error("ephemeral network issue");
+  }
+  if (unstable < 4) {
+    yield* fail("transient typed bridge issue") as Eff<never, Throws<string>>;
+  }
+  return "ok";
+});
+
+const recovered = await mayFail
+  .retryAllBy({
+    maxRetries: 4,
+    handle: (attempt) => {
+      if (attempt._tag === "success") return RetryDecision.stop();
+      return RetryDecision.retry();
+    },
+  })
+  .run();
+
+console.log(recovered); // → "ok"
+```
+<!-- @end -->
 
 ## Schedule (for repetition, not retry)
 
@@ -153,7 +189,7 @@ await run(repeat(heartbeat, Schedule.spaced(1000)));
 ## Pitfalls
 
 - **`retry` only catches typed failures.** If you `throw` inside `sync`, it
-  won't retry. Use `fail()` or `retryAllCause()`.
+  won't retry. Use `fail()` or `.retryAllBy(...)`.
 - **No jitter = thundering herd.** Always add `.withFullJitter()` for retries
   against shared infrastructure.
 - **Don't retry forever.** Cap with `.withMaxRetries(n)` or use a finite
