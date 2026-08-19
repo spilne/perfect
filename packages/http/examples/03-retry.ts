@@ -10,8 +10,10 @@ import {
   type ResponseParser,
   DefaultHttpClient,
   RetryAttempt,
+  RetryDecision,
   withRetry,
   withRetryAll,
+  withRetryAllBy,
 } from "../src";
 import { assertEq } from "./_assert";
 
@@ -91,4 +93,26 @@ const job = await withRetryAll(client2.get("/job/123", JobSchema), {
 }).run();
 assertEq(job, { state: "done", result: 42 });
 assertEq(t2.attempts, 3);
+// <<< example
+
+// >>> example: with-retry-all-by
+// withRetryAllBy uses the same logic as withRetryAll but exposes a handler
+// that returns RetryDecision.retry() / RetryDecision.stop().
+const t3 = new ScriptedTransport([
+  json({ state: "pending" }),
+  json({ state: "pending" }),
+  json({ state: "done", result: 99 }),
+]);
+const client3 = new DefaultHttpClient({ transport: t3 });
+
+const jobBy = await withRetryAllBy(client3.get("/job/456", JobSchema), {
+  maxRetries: 5,
+  baseDelayMs: 1,
+  handle: (r) =>
+    RetryAttempt.isSuccess(r) && r.value.state === "pending"
+      ? RetryDecision.retry()
+      : RetryDecision.stop(),
+}).run();
+assertEq(jobBy, { state: "done", result: 99 });
+assertEq(t3.attempts, 3);
 // <<< example

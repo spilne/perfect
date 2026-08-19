@@ -10,6 +10,8 @@ import {
   sleep,
   service,
   fromPromise,
+  RetryAttempt,
+  RetryDecision,
   raceEither,
   RetryPolicy,
   run,
@@ -41,6 +43,25 @@ describe("fluent API additions", () => {
     calls = 0;
     const result = await run(flakyTyped.retry(RetryPolicy.recurs(5)));
     expect(result).toBe("ok");
+    expect(calls).toBe(3);
+  });
+
+  test(".retryAllBy(handler) retries by inspecting full outcome", async () => {
+    let calls = 0;
+    const poller = sync(() => {
+      calls++;
+      return calls >= 3 ? "done" : "pending";
+    }) as any;
+    const result = await run(
+      poller.retryAllBy({
+        baseDelayMs: 1,
+        handle: (r) =>
+          RetryAttempt.isSuccess(r) && r.value === "pending"
+            ? RetryDecision.retry()
+            : RetryDecision.stop(),
+      }) as any,
+    );
+    expect(result).toBe("done");
     expect(calls).toBe(3);
   });
 

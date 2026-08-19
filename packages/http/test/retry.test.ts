@@ -11,7 +11,9 @@ import {
   HTTP_RETRYABLE,
   withRetry,
   withRetryAll,
+  withRetryAllBy,
   RetryAttempt,
+  RetryDecision,
   httpRequestText,
 } from "../src";
 
@@ -182,5 +184,44 @@ describe("withRetryAll — full outcome ADT", () => {
       ),
     ).rejects.toMatchObject({ _tag: "HttpStatusError", status: 503 });
     expect(t.calls).toBe(2);
+  });
+
+  test("withRetryAllBy retries on pending success via handler", async () => {
+    const t = new ScriptedTransport([
+      new Response(JSON.stringify({ state: "pending" }), {
+        headers: { "content-type": "application/json" },
+      }),
+      new Response(JSON.stringify({ state: "done" }), {
+        headers: { "content-type": "application/json" },
+      }),
+    ]);
+    const eff = (httpRequestText({ url: "/x", transport: t }) as any).map(
+      (s: string) => JSON.parse(s) as { state: string },
+    );
+
+    const result = await run(
+      withRetryAllBy(eff, {
+        baseDelayMs: 1,
+        handle: (r) =>
+          RetryAttempt.isSuccess(r) && r.value.state === "pending"
+            ? RetryDecision.retry()
+            : RetryDecision.stop(),
+      }) as any,
+    );
+    expect(result).toEqual({ state: "done" });
+    expect(t.calls).toBe(2);
+  });
+
+  test("withRetryAllBy can stop on retryable HTTP errors", async () => {
+    const t = new ScriptedTransport([new Response("", { status: 503 }), new Response("ok")]);
+    await expect(
+      run(
+        withRetryAllBy(httpRequestText({ url: "/x", transport: t }), {
+          policy: RetryPolicy.recurs(0),
+          handle: (r) => (RetryAttempt.isHttpError(r) ? RetryDecision.retry() : RetryDecision.stop()),
+        }) as any,
+      ),
+    ).rejects.toMatchObject({ _tag: "HttpStatusError", status: 503 });
+    expect(t.calls).toBe(1);
   });
 });

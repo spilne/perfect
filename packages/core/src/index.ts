@@ -47,8 +47,11 @@ export {
   hedged,
   repeatUntil,
   repeatUntilWithBackoff,
+  retryAllBy,
   retryAllCause,
+  RetryDecision,
 } from "./combinators-extra";
+export type { RetryAllByOptions, RetryAttemptHandler } from "./combinators-extra";
 export { cached, cachedBy } from "./cache";
 export type { KeyedCache } from "./cache";
 export { CacheStore } from "./cache-store";
