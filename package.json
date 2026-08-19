@@ -10,6 +10,7 @@
     "test:core": "cd packages/core && bun test",
     "test:transform": "cd packages/transform && bun test",
     "test:node": "node ./scripts/node-bun-test-run.mjs",
+    "test:node:coverage": "node ./scripts/node-bun-test-run.mjs --coverage",
     "test:node:all": "node ./scripts/node-bun-test-run.mjs --all",
     "typecheck": "bun run typecheck:core && bun run typecheck:packages && bun run typecheck:templates",
     "typecheck:core": "cd packages/core && bun run typecheck && bun run typecheck:types",
