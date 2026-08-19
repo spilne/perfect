@@ -101,6 +101,8 @@ Use this to validate Bun/TypeScript behavior on Node's `node:test` runner:
 bun run test:node      # curated default set (known Node-incompatible cases are excluded)
 bun run test:node:all  # run the full curated list, including known problematic tests
 bun run test:node -- --list  # print exact files selected by the Node runner
+bun run test:node:coverage  # run Node suite and print a basic function coverage summary
+bun run test:node:coverage -- --coverage-dir=coverage/node-all # store V8 coverage JSON in a custom directory
 ```
 
 The `node-runtime` CI job runs this script in a Node matrix (`22.x`, `24.x`) on
