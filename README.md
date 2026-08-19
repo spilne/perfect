@@ -93,6 +93,19 @@ make ci          # fmt-check, lint, typecheck, tests, build, smoke, docs, perf g
 bun test --recursive packages/
 ```
 
+### Node runtime test lane
+
+Use this to validate Bun/TypeScript behavior on Node's `node:test` runner:
+
+```bash
+bun run test:node      # curated default set (known Node-incompatible cases are excluded)
+bun run test:node:all  # run the full curated list, including known problematic tests
+bun run test:node -- --list  # print exact files selected by the Node runner
+```
+
+The `node-runtime` CI job runs this script in a Node matrix (`22.x`, `24.x`) on
+macOS for manual/dispatch runs.
+
 Rust toolchain needed only for `bun run build:swc` (the SWC WASM plugin).
 The [full guide](documentation/README.md) covers the core runtime, HTTP,
 observability, connector contracts, Kafka, Redis/PostgreSQL backends, and

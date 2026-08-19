@@ -2,6 +2,7 @@ import { Cause } from "./cause";
 import { type Eff, type Throws, type InferValue, type InferEffects, Suspend, Op } from "./eff";
 import { Fiber } from "./fiber";
 import { type Exit, Exit as ExitNS } from "./exit";
+import { runRetry as runRetryUnified } from "./retry-policy";
 
 export function succeed<A>(value: A): Eff<A, never> {
   return new Suspend(Op.Succeed, value, null) as any;
@@ -282,11 +283,7 @@ export function retry<A, S>(
   // has `.times` (and no `.impl`).
   const isPolicy = typeof (policyOrConfig as any).impl !== "undefined";
   if (isPolicy) {
-    // Delegate to the unified applier. Imported lazily to avoid the circular
-    // retry-policy.ts → constructors.ts → retry-policy.ts cycle on module load.
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { runRetry } = require("./retry-policy") as typeof import("./retry-policy");
-    return runRetry(eff, policyOrConfig as any);
+    return runRetryUnified(eff, policyOrConfig as any);
   }
   return retryLegacy(eff, policyOrConfig as RetryConfig);
 }
