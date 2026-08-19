@@ -1,16 +1,17 @@
-// withRetry + withRetryAll + PipelineResult tests.
+// withRetry + withRetryAll + RetryAttempt tests.
 
 import { describe, test, expect } from "bun:test";
-import { type Eff, type Throws, succeed, fail, sync, run } from "@perfect/core";
+import { RetryPolicy, type Eff, type Throws, succeed, fail, sync, run } from "@perfect/core";
 import {
   type HttpClientError,
   type HttpRequestOptions,
   type HttpTransport,
   HttpNetworkError,
   HttpStatusError,
+  HTTP_RETRYABLE,
   withRetry,
   withRetryAll,
-  PipelineResult,
+  RetryAttempt,
   httpRequestText,
 } from "../src";
 
@@ -88,6 +89,18 @@ describe("withRetry — HTTP-aware transient retry", () => {
     expect(result).toBe("ok");
     expect(t.calls).toBe(2);
   });
+
+  test("policy override is honored", async () => {
+    const t = new ScriptedTransport([new Response("", { status: 503 }), new Response("ok")]);
+    await expect(
+      run(
+        withRetry(httpRequestText({ url: "/x", transport: t }), {
+          policy: RetryPolicy.recurs(0),
+        }) as any,
+      ),
+    ).rejects.toMatchObject({ _tag: "HttpStatusError", status: 503 });
+    expect(t.calls).toBe(1);
+  });
 });
 
 describe("withRetryAll — full outcome ADT", () => {
@@ -120,7 +133,7 @@ describe("withRetryAll — full outcome ADT", () => {
     const result = await run(
       withRetryAll(eff, {
         baseDelayMs: 1,
-        shouldRetry: (r) => (PipelineResult.isSuccess(r) ? r.value.status !== "done" : true),
+        shouldRetry: (r) => (RetryAttempt.isSuccess(r) ? r.value.status !== "done" : true),
       }) as any,
     );
     expect(result).toEqual({ status: "done" });
@@ -146,15 +159,28 @@ describe("withRetryAll — full outcome ADT", () => {
     expect(calls).toBe(3); // 1 + 2 retries
   });
 
-  test("PipelineResult type guards", () => {
-    const s = PipelineResult.success(42);
-    const h = PipelineResult.httpError(
+  test("RetryAttempt type guards", () => {
+    const s = RetryAttempt.success(42);
+    const h = RetryAttempt.httpError(
       new HttpStatusError({ url: "/x", status: 503, body: "", message: "" }),
     );
-    const e = PipelineResult.thrown(new Error("x"));
-    expect(PipelineResult.isSuccess(s)).toBe(true);
-    expect(PipelineResult.isHttpError(h)).toBe(true);
-    expect(PipelineResult.isThrown(e)).toBe(true);
-    expect(PipelineResult.isSuccess(h)).toBe(false);
+    const e = RetryAttempt.thrown(new Error("x"));
+    expect(RetryAttempt.isSuccess(s)).toBe(true);
+    expect(RetryAttempt.isHttpError(h)).toBe(true);
+    expect(RetryAttempt.isThrown(e)).toBe(true);
+    expect(RetryAttempt.isSuccess(h)).toBe(false);
+  });
+
+  test("withRetryAll uses custom retry policy", async () => {
+    const t = new ScriptedTransport([new Response("", { status: 503 }), new Response("", { status: 503 })]);
+    await expect(
+      run(
+        withRetryAll(httpRequestText({ url: "/x", transport: t }), {
+          policy: RetryPolicy.recurs(1),
+          shouldRetry: (r) => RetryAttempt.isHttpError(r) && HTTP_RETRYABLE(r.error),
+        }) as any,
+      ),
+    ).rejects.toMatchObject({ _tag: "HttpStatusError", status: 503 });
+    expect(t.calls).toBe(2);
   });
 });

@@ -72,7 +72,7 @@ pass your own to mock, proxy, or instrument.
   (`onRequest` / `onResponse` / `onError`)
 - **DI** — `HttpClientService` tag for Layer-based injection
 - **Retry** — `withRetry` (HTTP-aware transient retry), `withRetryAll`
-  (full `PipelineResult` outcome ADT); for polling use core's
+  (full `RetryAttempt` outcome ADT); for polling use core's
   `.repeatUntil` / `.repeatUntilWithBackoff`
 - **Streaming** — `httpStream` base plus `httpStreamText` / `httpStreamLines` /
   `httpStreamNDJSON` / `httpStreamSSE`, and composable `parseSSE` / `parseNDJSON`
