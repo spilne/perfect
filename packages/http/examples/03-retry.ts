@@ -1,8 +1,8 @@
-// Retry — withRetry for transient errors, withRetryAll for full outcome control.
+// Retry — withRetryAll, withRetryAllBy, retryHttp, and Retry namespace helpers.
 //
 // Run: bun packages/http/examples/03-retry.ts
 
-import { RetryPolicy, type Eff, type Throws, sync } from "@perfect/core";
+import { type Eff, type Throws, sync } from "@perfect/core";
 import {
   type HttpClientError,
   type HttpRequestOptions,
@@ -11,22 +11,12 @@ import {
   DefaultHttpClient,
   RetryAttempt,
   RetryDecision,
-  withRetry,
+  retryHttp,
+  Retry,
   withRetryAll,
   withRetryAllBy,
 } from "../src";
 import { assertEq } from "./_assert";
-
-interface User {
-  id: number;
-  name: string;
-}
-const UserSchema: ResponseParser<User> = {
-  safeParse: (d: any) =>
-    d && typeof d.id === "number" && typeof d.name === "string"
-      ? { success: true, data: d }
-      : { success: false, error: "no" },
-};
 
 // Scripted transport: side effects live INSIDE the effect, so each retry
 // pulls a fresh response from the script.
@@ -47,27 +37,20 @@ const json = (body: unknown, status = 200): Response =>
     headers: { "content-type": "application/json" },
   });
 
-// >>> example: with-retry-default
-// withRetry retries 5xx, 429, timeouts, and network errors.
-// You can pass a full RetryPolicy builder for custom timing/deadline behavior.
-const t = new ScriptedTransport([
-  new Response("down", { status: 503 }),
-  new Response("down", { status: 503 }),
-  json({ id: 1, name: "alice" }),
-]);
-const client = new DefaultHttpClient({ transport: t });
-
-const user = await withRetry(client.get("/u", UserSchema), {
-  policy: RetryPolicy.exponential(1).withMaxRetries(3),
-}).run();
-assertEq(user, { id: 1, name: "alice" });
-assertEq(t.attempts, 3);
-// <<< example
-
 // >>> example: with-retry-all
 // withRetryAll exposes the full RetryAttempt ADT. Use it to retry on
 // "not ready" success values (polling), thrown defects, or any combination
 // of HTTP errors. The shouldRetry predicate sees every outcome.
+interface User {
+  id: number;
+  name: string;
+}
+const UserSchema: ResponseParser<User> = {
+  safeParse: (d: any) =>
+    d && typeof d.id === "number" && typeof d.name === "string"
+      ? { success: true, data: d }
+      : { success: false, error: "no" },
+};
 interface JobStatus {
   state: "pending" | "done";
   result?: number;
@@ -115,4 +98,32 @@ const jobBy = await withRetryAllBy(client3.get("/job/456", JobSchema), {
 }).run();
 assertEq(jobBy, { state: "done", result: 99 });
 assertEq(t3.attempts, 3);
+// <<< example
+
+// >>> example: retryHttp
+// retryHttp uses HTTP_RETRYABLE defaults for common transient failure patterns.
+const t4 = new ScriptedTransport([
+  new Response("down", { status: 503 }),
+  new Response("down", { status: 503 }),
+  json({ id: 1, name: "alice" }),
+]);
+const client4 = new DefaultHttpClient({ transport: t4 });
+
+const user = await retryHttp(client4.get("/u", UserSchema), { baseDelayMs: 1 }).run();
+assertEq(user, { id: 1, name: "alice" });
+assertEq(t4.attempts, 3);
+// <<< example
+
+// >>> example: retry-namespace-http
+// Namespace-style access from import. Same behavior, different call style.
+const t5 = new ScriptedTransport([
+  new Response("down", { status: 503 }),
+  new Response("down", { status: 503 }),
+  json({ id: 1, name: "alice" }),
+]);
+const client5 = new DefaultHttpClient({ transport: t5 });
+
+const user2 = await Retry.http(client5.get("/u", UserSchema), { baseDelayMs: 1 }).run();
+assertEq(user2, { id: 1, name: "alice" });
+assertEq(t5.attempts, 3);
 // <<< example

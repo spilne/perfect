@@ -71,10 +71,10 @@ pass your own to mock, proxy, or instrument.
   `.get/.post/.put/.patch/.delete`, `withOverrides`, `HttpMiddleware` hooks
   (`onRequest` / `onResponse` / `onError`)
 - **DI** — `HttpClientService` tag for Layer-based injection
-- **Retry** — `withRetry` (HTTP-aware transient retry), `withRetryAll` and
-  `withRetryAllBy` (full `RetryAttempt` outcome ADT / handler-driven retry);
-  for polling use core's
-  `.repeatUntil` / `.repeatUntilWithBackoff`
+- **Retry** — `withRetryAll`, `withRetryAllBy`, and `retryHttp` for HTTP-ready
+  transient defaults; `Retry` namespace mirrors these as `Retry.all`,
+  `Retry.allBy`, and `Retry.http`; for polling use core's `.repeatUntil` /
+  `.repeatUntilWithBackoff`.
 - **Streaming** — `httpStream` base plus `httpStreamText` / `httpStreamLines` /
   `httpStreamNDJSON` / `httpStreamSSE`, and composable `parseSSE` / `parseNDJSON`
   pipes

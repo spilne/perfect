@@ -1,4 +1,4 @@
-// withRetry + withRetryAll + RetryAttempt tests.
+// withRetryAll + RetryAttempt tests.
 
 import { describe, test, expect } from "bun:test";
 import { RetryPolicy, type Eff, type Throws, succeed, fail, sync, run } from "@perfect/core";
@@ -9,9 +9,10 @@ import {
   HttpNetworkError,
   HttpStatusError,
   HTTP_RETRYABLE,
-  withRetry,
   withRetryAll,
   withRetryAllBy,
+  retryHttp,
+  Retry,
   RetryAttempt,
   RetryDecision,
   httpRequestText,
@@ -29,15 +30,15 @@ class ScriptedTransport implements HttpTransport {
   }
 }
 
-describe("withRetry — HTTP-aware transient retry", () => {
-  test("retries 503, then 200", async () => {
+describe("withRetryAll — full outcome ADT", () => {
+  test("retries failures by default", async () => {
     const t = new ScriptedTransport([
       new Response("slow", { status: 503 }),
       new Response("slow", { status: 503 }),
       new Response("ok"),
     ]);
     const result = await run(
-      withRetry(httpRequestText({ url: "/x", transport: t }), { baseDelayMs: 1 }),
+      withRetryAll(httpRequestText({ url: "/x", transport: t }), { baseDelayMs: 1 }),
     );
     expect(result).toBe("ok");
     expect(t.calls).toBe(3);
@@ -51,7 +52,7 @@ describe("withRetry — HTTP-aware transient retry", () => {
     ]);
     await expect(
       run(
-        withRetry(httpRequestText({ url: "/x", transport: t }), {
+        withRetryAll(httpRequestText({ url: "/x", transport: t }), {
           maxRetries: 2,
           baseDelayMs: 1,
         }) as any,
@@ -60,10 +61,20 @@ describe("withRetry — HTTP-aware transient retry", () => {
     expect(t.calls).toBe(3); // 1 initial + 2 retries
   });
 
-  test("does NOT retry 404 (caller bug)", async () => {
-    const t = new ScriptedTransport([new Response("", { status: 404 })]);
+  test("can stop on specific HTTP status", async () => {
+    const t = new ScriptedTransport([new Response("", { status: 404 }), new Response("ok")]);
     await expect(
-      run(withRetry(httpRequestText({ url: "/x", transport: t })) as any),
+      run(
+        withRetryAll(httpRequestText({ url: "/x", transport: t }), {
+          baseDelayMs: 1,
+          shouldRetry: (r) => {
+            if (RetryAttempt.isHttpError(r)) {
+              return HTTP_RETRYABLE(r.error);
+            }
+            return true;
+          },
+        }) as any,
+      ),
     ).rejects.toMatchObject({ _tag: "HttpStatusError", status: 404 });
     expect(t.calls).toBe(1);
   });
@@ -74,19 +85,7 @@ describe("withRetry — HTTP-aware transient retry", () => {
       new Response("ok"),
     ]);
     const result = await run(
-      withRetry(httpRequestText({ url: "/x", transport: t }), { baseDelayMs: 1 }),
-    );
-    expect(result).toBe("ok");
-    expect(t.calls).toBe(2);
-  });
-
-  test("custom `when` predicate overrides default", async () => {
-    const t = new ScriptedTransport([new Response("", { status: 404 }), new Response("ok")]);
-    const result = await run(
-      withRetry(httpRequestText({ url: "/x", transport: t }), {
-        baseDelayMs: 1,
-        when: (e) => e._tag === "HttpStatusError" && e.status === 404,
-      }),
+      withRetryAll(httpRequestText({ url: "/x", transport: t }), { baseDelayMs: 1 }),
     );
     expect(result).toBe("ok");
     expect(t.calls).toBe(2);
@@ -96,22 +95,12 @@ describe("withRetry — HTTP-aware transient retry", () => {
     const t = new ScriptedTransport([new Response("", { status: 503 }), new Response("ok")]);
     await expect(
       run(
-        withRetry(httpRequestText({ url: "/x", transport: t }), {
+        withRetryAll(httpRequestText({ url: "/x", transport: t }), {
           policy: RetryPolicy.recurs(0),
         }) as any,
       ),
     ).rejects.toMatchObject({ _tag: "HttpStatusError", status: 503 });
     expect(t.calls).toBe(1);
-  });
-});
-
-describe("withRetryAll — full outcome ADT", () => {
-  test("default: retries errors, not success", async () => {
-    const t = new ScriptedTransport([new Response("", { status: 503 }), new Response("ok")]);
-    const result = await run(
-      withRetryAll(httpRequestText({ url: "/x", transport: t }), { baseDelayMs: 1 }),
-    );
-    expect(result).toBe("ok");
   });
 
   test("retry on unsatisfactory success — the poll-for-completion pattern", async () => {
@@ -186,7 +175,30 @@ describe("withRetryAll — full outcome ADT", () => {
     expect(t.calls).toBe(2);
   });
 
-  test("withRetryAllBy retries on pending success via handler", async () => {
+  test("retryHttp uses HTTP_RETRYABLE typed defaults", async () => {
+    const t = new ScriptedTransport([
+      new Response("", { status: 503 }),
+      new Response("ok"),
+    ]);
+    const result = await run(
+      retryHttp(httpRequestText({ url: "/x", transport: t }), { baseDelayMs: 1 }),
+    );
+    expect(result).toBe("ok");
+    expect(t.calls).toBe(2);
+  });
+
+  test("Retry.http namespace helper uses HTTP retry defaults", async () => {
+    const t = new ScriptedTransport([new Response("", { status: 503 }), new Response("ok")]);
+    const result = await run(
+      Retry.http(httpRequestText({ url: "/x", transport: t }), { baseDelayMs: 1 }) as any,
+    );
+    expect(result).toBe("ok");
+    expect(t.calls).toBe(2);
+  });
+});
+
+describe("withRetryAllBy — handler style", () => {
+  test("retries on pending success via handler", async () => {
     const t = new ScriptedTransport([
       new Response(JSON.stringify({ state: "pending" }), {
         headers: { "content-type": "application/json" },
@@ -212,11 +224,12 @@ describe("withRetryAll — full outcome ADT", () => {
     expect(t.calls).toBe(2);
   });
 
-  test("withRetryAllBy can stop on retryable HTTP errors", async () => {
+  test("can stop on retryable HTTP errors", async () => {
     const t = new ScriptedTransport([new Response("", { status: 503 }), new Response("ok")]);
     await expect(
       run(
         withRetryAllBy(httpRequestText({ url: "/x", transport: t }), {
+          baseDelayMs: 1,
           policy: RetryPolicy.recurs(0),
           handle: (r) => (RetryAttempt.isHttpError(r) ? RetryDecision.retry() : RetryDecision.stop()),
         }) as any,
