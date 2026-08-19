@@ -1,9 +1,8 @@
-// Retry with outcome ADT.
-//
-// Core design (from promin, proven in production): normalize every possible
-// outcome into a `PipelineResult<T>` tagged union FIRST, then decide whether
-// to retry via a single `shouldRetry(result) => boolean` predicate. This lets
-// callers retry on:
+// Retry with attempt outcome ADT.
+
+// Core design: normalize every possible outcome into a `RetryAttempt<T>` tagged
+// union FIRST, then decide whether to retry via a single
+// `shouldRetry(result) => boolean` predicate. This lets callers retry on:
 //   - HTTP errors (5xx, 429, timeouts)
 //   - Thrown defects from downstream transforms
 //   - "Not ready" success values (e.g. polling a job status)
@@ -17,6 +16,8 @@
 
 import {
   type Eff,
+  RetryAttempt as CoreRetryAttempt,
+  type RetryAttempt as CoreRetryAttemptType,
   type Throws,
   type CauseT,
   Cause,
@@ -24,29 +25,34 @@ import {
   fail,
   failCause,
   die,
-  sleep,
+  retry,
+  RetryPolicy,
 } from "@perfect/core";
 import { type HttpClientError, HTTP_RETRYABLE } from "./errors";
 
-// ── PipelineResult ADT ─────────────────────────────────────────────
+// ── RetryAttempt ADT ──────────────────────────────────────────────
 
-export type PipelineResult<T> =
-  | { readonly _tag: "success"; readonly value: T }
-  | { readonly _tag: "httpError"; readonly error: HttpClientError }
-  | { readonly _tag: "thrown"; readonly error: unknown };
+export type RetryAttempt<T> = CoreRetryAttemptType<T, HttpClientError>;
 
-export const PipelineResult = {
-  success: <T>(value: T): PipelineResult<T> => ({ _tag: "success", value }),
-  httpError: <T = never>(error: HttpClientError): PipelineResult<T> => ({
-    _tag: "httpError",
-    error,
-  }),
-  thrown: <T = never>(error: unknown): PipelineResult<T> => ({ _tag: "thrown", error }),
-  isSuccess: <T>(r: PipelineResult<T>): r is { _tag: "success"; value: T } => r._tag === "success",
-  isHttpError: <T>(r: PipelineResult<T>): r is { _tag: "httpError"; error: HttpClientError } =>
-    r._tag === "httpError",
-  isThrown: <T>(r: PipelineResult<T>): r is { _tag: "thrown"; error: unknown } =>
-    r._tag === "thrown",
+export const RetryAttempt = {
+  ...CoreRetryAttempt,
+  success: CoreRetryAttempt.success as <T>(value: T) => RetryAttempt<T>,
+  error: CoreRetryAttempt.error as <T>(error: HttpClientError) => RetryAttempt<T>,
+  thrown: CoreRetryAttempt.thrown as <T>(error: unknown) => RetryAttempt<T>,
+  isSuccess: CoreRetryAttempt.isSuccess as <T>(
+    r: RetryAttempt<T>,
+  ) => r is { readonly _tag: "success"; readonly value: T },
+  isError: CoreRetryAttempt.isError as <T>(
+    r: RetryAttempt<T>,
+  ) => r is { readonly _tag: "error"; readonly error: HttpClientError },
+  isThrown: CoreRetryAttempt.isThrown as <T>(
+    r: RetryAttempt<T>,
+  ) => r is { readonly _tag: "thrown"; readonly error: unknown },
+  // HTTP-specific aliases for API compatibility.
+  httpError: CoreRetryAttempt.error as <T>(error: HttpClientError) => RetryAttempt<T>,
+  isHttpError: CoreRetryAttempt.isError as <T>(
+    r: RetryAttempt<T>,
+  ) => r is { readonly _tag: "error"; readonly error: HttpClientError },
 } as const;
 
 // ── withRetryAll ───────────────────────────────────────────────────
@@ -58,21 +64,35 @@ export interface RetryAllOptions<T = unknown> {
   readonly baseDelayMs?: number;
   /** Cap on per-attempt delay in ms. Default: 30 000. */
   readonly maxDelayMs?: number;
+  /** Full retry policy override. If provided, base/max timing options are ignored. */
+  readonly policy?: RetryPolicy;
   /**
    * Decide whether to retry. Default: retry anything that isn't a success.
    * Override to:
-   *   - poll a job: `(r) => !PipelineResult.isSuccess(r) || r.value.status !== "done"`
-   *   - retry only thrown defects: `PipelineResult.isThrown`
-   *   - retry only transient HTTP: `(r) => PipelineResult.isHttpError(r) && HTTP_RETRYABLE(r.error)`
+   *   - poll a job: `(r) => !RetryAttempt.isSuccess(r) || r.value.status !== "done"`
+   *   - retry only thrown defects: `RetryAttempt.isThrown`
+   *   - retry only transient HTTP: `(r) => RetryAttempt.isHttpError(r) && HTTP_RETRYABLE(r.error)`
    */
-  readonly shouldRetry?: (result: PipelineResult<T>) => boolean;
+  readonly shouldRetry?: (result: RetryAttempt<T>) => boolean;
 }
 
-const DEFAULT_SHOULD_RETRY = <T>(r: PipelineResult<T>): boolean => r._tag !== "success";
+const DEFAULT_SHOULD_RETRY = <T>(r: RetryAttempt<T>): boolean => r._tag !== "success";
+
+const isRetryAttempt = <T>(value: unknown): value is RetryAttempt<T> =>
+  !!value &&
+  typeof value === "object" &&
+  (() => {
+    const candidate = value as { readonly _tag?: unknown };
+    return (
+      candidate._tag === "success" ||
+      candidate._tag === "error" ||
+      candidate._tag === "thrown"
+    );
+  })();
 
 /**
  * Retry that observes every outcome. The `shouldRetry` predicate sees the
- * full `PipelineResult<T>` and decides what to retry.
+ * full `RetryAttempt<T>` and decides what to retry.
  */
 export function withRetryAll<T>(
   eff: Eff<T, Throws<HttpClientError>>,
@@ -83,39 +103,50 @@ export function withRetryAll<T>(
     baseDelayMs = 250,
     maxDelayMs = 30_000,
     shouldRetry = DEFAULT_SHOULD_RETRY,
+    policy,
   } = options;
 
-  // Normalize: map success/failure/defect into PipelineResult<T> on the success channel.
-  // Interrupts propagate unchanged (we don't retry cancellations).
+  // Normalize: map success/failure/defect into RetryAttempt<T> on the success channel,
+  // then turn only retryable outcomes into typed failures handled by RetryPolicy.
   const normalized = (eff as any)
-    .map((value: T) => PipelineResult.success(value))
-    .catchAllCause((cause: CauseT): Eff<PipelineResult<T>, never> => {
+    .map((value: T) => RetryAttempt.success(value))
+    .catchAllCause((cause: CauseT): Eff<RetryAttempt<T>, never> => {
       const f = Cause.firstFail(cause);
-      if (f !== null) return succeed(PipelineResult.httpError(f.value as HttpClientError));
+      if (f !== null) return succeed(RetryAttempt.error(f.value as HttpClientError));
       const d = Cause.firstDie(cause);
-      if (d !== null) return succeed(PipelineResult.thrown(d.value));
-      // Interrupt (or composite of interrupts) — propagate
+      if (d !== null) return succeed(RetryAttempt.thrown(d.value));
+      // Interrupt (or composite of interrupts) — propagate as typed cause
       return failCause(cause) as any;
-    }) as Eff<PipelineResult<T>, never>;
+    }) as Eff<RetryAttempt<T>, never>;
 
-  const unwrap = (r: PipelineResult<T>): Eff<T, Throws<HttpClientError>> => {
+  const normalizedForRetry = (normalized as any).flatMap((r: RetryAttempt<T>) =>
+    shouldRetry(r) ? fail(r) : succeed(r),
+  ) as Eff<RetryAttempt<T>, Throws<RetryAttempt<T>>>;
+
+  const retryPolicy =
+    policy ??
+    RetryPolicy.exponential(baseDelayMs).withMaxRetries(maxRetries).withMaxDelay(maxDelayMs);
+
+  const ran = retry(normalizedForRetry, retryPolicy);
+
+  const unwrap = (r: RetryAttempt<T>): Eff<T, Throws<HttpClientError>> => {
     switch (r._tag) {
       case "success":
         return succeed(r.value);
-      case "httpError":
+      case "error":
         return fail(r.error) as Eff<T, Throws<HttpClientError>>;
       case "thrown":
         return die(r.error) as Eff<T, Throws<HttpClientError>>;
     }
   };
 
-  const loop = (attempt: number, wait: number): Eff<T, Throws<HttpClientError>> =>
-    (normalized as any).flatMap((r: PipelineResult<T>) => {
-      if (!shouldRetry(r) || attempt >= maxRetries) return unwrap(r);
-      return (sleep(wait) as any).flatMap(() => loop(attempt + 1, Math.min(wait * 2, maxDelayMs)));
+  return ran
+    .flatMap((r: RetryAttempt<T>) => unwrap(r))
+    .catchAllCause((cause: CauseT): Eff<T, Throws<HttpClientError>> => {
+      const failValue = Cause.firstFail(cause);
+      if (failValue === null || !isRetryAttempt<T>(failValue.value)) return failCause(cause) as any;
+      return unwrap(failValue.value);
     }) as Eff<T, Throws<HttpClientError>>;
-
-  return loop(0, baseDelayMs);
 }
 
 // ── withRetry (HTTP-aware default) ────────────────────────────────
@@ -127,6 +158,8 @@ export interface RetryOptions {
   readonly baseDelayMs?: number;
   /** Per-attempt cap. Default: 30 000ms. */
   readonly maxDelayMs?: number;
+  /** Full retry policy override. If provided, base/max timing options are ignored. */
+  readonly policy?: RetryPolicy;
   /**
    * Predicate to decide if a typed HTTP error should retry. Default:
    * `HTTP_RETRYABLE` — 5xx, 429, timeouts, network errors.
@@ -147,6 +180,13 @@ export function withRetry<T>(
     maxRetries: options.maxRetries,
     baseDelayMs: options.baseDelayMs,
     maxDelayMs: options.maxDelayMs,
-    shouldRetry: (r) => PipelineResult.isHttpError(r) && when(r.error),
+    policy: options.policy,
+    shouldRetry: (r) => RetryAttempt.isHttpError(r) && when(r.error),
   });
 }
+
+/**
+ * @deprecated Use `RetryAttempt` directly. Kept for compatibility with old docs/source.
+ */
+// Compatibility alias for existing Promin-era names.
+export const PipelineResult = RetryAttempt;

@@ -2,14 +2,14 @@
 //
 // Run: bun packages/http/examples/03-retry.ts
 
-import { type Eff, type Throws, sync } from "@perfect/core";
+import { RetryPolicy, type Eff, type Throws, sync } from "@perfect/core";
 import {
   type HttpClientError,
   type HttpRequestOptions,
   type HttpTransport,
   type ResponseParser,
   DefaultHttpClient,
-  PipelineResult,
+  RetryAttempt,
   withRetry,
   withRetryAll,
 } from "../src";
@@ -46,8 +46,8 @@ const json = (body: unknown, status = 200): Response =>
   });
 
 // >>> example: with-retry-default
-// withRetry retries 5xx, 429, timeouts, and network errors with exponential
-// backoff. Caller bugs (4xx other than 429) and parse errors do NOT retry.
+// withRetry retries 5xx, 429, timeouts, and network errors.
+// You can pass a full RetryPolicy builder for custom timing/deadline behavior.
 const t = new ScriptedTransport([
   new Response("down", { status: 503 }),
   new Response("down", { status: 503 }),
@@ -55,13 +55,15 @@ const t = new ScriptedTransport([
 ]);
 const client = new DefaultHttpClient({ transport: t });
 
-const user = await withRetry(client.get("/u", UserSchema), { maxRetries: 3, baseDelayMs: 1 }).run();
+const user = await withRetry(client.get("/u", UserSchema), {
+  policy: RetryPolicy.exponential(1).withMaxRetries(3),
+}).run();
 assertEq(user, { id: 1, name: "alice" });
 assertEq(t.attempts, 3);
 // <<< example
 
 // >>> example: with-retry-all
-// withRetryAll exposes the full PipelineResult ADT. Use it to retry on
+// withRetryAll exposes the full RetryAttempt ADT. Use it to retry on
 // "not ready" success values (polling), thrown defects, or any combination
 // of HTTP errors. The shouldRetry predicate sees every outcome.
 interface JobStatus {
@@ -85,7 +87,7 @@ const client2 = new DefaultHttpClient({ transport: t2 });
 const job = await withRetryAll(client2.get("/job/123", JobSchema), {
   maxRetries: 5,
   baseDelayMs: 1,
-  shouldRetry: (r) => (PipelineResult.isSuccess(r) ? r.value.state !== "done" : true),
+  shouldRetry: (r) => (RetryAttempt.isSuccess(r) ? r.value.state !== "done" : true),
 }).run();
 assertEq(job, { state: "done", result: 42 });
 assertEq(t2.attempts, 3);

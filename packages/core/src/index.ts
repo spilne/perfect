@@ -37,6 +37,7 @@ export {
   retry,
 } from "./constructors";
 export type { RetryConfig } from "./constructors";
+export { RetryAttempt } from "./retry-attempt";
 export { RetryPolicy, runRetry } from "./retry-policy";
 export type { RetryDetails } from "./retry-policy";
 export { all } from "./combinators";
