@@ -6,17 +6,20 @@ import { createReadStream } from 'node:fs';
 import { ReadableStream } from 'node:stream/web';
 import { expect } from 'expect';
 
-export const {
+const {
   describe,
   it,
   test,
   before,
   beforeEach,
-  beforeAll,
   after,
   afterEach,
-  afterAll,
 } = nodeTest;
+
+export { describe, it, test, before, beforeEach, after, afterEach };
+
+export const beforeAll = nodeTest.beforeAll ?? before;
+export const afterAll = nodeTest.afterAll ?? after;
 
 export { expect };
 
