@@ -7,8 +7,7 @@
 //   - Thrown defects from downstream transforms
 //   - "Not ready" success values (e.g. polling a job status)
 //
-// Two wrappers:
-//   `withRetry(eff, opts?)`      — retry transient HTTP errors only (default)
+// Primary wrapper:
 //   `withRetryAll(eff, opts?)`   — retry with full outcome visibility
 //
 // Both return `Eff<T, Throws<HttpClientError>>`. Thrown defects remain
@@ -71,7 +70,7 @@ export interface RetryAllOptions<T = unknown> {
    * Override to:
    *   - poll a job: `(r) => !RetryAttempt.isSuccess(r) || r.value.status !== "done"`
    *   - retry only thrown defects: `RetryAttempt.isThrown`
-   *   - retry only transient HTTP: `(r) => RetryAttempt.isHttpError(r) && HTTP_RETRYABLE(r.error)`
+   *   - retry only HTTP: `RetryAttempt.isHttpError`
    */
   readonly shouldRetry?: (result: RetryAttempt<T>) => boolean;
 }
@@ -117,38 +116,41 @@ export function withRetryAllBy<T>(
   return retryAllBy(eff, options);
 }
 
-// ── withRetry (HTTP-aware default) ────────────────────────────────
+// ── HTTP-aware default retry helper ─────────────────────────────────
 
-export interface RetryOptions {
-  /** Max retries (excluding initial attempt). Default: 3. */
+export interface RetryHttpOptions {
+  /** Max number of retries (excluding the initial attempt). Default: 3. */
   readonly maxRetries?: number;
-  /** Base exponential backoff delay. Default: 250ms. */
+  /** Base delay for exponential backoff in ms. Default: 250. */
   readonly baseDelayMs?: number;
-  /** Per-attempt cap. Default: 30 000ms. */
+  /** Cap on per-attempt delay in ms. Default: 30 000. */
   readonly maxDelayMs?: number;
   /** Full retry policy override. If provided, base/max timing options are ignored. */
   readonly policy?: RetryPolicy;
   /**
-   * Predicate to decide if a typed HTTP error should retry. Default:
-   * `HTTP_RETRYABLE` — 5xx, 429, timeouts, network errors.
+   * Predicate to decide if a typed HTTP error should retry.
+   * Default: HTTP_RETRYABLE (5xx, 429, timeouts, network errors).
    */
   readonly when?: (error: HttpClientError) => boolean;
 }
 
 /**
- * Retry on transient HTTP errors only. Convenience wrapper around
- * `withRetryAll` that ignores thrown defects and success values.
+ * HTTP-aware default retry. Retries on HTTP retryable typed failures, keeps
+ * typed HTTP defects and success values unchanged.
  */
-export function withRetry<T>(
+export function retryHttp<T>(
   eff: Eff<T, Throws<HttpClientError>>,
-  options: RetryOptions = {},
+  options: RetryHttpOptions = {},
 ): Eff<T, Throws<HttpClientError>> {
-  const { when = HTTP_RETRYABLE } = options;
+  const { when = HTTP_RETRYABLE, ...rest } = options;
   return withRetryAll(eff, {
-    maxRetries: options.maxRetries,
-    baseDelayMs: options.baseDelayMs,
-    maxDelayMs: options.maxDelayMs,
-    policy: options.policy,
+    ...rest,
     shouldRetry: (r) => RetryAttempt.isHttpError(r) && when(r.error),
   });
 }
+
+export const Retry = {
+  all: withRetryAll,
+  allBy: withRetryAllBy,
+  http: retryHttp,
+} as const;

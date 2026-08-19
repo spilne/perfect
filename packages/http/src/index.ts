@@ -4,7 +4,7 @@
 //   Phase 1: typed errors, transport, decoders, httpFetch*/httpRequest*
 //   Phase 2: AbstractHttpClient / DefaultHttpClient with withOverrides,
 //            middleware hooks, HttpClient service tag for Layer DI
-//   Phase 3: withRetry (transient errors), withRetryAll (outcome ADT).
+//   Phase 3: withRetryAll (outcome ADT).
 //            For polling use core's .repeatUntil / .repeatUntilWithBackoff.
 //   Phase 4: httpStreamText / httpStreamLines / httpStreamNDJSON / httpStreamSSE
 //   Phase 5: MockHttpClient — route-matched test double with call recording
@@ -50,12 +50,12 @@ export type { HttpMiddleware, HttpRequestContext } from "./middleware";
 export { HttpClient as HttpClientService } from "./service";
 
 // ── Phase 3 ──────────────────────────────────────────────────────
-// withRetry = HTTP-aware transient retry; withRetryAll = full outcome ADT.
+// withRetryAll = full outcome ADT.
 // For polling use core's `.repeatUntil` / `.repeatUntilWithBackoff` — they
 // subsume the `poll` helper promin has separately.
-export { withRetry, withRetryAll, withRetryAllBy, RetryAttempt, RetryDecision } from "./retry";
+export { withRetryAll, withRetryAllBy, retryHttp, Retry, RetryAttempt, RetryDecision } from "./retry";
 export type {
-  RetryOptions,
+  RetryHttpOptions,
   RetryAllOptions,
   RetryAllByOptions,
   RetryAttemptHandler,
