@@ -59,6 +59,15 @@ jobs:
       - run: bun run typecheck
 
       - run: bun test --recursive packages/
+      - run: bun run test:coverage
+
+      - name: Upload Bun coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bun-coverage-${{ github.run_id }}
+          path: coverage/bun
+          if-no-files-found: ignore
 
       - run: bun run build:packages
 
@@ -95,7 +104,15 @@ jobs:
 
       - run: bun install --frozen-lockfile
 
-      - run: bun run test:node
+      - run: bun run test:node:coverage -- --coverage-dir=coverage/node/${{ matrix.node-version }}
+
+      - name: Upload Node coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: node-coverage-${{ matrix.node-version }}-${{ github.run_id }}
+          path: coverage/node/${{ matrix.node-version }}
+          if-no-files-found: ignore
 
   rust:
     runs-on: ubuntu-latest

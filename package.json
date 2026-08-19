@@ -9,6 +9,7 @@
     "test": "bun test --recursive packages/",
     "test:core": "cd packages/core && bun test",
     "test:transform": "cd packages/transform && bun test",
+    "test:coverage": "bun test --coverage --coverage-reporter=lcov --coverage-dir=coverage/bun --recursive packages/",
     "test:node": "node ./scripts/node-bun-test-run.mjs",
     "test:node:coverage": "node ./scripts/node-bun-test-run.mjs --coverage",
     "test:node:all": "node ./scripts/node-bun-test-run.mjs --all",
