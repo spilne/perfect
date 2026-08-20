@@ -43,7 +43,7 @@ return Stream.retryFrom(
       ? Stream.fail({ _tag: "ConnectionLost", attempt: attempts })
       : Stream.of({ status: "connected", attempt: attempts });
   },
-  RetryPolicy.exponential({ initial: 60, factor: 2 }).withMaxRetries(3),
+  { times: 3, delay: 60, backoff: "exponential", maxDelay: 300 },
 );`,
   },
   {
