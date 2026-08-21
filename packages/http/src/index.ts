@@ -53,7 +53,14 @@ export { HttpClient as HttpClientService } from "./service";
 // withRetryAll = full outcome ADT.
 // For polling use core's `.repeatUntil` / `.repeatUntilWithBackoff` — they
 // subsume the `poll` helper promin has separately.
-export { withRetryAll, withRetryAllBy, retryHttp, Retry, RetryAttempt, RetryDecision } from "./retry";
+export {
+  withRetryAll,
+  withRetryAllBy,
+  retryHttp,
+  Retry,
+  RetryAttempt,
+  RetryDecision,
+} from "./retry";
 export type {
   RetryHttpOptions,
   RetryAllOptions,

@@ -334,15 +334,16 @@ describe("retryAllBy", () => {
     const unstable = sync(() => {
       calls++;
       return calls < 2 ? fail("retry") : succeed("done");
-    }).flatMap((v: any) =>
-      v === "retry" ? fail("retry") : succeed(v),
-    ) as any;
+    }).flatMap((v: any) => (v === "retry" ? fail("retry") : succeed(v))) as any;
 
     await expect(
       run(
         retryAllBy(unstable, {
           baseDelayMs: 1,
-          handle: (r) => (RetryAttempt.isError(r) && r.error === "go-on" ? RetryDecision.retry() : RetryDecision.stop()),
+          handle: (r) =>
+            RetryAttempt.isError(r) && r.error === "go-on"
+              ? RetryDecision.retry()
+              : RetryDecision.stop(),
         }) as any,
       ),
     ).rejects.toBe("retry");
