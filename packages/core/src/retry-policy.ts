@@ -8,7 +8,8 @@
 
 import { type Eff, Suspend, Op } from "./eff";
 import { Cause } from "./cause";
-import { sleep, succeed } from "./constructors";
+import { clockNow } from "./clock";
+import { type RetryConfig, sleep, succeed } from "./constructors";
 import { Schedule, type RetryDetails } from "./schedule";
 
 // ── Public: RetryDetails passed to onRetry hooks ────────────────────
@@ -22,6 +23,9 @@ interface PolicyImpl {
   readonly whenError?: (error: unknown) => boolean;
   readonly whenCause?: (cause: Cause) => boolean;
   readonly onRetry?: (details: RetryDetails<Cause, unknown>) => Eff<void, unknown>;
+  /** Wall-clock deadline in ms, anchored when the effect RUNS. See
+   *  {@link RetryPolicy.withWallClockBudget}. */
+  readonly wallClockBudgetMs?: number;
 }
 
 // ── RetryPolicy class ──────────────────────────────────────────────
@@ -81,6 +85,41 @@ export class RetryPolicy {
     return new RetryPolicy({ schedule: s as Schedule<unknown, unknown> });
   }
 
+  /**
+   * Build a policy from the declarative {@link RetryConfig} dict — the shape
+   * accepted by `retry(eff, { times, delay, … })`, `.retry()` and
+   * `Stream.retry()`. This is the single translation of that sugar; there is
+   * no second retry implementation behind it.
+   *
+   * `maxDelay` is applied both before and after jitter, matching the config's
+   * documented "never exceeds maxDelay" contract.
+   */
+  static fromConfig<E>(config: RetryConfig<E>): RetryPolicy {
+    const {
+      times,
+      delay = 0,
+      backoff = "fixed",
+      maxDelay = 30_000,
+      when,
+      jitter = false,
+      timeBudgetMs,
+    } = config;
+
+    // Both branches make the FIRST retry wait `delay`: Schedule.exponential's
+    // step 0 is `delay * factor^0`.
+    let policy =
+      backoff === "exponential" ? RetryPolicy.exponential(delay, 2) : RetryPolicy.spaced(delay);
+
+    policy = policy.withMaxDelay(maxDelay);
+    if (jitter) policy = policy.withJitter(0.5, 1.5).withMaxDelay(maxDelay);
+    policy = policy.withMaxRetries(times);
+    if (when !== undefined) policy = policy.whenError(when);
+    if (timeBudgetMs !== undefined && Number.isFinite(timeBudgetMs)) {
+      policy = policy.withWallClockBudget(timeBudgetMs);
+    }
+    return policy;
+  }
+
   // ── Fluent modifiers ──────────────────────────────────────────────
 
   /** Cap the number of retries at n. Intersects with the current schedule. */
@@ -93,13 +132,34 @@ export class RetryPolicy {
     return this.copy({ schedule: Schedule.maxDelay(this.impl.schedule, ms) });
   }
 
-  /** Cap the cumulative scheduled delay across retries. */
+  /**
+   * Cap the cumulative scheduled *delay* across retries — the time spent
+   * sleeping, ignoring how long each attempt itself takes. Purely a function
+   * of the schedule, so it needs no Clock.
+   *
+   * Use {@link withWallClockBudget} when the attempts' own runtime should
+   * count against the budget too.
+   */
   withTimeBudget(ms: number): RetryPolicy {
     const bounded = Schedule.whileOutput(
       Schedule.cumulativeDelay(this.impl.schedule),
       (total) => total < ms,
     );
     return this.copy({ schedule: bounded });
+  }
+
+  /**
+   * Cap total wall-clock time across all attempts — sleeping *and* the time
+   * each attempt spends running. The deadline is anchored via the Clock
+   * service when the effect RUNS, not when the policy is built, so a policy
+   * can be constructed once at module load and reused.
+   *
+   * Checked before each retry: if the deadline has passed, the last cause is
+   * re-failed instead of sleeping again. An attempt already in flight is not
+   * interrupted — compose with `timeout()` for that.
+   */
+  withWallClockBudget(ms: number): RetryPolicy {
+    return this.copy({ wallClockBudgetMs: ms });
   }
 
   /** Randomize each delay by a factor in [min, max], default ±20%. */
@@ -154,9 +214,9 @@ export class RetryPolicy {
 // ── Applier ─────────────────────────────────────────────────────────
 
 export function runRetry<A, S>(eff: Eff<A, S>, policy: RetryPolicy): Eff<A, S> {
-  const { schedule, whenError, whenCause, onRetry } = policy.impl;
+  const { schedule, whenError, whenCause, onRetry, wallClockBudgetMs } = policy.impl;
 
-  function loop(state: any, attempts: number): Eff<A, S> {
+  function loop(state: any, attempts: number, deadline: number): Eff<A, S> {
     return new Suspend(Op.CatchAll, eff, (cause: Cause) => {
       // Defect/interrupt gate (unless whenCause explicitly allows):
       const firstFail = Cause.firstFail(cause);
@@ -169,40 +229,56 @@ export function runRetry<A, S>(eff: Eff<A, S>, policy: RetryPolicy): Eff<A, S> {
         }
       }
 
-      const decision = schedule.step(cause as any, state);
-      if (decision._tag === "Done") {
+      const giveUp = (output: unknown, upcomingDelayMs: number) => {
         if (onRetry) {
           return (
             onRetry({
               attempts: attempts + 1,
-              upcomingDelayMs: 0,
+              upcomingDelayMs,
               input: cause,
-              output: decision.output,
+              output,
               givingUp: true,
             }) as any
           ).flatMap(() => new Suspend(Op.Fail, cause, null)) as any;
         }
         return new Suspend(Op.Fail, cause, null);
-      }
+      };
+
+      const decision = schedule.step(cause as any, state);
+      if (decision._tag === "Done") return giveUp(decision.output, 0);
 
       const next = () => {
         const wait =
           decision.delay > 0 ? (sleep(decision.delay) as any) : (succeed(undefined) as any);
-        return (wait as any).flatMap(() => loop(decision.state, attempts + 1));
+        return (wait as any).flatMap(() => loop(decision.state, attempts + 1, deadline));
       };
-      if (onRetry) {
-        return (
-          onRetry({
-            attempts: attempts + 1,
-            upcomingDelayMs: decision.delay,
-            input: cause,
-            output: decision.output,
-            givingUp: false,
-          }) as any
-        ).flatMap(next) as any;
-      }
-      return next();
+      const retryNow = () => {
+        if (onRetry) {
+          return (
+            onRetry({
+              attempts: attempts + 1,
+              upcomingDelayMs: decision.delay,
+              input: cause,
+              output: decision.output,
+              givingUp: false,
+            }) as any
+          ).flatMap(next) as any;
+        }
+        return next();
+      };
+
+      if (deadline === Infinity) return retryNow();
+      // Budget is consulted before sleeping — an attempt already in flight is
+      // never interrupted by it.
+      return (clockNow as any).flatMap((now: number) =>
+        now >= deadline ? giveUp(decision.output, decision.delay) : retryNow(),
+      );
     }) as any;
   }
-  return loop(schedule.initial, 0);
+
+  if (wallClockBudgetMs === undefined) return loop(schedule.initial, 0, Infinity);
+  // Anchor at RUN time, not build time, so a module-level policy can be reused.
+  return (clockNow as any).flatMap((start: number) =>
+    loop(schedule.initial, 0, start + wallClockBudgetMs),
+  ) as any;
 }

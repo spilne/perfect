@@ -2,7 +2,7 @@ import { Cause } from "./cause";
 import { type Eff, type Throws, type InferValue, type InferEffects, Suspend, Op } from "./eff";
 import { Fiber } from "./fiber";
 import { type Exit, Exit as ExitNS } from "./exit";
-import { runRetry as runRetryUnified } from "./retry-policy";
+import { RetryPolicy, runRetry as runRetryUnified } from "./retry-policy";
 
 export function succeed<A>(value: A): Eff<A, never> {
   return new Suspend(Op.Succeed, value, null) as any;
@@ -265,84 +265,21 @@ export interface RetryConfig<E = unknown> {
   when?: (error: E) => boolean;
   /** Randomize each delay by ±50% to avoid thundering-herd patterns. */
   jitter?: boolean;
-  /** Total wall-clock budget across all attempts; fail when exceeded. */
+  /**
+   * Total wall-clock budget across all attempts — sleeping and the time each
+   * attempt spends running. Anchored when the effect runs. Fail when exceeded.
+   */
   timeBudgetMs?: number;
 }
 
-// Overload: pass either a new RetryPolicy class or the legacy config dict.
-export function retry<A, S>(
-  eff: Eff<A, S>,
-  policy: import("./retry-policy").RetryPolicy,
-): Eff<A, S>;
+// Two spellings, one implementation: the declarative config dict is
+// translated by RetryPolicy.fromConfig and run by the same applier as a
+// hand-built policy.
+export function retry<A, S>(eff: Eff<A, S>, policy: RetryPolicy): Eff<A, S>;
 export function retry<A, S>(eff: Eff<A, S>, config: RetryConfig): Eff<A, S>;
-export function retry<A, S>(
-  eff: Eff<A, S>,
-  policyOrConfig: RetryConfig | import("./retry-policy").RetryPolicy,
-): Eff<A, S> {
-  // Dispatch on shape — a RetryPolicy instance has `.impl`, the legacy config
-  // has `.times` (and no `.impl`).
-  const isPolicy = typeof (policyOrConfig as any).impl !== "undefined";
-  if (isPolicy) {
-    return runRetryUnified(eff, policyOrConfig as any);
-  }
-  return retryLegacy(eff, policyOrConfig as RetryConfig);
-}
-
-function retryLegacy<A, S>(eff: Eff<A, S>, policy: RetryConfig): Eff<A, S> {
-  const {
-    times,
-    delay: baseDelay = 0,
-    backoff = "fixed",
-    maxDelay = 30_000,
-    when,
-    jitter = false,
-    timeBudgetMs = Infinity,
-  } = policy;
-
-  function nextDelayMs(current: number): number {
-    const base = backoff === "exponential" ? Math.min(current * 2, maxDelay) : current;
-    if (!jitter) return base;
-    // ±50% jitter, never below 0
-    const factor = 0.5 + Math.random();
-    return Math.max(0, Math.min(maxDelay, Math.floor(base * factor)));
-  }
-
-  // Time budget reads the context Clock, and the deadline is anchored when
-  // the effect RUNS — not when retry() builds the description.
-  const clockNow: Eff<number, never> = new Suspend(
-    Op.FlatMap,
-    new Suspend(Op.GetCtx, CLOCK_KEY, null) as any,
-    (c: { now(): number }) => new Suspend(Op.Sync, () => c.now(), null),
-  ) as any;
-
-  function attempt(remaining: number, currentDelay: number, deadline: number): Eff<A, S> {
-    return new Suspend(Op.CatchAll, eff, (cause: any) => {
-      if (remaining <= 0) return new Suspend(Op.Fail, cause, null);
-
-      // Only retry typed failures. Defects / interrupts propagate immediately.
-      const f = Cause.firstFail(cause);
-      if (f === null) return new Suspend(Op.Fail, cause, null);
-
-      // Predicate: if supplied, decide per typed error
-      if (when !== undefined && !when(f.value)) {
-        return new Suspend(Op.Fail, cause, null);
-      }
-
-      const retryNow = (): Suspend => {
-        const waitEff = currentDelay > 0 ? sleep(currentDelay) : succeed(undefined);
-        const nextD = nextDelayMs(currentDelay);
-        return new Suspend(Op.FlatMap, waitEff, () => attempt(remaining - 1, nextD, deadline));
-      };
-
-      if (deadline === Infinity) return retryNow();
-      return new Suspend(Op.FlatMap, clockNow, (now: number) =>
-        now >= deadline ? new Suspend(Op.Fail, cause, null) : retryNow(),
-      );
-    }) as any;
-  }
-
-  if (timeBudgetMs === Infinity) return attempt(times, baseDelay, Infinity) as any;
-  return new Suspend(Op.FlatMap, clockNow, (start: number) =>
-    attempt(times, baseDelay, start + timeBudgetMs),
-  ) as any;
+export function retry<A, S>(eff: Eff<A, S>, policyOrConfig: RetryConfig | RetryPolicy): Eff<A, S> {
+  return runRetryUnified(
+    eff,
+    policyOrConfig instanceof RetryPolicy ? policyOrConfig : RetryPolicy.fromConfig(policyOrConfig),
+  );
 }
