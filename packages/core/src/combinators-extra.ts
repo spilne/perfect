@@ -168,22 +168,14 @@ export interface RetryAllByOptions<T = unknown, E = unknown> {
 function isRetryAttempt<T, E>(value: unknown): value is RetryAttempt<T, E> {
   if (!value || typeof value !== "object") return false;
   const candidate = value as { readonly _tag?: unknown };
-  return (
-    candidate._tag === "success" || candidate._tag === "error" || candidate._tag === "thrown"
-  );
+  return candidate._tag === "success" || candidate._tag === "error" || candidate._tag === "thrown";
 }
 
 export function retryAllBy<A, S>(
   eff: Eff<A, S>,
   options: RetryAllByOptions<A, ErrorsOf<S>>,
 ): Eff<A, S> {
-  const {
-    maxRetries = 3,
-    baseDelayMs = 250,
-    maxDelayMs = 30_000,
-    handle,
-    policy,
-  } = options;
+  const { maxRetries = 3, baseDelayMs = 250, maxDelayMs = 30_000, handle, policy } = options;
 
   // Normalize each attempt into a tagged outcome object on the success channel.
   const normalized = (eff as any)

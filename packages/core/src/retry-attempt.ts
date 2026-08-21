@@ -17,7 +17,9 @@ export const RetryAttempt = {
   success: <T>(value: T): RetryAttempt<T, never> => ({ _tag: "success", value }),
   error: <T = never, E = unknown>(error: E): RetryAttempt<T, E> => ({ _tag: "error", error }),
   thrown: <T = never>(error: unknown): RetryAttempt<T, never> => ({ _tag: "thrown", error }),
-  isSuccess: <T, E>(r: RetryAttempt<T, E>): r is { _tag: "success"; value: T } => r._tag === "success",
+  isSuccess: <T, E>(r: RetryAttempt<T, E>): r is { _tag: "success"; value: T } =>
+    r._tag === "success",
   isError: <T, E>(r: RetryAttempt<T, E>): r is { _tag: "error"; error: E } => r._tag === "error",
-  isThrown: <T, E>(r: RetryAttempt<T, E>): r is { _tag: "thrown"; error: unknown } => r._tag === "thrown",
+  isThrown: <T, E>(r: RetryAttempt<T, E>): r is { _tag: "thrown"; error: unknown } =>
+    r._tag === "thrown",
 } as const;

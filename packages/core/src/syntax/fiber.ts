@@ -61,10 +61,7 @@ declare module "../eff" {
       impl: T,
     ): Eff<A, Exclude<S, Needs<T>>>;
     retry<A, S>(this: Eff<A, S>, policy: RetryPolicy | RetryConfig): Eff<A, S>;
-    retryAllBy<A, S, E = ErrorsOf<S>>(
-      this: Eff<A, S>,
-      options: RetryAllByOptions<A, E>,
-    ): Eff<A, S>;
+    retryAllBy<A, S, E = ErrorsOf<S>>(this: Eff<A, S>, options: RetryAllByOptions<A, E>): Eff<A, S>;
     repeat<A, S>(this: Eff<A, S>, schedule: Schedule<A>): Eff<A, S>;
     retryWith<A, S, In = unknown, Out = unknown>(
       this: Eff<A, S>,

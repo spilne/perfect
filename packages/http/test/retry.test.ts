@@ -163,7 +163,10 @@ describe("withRetryAll — full outcome ADT", () => {
   });
 
   test("withRetryAll uses custom retry policy", async () => {
-    const t = new ScriptedTransport([new Response("", { status: 503 }), new Response("", { status: 503 })]);
+    const t = new ScriptedTransport([
+      new Response("", { status: 503 }),
+      new Response("", { status: 503 }),
+    ]);
     await expect(
       run(
         withRetryAll(httpRequestText({ url: "/x", transport: t }), {
@@ -176,10 +179,7 @@ describe("withRetryAll — full outcome ADT", () => {
   });
 
   test("retryHttp uses HTTP_RETRYABLE typed defaults", async () => {
-    const t = new ScriptedTransport([
-      new Response("", { status: 503 }),
-      new Response("ok"),
-    ]);
+    const t = new ScriptedTransport([new Response("", { status: 503 }), new Response("ok")]);
     const result = await run(
       retryHttp(httpRequestText({ url: "/x", transport: t }), { baseDelayMs: 1 }),
     );
@@ -231,7 +231,8 @@ describe("withRetryAllBy — handler style", () => {
         withRetryAllBy(httpRequestText({ url: "/x", transport: t }), {
           baseDelayMs: 1,
           policy: RetryPolicy.recurs(0),
-          handle: (r) => (RetryAttempt.isHttpError(r) ? RetryDecision.retry() : RetryDecision.stop()),
+          handle: (r) =>
+            RetryAttempt.isHttpError(r) ? RetryDecision.retry() : RetryDecision.stop(),
         }) as any,
       ),
     ).rejects.toMatchObject({ _tag: "HttpStatusError", status: 503 });

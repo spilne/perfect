@@ -3,7 +3,16 @@
 //
 // Run: bun packages/core/examples/09-retry-schedule.ts
 
-import { eff, succeed, fail, sync, RetryPolicy, RetryDecision, type Eff, type Throws } from "../src";
+import {
+  eff,
+  succeed,
+  fail,
+  sync,
+  RetryPolicy,
+  RetryDecision,
+  type Eff,
+  type Throws,
+} from "../src";
 import { assertEq } from "./_assert";
 
 // >>> example: retry-config
