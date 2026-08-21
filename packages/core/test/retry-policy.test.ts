@@ -3,14 +3,21 @@ import {
   succeed,
   fail,
   sync,
+  sleep,
+  provide,
   retry,
   RetryPolicy,
   run,
+  runExit,
+  Clock,
+  TestClock,
   Cause,
   Schedule,
   retryWith,
   type RetryDetails,
 } from "../src";
+
+const tick = () => new Promise((r) => setTimeout(r, 0));
 
 describe("RetryPolicy — fluent builder", () => {
   test("recurs + withMaxRetries is the simple case", async () => {
@@ -191,6 +198,111 @@ describe("legacy retry config still works", () => {
       n < 3 ? fail("retry") : succeed("ok"),
     );
     expect(await run(retry(eff, { times: 5, delay: 0 }) as any)).toBe("ok");
+    expect(attempts).toBe(3);
+  });
+});
+
+describe("RetryPolicy.fromConfig — the config dict is sugar, not a second engine", () => {
+  test("delay schedule matches the config: first retry waits `delay`, then doubles", async () => {
+    const c = new TestClock();
+    let attempts = 0;
+    const eff: any = sync(() => ++attempts).flatMap(() => fail("nope"));
+
+    const program = provide(
+      retry(eff, { times: 3, delay: 100, backoff: "exponential" }) as any,
+      Clock,
+      c,
+    );
+    const done = runExit(program as any);
+
+    // Delays are 100, 200, 400 — the same sequence the config dict has always
+    // produced, now sourced from Schedule.exponential.
+    const seen: number[] = [];
+    for (const step of [100, 200, 400]) {
+      await tick();
+      seen.push(c.pendingDeadlines()[0]! - c.now());
+      c.advance(step);
+    }
+    await done;
+
+    expect(seen).toEqual([100, 200, 400]);
+    expect(attempts).toBe(4); // initial + 3 retries
+  });
+
+  test("maxDelay caps fixed backoff too (it silently did not before)", async () => {
+    const c = new TestClock();
+    let attempts = 0;
+    const eff: any = sync(() => ++attempts).flatMap(() => fail("nope"));
+
+    const program = provide(
+      retry(eff, { times: 1, delay: 5_000, backoff: "fixed", maxDelay: 250 }) as any,
+      Clock,
+      c,
+    );
+    const done = runExit(program as any);
+    await tick();
+    const waited = c.pendingDeadlines()[0]! - c.now();
+    c.advance(waited);
+    await done;
+
+    expect(waited).toBe(250);
+  });
+
+  test("`when` predicate stops the retry loop", async () => {
+    let attempts = 0;
+    const eff: any = sync(() => ++attempts).flatMap(() => fail("fatal"));
+    await expect(
+      run(retry(eff, { times: 5, delay: 0, when: (e: string) => e === "transient" }) as any),
+    ).rejects.toBe("fatal");
+    expect(attempts).toBe(1);
+  });
+});
+
+describe("RetryPolicy.withWallClockBudget", () => {
+  test("counts attempt runtime, not just scheduled delay", async () => {
+    const c = new TestClock();
+    let attempts = 0;
+    // Each attempt itself burns 40ms of virtual time before failing.
+    const eff: any = sync(() => ++attempts)
+      .flatMap(() => sleep(40))
+      .flatMap(() => fail("nope"));
+
+    const policy = RetryPolicy.spaced(10).withMaxRetries(100).withWallClockBudget(100);
+    const done = runExit(provide(retry(eff, policy) as any, Clock, c) as any);
+
+    // Drive: attempt runs (40) then sleeps (10) => 50ms per cycle.
+    for (let i = 0; i < 8; i++) {
+      await tick();
+      const next = c.pendingDeadlines()[0];
+      if (next === undefined) break;
+      c.advance(next - c.now());
+    }
+    const exit = await done;
+
+    expect(exit._tag).toBe("Failure");
+    // t=40 (0 elapsed at check... 40 < 100) retry; t=90 -> 90 < 100 retry;
+    // t=140 -> over budget, stop. withTimeBudget(100) would have allowed 10
+    // retries here, since it only ever counts the 10ms sleeps.
+    expect(attempts).toBe(3);
+  });
+
+  test("the deadline is anchored at run time, not build time", async () => {
+    const c = new TestClock();
+    const policy = RetryPolicy.spaced(60).withMaxRetries(100).withWallClockBudget(100);
+    let attempts = 0;
+    const eff: any = sync(() => ++attempts).flatMap(() => fail("nope"));
+
+    // Simulate a policy built at module load, used much later.
+    c.advance(10_000);
+
+    const done = runExit(provide(retry(eff, policy) as any, Clock, c) as any);
+    for (let i = 0; i < 5; i++) {
+      await tick();
+      c.advance(60);
+    }
+    const exit = await done;
+
+    expect(exit._tag).toBe("Failure");
     expect(attempts).toBe(3);
   });
 });
