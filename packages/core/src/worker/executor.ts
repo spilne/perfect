@@ -54,6 +54,9 @@ if (nodeWorkerPort) {
     void handleMessage({ data: payload });
   });
 } else {
-  (globalThis as { onmessage: (event: { data: WorkerMessageData }) => void }).onmessage =
+  // In a worker this global is a DedicatedWorkerGlobalScope, but the DOM lib
+  // types it as Window — whose `onmessage` takes a full MessageEvent. Only the
+  // `data` field is ever read, so narrow it through unknown.
+  (globalThis as unknown as { onmessage: (event: { data: WorkerMessageData }) => void }).onmessage =
     handleMessage;
 }

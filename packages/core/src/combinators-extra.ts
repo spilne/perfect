@@ -185,7 +185,9 @@ export function retryAllBy<A, S>(
       if (f !== null) return succeed(RetryAttempt.error(f.value as ErrorsOf<S>));
       const d = Cause.firstDie(cause);
       if (d !== null) return succeed(RetryAttempt.thrown(d.value));
-      return new Suspend(Op.Fail, cause, null) as Eff<never, Throws<never>>;
+      // Neither a Fail nor a Die leaf — an interrupt. It carries no typed
+      // error, so re-raising it adds nothing to the effect union.
+      return new Suspend(Op.Fail, cause, null) as Eff<never, never>;
     }) as Eff<RetryAttempt<A, ErrorsOf<S>>, never>;
 
   const normalizedForRetry = (normalized as any).flatMap((r: RetryAttempt<A, ErrorsOf<S>>) =>
@@ -203,7 +205,9 @@ export function retryAllBy<A, S>(
       case "success":
         return succeed(r.value) as Eff<A, S>;
       case "error":
-        return fail(r.error) as Eff<A, S>;
+        // Double assertion: TS can't prove `Throws<ErrorsOf<S>> extends S`
+        // even though the error was extracted from S in the first place.
+        return fail(r.error) as unknown as Eff<A, S>;
       case "thrown":
         return die(r.error) as Eff<A, S>;
     }
