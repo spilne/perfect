@@ -7,12 +7,25 @@ export interface Console {
   readonly log: (msg: string) => Eff<void, never>;
   readonly warn: (msg: string) => Eff<void, never>;
   readonly error: (msg: string) => Eff<void, never>;
+  /**
+   * Read one line from stdin, without the trailing newline. Resolves to
+   * undefined at end of input, so a read loop terminates instead of spinning.
+   */
+  readonly readLine: () => Eff<string | undefined, never>;
 }
 
 export const Console: ServiceTag<Console> = service<Console>("Console");
 
 function effSync<A>(f: () => A): Eff<A, never> {
   return new Suspend(Op.Sync, f, null) as any;
+}
+
+function effAsync<A>(register: (resume: (value: Eff<A, never>) => void) => void): Eff<A, never> {
+  return new Suspend(Op.Async, register, null) as any;
+}
+
+function succeedNow<A>(value: A): Eff<A, never> {
+  return new Suspend(Op.Succeed, value, null) as any;
 }
 
 // ── Real console: writes to stdout/stderr via globalThis.console ───
@@ -33,6 +46,66 @@ export class RealConsole implements Console {
       globalThis.console.error(msg);
     });
   }
+
+  /**
+   * One line from stdin. Buffers whatever the last read over-consumed, so
+   * successive calls don't drop input — process.stdin hands over chunks, not
+   * lines. Uses the Node-compatible stream API, which Bun implements too.
+   */
+  readLine(): Eff<string | undefined, never> {
+    return effAsync<string | undefined>((resume) => {
+      const buffered = stdinBuffer.indexOf("\n");
+      if (buffered >= 0) {
+        const line = stdinBuffer.slice(0, buffered);
+        stdinBuffer = stdinBuffer.slice(buffered + 1);
+        resume(succeedNow(stripCarriageReturn(line)));
+        return;
+      }
+
+      const stdin = (globalThis as any).process?.stdin;
+      if (stdin === undefined) {
+        resume(succeedNow(undefined));
+        return;
+      }
+
+      const cleanup = (): void => {
+        stdin.off?.("data", onData);
+        stdin.off?.("end", onEnd);
+        stdin.off?.("error", onEnd);
+      };
+      const onData = (chunk: unknown): void => {
+        stdinBuffer += String(chunk);
+        const index = stdinBuffer.indexOf("\n");
+        if (index < 0) return;
+        const line = stdinBuffer.slice(0, index);
+        stdinBuffer = stdinBuffer.slice(index + 1);
+        cleanup();
+        stdin.pause?.();
+        resume(succeedNow(stripCarriageReturn(line)));
+      };
+      const onEnd = (): void => {
+        cleanup();
+        // Flush a trailing line with no newline terminator.
+        const rest = stdinBuffer;
+        stdinBuffer = "";
+        resume(succeedNow(rest.length > 0 ? stripCarriageReturn(rest) : undefined));
+      };
+
+      stdin.setEncoding?.("utf8");
+      stdin.on?.("data", onData);
+      stdin.once?.("end", onEnd);
+      stdin.once?.("error", onEnd);
+      stdin.resume?.();
+    });
+  }
+}
+
+// Module-level so the leftover of a partially-consumed chunk survives across
+// readLine() calls on the shared stdin stream.
+let stdinBuffer = "";
+
+function stripCarriageReturn(line: string): string {
+  return line.endsWith("\r") ? line.slice(0, -1) : line;
 }
 
 export const realConsole: Console = new RealConsole();
@@ -43,6 +116,26 @@ export class TestConsole implements Console {
   private _logs: string[] = [];
   private _warns: string[] = [];
   private _errors: string[] = [];
+  private _input: string[] = [];
+
+  /** Queue lines that readLine() will return, in order. */
+  constructor(input: readonly string[] = []) {
+    this._input = [...input];
+  }
+
+  /** Append more scripted input. */
+  feed(...lines: string[]): void {
+    this._input.push(...lines);
+  }
+
+  /** Lines not yet consumed by readLine(). */
+  remainingInput(): readonly string[] {
+    return this._input;
+  }
+
+  readLine(): Eff<string | undefined, never> {
+    return effSync(() => this._input.shift());
+  }
 
   log(msg: string): Eff<void, never> {
     return effSync(() => {
@@ -90,5 +183,6 @@ export class TestConsole implements Console {
     this._logs.length = 0;
     this._warns.length = 0;
     this._errors.length = 0;
+    this._input.length = 0;
   }
 }
