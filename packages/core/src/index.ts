@@ -145,6 +145,7 @@ export { AsyncScheduler, BunScheduler, SyncScheduler, setDefaultScheduler } from
 export { WorkerPool } from "./worker";
 export {
   Chunk,
+  Pipe,
   Stream,
   StreamDeadlineError,
   StreamTimeoutError,
@@ -153,7 +154,7 @@ export {
   Pipes,
   Sinks,
 } from "./stream";
-export type { CsvOptions, Pipe, SchemaParser, StatefulMapOptions } from "./stream";
+export type { CsvOptions, SchemaParser, StatefulMapOptions } from "./stream";
 
 export { eff } from "./syntax";
 import "./syntax";

@@ -1298,6 +1298,35 @@ export class Stream<A, S = never> {
    * state carries across chunk boundaries. Unlike `scan` the state itself is
    * never emitted.
    */
+  /**
+   * Effectful {@link scan} — emits the seed, then one accumulator per element.
+   * The effects run strictly in element order; the chunk fold is a flatMap
+   * chain, which the trampoline keeps stack-safe at any chunk size.
+   */
+  scanEffect<B, S2>(zero: B, f: (acc: B, a: A) => Eff<B, S2>): Stream<B, S | S2> {
+    function go(acc: B, stream: Stream<A, any>): Stream<B, any> {
+      return new Stream(
+        (stream.step as any).flatMap((s: Step<A>) => {
+          if (s._tag === "Done") return succeed(DONE);
+          const items = s.chunk.toArray();
+          const out: B[] = [];
+          const foldFrom = (index: number, current: B): Eff<B, any> =>
+            index >= items.length
+              ? (succeed(current) as any)
+              : (f(current, items[index] as A) as any).flatMap((next: B) => {
+                  out.push(next);
+                  return foldFrom(index + 1, next);
+                });
+          return (foldFrom(0, acc) as any).map((last: B) =>
+            emit(Chunk.fromArray(out), go(last, s.next)),
+          );
+        }),
+        stream._finalizer,
+      );
+    }
+    return new Stream(succeed(emit(Chunk.single(zero), go(zero, this))), this._finalizer) as any;
+  }
+
   mapAccumulate<St, B>(initial: St, f: (state: St, a: A) => readonly [St, B]): Stream<B, S> {
     function go(state: St, stream: Stream<A, any>): Stream<B, any> {
       return new Stream(
@@ -2903,6 +2932,43 @@ export type Pipe<I, O, S2 = never> = (<S>(input: Stream<I, S>) => Stream<O, S | 
   readonly "~perfect/PipeOutput"?: O;
   readonly "~perfect/PipeEffects"?: S2;
 };
+
+/**
+ * Constructors for ad-hoc pipes. The `Pipes` module ships the concrete ones
+ * (utf8, lines, csv, …); these build a reusable stage out of a plain
+ * function, so `.through()` can be used without hand-writing the Pipe type.
+ *
+ *   const evens = Pipe.filter<number>((n) => n % 2 === 0);
+ *   stream.through(evens).through(Pipe.map(String));
+ */
+export const Pipe = {
+  map:
+    <I, O>(f: (value: I) => O): Pipe<I, O> =>
+    (input: any) =>
+      input.map(f),
+
+  filter:
+    <I>(predicate: (value: I) => boolean): Pipe<I, I> =>
+    (input: any) =>
+      input.filter(predicate),
+
+  /** Drops elements for which `f` returns undefined. */
+  filterMap:
+    <I, O>(f: (value: I) => O | undefined): Pipe<I, O> =>
+    (input: any) =>
+      input.filterMap(f),
+
+  scan:
+    <I, O>(zero: O, f: (acc: O, value: I) => O): Pipe<I, O> =>
+    (input: any) =>
+      input.scan(zero, f),
+
+  /** Effectful stage — the pipe's own effects surface as the Pipe's `S2`. */
+  evalMap:
+    <I, O, S2 = never>(f: (value: I) => Eff<O, S2>): Pipe<I, O, S2> =>
+    (input: any) =>
+      input.evalMap(f),
+} as const;
 
 // ── Helpers ────────────────────────────────────────────────────────
 
