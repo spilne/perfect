@@ -155,9 +155,16 @@ jobs:
 
   performance:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The baseline is measured from a worktree of another commit, so the
+          # full history has to be present.
+          fetch-depth: 0
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -173,14 +180,124 @@ jobs:
 
       - run: bun install --frozen-lockfile
 
-      - name: Generate performance report
+      # Informational: the mitata report against effect-ts. Kept from the
+      # previous job shape; never fatal, since it gates nothing.
+      - name: Comparative report vs effect-ts
+        continue-on-error: true
         run: bun run perf:report
 
-      - name: Run performance gate
+      - name: Absolute gate (catastrophic floor)
         run: bun run perf:gate
+
+      - name: Resolve baseline commit
+        id: baseline
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            # Merge-base, not the base tip: comparing against a base that moved
+            # on would attribute other people's changes to this PR.
+            ref=$(git merge-base HEAD "${{ github.event.pull_request.base.sha }}")
+          else
+            ref=$(git rev-parse HEAD~1 2>/dev/null || true)
+          fi
+          if [ -z "$ref" ] || [ "$ref" = "$(git rev-parse HEAD)" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Baseline comparison
+        if: steps.baseline.outputs.skip == 'false'
+        run: bun run perf:compare --baseline "${{ steps.baseline.outputs.ref }}" --rounds 3
+
+      - name: Comment the comparison on the PR
+        # Fork PRs get a read-only token, so skip rather than fail. Never fatal:
+        # a commenting problem must not mask the gate's own verdict.
+        if: >-
+          always() &&
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name == github.repository &&
+          steps.baseline.outputs.skip == 'false'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          [ -f .perf/compare.md ] || exit 0
+          printf '<!-- perfect-perf-report -->\n\n' > .perf/comment.md
+          cat .perf/compare.md >> .perf/comment.md
+          pr=${{ github.event.pull_request.number }}
+          existing=$(gh api "repos/${{ github.repository }}/issues/$pr/comments" \
+            --jq 'map(select(.body | startswith("<!-- perfect-perf-report -->"))) | .[0].id // empty')
+          if [ -n "$existing" ]; then
+            gh api -X PATCH "repos/${{ github.repository }}/issues/comments/$existing" \
+              -F body=@.perf/comment.md >/dev/null
+          else
+            gh pr comment "$pr" --body-file .perf/comment.md >/dev/null
+          fi
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: perf
-          path: .perf/
+          # Exclude the baseline worktree: compare-refs removes it, but a killed
+          # run would otherwise upload an entire second checkout.
+          path: |
+            .perf/
+            !.perf/baseline-tree/
+
+  # Trend record. The comparison gate catches one bad commit; it cannot see a
+  # 3% regression repeated ten times, where every step is inside tolerance but
+  # the total is not. Runs only on main so the series is one comparable line.
+  performance-history:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: performance
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      # Reuse the numbers the performance job already measured rather than
+      # re-running the suites — a second measurement would be a different
+      # sample and make the series noisier for no benefit.
+      - uses: actions/download-artifact@v4
+        with:
+          name: perf
+          path: .perf
+
+      - name: Append to the history branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          [ -f .perf/current.json ] || { echo "no results to record"; exit 0; }
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if git ls-remote --exit-code --heads origin perf-history >/dev/null 2>&1; then
+            git fetch origin perf-history --depth=1
+            git worktree add ../perf-history origin/perf-history
+          else
+            git worktree add --detach ../perf-history
+            git -C ../perf-history checkout --orphan perf-history
+            git -C ../perf-history rm -rf . >/dev/null 2>&1 || true
+          fi
+
+          bun scripts/perf/history.ts --results .perf/current.json --dir ../perf-history
+
+          cd ../perf-history
+          git add history.jsonl README.md
+          if git diff --cached --quiet; then
+            echo "nothing to record"
+            exit 0
+          fi
+          git commit -m "perf: record ${GITHUB_SHA:0:8}"
+          git push origin HEAD:perf-history
