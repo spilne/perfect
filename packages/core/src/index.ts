@@ -146,6 +146,7 @@ export { WorkerPool } from "./worker";
 export {
   Chunk,
   Pipe,
+  RawStream,
   Stream,
   StreamDeadlineError,
   StreamTimeoutError,
