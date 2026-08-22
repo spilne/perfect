@@ -64,6 +64,14 @@ export { Layer, LayerCycleError, LayerMissingDependencyError } from "./layer";
 export type { Layer as LayerT } from "./layer";
 import "./layer";
 export { Clock, RealClock, TestClock, realClock } from "./clock";
+export {
+  FileSystem,
+  FileSystemError,
+  RealFileSystem,
+  TestFileSystem,
+  realFileSystem,
+} from "./filesystem";
+export type { FileEvent, FileStat } from "./filesystem";
 export { Random, RealRandom, TestRandom, realRandom } from "./random";
 export { Console, RealConsole, TestConsole, realConsole } from "./console";
 export {
