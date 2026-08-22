@@ -24,7 +24,9 @@ const registry = (process.env.NPM_CONFIG_REGISTRY ?? "https://registry.npmjs.org
 );
 
 async function run(command: readonly string[], directory = root): Promise<void> {
-  const process = Bun.spawn(command, {
+  // Bun.spawn's signature wants a mutable array; the parameter is readonly so
+  // callers cannot have their literal mutated.
+  const process = Bun.spawn([...command], {
     cwd: directory,
     stdin: "inherit",
     stdout: "inherit",

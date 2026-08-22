@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["bun"],
+    "declaration": false,
+    "declarationMap": false,
+    "composite": false
+  },
+  "references": [],
+  "include": ["scripts/**/*.ts"]
+}

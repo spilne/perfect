@@ -1,20 +1,12 @@
-import * as nodeTest from 'node:test';
-import { spawnSync as nodeSpawnSync, spawn as nodeSpawn } from 'node:child_process';
-import { Worker as NodeWorker } from 'node:worker_threads';
-import { Readable } from 'node:stream';
-import { createReadStream } from 'node:fs';
-import { ReadableStream } from 'node:stream/web';
-import { expect } from 'expect';
+import * as nodeTest from "node:test";
+import { spawnSync as nodeSpawnSync, spawn as nodeSpawn } from "node:child_process";
+import { Worker as NodeWorker } from "node:worker_threads";
+import { Readable } from "node:stream";
+import { createReadStream } from "node:fs";
+import { ReadableStream } from "node:stream/web";
+import { expect } from "expect";
 
-const {
-  describe,
-  it,
-  test,
-  before,
-  beforeEach,
-  after,
-  afterEach,
-} = nodeTest;
+const { describe, it, test, before, beforeEach, after, afterEach } = nodeTest;
 
 export { describe, it, test, before, beforeEach, after, afterEach };
 
@@ -61,7 +53,7 @@ test.skipIf = testSkipIf;
 describe.skipIf = skipIf;
 
 const toBuffer = (value) => {
-  if (typeof value === 'string') {
+  if (typeof value === "string") {
     return Buffer.from(value);
   }
 
@@ -85,20 +77,20 @@ const createReadableBody = (stream) => {
     return undefined;
   }
 
-  if (typeof Readable.toWeb === 'function') {
+  if (typeof Readable.toWeb === "function") {
     return Readable.toWeb(stream);
   }
 
   return new ReadableStream({
     start(controller) {
-      stream.on('data', (chunk) => {
+      stream.on("data", (chunk) => {
         controller.enqueue(toBuffer(chunk));
       });
 
-      stream.on('end', () => {
+      stream.on("end", () => {
         controller.close();
       });
-      stream.on('error', (error) => {
+      stream.on("error", (error) => {
         controller.error(error);
       });
     },
@@ -107,8 +99,8 @@ const createReadableBody = (stream) => {
 
 const createSpawnResult = (child) => ({
   exited: new Promise((resolve, reject) => {
-    child.once('error', reject);
-    child.once('exit', (code, signal) => {
+    child.once("error", reject);
+    child.once("exit", (code, signal) => {
       if (signal) {
         resolve(`signal:${signal}`);
         return;
@@ -140,25 +132,23 @@ export const Bun = {
     return {
       text: () => Bun.fileReadText(target),
       stream: () => {
-        const stream = Readable.toWeb(
-          createReadStream(target),
-        );
+        const stream = Readable.toWeb(createReadStream(target));
         return Promise.resolve(stream);
       },
     };
   },
   spawnSync: (input) => {
-    const { cmd, stdout = 'pipe', stderr = 'pipe', timeout } = normalizeArgs(input);
+    const { cmd, stdout = "pipe", stderr = "pipe", timeout } = normalizeArgs(input);
     const stdio = [
-      'ignore',
-      stdout === 'pipe' ? 'pipe' : stdout === 'ignore' ? 'ignore' : stdout,
-      stderr === 'pipe' ? 'pipe' : stderr === 'ignore' ? 'ignore' : stderr,
+      "ignore",
+      stdout === "pipe" ? "pipe" : stdout === "ignore" ? "ignore" : stdout,
+      stderr === "pipe" ? "pipe" : stderr === "ignore" ? "ignore" : stderr,
     ];
 
     const result = nodeSpawnSync(cmd[0], cmd.slice(1), {
       stdio,
       timeout,
-      encoding: 'utf8',
+      encoding: "utf8",
       shell: false,
     });
 
@@ -170,11 +160,11 @@ export const Bun = {
     };
   },
   spawn: (input) => {
-    const { cmd, stdout = 'pipe', stderr = 'pipe' } = normalizeArgs(input);
+    const { cmd, stdout = "pipe", stderr = "pipe" } = normalizeArgs(input);
     const stdio = [
-      'ignore',
-      stdout === 'pipe' ? 'pipe' : stdout === 'ignore' ? 'ignore' : stdout,
-      stderr === 'pipe' ? 'pipe' : stderr === 'ignore' ? 'ignore' : stderr,
+      "ignore",
+      stdout === "pipe" ? "pipe" : stdout === "ignore" ? "ignore" : stdout,
+      stderr === "pipe" ? "pipe" : stderr === "ignore" ? "ignore" : stderr,
     ];
 
     const child = nodeSpawn(cmd[0], cmd.slice(1), {
@@ -186,8 +176,8 @@ export const Bun = {
 };
 
 Bun.fileReadText = async (path) => {
-  const fs = await import('node:fs/promises');
-  return fs.readFile(path, 'utf8');
+  const fs = await import("node:fs/promises");
+  return fs.readFile(path, "utf8");
 };
 
 Object.assign(globalThis, { Bun });
