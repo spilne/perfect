@@ -1,0 +1,20 @@
+# Review ownership. The last matching pattern wins, so the catch-all goes
+# first and any narrower rule below it overrides.
+#
+# Single maintainer today — the per-area rules exist so that adding a
+# co-maintainer is a one-line change per area rather than a rewrite.
+
+* @lightsaway
+
+# Runtime core: the interpreter, fibers, scheduler and effect types.
+/packages/core/src/ @lightsaway
+
+# Compiler surface — the SWC plugin and the TS rewriter must not diverge.
+/crates/ @lightsaway
+/packages/transform/ @lightsaway
+/packages/swc-plugin/ @lightsaway
+
+# Release and CI machinery.
+/.github/ @lightsaway
+/scripts/ @lightsaway
+/RELEASING.md @lightsaway

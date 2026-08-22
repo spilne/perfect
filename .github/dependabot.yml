@@ -1,0 +1,49 @@
+version: 2
+
+updates:
+  # JS/TS dependencies. One entry at the root covers the whole Bun workspace
+  # (packages/* and templates/*). Bun lives inside the npm_and_yarn ecosystem,
+  # so this reads package.json + bun.lock. Version updates only — Dependabot
+  # does not yet do security updates for bun.
+  #
+  # Minor/patch are grouped into two PRs a week to keep review load flat;
+  # majors are deliberately left ungrouped so each lands as its own reviewable
+  # PR (this repo pins TypeScript, nx, oxlint and vite, all of which have
+  # broken on majors before).
+  - package-ecosystem: "bun"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    groups:
+      dev-minor-patch:
+        dependency-type: "development"
+        update-types: ["minor", "patch"]
+        patterns: ["*"]
+      prod-minor-patch:
+        dependency-type: "production"
+        update-types: ["minor", "patch"]
+        patterns: ["*"]
+
+  # The SWC WASM plugin. swc_core majors track specific SWC runtimes, so they
+  # need to move together with whatever Next.js/Vite ships.
+  - package-ecosystem: "cargo"
+    directory: "/crates/swc-plugin-perfect"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 3
+    groups:
+      swc:
+        patterns: ["swc*"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 3
+    groups:
+      actions:
+        patterns: ["*"]
