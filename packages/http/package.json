@@ -41,12 +41,17 @@
   "scripts": {
     "test": "bun test",
     "typecheck": "tsc -p tsconfig.src.json --noEmit",
-    "build": "bun ../../scripts/build-package.ts ."
+    "build": "bun ../../scripts/build-package.ts .",
+    "bench": "bun run bench/vs-clients.ts"
   },
   "dependencies": {
     "@perfect/core": "^0.1.0"
   },
   "devDependencies": {
+    "axios": "^1.19.0",
+    "mitata": "^1.0.34",
+    "node-fetch": "^3.3.2",
+    "undici": "^8.10.0",
     "valibot": "^1.3.1",
     "zod": "^4.3.6"
   }
