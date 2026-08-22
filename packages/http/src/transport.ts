@@ -95,9 +95,21 @@ export class FetchTransport implements HttpTransport {
     }
 
     return scoped(
-      sync(() => new AbortController())
-        .acquireRelease((c) => sync(() => c.abort()))
-        .flatMap((controller) => {
+      // `settled` guards the release. The scope closes as soon as this effect
+      // yields the Response — which is when the HEADERS have arrived, not the
+      // body. Aborting unconditionally there killed the connection out from
+      // under every caller that reads the body afterwards (httpRequestJson,
+      // client.get, …); it only appeared to work because a small body usually
+      // won the race. Once the fetch has resolved the caller owns the Response,
+      // so there is nothing left for us to cancel.
+      sync(() => ({ controller: new AbortController(), settled: false }))
+        .acquireRelease((state) =>
+          sync(() => {
+            if (!state.settled) state.controller.abort();
+          }),
+        )
+        .flatMap((state) => {
+          const controller = state.controller;
           // Combine: our controller + timeout + optional external signal
           const signals: AbortSignal[] = [controller.signal, AbortSignal.timeout(timeoutMs)];
           if (signal) signals.push(signal);
@@ -115,7 +127,19 @@ export class FetchTransport implements HttpTransport {
           }
 
           return tryPromise(
-            () => fetch(urlStr, fetchOptions),
+            () =>
+              fetch(urlStr, fetchOptions).then(
+                (response) => {
+                  // Headers are in and the body stream belongs to the caller.
+                  state.settled = true;
+                  return response;
+                },
+                (cause) => {
+                  // Nothing left to abort on the failure path either.
+                  state.settled = true;
+                  throw cause;
+                },
+              ),
             (cause): HttpClientError => {
               // DOMException with name "TimeoutError" → our timeout fired
               if (cause instanceof DOMException && cause.name === "TimeoutError") {
