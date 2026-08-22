@@ -94,6 +94,164 @@ export function memoize<Services extends Record<string, any>, E>(
   }) as any;
 }
 
+// ── Auto-wiring ────────────────────────────────────────────────────
+//
+// `merge` builds layers left-to-right in the order written, which means the
+// author has to topologically sort by hand and gets a runtime
+// "Service not provided" defect if they get it wrong.
+//
+// `Layer.build` does the sort instead. It needs each layer to declare what it
+// provides and requires, because a layer is an opaque `Eff` — what it
+// consumes is only visible in the type, and types are gone at runtime.
+// `Layer.describe` attaches that declaration; undescribed layers are treated
+// as providing nothing and requiring nothing, so they simply build first.
+
+const LAYER_DEPS: unique symbol = Symbol.for("spilne/layer-deps");
+
+interface LayerDeps {
+  readonly provides: readonly string[];
+  readonly requires: readonly string[];
+}
+
+export class LayerCycleError extends Error {
+  constructor(readonly cycle: readonly string[]) {
+    super(`Layer dependency cycle: ${cycle.join(" -> ")}`);
+    this.name = "LayerCycleError";
+  }
+}
+
+export class LayerMissingDependencyError extends Error {
+  constructor(
+    readonly service: string,
+    readonly requiredBy: readonly string[],
+  ) {
+    super(
+      `No layer provides "${service}" (required by ${requiredBy.map((s) => `"${s}"`).join(", ")})`,
+    );
+    this.name = "LayerMissingDependencyError";
+  }
+}
+
+/**
+ * Declare a layer's edges so {@link build} can order it.
+ *
+ *   const CacheLive = Layer.describe(
+ *     { provides: ["Cache"], requires: ["Db"] },
+ *     eff(function* () { ... }),
+ *   );
+ *
+ * Names are the same strings passed to `service<T>(name)`.
+ */
+export function describe<Services extends Record<string, any>, E>(
+  deps: { readonly provides: readonly string[]; readonly requires?: readonly string[] },
+  layer: Layer<Services, E>,
+): Layer<Services, E> {
+  const described = layer as any;
+  described[LAYER_DEPS] = {
+    provides: deps.provides,
+    requires: deps.requires ?? [],
+  } satisfies LayerDeps;
+  return described;
+}
+
+function depsOf(layer: unknown): LayerDeps {
+  const deps = (layer as any)?.[LAYER_DEPS] as LayerDeps | undefined;
+  return deps ?? { provides: [], requires: [] };
+}
+
+/**
+ * Topologically sort layers by their declared dependencies, then merge them.
+ * Each layer's services are visible to every layer built after it, so the
+ * order is correct by construction rather than by convention.
+ *
+ * Throws {@link LayerCycleError} naming the cycle, or
+ * {@link LayerMissingDependencyError} naming the unsatisfied service and who
+ * wanted it. Both are thrown when `build` is called — a wiring mistake is a
+ * programmer error, not a typed failure of the resulting effect.
+ */
+export function build<L extends readonly Layer<any, any>[]>(
+  ...layers: L
+): Layer<MergedServices<L>, MergedEffects<L>> {
+  const nodes = layers.map((layer, index) => ({ layer, index, deps: depsOf(layer) }));
+
+  // service name -> the node that provides it (last declaration wins, matching
+  // merge's "later keys win on collision")
+  const providers = new Map<string, number>();
+  for (const node of nodes) {
+    for (const name of node.deps.provides) providers.set(name, node.index);
+  }
+
+  // Every required service must be provided by some layer in this call.
+  const missing = new Map<string, string[]>();
+  for (const node of nodes) {
+    for (const name of node.deps.requires) {
+      if (!providers.has(name)) {
+        const wanters = missing.get(name) ?? [];
+        wanters.push(node.deps.provides.join("+") || `layer #${node.index}`);
+        missing.set(name, wanters);
+      }
+    }
+  }
+  if (missing.size > 0) {
+    const [service, requiredBy] = [...missing.entries()][0]!;
+    throw new LayerMissingDependencyError(service, requiredBy);
+  }
+
+  // DFS with three-colour marking: white = unvisited, grey = on the current
+  // path (a back-edge to grey is a cycle), black = finished.
+  const WHITE = 0;
+  const GREY = 1;
+  const BLACK = 2;
+  const colour = new Array<number>(nodes.length).fill(WHITE);
+  const order: number[] = [];
+  const path: number[] = [];
+
+  const label = (index: number): string =>
+    nodes[index]!.deps.provides.join("+") || `layer #${index}`;
+
+  const visit = (index: number): void => {
+    if (colour[index] === BLACK) return;
+    if (colour[index] === GREY) {
+      const start = path.indexOf(index);
+      throw new LayerCycleError([...path.slice(start), index].map(label));
+    }
+    colour[index] = GREY;
+    path.push(index);
+    for (const name of nodes[index]!.deps.requires) {
+      const provider = providers.get(name)!;
+      // A layer that requires something it also provides is not a cycle.
+      if (provider !== index) visit(provider);
+    }
+    path.pop();
+    colour[index] = BLACK;
+    order.push(index);
+  };
+
+  for (const node of nodes) visit(node.index);
+
+  // Not `merge`: that is horizontal composition — every layer builds against
+  // the caller's context, so a layer could not see one merged before it. Here
+  // each layer is built with everything already constructed installed in its
+  // context, which is the whole point of sorting them.
+  let acc: any = new Suspend(Op.Succeed, {}, null);
+  for (const index of order) {
+    const prev = acc;
+    const layer = nodes[index]!.layer;
+    acc = new Suspend(
+      Op.FlatMap,
+      prev,
+      (built: Record<string, unknown>) =>
+        new Suspend(
+          Op.FlatMap,
+          new Suspend(Op.Provide, layer, servicesToContext(built)),
+          (services: Record<string, unknown>) =>
+            new Suspend(Op.Succeed, { ...built, ...services }, null),
+        ),
+    );
+  }
+  return acc;
+}
+
 // ── .with() method ─────────────────────────────────────────────────
 
 declare module "./eff" {
@@ -178,4 +336,6 @@ Suspend.prototype.memoize = function (this: Suspend): any {
 export const Layer = {
   merge,
   memoize,
+  describe,
+  build,
 } as const;

@@ -60,7 +60,7 @@ export type { RepeatTimeoutError } from "./combinators-extra";
 export { service, provide } from "./service";
 export type { ServiceTag } from "./service";
 export { TaggedError } from "./tagged-error";
-export { Layer } from "./layer";
+export { Layer, LayerCycleError, LayerMissingDependencyError } from "./layer";
 export type { Layer as LayerT } from "./layer";
 import "./layer";
 export { Clock, RealClock, TestClock, realClock } from "./clock";
