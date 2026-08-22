@@ -50,7 +50,8 @@ const resolvePackageImport = (specifier) => {
     return null;
   }
 
-  const candidateBase = subPath === "" ? path.join(basePath, "index.ts") : path.join(basePath, subPath);
+  const candidateBase =
+    subPath === "" ? path.join(basePath, "index.ts") : path.join(basePath, subPath);
 
   if (hasTypeScriptExtension(candidateBase) && existsSync(candidateBase)) {
     return toFileUrl(candidateBase);
@@ -112,22 +113,18 @@ export async function getFormat(url, context, nextGetFormat) {
 export async function load(url, context, nextLoad) {
   if (url.startsWith("file:") && (url.endsWith(".ts") || url.endsWith(".tsx"))) {
     const source = await readFile(new URL(url));
-    const result = spawnSync(
-      "bun",
-      [fileURLToPath(BUN_TRANSPILER)],
-      {
-        input: source,
-        encoding: "utf8",
-      },
-    );
+    const result = spawnSync("bun", [fileURLToPath(BUN_TRANSPILER)], {
+      input: source,
+      encoding: "utf8",
+    });
 
-  if (result.status !== 0) {
+    if (result.status !== 0) {
       const message = [result.stderr, result.error].filter(Boolean).join("\n");
       throw new Error(`bun transpiler failed for ${url}: ${message}`);
     }
 
     const injectImportMetaDir = result.stdout.includes("import.meta.dir")
-      ? "const __nodeImportMetaDir = decodeURIComponent(new URL(\".\", import.meta.url).pathname);\n"
+      ? 'const __nodeImportMetaDir = decodeURIComponent(new URL(".", import.meta.url).pathname);\n'
       : "";
     const withImportMetaDir = result.stdout.includes("import.meta.dir")
       ? result.stdout.replaceAll("import.meta.dir", "__nodeImportMetaDir")

@@ -26,7 +26,7 @@ const EXCLUDED_FROM_NODE_CI = new Set([
   "packages/integration/test/kafka.test.ts",
 ]);
 
-const args = [...process.argv.slice(2)];
+const args = process.argv.slice(2);
 const argSet = new Set(args);
 const includeAllTests = argSet.has("--all");
 const listOnly = argSet.has("--list");
@@ -37,7 +37,7 @@ if (includeCoverage) {
 }
 
 let coverageDir = resolve(process.cwd(), "coverage/node");
-for (const arg of [...argSet]) {
+for (const arg of argSet) {
   if (arg.startsWith("--coverage-dir=")) {
     coverageDir = resolve(process.cwd(), arg.slice("--coverage-dir=".length));
     argSet.delete(arg);
