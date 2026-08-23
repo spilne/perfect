@@ -1,6 +1,27 @@
+# NOTE: no `path_suffixes`, deliberately.
+#
+# This language previously declared `path_suffixes = ["ts", "tsx"]`, which made
+# Zed associate EVERY TypeScript file in every project with it. Because a
+# language config cannot attach a language server, that silently replaced the
+# built-in TypeScript language and took tsserver with it: no diagnostics, no
+# completions, no go-to-definition, no rename — in any .ts file, project-wide,
+# for as long as the extension stayed installed.
+#
+# There is no extension-side fix. Zed's LanguageConfig has no `language_servers`
+# field; `extension.toml` can declare one, but only for a server the extension
+# itself provides through a Rust/WASM lib, and there is no way to point a custom
+# language at Zed's built-in TypeScript server.
+#
+# So the language no longer claims any file. It stays selectable by hand
+# (Command Palette → "language selector: toggle") for anyone who wants these
+# highlights and accepts losing LSP in that buffer — an explicit, per-buffer,
+# reversible trade instead of a silent global one.
+#
+# Making the highlights work in ordinary .ts files needs a different mechanism
+# entirely; see editors/zed/README.md.
+
 name = "Perfect TypeScript"
 grammar = "typescript"
-path_suffixes = ["ts", "tsx"]
 line_comments = ["//"]
 block_comment = ["/*", "*/"]
 autoclose_before = ";:.,=}])> \n\t"
