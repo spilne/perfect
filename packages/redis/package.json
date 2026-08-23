@@ -47,7 +47,7 @@
     "@perfect/core": "^0.1.0"
   },
   "devDependencies": {
-    "ioredis": "^5.7.0",
+    "ioredis": "^6.0.0",
     "testcontainers": "^11.13.0"
   }
 }
