@@ -381,17 +381,23 @@ describe.skipIf(!dockerAvailable)("integration — redis:7-alpine", () => {
 
   test("circuit breaker state is shared and admits one half-open probe", async () => {
     type Boom = { readonly _tag: "Boom" };
+    // resetTimeoutMs has to comfortably exceed the time the assertions
+    // themselves take. At 80ms the two failing round-trips to Redis could
+    // outlast it on a loaded runner, so the breaker had already moved to
+    // half-open before `first.state` was read — the test failed with
+    // "expected open, received half-open" roughly one run in three.
+    const RESET_MS = 750;
     const first = RedisCircuitBreaker.make<Boom>({
       redis,
       key: "breaker",
       failureThreshold: 2,
-      resetTimeoutMs: 80,
+      resetTimeoutMs: RESET_MS,
     });
     const second = RedisCircuitBreaker.make<Boom>({
       redis,
       key: "breaker",
       failureThreshold: 2,
-      resetTimeoutMs: 80,
+      resetTimeoutMs: RESET_MS,
     });
 
     await expect(unsafeRun(first.protect(fail<Boom>({ _tag: "Boom" })))).rejects.toEqual({
@@ -406,7 +412,7 @@ describe.skipIf(!dockerAvailable)("integration — redis:7-alpine", () => {
       .catchTag("CircuitOpen", () => succeed("blocked"));
     expect(await unsafeRun(blocked)).toBe("blocked");
 
-    await unsafeRun(sleep(90));
+    await unsafeRun(sleep(RESET_MS + 100));
     expect(await unsafeRun(first.protect(succeed("probe")))).toBe("probe");
     expect(await unsafeRun(second.state)).toBe("closed");
 
@@ -415,13 +421,15 @@ describe.skipIf(!dockerAvailable)("integration — redis:7-alpine", () => {
       redis,
       key: "filtered-breaker",
       failureThreshold: 1,
-      resetTimeoutMs: 30,
+      // Same reasoning as RESET_MS above — 30ms was shorter than a Redis
+      // round-trip under load.
+      resetTimeoutMs: 300,
       isFailure: (error) => error._tag === "Counted",
     });
     await expect(unsafeRun(filtered.protect(fail<Filtered>({ _tag: "Counted" })))).rejects.toEqual({
       _tag: "Counted",
     });
-    await unsafeRun(sleep(40));
+    await unsafeRun(sleep(400));
     await expect(unsafeRun(filtered.protect(fail<Filtered>({ _tag: "Ignored" })))).rejects.toEqual({
       _tag: "Ignored",
     });

@@ -243,11 +243,12 @@ jobs:
         if: always()
         with:
           name: perf
-          # Explicit globs rather than `.perf/` plus a `!` exclusion: that
-          # combination matched nothing, so the step reported success while
-          # creating no artifact, and performance-history then failed with
-          # "Artifact not found". Naming the files also keeps the baseline
-          # worktree out without relying on exclusion semantics.
+          # `.perf` is a HIDDEN directory, and upload-artifact ignores anything
+          # inside a folder beginning with "." unless told otherwise. That, not
+          # the glob, is why the artifact was never created and
+          # performance-history reported "Artifact not found" while this step
+          # showed green. Explicit globs also keep the baseline worktree out.
+          include-hidden-files: true
           path: |
             .perf/*.json
             .perf/*.md
