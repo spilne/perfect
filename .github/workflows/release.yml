@@ -10,6 +10,9 @@ permissions:
   pull-requests: write
   id-token: write
 
+env:
+  BUN_VERSION: latest
+
 concurrency:
   group: release
   cancel-in-progress: false
@@ -26,14 +29,18 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.14
+          bun-version: ${{ env.BUN_VERSION }}
 
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
 
-      - uses: dtolnay/rust-toolchain@stable
+      # Must match rust-toolchain.toml and ci.yml. On @stable this step picks up
+      # rustc 1.98, where the wasm32-wasip1 link fails on SWC's host imports —
+      # release:publish runs build:swc, so the release would break exactly as CI
+      # did on 2026-08-23.
+      - uses: dtolnay/rust-toolchain@1.90.0
         with:
           targets: wasm32-wasip1
 
