@@ -53,6 +53,6 @@
     "build": "bun ../../scripts/build-package.ts ."
   },
   "devDependencies": {
-    "@swc/core": "~1.15.47"
+    "@swc/core": "~1.16.1"
   }
 }
