@@ -1,4 +1,22 @@
+# Pinned, not "stable".
+#
+# CI floated to rustc 1.98.0 on 2026-08-20 and the wasm32-wasip1 link broke:
+#
+#   rust-lld: error: undefined symbol: __set_transform_result
+#   rust-lld: error: undefined symbol: __emit_diagnostics
+#
+# Those are SWC host functions. A plugin is meant to leave them undefined so the
+# WASM runtime supplies them at load time, and newer rust-lld stopped accepting
+# that by default. The same crate links cleanly on 1.90.0.
+#
+# A floating channel means a toolchain release can break the build with no
+# change on our side and no way to reproduce an older green run — exactly what
+# happened. Bumping this is now a deliberate, reviewable commit.
+#
+# To move forward: raise the channel, run `bun run build:swc`, and if the
+# undefined-symbol error returns, either upgrade swc_core to a release that
+# handles the newer linker or add the wasm-ld opt-in for undefined imports.
 [toolchain]
-channel = "stable"
+channel = "1.90.0"
 profile = "minimal"
 targets = ["wasm32-wasip1"]

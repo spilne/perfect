@@ -120,7 +120,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      # Must match rust-toolchain.toml. @stable would float and silently
+      # reintroduce the 1.98 wasm link failure.
+      - uses: dtolnay/rust-toolchain@1.90.0
         with:
           targets: wasm32-wasip1
 
@@ -241,11 +243,15 @@ jobs:
         if: always()
         with:
           name: perf
-          # Exclude the baseline worktree: compare-refs removes it, but a killed
-          # run would otherwise upload an entire second checkout.
+          # Explicit globs rather than `.perf/` plus a `!` exclusion: that
+          # combination matched nothing, so the step reported success while
+          # creating no artifact, and performance-history then failed with
+          # "Artifact not found". Naming the files also keeps the baseline
+          # worktree out without relying on exclusion semantics.
           path: |
-            .perf/
-            !.perf/baseline-tree/
+            .perf/*.json
+            .perf/*.md
+          if-no-files-found: error
 
   # Trend record. The comparison gate catches one bad commit; it cannot see a
   # 3% regression repeated ten times, where every step is inside tolerance but
@@ -267,7 +273,10 @@ jobs:
       # Reuse the numbers the performance job already measured rather than
       # re-running the suites — a second measurement would be a different
       # sample and make the series noisier for no benefit.
+      # Not fatal: the recording script already no-ops when there are no
+      # results, and a missing artifact must not fail a push to main.
       - uses: actions/download-artifact@v4
+        continue-on-error: true
         with:
           name: perf
           path: .perf

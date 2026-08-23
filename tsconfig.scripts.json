@@ -5,7 +5,19 @@
     "types": ["bun"],
     "declaration": false,
     "declarationMap": false,
-    "composite": false
+    "composite": false,
+    // The perf suites import packages/*/src directly, which drags those sources
+    // into this program — and packages/http/src imports "@perfect/core". Without
+    // these mappings that falls back to node_modules and resolves to
+    // packages/core/dist/types, which only exists after a build. It therefore
+    // passed on a dev machine with a stale dist/ and failed on a fresh CI
+    // checkout. Mirrors the paths each package already declares for itself.
+    "paths": {
+      "@perfect/core": ["./packages/core/src/index.ts"],
+      "@perfect/core/*": ["./packages/core/src/*"],
+      "@perfect/http": ["./packages/http/src/index.ts"],
+      "@perfect/http/*": ["./packages/http/src/*"]
+    }
   },
   "references": [],
   "include": ["scripts/**/*.ts"]
