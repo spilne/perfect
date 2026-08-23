@@ -71,7 +71,7 @@
         "@testcontainers/kafka": "^12.1.0",
         "@types/debug": "^4.1.12",
         "kafkajs": "^2.2.4",
-        "node": "^24.6.0",
+        "node": "^26.7.0",
         "testcontainers": "^12.1.0",
       },
     },
@@ -1450,7 +1450,7 @@
 
     "nanoid": ["nanoid@3.3.18", "", { "bin": { "nanoid": "bin/nanoid.cjs" } }, "sha512-DTg4MJbGMWkfi6VZFdNt2/caMbQy4Ou+Op/hJQvGEWcnVfoA1QA+xzRKAzw9jD6+GVOOeYr/mIcuDSdug6F6+w=="],
 
-    "node": ["node@24.19.0", "", { "dependencies": { "node-bin-setup": "^1.0.0" }, "bin": { "node": "bin/node" } }, "sha512-13tfVQc5QaaXTSdd61HLeKL5IeS2Yvh0jHFzOvB2Pbih66zYBDc5nBPpgwSc4mhZUggGCb1mXsZuYU/osDnskA=="],
+    "node": ["node@26.7.0", "", { "dependencies": { "node-bin-setup": "^1.0.0" }, "bin": { "node": "bin/node" } }, "sha512-ti5ikv+YT+5+kSxcuu7K86ED/Cv5R1N8WylDenxzjPL6FUSGNI5WEEOcILFxWr9qKRj+q/BPJ82hKNrPPZKzLw=="],
 
     "node-bin-setup": ["node-bin-setup@1.1.4", "", {}, "sha512-vWNHOne0ZUavArqPP5LJta50+S8R261Fr5SvGul37HbEDcowvLjwdvd0ZeSr0r2lTSrPxl6okq9QUw8BFGiAxA=="],
 
