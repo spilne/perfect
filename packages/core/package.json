@@ -74,7 +74,7 @@
     "bench": "bun run bench/index.ts"
   },
   "devDependencies": {
-    "effect": "^3.21.0",
+    "effect": "^3.22.1",
     "mitata": "^1.0.34"
   }
 }

@@ -412,22 +412,18 @@ class TopologyRunnerInstance {
     const rightKeyFn = this.findKeyBy(node.right).keyFn;
 
     type Tagged = { record: TopologyRecord; side: "left" | "right"; key: string; ts: number };
-    const left = this.compile(node.left).map(
-      (record): Tagged => ({
-        record,
-        side: "left",
-        key: leftKeyFn(record.value),
-        ts: this.extractTimestamp(record.value),
-      }),
-    );
-    const right = this.compile(node.right).map(
-      (record): Tagged => ({
-        record,
-        side: "right",
-        key: rightKeyFn(record.value),
-        ts: this.extractTimestamp(record.value),
-      }),
-    );
+    const left = this.compile(node.left).map((record): Tagged => ({
+      record,
+      side: "left",
+      key: leftKeyFn(record.value),
+      ts: this.extractTimestamp(record.value),
+    }));
+    const right = this.compile(node.right).map((record): Tagged => ({
+      record,
+      side: "right",
+      key: rightKeyFn(record.value),
+      ts: this.extractTimestamp(record.value),
+    }));
 
     return left.merge(right).flatMap((tagged) => {
       const record = tagged.record;

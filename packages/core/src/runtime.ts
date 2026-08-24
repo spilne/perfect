@@ -451,7 +451,7 @@ function runFiberLoop(fiber: Fiber<any>): void {
         // (success-path or fail-walk), we run the finalizer then propagate the
         // body's outcome.
         k = new Cont(Op.EnsuringFrame, cur.b /* finalizer */, k);
-        cur = cur.a /* body */;
+        cur = cur.a; /* body */
         continue loop;
       }
 
@@ -491,7 +491,7 @@ function runFiberLoop(fiber: Fiber<any>): void {
         const oldScope = fiber.scope;
         fiber.scope = scope;
         k = new Cont(Op.ScopeFrame, { scope, oldScope }, k);
-        cur = cur.a /* body */;
+        cur = cur.a; /* body */
         continue loop;
       }
 

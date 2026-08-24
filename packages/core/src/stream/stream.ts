@@ -1191,8 +1191,8 @@ export class Stream<A, S = never> {
         const watchSignal = (
           ensuring(
             (signal.step as any).flatMap((step: Step<unknown>) =>
-              (releaseSignal() as any).map(
-                (): SignalEvent => (step._tag === "Done" ? { _tag: "empty" } : { _tag: "stop" }),
+              (releaseSignal() as any).map((): SignalEvent =>
+                step._tag === "Done" ? { _tag: "empty" } : { _tag: "stop" },
               ),
             ),
             suspend(releaseSignal),
@@ -1219,9 +1219,10 @@ export class Stream<A, S = never> {
           return (
             race([
               pullSource(source),
-              (control.await as any).map(
-                (event: SignalEvent): RaceEvent => ({ _tag: "signal", event }),
-              ),
+              (control.await as any).map((event: SignalEvent): RaceEvent => ({
+                _tag: "signal",
+                event,
+              })),
             ]) as any
           ).flatMap((winner: RaceEvent): Eff<Step<A>, any> => {
             if (winner._tag === "source") {

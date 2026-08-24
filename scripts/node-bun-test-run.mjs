@@ -24,6 +24,9 @@ const EXCLUDED_FROM_NODE_CI = new Set([
   "packages/core/test/test-clock.test.ts",
   "packages/kafka/test/commit-batch-within.test.ts",
   "packages/integration/test/kafka.test.ts",
+  // Uses Bun.serve/Bun.sleep to drive a slow response body; there is no
+  // node equivalent in this harness.
+  "packages/http/test/transport-body-lifetime.test.ts",
 ]);
 
 const args = process.argv.slice(2);
