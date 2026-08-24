@@ -65,6 +65,13 @@ export const coreSuite: Suite = {
         unit: "ns/op",
         divisor: 1,
         threshold: 350,
+        // Reported, never fatal. At ~10-30ns this is dominated by timer
+        // resolution and scheduling jitter on a shared runner. Two consecutive
+        // CI runs against trees with NO measured code change read -8.6% and
+        // then +73.6%; the second cleared its own widened +-56.1% band and
+        // failed the build. The absolute threshold above still catches a
+        // catastrophic change.
+        gating: false,
         run: () => do_not_optimize(runSync(succeed(42))),
       },
       {
@@ -96,6 +103,9 @@ export const coreSuite: Suite = {
         unit: "ns/item",
         divisor: STREAM_N,
         threshold: 45,
+        // Same reasoning: ~2-5ns per item. Observed swinging +32% on CI and
+        // +30% locally between identical trees.
+        gating: false,
         run: async () => do_not_optimize(await run(streamProgram(STREAM_N))),
       },
     ];

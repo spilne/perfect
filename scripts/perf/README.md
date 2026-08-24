@@ -78,11 +78,28 @@ precisely on the benchmarks that need it — in practice 12% on steady ones and
 same way in most rounds; a real regression does. With three or more rounds a
 majority must agree before the build fails.
 
-**Some suites cannot gate at all.** `Suite.gating: false` marks a suite whose
-run-to-run variance swamps what it measures — its rows are reported with 🟡 and
-never fail the build. The HTTP suite is the case in point: a full comparison
-between two commits touching no HTTP code still reported axios +30% and raw
-fetch +23%.
+**Some benchmarks cannot gate at all.** `gating: false` — on a whole suite, or
+on an individual case — marks something whose run-to-run variance swamps what it
+measures. Those rows are reported with 🟡, recorded in the trend, and never fail
+the build.
+
+Three are currently marked, each on evidence rather than suspicion:
+
+- the whole **HTTP suite** — a comparison between two commits touching no HTTP
+  code reported axios +30% and raw fetch +23%;
+- **`runSync(succeed)`** — at ~10–30 ns it is dominated by timer resolution.
+  Two consecutive CI runs against trees with no measured code change read −8.6%
+  and then +73.6%, the second clearing its own widened ±56.1% band and failing
+  the build;
+- **`stream map/filter/take`** — ~2–5 ns per item, seen swinging +32% on CI and
+  +30% locally between identical trees.
+
+What still gates: `all x100 run`, `flatMap chain x10k runSync` and `run(sync)` —
+the rows amortized over enough operations to hold steady. Absolute thresholds
+still apply to every row, so a catastrophic change is caught regardless.
+
+The general rule: if a benchmark's per-operation cost is near the runner's
+timing floor, measure it and watch the trend, but do not let it fail a build.
 
 **One set of suite definitions.** `suites/` is the single source of truth, used
 by the gate, the comparison, and the local HTTP report. Two copies would drift,

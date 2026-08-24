@@ -9,6 +9,13 @@ export interface BenchCase {
    * cases that only make sense as a relative comparison.
    */
   readonly threshold?: number;
+  /**
+   * Whether a regression in this specific case may fail the build. Defaults to
+   * the suite's setting. Set false for a case whose per-operation cost is too
+   * small to measure reliably on a shared runner — it is still measured,
+   * reported and recorded in the trend, just never build-failing.
+   */
+  readonly gating?: boolean;
   readonly run: () => unknown | Promise<unknown>;
 }
 

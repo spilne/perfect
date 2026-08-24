@@ -93,7 +93,7 @@ for (const suite of suites) {
           p99: Number.NaN,
           samples: 0,
           threshold: c.threshold,
-          gating: suite.gating ?? true,
+          gating: c.gating ?? suite.gating ?? true,
           unavailable: failure,
         });
         continue;
@@ -114,7 +114,7 @@ for (const suite of suites) {
         p99: stats.p99 / c.divisor,
         samples: SAMPLES,
         threshold: c.threshold,
-        gating: suite.gating ?? true,
+        gating: c.gating ?? suite.gating ?? true,
       });
       const last = results[results.length - 1]!;
       console.log(
