@@ -30,13 +30,13 @@ on:
 
 permissions:
   contents: read
-  # Pages publishing is temporarily disabled.
-  # pages: write
-  # id-token: write
+  pages: write
+  id-token: write
 
 concurrency:
-  group: documentation
-  # group: pages
+  # Pages allows one in-flight deployment; queue rather than cancel so a
+  # merge train cannot leave the site built from an older commit.
+  group: pages
   cancel-in-progress: false
 
 jobs:
@@ -59,20 +59,26 @@ jobs:
       - name: Build site
         run: bun run documentation:build:html
 
-      # Pages publishing is temporarily disabled. Re-enable these steps and
-      # the deploy job below when documentation hosting should resume.
-      # - uses: actions/configure-pages@v5
-      #
-      # - uses: actions/upload-pages-artifact@v3
-      #   with:
-      #     path: documentation/.vitepress/dist
+      # Only upload from main. A PR still builds the site above, so breakage is
+      # caught before merge, but must not be able to publish it.
+      - uses: actions/configure-pages@v5
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
 
-  # deploy:
-  #   needs: check
-  #   runs-on: ubuntu-latest
-  #   environment:
-  #     name: github-pages
-  #     url: ${{ steps.deployment.outputs.page_url }}
-  #   steps:
-  #     - id: deployment
-  #       uses: actions/deploy-pages@v4
+      - uses: actions/upload-pages-artifact@v4
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        with:
+          path: documentation/.vitepress/dist
+
+  deploy:
+    needs: check
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
