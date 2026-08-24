@@ -1,10 +1,10 @@
 # Performance history
 
-Last 5 run(s) of 5 recorded. Medians in each benchmark's own unit (ns/op or ns/item). Absolute values are only comparable within a runner class — the trend is the signal, not the number.
+Last 6 run(s) of 6 recorded. Medians in each benchmark's own unit (ns/op or ns/item). Absolute values are only comparable within a runner class — the trend is the signal, not the number.
 
 ## core/all x100 run
 
-latest **19.36** · window min 15.93 / max 20.19 · drift across window +5.3%
+latest **19.27** · window min 15.93 / max 20.19 · drift across window +4.9%
 
 | run | commit | median |
 |---:|---|---:|
@@ -13,10 +13,11 @@ latest **19.36** · window min 15.93 / max 20.19 · drift across window +5.3%
 | 2026-08-24 | `6497f365` | 20.19 |
 | 2026-08-24 | `0dc21388` | 19.26 |
 | 2026-08-24 | `22e7fca6` | 19.36 |
+| 2026-08-24 | `54856bca` | 19.27 |
 
 ## core/flatMap chain x10k runSync
 
-latest **22.19** · window min 22.17 / max 35.81 · drift across window +0.1%
+latest **26.02** · window min 22.17 / max 35.81 · drift across window +17.4%
 
 | run | commit | median |
 |---:|---|---:|
@@ -25,10 +26,11 @@ latest **22.19** · window min 22.17 / max 35.81 · drift across window +0.1%
 | 2026-08-24 | `6497f365` | 31.88 |
 | 2026-08-24 | `0dc21388` | 35.81 |
 | 2026-08-24 | `22e7fca6` | 22.19 |
+| 2026-08-24 | `54856bca` | 26.02 |
 
 ## core/run(sync)
 
-latest **370.16** · window min 318.44 / max 393.43 · drift across window +3.3%
+latest **353.93** · window min 318.44 / max 393.43 · drift across window -1.2%
 
 | run | commit | median |
 |---:|---|---:|
@@ -37,10 +39,11 @@ latest **370.16** · window min 318.44 / max 393.43 · drift across window +3.3%
 | 2026-08-24 | `6497f365` | 393.43 |
 | 2026-08-24 | `0dc21388` | 330.62 |
 | 2026-08-24 | `22e7fca6` | 370.16 |
+| 2026-08-24 | `54856bca` | 353.93 |
 
 ## core/runSync(succeed)
 
-latest **19.18** · window min 19.18 / max 48.32 · drift across window -60.3%
+latest **33.42** · window min 19.18 / max 48.32 · drift across window -30.8%
 
 | run | commit | median |
 |---:|---|---:|
@@ -49,10 +52,11 @@ latest **19.18** · window min 19.18 / max 48.32 · drift across window -60.3%
 | 2026-08-24 | `6497f365` | 34.53 |
 | 2026-08-24 | `0dc21388` | 31.66 |
 | 2026-08-24 | `22e7fca6` | 19.18 |
+| 2026-08-24 | `54856bca` | 33.42 |
 
 ## core/stream map/filter/take
 
-latest **4.75** · window min 3.83 / max 5.13 · drift across window -6.8%
+latest **5.90** · window min 3.83 / max 5.90 · drift across window +15.7%
 
 | run | commit | median |
 |---:|---|---:|
@@ -61,10 +65,11 @@ latest **4.75** · window min 3.83 / max 5.13 · drift across window -6.8%
 | 2026-08-24 | `6497f365` | 4.43 |
 | 2026-08-24 | `0dc21388` | 3.83 |
 | 2026-08-24 | `22e7fca6` | 4.75 |
+| 2026-08-24 | `54856bca` | 5.90 |
 
 ## http/GET @perfect/http client
 
-latest **165039.00** · window min 98248.00 / max 193624.00 · drift across window -14.8%
+latest **118566.00** · window min 98248.00 / max 193624.00 · drift across window -38.8%
 
 | run | commit | median |
 |---:|---|---:|
@@ -73,10 +78,11 @@ latest **165039.00** · window min 98248.00 / max 193624.00 · drift across wind
 | 2026-08-24 | `6497f365` | 112757.00 |
 | 2026-08-24 | `0dc21388` | 142020.00 |
 | 2026-08-24 | `22e7fca6` | 165039.00 |
+| 2026-08-24 | `54856bca` | 118566.00 |
 
 ## http/GET @perfect/http httpRequestJson
 
-latest **167674.00** · window min 108292.00 / max 179147.00 · drift across window -6.4%
+latest **135331.00** · window min 108292.00 / max 179147.00 · drift across window -24.5%
 
 | run | commit | median |
 |---:|---|---:|
@@ -85,10 +91,11 @@ latest **167674.00** · window min 108292.00 / max 179147.00 · drift across win
 | 2026-08-24 | `6497f365` | 114287.00 |
 | 2026-08-24 | `0dc21388` | 135380.00 |
 | 2026-08-24 | `22e7fca6` | 167674.00 |
+| 2026-08-24 | `54856bca` | 135331.00 |
 
 ## http/GET axios
 
-latest **371435.00** · window min 314412.00 / max 394954.00 · drift across window -5.6%
+latest **357600.00** · window min 314412.00 / max 394954.00 · drift across window -9.1%
 
 | run | commit | median |
 |---:|---|---:|
@@ -97,10 +104,11 @@ latest **371435.00** · window min 314412.00 / max 394954.00 · drift across win
 | 2026-08-24 | `6497f365` | 357537.00 |
 | 2026-08-24 | `0dc21388` | 394954.00 |
 | 2026-08-24 | `22e7fca6` | 371435.00 |
+| 2026-08-24 | `54856bca` | 357600.00 |
 
 ## http/GET fetch (baseline)
 
-latest **124823.00** · window min 70535.00 / max 152106.00 · drift across window -17.9%
+latest **85717.00** · window min 70535.00 / max 152106.00 · drift across window -43.6%
 
 | run | commit | median |
 |---:|---|---:|
@@ -109,10 +117,11 @@ latest **124823.00** · window min 70535.00 / max 152106.00 · drift across wind
 | 2026-08-24 | `6497f365` | 82677.00 |
 | 2026-08-24 | `0dc21388` | 89282.00 |
 | 2026-08-24 | `22e7fca6` | 124823.00 |
+| 2026-08-24 | `54856bca` | 85717.00 |
 
 ## http/GET node-fetch
 
-latest **123491.00** · window min 87672.00 / max 172013.00 · drift across window -28.2%
+latest **113388.00** · window min 87672.00 / max 172013.00 · drift across window -34.1%
 
 | run | commit | median |
 |---:|---|---:|
@@ -121,10 +130,11 @@ latest **123491.00** · window min 87672.00 / max 172013.00 · drift across wind
 | 2026-08-24 | `6497f365` | 96910.00 |
 | 2026-08-24 | `0dc21388` | 112747.00 |
 | 2026-08-24 | `22e7fca6` | 123491.00 |
+| 2026-08-24 | `54856bca` | 113388.00 |
 
 ## http/GET undici.request
 
-latest **127569.00** · window min 79340.00 / max 165187.00 · drift across window -22.8%
+latest **100508.00** · window min 79340.00 / max 165187.00 · drift across window -39.2%
 
 | run | commit | median |
 |---:|---|---:|
@@ -133,10 +143,11 @@ latest **127569.00** · window min 79340.00 / max 165187.00 · drift across wind
 | 2026-08-24 | `6497f365` | 99054.00 |
 | 2026-08-24 | `0dc21388` | 96963.00 |
 | 2026-08-24 | `22e7fca6` | 127569.00 |
+| 2026-08-24 | `54856bca` | 100508.00 |
 
 ## http/POST @perfect/http client
 
-latest **165760.00** · window min 104747.00 / max 189256.00 · drift across window -12.4%
+latest **169561.00** · window min 104747.00 / max 189256.00 · drift across window -10.4%
 
 | run | commit | median |
 |---:|---|---:|
@@ -145,10 +156,11 @@ latest **165760.00** · window min 104747.00 / max 189256.00 · drift across win
 | 2026-08-24 | `6497f365` | 125414.00 |
 | 2026-08-24 | `0dc21388` | 172115.00 |
 | 2026-08-24 | `22e7fca6` | 165760.00 |
+| 2026-08-24 | `54856bca` | 169561.00 |
 
 ## http/POST axios
 
-latest **398005.00** · window min 317536.00 / max 400663.00 · drift across window +4.4%
+latest **402461.00** · window min 317536.00 / max 402461.00 · drift across window +5.6%
 
 | run | commit | median |
 |---:|---|---:|
@@ -157,10 +169,11 @@ latest **398005.00** · window min 317536.00 / max 400663.00 · drift across win
 | 2026-08-24 | `6497f365` | 352890.00 |
 | 2026-08-24 | `0dc21388` | 400663.00 |
 | 2026-08-24 | `22e7fca6` | 398005.00 |
+| 2026-08-24 | `54856bca` | 402461.00 |
 
 ## http/POST fetch (baseline)
 
-latest **152034.00** · window min 73811.00 / max 156574.00 · drift across window -2.9%
+latest **100218.00** · window min 73811.00 / max 156574.00 · drift across window -36.0%
 
 | run | commit | median |
 |---:|---|---:|
@@ -169,4 +182,5 @@ latest **152034.00** · window min 73811.00 / max 156574.00 · drift across wind
 | 2026-08-24 | `6497f365` | 85915.00 |
 | 2026-08-24 | `0dc21388` | 108531.00 |
 | 2026-08-24 | `22e7fca6` | 152034.00 |
+| 2026-08-24 | `54856bca` | 100218.00 |
 
