@@ -34,8 +34,8 @@ permissions:
   id-token: write
 
 concurrency:
-  # Pages allows one in-flight deployment; queue rather than cancel so a
-  # merge train cannot leave the site built from an older commit.
+  # Shared with release.yml: Pages allows one in-flight deployment, and
+  # cancelling mid-flight can leave the live site built from an older commit.
   group: pages
   cancel-in-progress: false
 
@@ -59,19 +59,21 @@ jobs:
       - name: Build site
         run: bun run documentation:build:html
 
-      # Only upload from main. A PR still builds the site above, so breakage is
-      # caught before merge, but must not be able to publish it.
+      # Publishing happens in release.yml, when packages actually publish, so
+      # the site always matches the released version rather than whatever last
+      # landed on main. These steps run only for a manual dispatch, which is the
+      # escape hatch for fixing the live site without cutting a release.
       - uses: actions/configure-pages@v5
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        if: github.event_name == 'workflow_dispatch'
 
       - uses: actions/upload-pages-artifact@v4
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        if: github.event_name == 'workflow_dispatch'
         with:
           path: documentation/.vitepress/dist
 
   deploy:
     needs: check
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       pages: write

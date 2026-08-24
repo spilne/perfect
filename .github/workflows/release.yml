@@ -8,6 +8,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  pages: write
   id-token: write
 
 env:
@@ -45,6 +46,7 @@ jobs:
       - run: bun run ci
 
       - name: Create version PR or publish packages
+        id: changesets
         uses: changesets/action@v2
         with:
           version-script: bun run version-packages
@@ -53,3 +55,40 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # Documentation publishes with the release, not on every push to main, so
+      # the live site always describes the version that is actually on npm.
+      # `published` is false when this run only opened or updated the version
+      # PR, which is most runs -- those must not deploy.
+      - name: Build the documentation site
+        if: steps.changesets.outputs.published == 'true'
+        run: bun run documentation:build:html
+
+      - uses: actions/configure-pages@v5
+        if: steps.changesets.outputs.published == 'true'
+
+      - uses: actions/upload-pages-artifact@v4
+        if: steps.changesets.outputs.published == 'true'
+        with:
+          path: documentation/.vitepress/dist
+
+    outputs:
+      published: ${{ steps.changesets.outputs.published }}
+
+  deploy-docs:
+    needs: release
+    if: needs.release.outputs.published == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    # Shares the `pages` group with docs.yml: only one deployment in flight.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
