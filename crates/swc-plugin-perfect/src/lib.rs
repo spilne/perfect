@@ -71,8 +71,8 @@ impl PerfectTransformVisitor {
 
     fn transform_eff_block(&self, arrow: &ArrowExpr) -> Option<Expr> {
         let body = match &*arrow.body {
-            BlockStmtOrExpr::BlockStmt(block) => &block.stmts,
-            BlockStmtOrExpr::Expr(e) => {
+            ArrowFunctionBody::FunctionBody(block) => &block.stmts,
+            ArrowFunctionBody::Expr(e) => {
                 if let Some(inner) = self.extract_dollar_from_expr(e) {
                     return Some(inner);
                 }
@@ -354,7 +354,7 @@ impl PerfectTransformVisitor {
                 expr: Box::new(Expr::Arrow(ArrowExpr {
                     span,
                     params: vec![param],
-                    body: Box::new(BlockStmtOrExpr::Expr(Box::new(body))),
+                    body: Box::new(ArrowFunctionBody::Expr(Box::new(body))),
                     is_async: false,
                     is_generator: false,
                     type_params: None,
@@ -380,7 +380,7 @@ impl PerfectTransformVisitor {
                 expr: Box::new(Expr::Arrow(ArrowExpr {
                     span,
                     params: vec![],
-                    body: Box::new(BlockStmtOrExpr::Expr(Box::new(body))),
+                    body: Box::new(ArrowFunctionBody::Expr(Box::new(body))),
                     is_async: false,
                     is_generator: false,
                     type_params: None,
@@ -419,7 +419,7 @@ impl PerfectTransformVisitor {
                 expr: Box::new(Expr::Arrow(ArrowExpr {
                     span,
                     params: vec![],
-                    body: Box::new(BlockStmtOrExpr::Expr(Box::new(expr))),
+                    body: Box::new(ArrowFunctionBody::Expr(Box::new(expr))),
                     is_async: false,
                     is_generator: false,
                     type_params: None,
@@ -447,10 +447,9 @@ impl PerfectTransformVisitor {
                 expr: Box::new(Expr::Arrow(ArrowExpr {
                     span,
                     params: vec![],
-                    body: Box::new(BlockStmtOrExpr::BlockStmt(BlockStmt {
+                    body: Box::new(ArrowFunctionBody::FunctionBody(FunctionBody {
                         span,
                         stmts: vec![stmt],
-                        ctxt: Default::default(),
                     })),
                     is_async: false,
                     is_generator: false,

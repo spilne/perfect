@@ -435,15 +435,13 @@ export class DefaultHttpClient extends AbstractHttpClient {
       ).flatMap((meta: any) =>
         // Decoder returns a Promise — bridge via tryPromise
         succeed(null).flatMap(() => {
-          return decodeResponse(meta.response, decoder).map(
-            (body: T): HttpResponse<T> => ({
-              status: meta.status,
-              headers: meta.headers,
-              contentType: meta.contentType,
-              contentLength: meta.contentLength,
-              body,
-            }),
-          );
+          return decodeResponse(meta.response, decoder).map((body: T): HttpResponse<T> => ({
+            status: meta.status,
+            headers: meta.headers,
+            contentType: meta.contentType,
+            contentLength: meta.contentLength,
+            body,
+          }));
         }),
       ),
     ) as Eff<HttpResponse<T>, Throws<HttpClientError>>;

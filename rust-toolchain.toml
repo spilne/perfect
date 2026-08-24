@@ -1,22 +1,16 @@
-# Pinned, not "stable".
+# Back to floating `stable` as of 2026-08-23.
 #
-# CI floated to rustc 1.98.0 on 2026-08-20 and the wasm32-wasip1 link broke:
+# History worth keeping: this was briefly pinned to 1.90.0 because CI's stable
+# reached 1.98.0 and the wasm32-wasip1 link began rejecting SWC's host imports
+# (`undefined symbol: __set_transform_result`). The real cause was swc_core 63,
+# which predates that linker behaviour. Upgrading to swc_core 77 fixed it at the
+# source — verified by building this crate on 1.98.0, which links cleanly.
 #
-#   rust-lld: error: undefined symbol: __set_transform_result
-#   rust-lld: error: undefined symbol: __emit_diagnostics
-#
-# Those are SWC host functions. A plugin is meant to leave them undefined so the
-# WASM runtime supplies them at load time, and newer rust-lld stopped accepting
-# that by default. The same crate links cleanly on 1.90.0.
-#
-# A floating channel means a toolchain release can break the build with no
-# change on our side and no way to reproduce an older green run — exactly what
-# happened. Bumping this is now a deliberate, reviewable commit.
-#
-# To move forward: raise the channel, run `bun run build:swc`, and if the
-# undefined-symbol error returns, either upgrade swc_core to a release that
-# handles the newer linker or add the wasm-ld opt-in for undefined imports.
+# If that error ever returns, it means swc_core has fallen behind the toolchain
+# again. Upgrade swc_core rather than pinning rustc, and remember the JS-side
+# @swc/core must move with it: the plugin runner refuses a plugin built against
+# an incompatible swc_core.
 [toolchain]
-channel = "1.90.0"
+channel = "stable"
 profile = "minimal"
 targets = ["wasm32-wasip1"]
