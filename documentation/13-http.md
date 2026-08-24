@@ -189,6 +189,16 @@ import { type ResponseParser, DefaultHttpClient, RetryAttempt, withRetryAll } fr
 // withRetryAll exposes the full RetryAttempt ADT. Use it to retry on
 // "not ready" success values (polling), thrown defects, or any combination
 // of HTTP errors. The shouldRetry predicate sees every outcome.
+interface User {
+  id: number;
+  name: string;
+}
+const UserSchema: ResponseParser<User> = {
+  safeParse: (d: any) =>
+    d && typeof d.id === "number" && typeof d.name === "string"
+      ? { success: true, data: d }
+      : { success: false, error: "no" },
+};
 interface JobStatus {
   state: "pending" | "done";
   result?: number;
@@ -221,30 +231,19 @@ console.log(t2.attempts); // → 3
 
 <!-- @embed packages/http/examples/03-retry.ts#retryHttp -->
 ```ts
-import { type ResponseParser, DefaultHttpClient, retryHttp } from "@perfect/http";
+import { DefaultHttpClient, retryHttp } from "@perfect/http";
 
-// retryHttp is a HTTP-focused wrapper with RetryAttempt defaults:
-// retry only HTTP errors that match HTTP_RETRYABLE.
-interface User {
-  id: number;
-  name: string;
-}
-const UserSchema: ResponseParser<User> = {
-  safeParse: (d: any) =>
-    d && typeof d.id === "number" && typeof d.name === "string"
-      ? { success: true, data: d }
-      : { success: false, error: "not user" },
-};
-const t = new ScriptedTransport([
+// retryHttp uses HTTP_RETRYABLE defaults for common transient failure patterns.
+const t4 = new ScriptedTransport([
   new Response("down", { status: 503 }),
   new Response("down", { status: 503 }),
-  new Response(JSON.stringify({ id: 1, name: "alice" }), { status: 200, headers: { "content-type": "application/json" } }),
+  json({ id: 1, name: "alice" }),
 ]);
-const client = new DefaultHttpClient({ transport: t });
+const client4 = new DefaultHttpClient({ transport: t4 });
 
-const user = await retryHttp(client.get("/u", UserSchema), { baseDelayMs: 1 }).run();
+const user = await retryHttp(client4.get("/u", UserSchema), { baseDelayMs: 1 }).run();
 console.log(user); // → { id: 1, name: "alice" }
-console.log(t.attempts); // → 3
+console.log(t4.attempts); // → 3
 ```
 <!-- @end -->
 
@@ -252,30 +251,19 @@ console.log(t.attempts); // → 3
 
 <!-- @embed packages/http/examples/03-retry.ts#retry-namespace-http -->
 ```ts
-import { type ResponseParser, DefaultHttpClient, Retry } from "@perfect/http";
+import { DefaultHttpClient, Retry } from "@perfect/http";
 
-// Same behavior as retryHttp, but kept under a namespace for a fluent-style
-// import surface.
-interface User {
-  id: number;
-  name: string;
-}
-const UserSchema: ResponseParser<User> = {
-  safeParse: (d: any) =>
-    d && typeof d.id === "number" && typeof d.name === "string"
-      ? { success: true, data: d }
-      : { success: false, error: "not user" },
-};
-const t = new ScriptedTransport([
+// Namespace-style access from import. Same behavior, different call style.
+const t5 = new ScriptedTransport([
   new Response("down", { status: 503 }),
   new Response("down", { status: 503 }),
-  new Response(JSON.stringify({ id: 1, name: "alice" }), { status: 200, headers: { "content-type": "application/json" } }),
+  json({ id: 1, name: "alice" }),
 ]);
-const client = new DefaultHttpClient({ transport: t });
+const client5 = new DefaultHttpClient({ transport: t5 });
 
-const user2 = await Retry.http(client.get("/u", UserSchema), { baseDelayMs: 1 }).run();
+const user2 = await Retry.http(client5.get("/u", UserSchema), { baseDelayMs: 1 }).run();
 console.log(user2); // → { id: 1, name: "alice" }
-console.log(t.attempts); // → 3
+console.log(t5.attempts); // → 3
 ```
 <!-- @end -->
 
