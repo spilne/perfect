@@ -1,6 +1,6 @@
-import type { Eff, QueueClosed, SubscriptionRef, Throws } from "@perfect/core";
-import type { Codec } from "@perfect/core/connect";
-import { Stream } from "@perfect/core/stream";
+import type { Eff, QueueClosed, SubscriptionRef, Throws } from "@spilne/perfect-core";
+import type { Codec } from "@spilne/perfect-core/connect";
+import { Stream } from "@spilne/perfect-core/stream";
 import type { RedisClient } from "./redis-client";
 import { RedisError } from "./redis-error";
 import { RedisPubSub } from "./redis-pubsub";

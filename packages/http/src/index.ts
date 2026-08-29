@@ -1,4 +1,4 @@
-// @perfect/http — Phases 1, 2 & 3.
+// @spilne/perfect-http — Phases 1, 2 & 3.
 //
 // Roadmap in `docs/plan-http.md`.
 //   Phase 1: typed errors, transport, decoders, httpFetch*/httpRequest*

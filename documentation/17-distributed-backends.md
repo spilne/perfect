@@ -9,12 +9,12 @@ without changing their coordination logic.
 Install the adapter and inject any client satisfying `RedisClient`:
 
 ```bash
-bun add @perfect/redis ioredis
+bun add @spilne/perfect-redis ioredis
 ```
 
 ```ts
 import Redis from "ioredis";
-import { RedisRef, type RedisClient } from "@perfect/redis";
+import { RedisRef, type RedisClient } from "@spilne/perfect-redis";
 
 const redis = new Redis("redis://localhost:6379") as unknown as RedisClient;
 const counter = await RedisRef.make({ redis, key: "counter", initial: 0 }).run();
@@ -53,7 +53,7 @@ explicitly when reconnect behavior is appropriate.
 ## PostgreSQL
 
 ```bash
-bun add @perfect/postgres drizzle-orm postgres
+bun add @spilne/perfect-postgres drizzle-orm postgres
 ```
 
 The root package exports `PgQueue`, `PgChangeStream`, `PgRateLimiter`,
@@ -80,8 +80,8 @@ helpers are exported for applications that manage migrations explicitly.
 PGMQ lives under a separate export:
 
 ```ts
-import { createPostgresDb } from "@perfect/postgres";
-import { PgmqQueue } from "@perfect/postgres/pgmq";
+import { createPostgresDb } from "@spilne/perfect-postgres";
+import { PgmqQueue } from "@spilne/perfect-postgres/pgmq";
 
 const db = createPostgresDb(process.env.DATABASE_URL!);
 const jobs = await PgmqQueue.create<{ userId: string; sequence: number }>(
@@ -103,7 +103,7 @@ with another group.
 Schema validation is optional. `onSchemaError` can be `"throw"`, `"skip"`, or
 `"dlq"`; the loud typed failure is the default.
 
-The `@perfect/postgres/pgmq` subpath also exports the low-level PGMQ operations
+The `@spilne/perfect-postgres/pgmq` subpath also exports the low-level PGMQ operations
 for queue creation, batched send, read/pop, delete/archive, visibility changes,
 metrics, notifications, and FIFO index creation. Use those when the
 `Streamable`/`Sinkable`/`Acknowledgeable` wrapper is not the desired boundary.
@@ -113,7 +113,7 @@ metrics, notifications, and FIFO index creation. Use those when the
 `PgPartitionedStateBackend` stores partition-scoped state, source progress,
 checkpoints, dedupe records, owner leases, and fencing epochs. When a
 `PgmqQueue` source, `PgmqQueue` sink, and this state backend share the same
-Drizzle database object, `@perfect/topology` can atomically publish output,
+Drizzle database object, `@spilne/perfect-topology` can atomically publish output,
 commit state/progress, and delete/archive the source message in one PostgreSQL
 transaction.
 

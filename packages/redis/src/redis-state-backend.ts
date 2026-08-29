@@ -1,5 +1,5 @@
-import type { Codec, StateBackend, CheckpointName } from "@perfect/core/connect";
-import { JsonCodec } from "@perfect/core/connect";
+import type { Codec, StateBackend, CheckpointName } from "@spilne/perfect-core/connect";
+import { JsonCodec } from "@spilne/perfect-core/connect";
 import { decode, encode, redisKeyFamily } from "./internal";
 import type { RedisClient } from "./redis-client";
 

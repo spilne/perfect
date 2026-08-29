@@ -9,7 +9,7 @@
     "build": "tsc --noEmit && vite build"
   },
   "dependencies": {
-    "@perfect/core": "^0.1.0"
+    "@spilne/perfect-core": "^0.1.0"
   },
   "devDependencies": {
     "typescript": "^7.0.2",

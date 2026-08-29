@@ -1,16 +1,16 @@
-# @perfect/core
+# @spilne/perfect-core
 
 The Perfect effect runtime — like effect-ts or ZIO, but with a flat union
 type and a fluent API. `Eff<A, S>` is an effect producing `A`, where `S` is a
 flat union of effect tags: `Throws<E>` for typed errors, `Needs<D>` for typed
 dependencies. Compose with `.flatMap()`, `.map()`, `.catch()` — no `pipe()`.
-Everything else in the Perfect stack (`@perfect/http`, `@perfect/kafka`,
-`@perfect/topology`, …) is built on this package.
+Everything else in the Perfect stack (`@spilne/perfect-http`, `@spilne/perfect-kafka`,
+`@spilne/perfect-topology`, …) is built on this package.
 
 ## Install
 
 ```bash
-bun add @perfect/core
+bun add @spilne/perfect-core
 ```
 
 > Not yet published to npm — install from the workspace for now.
@@ -18,7 +18,7 @@ bun add @perfect/core
 ## Quickstart
 
 ```ts
-import { eff, succeed, fail, type Eff, type Throws } from "@perfect/core";
+import { eff, succeed, fail, type Eff, type Throws } from "@spilne/perfect-core";
 
 type Err = { _tag: "NotFound"; id: number };
 
@@ -39,7 +39,7 @@ the `Throws<Err>` is gone, so the compiler knows the program can't fail.
 Services work the same way — a dependency is an effect tag until you provide it:
 
 ```ts
-import { eff, succeed, service, provide, type Eff } from "@perfect/core";
+import { eff, succeed, service, provide, type Eff } from "@spilne/perfect-core";
 
 interface Greeter {
   greet(name: string): Eff<string, never>;
@@ -68,7 +68,7 @@ const a = eff(function* () {
 // Composed .flatMap (fastest)
 const b = succeed(21).flatMap((x) => succeed(x * 2));
 
-// eff($) sugar (cleanest — needs @perfect/swc-plugin or @perfect/transform)
+// eff($) sugar (cleanest — needs @spilne/perfect-swc-plugin or @spilne/perfect-transform)
 const c = eff(($) => {
   const x = $(succeed(21));
   return x * 2;
@@ -111,21 +111,21 @@ Each is also a fluent method: `program.run()`, `.runSync()`, `.runExit()`, `.run
 - **Resilience** — `CircuitBreaker`, `RateLimiter`, `Throttle`,
   `Singleflight`, `cached` / `CacheStore`
 - **Observability** — `Logger`, `Tracer` / `withSpan`, `Metrics` (`Counter`,
-  `Gauge`, `Histogram`) — bridge to OpenTelemetry via `@perfect/otel`
+  `Gauge`, `Histogram`) — bridge to OpenTelemetry via `@spilne/perfect-otel`
 - **Testing** — `TestClock`, `TestRandom`, `TestConsole`, `TestLogger`,
   `TestTracer`, property testing with `Gen` / `forAll`
 - **Utilities** — `Duration`, typeclasses (`Eq`, `Ord`, `Show`, `Monoid`)
 
 ## Subpath exports
 
-| Import                  | Contents                                                                                                                                                                 |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `@perfect/core`         | Everything above                                                                                                                                                         |
-| `@perfect/core/stream`  | `Stream`, `Chunk`, `Sink`, `Pipes` (also re-exported from root)                                                                                                          |
-| `@perfect/core/retry`   | `RetryPolicy`, `Schedule`, `retryWith`, and scheduled repetition                                                                                                         |
-| `@perfect/core/connect` | Queue-agnostic endpoint contracts (`Streamable`, `Sinkable`, `Envelope`, `Codec`, `OffsetTracker`, …) — implemented by `@perfect/kafka`, consumed by `@perfect/topology` |
-| `@perfect/core/syntax`  | The `eff` comprehension entry point                                                                                                                                      |
-| `@perfect/core/worker`  | `WorkerPool`                                                                                                                                                             |
+| Import                         | Contents                                                                                                                                                                               |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@spilne/perfect-core`         | Everything above                                                                                                                                                                       |
+| `@spilne/perfect-core/stream`  | `Stream`, `Chunk`, `Sink`, `Pipes` (also re-exported from root)                                                                                                                        |
+| `@spilne/perfect-core/retry`   | `RetryPolicy`, `Schedule`, `retryWith`, and scheduled repetition                                                                                                                       |
+| `@spilne/perfect-core/connect` | Queue-agnostic endpoint contracts (`Streamable`, `Sinkable`, `Envelope`, `Codec`, `OffsetTracker`, …) — implemented by `@spilne/perfect-kafka`, consumed by `@spilne/perfect-topology` |
+| `@spilne/perfect-core/syntax`  | The `eff` comprehension entry point                                                                                                                                                    |
+| `@spilne/perfect-core/worker`  | `WorkerPool`                                                                                                                                                                           |
 
 ## Links
 

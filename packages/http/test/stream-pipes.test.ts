@@ -2,7 +2,7 @@
 // thin wrappers the user can swap for any Stream pipeline.
 
 import { describe, test, expect } from "bun:test";
-import { type Eff, type Throws, succeed, fail, sync, run, Pipes } from "@perfect/core";
+import { type Eff, type Throws, succeed, fail, sync, run, Pipes } from "@spilne/perfect-core";
 import {
   type HttpClientError,
   type HttpRequestOptions,

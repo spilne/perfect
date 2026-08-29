@@ -1,5 +1,5 @@
 {
-  "name": "@perfect/http",
+  "name": "@spilne/perfect-http",
   "sourceRoot": "packages/http/src",
   "targets": {
     "build": {},

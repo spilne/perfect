@@ -7,9 +7,9 @@
 // batch); database and schema failures remain in the Stream effect channel.
 // ---------------------------------------------------------------------------
 
-import { fromPromise, type Eff, type Throws } from "@perfect/core";
-import { Stream, type SchemaParser } from "@perfect/core/stream";
-import { JsonCodec } from "@perfect/core/connect";
+import { fromPromise, type Eff, type Throws } from "@spilne/perfect-core";
+import { Stream, type SchemaParser } from "@spilne/perfect-core/stream";
+import { JsonCodec } from "@spilne/perfect-core/connect";
 import type {
   Streamable,
   Sinkable,
@@ -18,7 +18,7 @@ import type {
   ConsumerGroup,
   TransactionalEnvelope,
   TransactionalSinkable,
-} from "@perfect/core/connect";
+} from "@spilne/perfect-core/connect";
 import type { DrizzleDb } from "../lib/drizzle-db";
 import { pollStream } from "../lib/poll-stream";
 import { PostgresError, toPostgresError } from "../lib/postgres-error";

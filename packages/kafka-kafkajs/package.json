@@ -1,7 +1,7 @@
 {
-  "name": "@perfect/kafka-kafkajs",
+  "name": "@spilne/perfect-kafka-kafkajs",
   "version": "0.1.0",
-  "description": "KafkaJS driver adapter for @perfect/kafka.",
+  "description": "KafkaJS driver adapter for @spilne/perfect-kafka.",
   "keywords": [
     "effect",
     "kafka",
@@ -42,7 +42,7 @@
     "build": "bun ../../scripts/build-package.ts ."
   },
   "dependencies": {
-    "@perfect/kafka": "^0.1.0"
+    "@spilne/perfect-kafka": "^0.1.0"
   },
   "devDependencies": {
     "kafkajs": "^2.2.4"

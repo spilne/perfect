@@ -1,5 +1,5 @@
-import { succeed } from "@perfect/core";
-import type { Barrier, Eff, Throws } from "@perfect/core";
+import { succeed } from "@spilne/perfect-core";
+import type { Barrier, Eff, Throws } from "@spilne/perfect-core";
 import { numberResult, redisBlocking, redisEff, redisKeyFamily } from "./internal";
 import type { RedisClient } from "./redis-client";
 import { RedisError } from "./redis-error";

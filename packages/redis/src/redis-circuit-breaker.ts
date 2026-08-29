@@ -1,4 +1,4 @@
-import { fail, succeed } from "@perfect/core";
+import { fail, succeed } from "@spilne/perfect-core";
 import type {
   CircuitBreaker,
   CircuitBreakerOptions,
@@ -6,7 +6,7 @@ import type {
   CircuitState,
   Eff,
   Throws,
-} from "@perfect/core";
+} from "@spilne/perfect-core";
 import { redisEff } from "./internal";
 import type { RedisClient } from "./redis-client";
 import { RedisError } from "./redis-error";

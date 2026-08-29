@@ -6,8 +6,8 @@
     "rootDir": "src",
     "declarationDir": "dist/types",
     "paths": {
-      "@perfect/core": ["../core/dist/types/index.d.ts"],
-      "@perfect/core/*": ["../core/dist/types/*"]
+      "@spilne/perfect-core": ["../core/dist/types/index.d.ts"],
+      "@spilne/perfect-core/*": ["../core/dist/types/*"]
     }
   },
   "include": ["src"]

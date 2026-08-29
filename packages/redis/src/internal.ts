@@ -1,6 +1,6 @@
-import { async, fail, fromPromise, succeed } from "@perfect/core";
-import type { Codec } from "@perfect/core/connect";
-import type { Eff, Throws } from "@perfect/core";
+import { async, fail, fromPromise, succeed } from "@spilne/perfect-core";
+import type { Codec } from "@spilne/perfect-core/connect";
+import type { Eff, Throws } from "@spilne/perfect-core";
 import { closeRedisClient, type RedisClient } from "./redis-client";
 import { RedisError, toRedisError } from "./redis-error";
 

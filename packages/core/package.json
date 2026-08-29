@@ -1,5 +1,5 @@
 {
-  "name": "@perfect/core",
+  "name": "@spilne/perfect-core",
   "version": "0.1.0",
   "description": "TypeScript effect runtime — Eff<A,S> with typed errors and dependencies, fibers, structured concurrency, pull-based streams, and messaging contracts.",
   "keywords": [

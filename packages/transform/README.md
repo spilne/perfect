@@ -1,10 +1,10 @@
-# @perfect/transform
+# @spilne/perfect-transform
 
 Source-text for-comprehension compiler for Perfect: a TypeScript rewriter
 plus Bun plugins that wrap it. It desugars two syntaxes before the TS parser
 sees the file — the `eff(($) => …)` sugar and the Scala-style
 `for { x <- e } yield` comprehension. For bundler builds (Next.js, Vite) the
-canonical `eff($)` compiler is `@perfect/swc-plugin` (AST-level, source
+canonical `eff($)` compiler is `@spilne/perfect-swc-plugin` (AST-level, source
 maps); this package covers Bun preload workflows and is the _only_ home of
 the `for {} yield` syntax, which is not valid TypeScript and therefore can't
 be handled by any AST plugin.
@@ -12,7 +12,7 @@ be handled by any AST plugin.
 ## Install
 
 ```bash
-bun add @perfect/transform
+bun add @spilne/perfect-transform
 ```
 
 > Not yet published to npm — install from the workspace for now.
@@ -22,13 +22,13 @@ bun add @perfect/transform
 Wire the preload in `bunfig.toml`:
 
 ```toml
-preload = ["@perfect/transform/preload"]
+preload = ["@spilne/perfect-transform/preload"]
 ```
 
 Then both syntaxes work in any `.ts` file (node_modules excluded):
 
 ```ts
-import { eff, succeed } from "@perfect/core";
+import { eff, succeed } from "@spilne/perfect-core";
 
 // eff($) — Eff-specific; becomes a composed .flatMap chain
 const program = eff(($) => {
@@ -51,7 +51,7 @@ desugared output needs them.
 ## Programmatic use
 
 ```ts
-import { rewriteEffBlocks, RewriteError } from "@perfect/transform";
+import { rewriteEffBlocks, RewriteError } from "@spilne/perfect-transform";
 
 const output = rewriteEffBlocks(source);
 // throws RewriteError instead of emitting code with a dangling `$`
@@ -59,12 +59,12 @@ const output = rewriteEffBlocks(source);
 
 ## Entry points
 
-| Import                          | What it does                                                 |
-| ------------------------------- | ------------------------------------------------------------ |
-| `@perfect/transform`            | `rewriteEffBlocks` / `RewriteError` — the pure rewriter      |
-| `@perfect/transform/preload`    | Bun preload: both syntaxes + auto-import, skips node_modules |
-| `@perfect/transform/plugin`     | Bun plugin: `eff($)` only + auto-import                      |
-| `@perfect/transform/bun-plugin` | Bun plugin: both syntaxes, no auto-import                    |
+| Import                                 | What it does                                                 |
+| -------------------------------------- | ------------------------------------------------------------ |
+| `@spilne/perfect-transform`            | `rewriteEffBlocks` / `RewriteError` — the pure rewriter      |
+| `@spilne/perfect-transform/preload`    | Bun preload: both syntaxes + auto-import, skips node_modules |
+| `@spilne/perfect-transform/plugin`     | Bun plugin: `eff($)` only + auto-import                      |
+| `@spilne/perfect-transform/bun-plugin` | Bun plugin: both syntaxes, no auto-import                    |
 
 ## What it handles
 
@@ -83,11 +83,11 @@ const output = rewriteEffBlocks(source);
   SWC-compiled `eff($)` form
 - `$()` inside loops, `try` blocks, callbacks, `if` statements, function-call
   arguments, or larger expressions is rejected with a `RewriteError`. Use the
-  AST-based `@perfect/swc-plugin` for supported `if`/`else` control flow
+  AST-based `@spilne/perfect-swc-plugin` for supported `if`/`else` control flow
 - Comprehensions inside template-literal `${…}` interpolations are not
   transformed
 - Source-text rewriting means no source maps — for `eff($)` with source maps
-  use `@perfect/swc-plugin`
+  use `@spilne/perfect-swc-plugin`
 
 ## Links
 

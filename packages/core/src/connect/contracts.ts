@@ -278,7 +278,7 @@ export interface LeaderElection {
 
 // ── ShuffleTransport — repartition channels for distributed runs ───
 //
-// Lives here (not in @perfect/kafka or @perfect/topology) to break the
+// Lives here (not in @spilne/perfect-kafka or @spilne/perfect-topology) to break the
 // dependency cycle: kafka IMPLEMENTS it, topology CONSUMES it.
 
 export interface ShuffleTransport<T = unknown, S = never> {

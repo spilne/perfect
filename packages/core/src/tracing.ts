@@ -4,7 +4,7 @@
 // anti-goal: no tracing in the hot path).
 //
 //   const traced = withSpan(handler, "handle-request", { route });
-//   provide(traced, Tracer, new TestTracer())   // or the @perfect/otel bridge
+//   provide(traced, Tracer, new TestTracer())   // or the @spilne/perfect-otel bridge
 
 import { type Eff, Suspend, Op } from "./eff";
 import { service, type ServiceTag } from "./service";

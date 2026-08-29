@@ -1,7 +1,7 @@
 {
-  "name": "@perfect/http-otel",
+  "name": "@spilne/perfect-http-otel",
   "version": "0.1.0",
-  "description": "OpenTelemetry tracing middleware and W3C trace propagation for @perfect/http.",
+  "description": "OpenTelemetry tracing middleware and W3C trace propagation for @spilne/perfect-http.",
   "keywords": [
     "effect",
     "http",
@@ -43,8 +43,8 @@
   },
   "dependencies": {
     "@opentelemetry/api": "^1.9.0",
-    "@perfect/core": "^0.1.0",
-    "@perfect/http": "^0.1.0"
+    "@spilne/perfect-core": "^0.1.0",
+    "@spilne/perfect-http": "^0.1.0"
   },
   "devDependencies": {}
 }

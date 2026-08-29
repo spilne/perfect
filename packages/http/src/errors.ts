@@ -3,7 +3,7 @@
 // error class has a static `_tag` (for `.catchTag`) AND is an Error subclass
 // (for `instanceof` + stack traces).
 
-import { TaggedError } from "@perfect/core";
+import { TaggedError } from "@spilne/perfect-core";
 
 /** Network-level failure (DNS, connection refused, socket hang up, fetch aborted). */
 export class HttpNetworkError extends TaggedError("HttpNetworkError")<{

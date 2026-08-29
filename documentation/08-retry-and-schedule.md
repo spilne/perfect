@@ -11,7 +11,7 @@ Retry transient failures with controlled backoff and jitter. Use the fluent
 ::: syntax generator
 <!-- @embed packages/core/examples/09-retry-schedule.ts#retry-config -->
 ```ts
-import { eff, fail, type Eff, type Throws } from "@perfect/core";
+import { eff, fail, type Eff, type Throws } from "@spilne/perfect-core";
 
 // Inline config form — quickest setup. Fluent .retry() method.
 let calls = 0;
@@ -31,7 +31,7 @@ console.log(calls); // → 3
 ::: syntax chainable
 <!-- @embed packages/core/examples/09-retry-schedule.ts#retry-config-flat -->
 ```ts
-import { succeed, fail, sync, type Eff, type Throws } from "@perfect/core";
+import { succeed, fail, sync, type Eff, type Throws } from "@spilne/perfect-core";
 
 // Same retry, chainable form — sync() + .flatMap, no generator.
 let callsFlat = 0;
@@ -63,7 +63,7 @@ For anything beyond trivial:
 
 <!-- @embed packages/core/examples/09-retry-schedule.ts#retry-policy-fluent -->
 ```ts
-import { eff, fail, RetryPolicy, type Eff, type Throws } from "@perfect/core";
+import { eff, fail, RetryPolicy, type Eff, type Throws } from "@spilne/perfect-core";
 
 // Fluent builder — composable, expressive.
 calls = 0;
@@ -118,7 +118,7 @@ aren't, so a real bug doesn't loop forever.
 
 <!-- @embed packages/core/examples/09-retry-schedule.ts#retry-on-cause-only -->
 ```ts
-import { succeed, sync, RetryPolicy } from "@perfect/core";
+import { succeed, sync, RetryPolicy } from "@spilne/perfect-core";
 
 // Don't retry defects (real bugs) or interrupts — only typed failures.
 const probablyABug = sync(() => {
@@ -144,7 +144,7 @@ errors and defects from thrown exceptions.
 
 <!-- @embed packages/core/examples/09-retry-schedule.ts#retry-all-by -->
 ```ts
-import { eff, fail, RetryDecision, type Eff, type Throws } from "@perfect/core";
+import { eff, fail, RetryDecision, type Eff, type Throws } from "@spilne/perfect-core";
 
 // Retry typed failures and defects with per-outcome logic.
 let unstable = 0;
@@ -180,7 +180,7 @@ it. You can also use it directly with `repeat(eff, schedule)` — useful for
 periodic jobs:
 
 ```ts
-import { repeat, run, Schedule, sync } from "@perfect/core";
+import { repeat, run, Schedule, sync } from "@spilne/perfect-core";
 
 const heartbeat = sync(() => console.log("alive"));
 await run(repeat(heartbeat, Schedule.spaced(1000)));

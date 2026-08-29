@@ -19,7 +19,7 @@ import type { DrizzleDb } from "./drizzle-db";
  *
  * @example
  * ```ts
- * import { topologyState, ensureTable } from "@perfect/postgres";
+ * import { topologyState, ensureTable } from "@spilne/perfect-postgres";
  *
  * // Quick bootstrap — no migration files needed
  * await ensureTable(db, topologyState);

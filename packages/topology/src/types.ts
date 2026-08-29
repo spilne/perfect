@@ -8,10 +8,10 @@ import type {
   StageId,
   TopologyId,
   TopologyInstanceId,
-} from "@perfect/core/connect";
-import type { ExitT } from "@perfect/core";
+} from "@spilne/perfect-core/connect";
+import type { ExitT } from "@spilne/perfect-core";
 import type { StateBackend } from "./state-backend";
-import type { PartitionedStateBackend } from "@perfect/core/connect";
+import type { PartitionedStateBackend } from "@spilne/perfect-core/connect";
 
 export interface TimeWindow {
   start: number;

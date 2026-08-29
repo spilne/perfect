@@ -10,7 +10,7 @@ the sleep. Run with `provide(eff, Clock, testClock)`.
 
 <!-- @embed packages/core/examples/12-testing.ts#test-clock -->
 ```ts
-import { eff, sleep, provide, run, Clock, TestClock } from "@perfect/core";
+import { eff, sleep, provide, run, Clock, TestClock } from "@spilne/perfect-core";
 
 // TestClock gives virtual time — `sleep` doesn't wait, you advance manually.
 const clock = new TestClock();
@@ -47,7 +47,7 @@ Seeded PRNG for reproducibility:
 
 <!-- @embed packages/core/examples/12-testing.ts#test-random -->
 ```ts
-import { eff, provide, Random, TestRandom } from "@perfect/core";
+import { eff, provide, Random, TestRandom } from "@spilne/perfect-core";
 
 // TestRandom — seeded for reproducibility.
 const seeded = new TestRandom(42);
@@ -81,7 +81,7 @@ Captures `log` / `warn` / `error` calls instead of writing to stdout:
 
 <!-- @embed packages/core/examples/12-testing.ts#test-console -->
 ```ts
-import { eff, provide, Console, TestConsole } from "@perfect/core";
+import { eff, provide, Console, TestConsole } from "@spilne/perfect-core";
 
 // TestConsole captures log output instead of writing to stdout.
 const captured = new TestConsole();
@@ -112,7 +112,7 @@ console.log(captured.logs()); // → ["hello", "world"]
 Lightweight property testing built on the same Random service:
 
 ```ts
-import { Gen, forAll, run, provide, Random, TestRandom } from "@perfect/core";
+import { Gen, forAll, run, provide, Random, TestRandom } from "@spilne/perfect-core";
 
 const positiveInts = Gen.int(1, 1000);
 

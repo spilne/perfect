@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { run, succeed } from "@perfect/core";
+import { run, succeed } from "@spilne/perfect-core";
 import { MockHttpClient, mockHttpClient, type ResponseParser } from "../src";
 
 interface User {
@@ -194,7 +194,7 @@ describe("Integration: plug MockHttpClient into a Layer-consuming program", () =
   test("swap implementation via HttpClientService for a test run", async () => {
     // Import here to exercise the service wiring
     const { HttpClientService } = await import("../src");
-    const { eff } = await import("@perfect/core");
+    const { eff } = await import("@spilne/perfect-core");
 
     const mock = new MockHttpClient().on("GET", "/u/7", { id: 7, name: "alice" });
 

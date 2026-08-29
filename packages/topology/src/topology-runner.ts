@@ -9,8 +9,8 @@ import {
   runFiber,
   succeed,
   sync,
-} from "@perfect/core";
-import { Stream } from "@perfect/core/stream";
+} from "@spilne/perfect-core";
+import { Stream } from "@spilne/perfect-core/stream";
 import {
   CheckpointName,
   InMemoryPartitionedState,
@@ -37,7 +37,7 @@ import {
   type Streamable,
   type TransactionalPartitionedStateBackend,
   type TransactionalSinkable,
-} from "@perfect/core/connect";
+} from "@spilne/perfect-core/connect";
 import type { StateBackend } from "./state-backend";
 import { BuiltTopology } from "./stream-topology";
 import { WindowManager } from "./window-manager";

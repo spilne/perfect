@@ -8,7 +8,7 @@ code. Functions that take time can accept `DurationInput`
 
 <!-- @embed packages/core/examples/15-duration-cache.ts#duration-basics -->
 ```ts
-import { Duration, resolveMs } from "@perfect/core";
+import { Duration, resolveMs } from "@spilne/perfect-core";
 
 // Type-safe time arithmetic — no more raw `5000` magic numbers.
 const fiveMins = Duration.minutes(5);
@@ -56,7 +56,7 @@ delay(myEff, Duration.minutes(2)); // Duration
 
 Pluggable key-value cache with TTL + LRU eviction. The `CacheStore<K, V>`
 interface is `Eff`-typed; in-process implementation ships with
-`@perfect/core`. Distributed backends (Redis, memcached) implement the
+`@spilne/perfect-core`. Distributed backends (Redis, memcached) implement the
 same interface.
 
 This is the **storage layer** — different from the
@@ -69,7 +69,7 @@ key-value backend.
 
 <!-- @embed packages/core/examples/15-duration-cache.ts#cache-store-memory -->
 ```ts
-import { eff, CacheStore } from "@perfect/core";
+import { eff, CacheStore } from "@spilne/perfect-core";
 
 // In-process LRU + TTL cache. Pluggable behind the CacheStore interface —
 // distributed backends (Redis, memcached) implement the same shape.
@@ -100,7 +100,7 @@ await (
 
 <!-- @embed packages/core/examples/15-duration-cache.ts#cache-store-ttl -->
 ```ts
-import { CacheStore } from "@perfect/core";
+import { CacheStore } from "@spilne/perfect-core";
 
 // Per-entry TTL overrides the store default.
 const ttlStore = CacheStore.memory<string, string>({ ttlMs: 60_000 });
@@ -120,7 +120,7 @@ console.log(ttlStore.get("long").runSync()); // → "stays-around"
 
 <!-- @embed packages/core/examples/15-duration-cache.ts#cache-store-lru -->
 ```ts
-import { CacheStore } from "@perfect/core";
+import { CacheStore } from "@spilne/perfect-core";
 
 // LRU eviction at maxSize.
 const lru = CacheStore.memory<string, number>({ maxSize: 3 });
@@ -147,11 +147,11 @@ console.log(lru.has("b").runSync()); // → false
 
 ### Distributed backends
 
-`@perfect/redis` ships the distributed implementation. It preserves the same
+`@spilne/perfect-redis` ships the distributed implementation. It preserves the same
 interface while adding `Throws<RedisError>` to each effect:
 
 ```ts
-import { RedisCacheStore } from "@perfect/redis";
+import { RedisCacheStore } from "@spilne/perfect-redis";
 
 const store = RedisCacheStore.make<string, User>({
   redis,

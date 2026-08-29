@@ -1,4 +1,4 @@
-import { TaggedError } from "@perfect/core";
+import { TaggedError } from "@spilne/perfect-core";
 
 export class RedisError extends TaggedError("RedisError")<{
   readonly operation: string;

@@ -8,7 +8,7 @@ is interrupted, children are interrupted too.
 
 <!-- @embed packages/core/examples/07-concurrency.ts#fork-join -->
 ```ts
-import { succeed, sleep, join } from "@perfect/core";
+import { succeed, sleep, join } from "@spilne/perfect-core";
 
 // .fork() spawns a fiber. join() awaits its result.
 const forkExample = sleep(10)
@@ -31,7 +31,7 @@ interrupted:
 
 <!-- @embed packages/core/examples/07-concurrency.ts#race-method -->
 ```ts
-import { succeed, sleep } from "@perfect/core";
+import { succeed, sleep } from "@spilne/perfect-core";
 
 // .race(other) — fluent two-way race. First to succeed wins.
 const fast = sleep(10).flatMap(() => succeed("fast"));
@@ -45,7 +45,7 @@ For 3+ effects, use the variadic form:
 
 <!-- @embed packages/core/examples/07-concurrency.ts#race-variadic -->
 ```ts
-import { succeed, sleep, race } from "@perfect/core";
+import { succeed, sleep, race } from "@spilne/perfect-core";
 
 // race([...]) — variadic form for 3+ effects.
 const winner = await race([
@@ -68,7 +68,7 @@ console.log(winner); // → "b"
 
 <!-- @embed packages/core/examples/07-concurrency.ts#all-parallel -->
 ```ts
-import { succeed, sleep, all } from "@perfect/core";
+import { succeed, sleep, all } from "@spilne/perfect-core";
 
 // all() runs effects in parallel and collects their results.
 const results = await all([
@@ -85,7 +85,7 @@ console.log(results); // → ["a", "b", "c"]
 
 <!-- @embed packages/core/examples/07-concurrency.ts#all-object -->
 ```ts
-import { succeed, sleep, all } from "@perfect/core";
+import { succeed, sleep, all } from "@spilne/perfect-core";
 
 // all() also accepts an object — destructure named results.
 const { user, posts, friends } = await all({
@@ -107,7 +107,7 @@ fiber is interrupted. Use `forkDaemon(eff)` for long-running background work
 that should outlive its spawning context.
 
 ```ts
-import { forkDaemon, sleep, succeed } from "@perfect/core";
+import { forkDaemon, sleep, succeed } from "@spilne/perfect-core";
 
 // Background job — keeps running after parent returns
 forkDaemon(
@@ -121,7 +121,7 @@ Fibers are interruptible by default. `uninterruptible(eff)` marks a region as
 non-cancellable (use sparingly — only for cleanup that must complete).
 
 ```ts
-import { uninterruptible } from "@perfect/core";
+import { uninterruptible } from "@spilne/perfect-core";
 
 // This block runs to completion even if interrupted
 const safe = uninterruptible(criticalCleanup);
@@ -138,7 +138,7 @@ late callbacks do not resume a cancelled fiber.
 `Fiber` exposes lightweight diagnostics for tests and debugging:
 
 ```ts
-import { addFiberSupervisor, sleep } from "@perfect/core";
+import { addFiberSupervisor, sleep } from "@spilne/perfect-core";
 
 const stop = addFiberSupervisor({
   onStart: (fiber) => console.log("start", fiber.status),

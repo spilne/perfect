@@ -17,11 +17,17 @@
 // scope a subscription's lifetime accordingly.
 // ---------------------------------------------------------------------------
 
-import { async as asyncEff, fail, succeed, type Throws } from "@perfect/core";
-import { Stream } from "@perfect/core/stream";
+import { async as asyncEff, fail, succeed, type Throws } from "@spilne/perfect-core";
+import { Stream } from "@spilne/perfect-core/stream";
 import { sql } from "drizzle-orm";
-import { JsonCodec } from "@perfect/core/connect";
-import type { Streamable, Replayable, Offset, Codec, ConsumerGroup } from "@perfect/core/connect";
+import { JsonCodec } from "@spilne/perfect-core/connect";
+import type {
+  Streamable,
+  Replayable,
+  Offset,
+  Codec,
+  ConsumerGroup,
+} from "@spilne/perfect-core/connect";
 import type { DrizzleDb } from "./drizzle-db";
 import { pollStream } from "./poll-stream";
 import { PostgresError, toPostgresError } from "./postgres-error";

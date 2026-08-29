@@ -1,8 +1,8 @@
 {
-  "name": "@perfect/integration",
+  "name": "@spilne/perfect-integration",
   "version": "0.0.1",
   "private": true,
-  "description": "Testcontainers-based integration tests — runs @perfect/kafka against real brokers. Opt-in: bun test packages/integration.",
+  "description": "Testcontainers-based integration tests — runs @spilne/perfect-kafka against real brokers. Opt-in: bun test packages/integration.",
   "type": "module",
   "sideEffects": false,
   "scripts": {
@@ -10,10 +10,10 @@
     "typecheck": "tsc -p tsconfig.src.json --noEmit"
   },
   "dependencies": {
-    "@perfect/core": "workspace:*",
-    "@perfect/kafka": "workspace:*",
-    "@perfect/kafka-kafkajs": "workspace:*",
-    "@perfect/kafka-platformatic": "workspace:*"
+    "@spilne/perfect-core": "workspace:*",
+    "@spilne/perfect-kafka": "workspace:*",
+    "@spilne/perfect-kafka-kafkajs": "workspace:*",
+    "@spilne/perfect-kafka-platformatic": "workspace:*"
   },
   "devDependencies": {
     "@platformatic/kafka": "^2.9.0",

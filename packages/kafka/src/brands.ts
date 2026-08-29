@@ -10,8 +10,8 @@
 // assignable both ways without casts.
 // ---------------------------------------------------------------------------
 
-import { type Brand, nominal } from "@perfect/core";
-import { ConsumerGroup, Partition } from "@perfect/core/connect";
+import { type Brand, nominal } from "@spilne/perfect-core";
+import { ConsumerGroup, Partition } from "@spilne/perfect-core/connect";
 
 // Constructor signatures are pinned explicitly (runtime-free cast) so the
 // exported types don't reference core's unexported BRAND symbol (TS4023).

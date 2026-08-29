@@ -1,7 +1,7 @@
 import { Kafka, logLevel } from "kafkajs";
 import type { KafkaConfig } from "kafkajs";
-import type { KafkaAdmin, KafkaClient, KafkaConsumer, KafkaProducer } from "@perfect/kafka";
-import { KafkaOffset, PartitionId, TopicName } from "@perfect/kafka";
+import type { KafkaAdmin, KafkaClient, KafkaConsumer, KafkaProducer } from "@spilne/perfect-kafka";
+import { KafkaOffset, PartitionId, TopicName } from "@spilne/perfect-kafka";
 
 export interface KafkajsAdapterConfig extends Omit<KafkaConfig, "brokers"> {
   readonly brokers: string[];

@@ -22,7 +22,7 @@ import {
   type Throws,
   retryAllBy,
   RetryPolicy,
-} from "@perfect/core";
+} from "@spilne/perfect-core";
 import { type HttpClientError, HTTP_RETRYABLE } from "./errors";
 
 // ── RetryAttempt ADT ──────────────────────────────────────────────

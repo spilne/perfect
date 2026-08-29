@@ -1,4 +1,4 @@
-import { TaggedError } from "@perfect/core";
+import { TaggedError } from "@spilne/perfect-core";
 
 export class PostgresError extends TaggedError("PostgresError")<{
   readonly operation: string;

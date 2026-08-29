@@ -11,7 +11,7 @@ import {
   type StatePartitionLease,
   type StatePartitionScope,
   type SourceRecordId,
-} from "@perfect/core/connect";
+} from "@spilne/perfect-core/connect";
 import { decode, encode, redisKeyFamily } from "./internal";
 import type { RedisClient } from "./redis-client";
 

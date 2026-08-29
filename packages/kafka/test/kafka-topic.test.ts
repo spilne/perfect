@@ -5,7 +5,7 @@
 // Ported from promin's kafka-topic.test.ts.
 
 import { describe, it, expect } from "bun:test";
-import { Chunk, fromPromise, run } from "@perfect/core";
+import { Chunk, fromPromise, run } from "@spilne/perfect-core";
 import { KafkaTopic } from "../src/kafka-topic";
 import type {
   KafkaAdmin,

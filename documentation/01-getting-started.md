@@ -24,14 +24,14 @@ bun run smoke:stackblitz
 ```
 
 ```bash
-bun add @perfect/core
+bun add @spilne/perfect-core
 ```
 
 Optional packages:
 
 ```bash
-bun add @perfect/swc-plugin   # SWC WASM plugin — compiles eff(($) => …) in Next.js/Vite/SWC builds
-bun add @perfect/transform    # Bun-plugin rewriter — eff(($) => …) and for { x <- e } yield under Bun
+bun add @spilne/perfect-swc-plugin   # SWC WASM plugin — compiles eff(($) => …) in Next.js/Vite/SWC builds
+bun add @spilne/perfect-transform    # Bun-plugin rewriter — eff(($) => …) and for { x <- e } yield under Bun
 ```
 
 ## Your first program
@@ -41,7 +41,7 @@ The smallest possible Eff:
 <!-- @embed packages/core/examples/01-hello.ts#hello-sync -->
 
 ```ts
-import { succeed } from "@perfect/core";
+import { succeed } from "@spilne/perfect-core";
 
 // runSync — for purely synchronous programs (no Async, no Sleep, no Fork).
 const greet = succeed("hello, perfect");
@@ -64,7 +64,7 @@ same fiber walk. Pick by readability — the perf table is in
 <!-- @embed packages/core/examples/01-hello.ts#hello-generator -->
 
 ```ts
-import { eff, succeed } from "@perfect/core";
+import { eff, succeed } from "@spilne/perfect-core";
 
 // The recommended syntax: write effects in generator form, use yield* to
 // extract values. No build step required.
@@ -84,7 +84,7 @@ console.log(await program.run()); // → 42
 <!-- @embed packages/core/examples/01-hello.ts#hello-flatmap -->
 
 ```ts
-import { succeed } from "@perfect/core";
+import { succeed } from "@spilne/perfect-core";
 
 // The composed-flatMap form — fastest, but reads bottom-up for long chains.
 const composed = succeed(21)
@@ -107,8 +107,8 @@ const program = eff(($) => {
 ```
 
 This form is rewritten at build time into the composed `.flatMap` chain. Use
-the canonical [`@perfect/swc-plugin`](../packages/swc-plugin/) in SWC-based
-builds, or [`@perfect/transform`](../packages/transform/) for Bun preload and
+the canonical [`@spilne/perfect-swc-plugin`](../packages/swc-plugin/) in SWC-based
+builds, or [`@spilne/perfect-transform`](../packages/transform/) for Bun preload and
 the experimental `for { ... } yield` syntax.
 
 ## Running

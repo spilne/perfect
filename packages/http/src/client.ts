@@ -8,7 +8,7 @@
 // The interface is `Eff`-typed so distributed / proxy / test implementations
 // drop in wherever an HttpClient is needed (typically via Layer).
 
-import { type Eff, type Throws, succeed, sync } from "@perfect/core";
+import { type Eff, type Throws, succeed, sync } from "@spilne/perfect-core";
 import type { HttpClientError } from "./errors";
 import type { HttpProxyConfig, HttpTransport } from "./transport";
 import type { HttpMiddleware, HttpRequestContext } from "./middleware";
@@ -510,7 +510,7 @@ export class DefaultHttpClient extends AbstractHttpClient {
 
 // ── Helper: decode response body via a ResponseDecoder ────────────
 
-import { tryPromise } from "@perfect/core";
+import { tryPromise } from "@spilne/perfect-core";
 import { HttpParseError } from "./errors";
 
 function decodeResponse<T>(

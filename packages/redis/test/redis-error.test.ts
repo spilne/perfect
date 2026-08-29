@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { run, succeed } from "@perfect/core";
+import { run, succeed } from "@spilne/perfect-core";
 import { RedisCacheStore } from "../src/redis-cache-store";
 import { RedisDeferred } from "../src/redis-deferred";
 import type { RedisClient } from "../src/redis-client";

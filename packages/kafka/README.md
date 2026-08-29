@@ -1,31 +1,31 @@
-# @perfect/kafka
+# @spilne/perfect-kafka
 
-Kafka backend for the `@perfect/core/connect` contracts. `KafkaTopic<T>`
+Kafka backend for the `@spilne/perfect-core/connect` contracts. `KafkaTopic<T>`
 implements `Partitionable`, `Replayable`, `Acknowledgeable`, `KeyedSinkable`,
 and `Checkpointable`, so a topic plugs directly into anything that consumes
-those contracts — `@perfect/topology` DAGs included. The Kafka-specific
+those contracts — `@spilne/perfect-topology` DAGs included. The Kafka-specific
 machinery (offsets, partitions, consumer groups, the eachMessage/eachBatch
 driver model) lives here; the queue-agnostic layer (`Envelope`,
-`OffsetTracker`, `autoCommitBatchWithin`, …) stays in `@perfect/core/connect`.
+`OffsetTracker`, `autoCommitBatchWithin`, …) stays in `@spilne/perfect-core/connect`.
 
 ## Install
 
 ```bash
-bun add @perfect/kafka @perfect/kafka-kafkajs kafkajs
+bun add @spilne/perfect-kafka @spilne/perfect-kafka-kafkajs kafkajs
 ```
 
 > Not yet published to npm — install from the workspace for now.
 
-**No driver is bundled.** Install `@perfect/kafka-kafkajs` for KafkaJS on Bun
-or Node.js, or `@perfect/kafka-platformatic` for Platformatic Kafka on Node.js.
+**No driver is bundled.** Install `@spilne/perfect-kafka-kafkajs` for KafkaJS on Bun
+or Node.js, or `@spilne/perfect-kafka-platformatic` for Platformatic Kafka on Node.js.
 You can also implement the small `KafkaClient` driver interface directly.
 
 ## Quickstart
 
 ```ts
-import { fromPromise, run } from "@perfect/core";
-import { kafkaConfig } from "@perfect/kafka";
-import { createKafkajsClient } from "@perfect/kafka-kafkajs";
+import { fromPromise, run } from "@spilne/perfect-core";
+import { kafkaConfig } from "@spilne/perfect-kafka";
+import { createKafkajsClient } from "@spilne/perfect-kafka-kafkajs";
 
 interface Order {
   id: string;
@@ -81,7 +81,7 @@ their consumer explicitly, so call `subscription.close()` in a `finally` block.
   - `subscribeAck` — `Stream<Envelope<T>>` with background contiguous commits
   - `subscribeAckWithHandle` — explicit consumer ownership for external commit pipes
   - `batchEmit: true` — preserve callback-driver fetch batches as native Stream chunks
-  - checkpoint support for `@perfect/topology`
+  - checkpoint support for `@spilne/perfect-topology`
 - `commitBatchWithin` — typed batched offset-commit pipe (count or time window)
 - `KafkaConfigBuilder` / `kafkaConfig<T>()` — validated fluent construction
   for the client, topic, group, codec, batch mode, and consumer tuning
@@ -96,6 +96,6 @@ their consumer explicitly, so call `subscription.close()` in a `finally` block.
 ## Links
 
 - Repo: https://github.com/spilne/perfect
-- Connect contracts: `@perfect/core/connect`
+- Connect contracts: `@spilne/perfect-core/connect`
 - Messaging guide: [`documentation/16-messaging.md`](../../documentation/16-messaging.md)
 - Stateful topology guide: [`documentation/18-topologies.md`](../../documentation/18-topologies.md)

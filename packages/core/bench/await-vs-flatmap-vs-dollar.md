@@ -11,12 +11,12 @@ bun packages/core/bench/await-vs-flatmap-vs-dollar.ts
 Compares four ways to write an effect pipeline against raw Promise baselines
 across five realistic scenarios.
 
-| Approach                                 | what it does                                                |
-| ---------------------------------------- | ----------------------------------------------------------- |
-| **(A) composed `.flatMap`**              | one fiber, all steps share state, built once                |
-| **(B) `await eff` per step**             | one thenable fast-path per `await` (microtask per step)     |
-| **(C) `eff(($) => …)` source syntax**    | compiles to (A) via `@perfect/transform` — needs build step |
-| **(D) `eff(function* () { yield* … })`** | runtime driver, no build step, effect-ts `Effect.gen` style |
+| Approach                                 | what it does                                                       |
+| ---------------------------------------- | ------------------------------------------------------------------ |
+| **(A) composed `.flatMap`**              | one fiber, all steps share state, built once                       |
+| **(B) `await eff` per step**             | one thenable fast-path per `await` (microtask per step)            |
+| **(C) `eff(($) => …)` source syntax**    | compiles to (A) via `@spilne/perfect-transform` — needs build step |
+| **(D) `eff(function* () { yield* … })`** | runtime driver, no build step, effect-ts `Effect.gen` style        |
 
 ## Composite table (Bun, M-series, N=100, single run)
 
@@ -124,7 +124,7 @@ reification on **every** step (15.8 µs), matching `await + try/catch` at 14.6
 ## Why `eff($)` needs a build step (and `eff(function*)` doesn't)
 
 `eff(($) => { const x = $(e); … })` is not a runtime construct. The TS source
-is rewritten by `@perfect/transform` (SWC plugin / TS rewriter) into a
+is rewritten by `@spilne/perfect-transform` (SWC plugin / TS rewriter) into a
 composed `.flatMap` chain before execution.
 
 `eff(function* () { const x = yield* e; … })` **is** a runtime construct.

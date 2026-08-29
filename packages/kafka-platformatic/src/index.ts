@@ -12,8 +12,8 @@ import type {
   KafkaConsumer,
   KafkaMessage,
   KafkaProducer,
-} from "@perfect/kafka";
-import { KafkaOffset, PartitionId, TopicName } from "@perfect/kafka";
+} from "@spilne/perfect-kafka";
+import { KafkaOffset, PartitionId, TopicName } from "@spilne/perfect-kafka";
 
 type BinaryConsumerOptions = ConsumerOptions<Buffer, Buffer, Buffer, Buffer>;
 type BinaryProducerOptions = ProducerOptions<Buffer, Buffer, Buffer, Buffer>;

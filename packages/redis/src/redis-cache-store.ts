@@ -1,6 +1,6 @@
-import type { CacheStore, Eff, Throws } from "@perfect/core";
-import type { Codec } from "@perfect/core/connect";
-import { JsonCodec } from "@perfect/core/connect";
+import type { CacheStore, Eff, Throws } from "@spilne/perfect-core";
+import type { Codec } from "@spilne/perfect-core/connect";
+import { JsonCodec } from "@spilne/perfect-core/connect";
 import { decode, encode, redisEff } from "./internal";
 import type { RedisClient } from "./redis-client";
 import { RedisError } from "./redis-error";

@@ -15,7 +15,7 @@ There's also `Cause.Interrupt` for cooperative cancellation.
 
 <!-- @embed packages/core/examples/06-error-handling.ts#catch-typed -->
 ```ts
-import { succeed, fail, type Eff, type Throws } from "@perfect/core";
+import { succeed, fail, type Eff, type Throws } from "@spilne/perfect-core";
 
 // .catch handles any typed failure, removing Throws<E> from the type.
 const program: Eff<string, never> = (fail("nope") as Eff<never, Throws<string>>).catch((e) =>
@@ -32,7 +32,7 @@ When your error is a discriminated union, handle one variant at a time:
 
 <!-- @embed packages/core/examples/06-error-handling.ts#catch-tag -->
 ```ts
-import { succeed, fail, type Eff, type Throws } from "@perfect/core";
+import { succeed, fail, type Eff, type Throws } from "@spilne/perfect-core";
 
 // .catchTag — handle one specific tagged error variant.
 type Err = { _tag: "NotFound"; id: number } | { _tag: "Forbidden" };
@@ -57,7 +57,7 @@ If you need to see defects and interrupts too, use `.catchAllCause`:
 
 <!-- @embed packages/core/examples/06-error-handling.ts#catch-cause -->
 ```ts
-import { succeed, fail, type Eff, type Throws } from "@perfect/core";
+import { succeed, fail, type Eff, type Throws } from "@spilne/perfect-core";
 
 // .catchAllCause — see the full Cause (Fail | Die | Interrupt | composites).
 const wild = (fail("boom") as Eff<never, Throws<string>>).catchAllCause((cause) =>
@@ -84,7 +84,7 @@ console.log(wild.runSync()); // → "cause: Fail"
 
 <!-- @embed packages/core/examples/06-error-handling.ts#tap-error -->
 ```ts
-import { succeed, fail, sync, type Eff, type Throws } from "@perfect/core";
+import { succeed, fail, sync, type Eff, type Throws } from "@spilne/perfect-core";
 
 // .tapError — observe a typed failure without handling it (re-fails).
 let observedError: string | null = null;
@@ -106,7 +106,7 @@ console.log(observedError); // → "bad"
 
 <!-- @embed packages/core/examples/06-error-handling.ts#orelse -->
 ```ts
-import { succeed, fail, type Eff, type Throws } from "@perfect/core";
+import { succeed, fail, type Eff, type Throws } from "@spilne/perfect-core";
 
 // .orElse — if this effect fails, run another.
 const fallback = (fail("first") as Eff<never, Throws<string>>).orElse(() => succeed("second"));

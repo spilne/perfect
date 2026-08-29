@@ -7,7 +7,7 @@ import {
   StateCheckpointId,
   TopologyId,
   TopologyInstanceId,
-} from "@perfect/core/connect";
+} from "@spilne/perfect-core/connect";
 import { PgPartitionedStateBackend } from "../src/lib/pg-partitioned-state-backend";
 import { fakeDb } from "./fake-db";
 

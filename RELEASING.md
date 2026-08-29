@@ -1,12 +1,13 @@
 # Releasing Perfect
 
 Perfect publishes each adapter and runtime component as a separate public package
-under the `@perfect` npm scope. Public packages start at `0.1.0` and use independent
-semantic versions, so changing Redis does not force an unrelated Kafka release.
+under the `@spilne` npm scope with a `perfect-` package prefix. Public packages
+start at `0.1.0` and use independent semantic versions, so changing Redis does
+not force an unrelated Kafka release.
 
 Twelve packages publish: `core`, `http`, `http-otel`, `kafka`, `kafka-kafkajs`,
 `kafka-platformatic`, `otel`, `postgres`, `redis`, `swc-plugin`, `topology`,
-`transform`. `@perfect/integration` is private and never publishes.
+`transform`. `@spilne/perfect-integration` is private and never publishes.
 
 ---
 
@@ -14,36 +15,31 @@ Twelve packages publish: `core`, `http`, `http-otel`, `kafka`, `kafka-kafkajs`,
 
 Nothing has been published yet, so every step below is still pending.
 
-### 1. Settle the scope name
+### 1. Verify the npm scope
 
-Do this before anything else — it is the only step that can invalidate all the
-others, and it is effectively irreversible once packages exist.
+GitHub and npm organisations are independent. Membership in the `spilne` GitHub
+organisation does not grant permission to publish under the `@spilne` npm scope.
 
-As of 2026-08-23, `@perfect/core` returns 404 and no package exists anywhere
-under the `@perfect` scope. That is **not** proof the scope is free: a scope can
-be owned with nothing published in it, and that looks identical from outside.
-(The bare `perfect` package name is taken, but that is a package name, not a
-scope, and does not affect us.)
+As of 2026-08-28, `@spilne/perfect-core` and `@spilne/perfect-kafka` return 404.
+That confirms those package names have not been published, but it does not prove
+the current npm account can write to the scope.
 
 Check properly:
 
 ```sh
 npm login                # browser flow
-npm org ls perfect       # permission error => exists and is someone else's
-                         # not found      => likely claimable
+npm org ls spilne        # must list you as a member
 ```
 
-If it is taken, pick the fallback **now**, before publishing anything.
-`@spilne/*` matches the GitHub organisation and is the obvious candidate.
-Changing scope after release means republishing everything and breaking anyone
-who already installed.
+Do not continue until the npm account can write to `@spilne`. Changing scope
+after release means republishing everything and breaking existing installs.
 
-### 2. Claim the scope
+### 2. Create the npm organisation if needed
 
 Public packages only, so the free plan is enough:
 
 1. <https://www.npmjs.com/org/create>
-2. Create the org named `perfect` — this grants the `@perfect` scope.
+2. Create the org named `spilne` — this grants the `@spilne` scope.
 
 A personal-account scope (`@<username>`) also works, but an organisation is
 preferable here because maintainers can be added without sharing credentials.
@@ -52,10 +48,10 @@ preferable here because maintainers can be added without sharing credentials.
 
 ```sh
 npm whoami
-npm org ls perfect       # must list you
+npm org ls spilne        # must list you
 ```
 
-Do not continue until `npm org ls perfect` shows you as a member. Everything
+Do not continue until `npm org ls spilne` shows you as a member. Everything
 downstream assumes the account can actually write to the scope.
 
 ### 4. Validate the release locally
@@ -79,7 +75,7 @@ Access**, or Classic → **Automation**.
 
 The token type matters. An **automation** token bypasses two-factor auth; a
 plain publish token under 2FA enforcement will hang the release waiting for an
-OTP that CI can never supply. Scope it to the `@perfect` org with read+write and
+OTP that CI can never supply. Scope it to the `@spilne` org with read+write and
 set an expiry you will remember to rotate.
 
 ### 6. Wire it into GitHub
@@ -99,8 +95,8 @@ the button.
 ### 7. Verify the first publish
 
 ```sh
-npm view @perfect/core
-cd /tmp && npm init -y && npm install @perfect/core     # from the real registry
+npm view @spilne/perfect-core
+cd /tmp && npm init -y && npm install @spilne/perfect-core     # from the real registry
 ```
 
 Then drop the "not yet on npm" banner from `README.md`. The StackBlitz template
@@ -164,7 +160,8 @@ attestations need, but `scripts/publish-packages.ts` publishes with
 currently inert. Provenance cannot be applied retroactively to a published
 version, so decide before the first release whether you want it.
 
-### The bare `perfect` name is unavailable
+### Package names do not mirror directories
 
-Already taken by an unrelated package. The scope is what matters; there is no
-plan to publish an unscoped `perfect`.
+npm package names have the form `@scope/package`, so the packages publish as
+`@spilne/perfect-core`, `@spilne/perfect-kafka`, and so on. Their workspace
+directories remain `packages/core`, `packages/kafka`, and so on.

@@ -1,7 +1,7 @@
-import { Cause, ensuring, fail, succeed } from "@perfect/core";
-import type { Eff, Singleflight, Throws } from "@perfect/core";
-import type { Codec } from "@perfect/core/connect";
-import { JsonCodec } from "@perfect/core/connect";
+import { Cause, ensuring, fail, succeed } from "@spilne/perfect-core";
+import type { Eff, Singleflight, Throws } from "@spilne/perfect-core";
+import type { Codec } from "@spilne/perfect-core/connect";
+import { JsonCodec } from "@spilne/perfect-core/connect";
 import { redisBlocking, redisEff } from "./internal";
 import type { RedisClient } from "./redis-client";
 import { RedisError } from "./redis-error";

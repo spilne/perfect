@@ -1,5 +1,5 @@
-import { async as asyncEff, fail, succeed, sync } from "@perfect/core";
-import type { Eff, Throws } from "@perfect/core";
+import { async as asyncEff, fail, succeed, sync } from "@spilne/perfect-core";
+import type { Eff, Throws } from "@spilne/perfect-core";
 import type {
   Acknowledgeable,
   AcknowledgeOptions,
@@ -10,9 +10,9 @@ import type {
   Offset,
   Replayable,
   Streamable,
-} from "@perfect/core/connect";
-import { JsonCodec } from "@perfect/core/connect";
-import { Stream } from "@perfect/core/stream";
+} from "@spilne/perfect-core/connect";
+import { JsonCodec } from "@spilne/perfect-core/connect";
+import { Stream } from "@spilne/perfect-core/stream";
 import { decode, encode, redisEff } from "./internal";
 import { closeRedisClient, type RedisClient } from "./redis-client";
 import { RedisError, toRedisError } from "./redis-error";

@@ -1,7 +1,7 @@
-import { fail as failEff, succeed as succeedEff } from "@perfect/core";
-import type { Codec } from "@perfect/core/connect";
-import { JsonCodec } from "@perfect/core/connect";
-import type { Deferred, Eff, Throws } from "@perfect/core";
+import { fail as failEff, succeed as succeedEff } from "@spilne/perfect-core";
+import type { Codec } from "@spilne/perfect-core/connect";
+import { JsonCodec } from "@spilne/perfect-core/connect";
+import type { Deferred, Eff, Throws } from "@spilne/perfect-core";
 import { numberResult, redisBlocking, redisEff, redisKeyFamily } from "./internal";
 import type { RedisClient } from "./redis-client";
 import { RedisError } from "./redis-error";

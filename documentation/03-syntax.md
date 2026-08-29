@@ -16,7 +16,7 @@ The lowest-level surface — chained method calls.
 
 <!-- @embed packages/core/examples/01-hello.ts#hello-flatmap -->
 ```ts
-import { succeed } from "@perfect/core";
+import { succeed } from "@spilne/perfect-core";
 
 // The composed-flatMap form — fastest, but reads bottom-up for long chains.
 const composed = succeed(21)
@@ -35,7 +35,7 @@ The recommended default. Uses `yield*` to extract values from effects.
 
 <!-- @embed packages/core/examples/03-generator-syntax.ts#gen-basic -->
 ```ts
-import { eff, succeed, sync } from "@perfect/core";
+import { eff, succeed, sync } from "@spilne/perfect-core";
 
 // Use yield* to extract values from effects. Looks like async/await.
 const program = eff(function* () {
@@ -53,7 +53,7 @@ console.log(program.runSync()); // → 60
 
 <!-- @embed packages/core/examples/03-generator-syntax.ts#gen-trycatch -->
 ```ts
-import { eff, fail, type Eff, type Throws } from "@perfect/core";
+import { eff, fail, type Eff, type Throws } from "@spilne/perfect-core";
 
 // try/catch inside the generator catches typed failures (and defects).
 const safe = eff(function* () {
@@ -76,11 +76,11 @@ above when the difference matters.
 ## `eff($)` rewriter
 
 The cleanest source syntax — but requires a transform. The canonical compiler
-is the AST-based `@perfect/swc-plugin`; `@perfect/transform` supplies the Bun
+is the AST-based `@spilne/perfect-swc-plugin`; `@spilne/perfect-transform` supplies the Bun
 preload/source-text fallback.
 
 ```ts
-import { eff, succeed, run } from "@perfect/core";
+import { eff, succeed, run } from "@spilne/perfect-core";
 
 const program = eff(($) => {
   const a = $(succeed(21));

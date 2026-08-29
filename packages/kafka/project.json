@@ -1,5 +1,5 @@
 {
-  "name": "@perfect/kafka",
+  "name": "@spilne/perfect-kafka",
   "sourceRoot": "packages/kafka/src",
   "targets": {
     "build": {},

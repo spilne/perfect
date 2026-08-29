@@ -1,6 +1,6 @@
-import { run, type Eff } from "@perfect/core";
-import { GroupId, KafkaTopic, TopicName } from "@perfect/kafka";
-import { createPlatformaticClient } from "@perfect/kafka-platformatic";
+import { run, type Eff } from "@spilne/perfect-core";
+import { GroupId, KafkaTopic, TopicName } from "@spilne/perfect-kafka";
+import { createPlatformaticClient } from "@spilne/perfect-kafka-platformatic";
 
 const broker = process.argv[2];
 const rawTopic = process.argv[3];

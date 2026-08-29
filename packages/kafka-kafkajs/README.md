@@ -1,11 +1,11 @@
-# @perfect/kafka-kafkajs
+# @spilne/perfect-kafka-kafkajs
 
-KafkaJS driver adapter for `@perfect/kafka`.
+KafkaJS driver adapter for `@spilne/perfect-kafka`.
 
 ## Install
 
 ```bash
-bun add @perfect/kafka @perfect/kafka-kafkajs kafkajs
+bun add @spilne/perfect-kafka @spilne/perfect-kafka-kafkajs kafkajs
 ```
 
 > Not yet published to npm — install from the workspace for now.
@@ -13,8 +13,8 @@ bun add @perfect/kafka @perfect/kafka-kafkajs kafkajs
 ## Quickstart
 
 ```ts
-import { kafkaConfig } from "@perfect/kafka";
-import { createKafkajsClient } from "@perfect/kafka-kafkajs";
+import { kafkaConfig } from "@spilne/perfect-kafka";
+import { createKafkajsClient } from "@spilne/perfect-kafka-kafkajs";
 
 const orders = kafkaConfig<unknown>()
   .client(createKafkajsClient(["localhost:9092"]))

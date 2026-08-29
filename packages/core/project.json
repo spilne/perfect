@@ -1,5 +1,5 @@
 {
-  "name": "@perfect/core",
+  "name": "@spilne/perfect-core",
   "sourceRoot": "packages/core/src",
   "targets": {
     "test": {},

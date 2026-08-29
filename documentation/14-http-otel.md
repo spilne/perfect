@@ -1,7 +1,7 @@
 # HTTP — OpenTelemetry
 
-`@perfect/http-otel` provides drop-in OpenTelemetry tracing for
-`@perfect/http`. Two integration points compose independently:
+`@spilne/perfect-http-otel` provides drop-in OpenTelemetry tracing for
+`@spilne/perfect-http`. Two integration points compose independently:
 
 | Piece | What it does |
 |---|---|
@@ -12,7 +12,7 @@
 Either alone is useful; combining both gives you spans **and** propagation.
 
 ```bash
-bun add @perfect/http-otel @opentelemetry/api
+bun add @spilne/perfect-http-otel @opentelemetry/api
 ```
 
 ## Spans on every request
@@ -20,7 +20,7 @@ bun add @perfect/http-otel @opentelemetry/api
 <!-- @embed packages/http-otel/examples/01-tracing.ts#tracing-success -->
 ```ts
 import { SpanKind, SpanStatusCode } from "@opentelemetry/api";
-import { DefaultHttpClient } from "@perfect/http";
+import { DefaultHttpClient } from "@spilne/perfect-http";
 
 // tracingMiddleware starts a CLIENT span on every request, fills semantic
 // HTTP attributes (http.request.method, url.full, http.response.status_code,
@@ -52,8 +52,8 @@ The request `tag` (when provided to `client.get`/`post`/etc.) becomes
 <!-- @embed packages/http-otel/examples/01-tracing.ts#tracing-error -->
 ```ts
 import { SpanStatusCode } from "@opentelemetry/api";
-import { DefaultHttpClient } from "@perfect/http";
-import { tracingMiddleware } from "@perfect/http-otel";
+import { DefaultHttpClient } from "@spilne/perfect-http";
+import { tracingMiddleware } from "@spilne/perfect-http-otel";
 
 // On error, the span status flips to ERROR, http.response.status_code is
 // recorded, and error.type carries the typed error tag for filtering.
@@ -84,8 +84,8 @@ when you want downstream services to join the same trace, not just
 client-side observability.
 
 ```ts
-import { tracingTransport, TracingFetchTransport } from "@perfect/http-otel";
-import { FetchTransport } from "@perfect/http";
+import { tracingTransport, TracingFetchTransport } from "@spilne/perfect-http-otel";
+import { FetchTransport } from "@spilne/perfect-http";
 
 // Default: wraps FetchTransport.
 const transport = tracingTransport;
@@ -110,7 +110,7 @@ spans. Header redaction is pluggable.
 
 <!-- @embed packages/http-otel/examples/01-tracing.ts#tracing-redaction -->
 ```ts
-import { makeRedaction, redactHeaders } from "@perfect/http-otel";
+import { makeRedaction, redactHeaders } from "@spilne/perfect-http-otel";
 
 // URL queries are stripped from url.full by default to keep span attributes
 // PII-free. Pass includeQuery: true to keep them. Header redaction is
@@ -131,7 +131,7 @@ console.log(out["Content-Type"]); // → "application/json"
 
 | Option | Default | Purpose |
 |---|---|---|
-| `tracer` | `trace.getTracer("@perfect/http")` | custom Tracer instance |
+| `tracer` | `trace.getTracer("@spilne/perfect-http")` | custom Tracer instance |
 | `redaction` | `defaultRedaction` | header redaction policy |
 | `includeQuery` | `false` | keep query string in `url.full` |
 | `spanName` | `"{method} {url-no-query}"` | override per-request |
@@ -140,8 +140,8 @@ console.log(out["Content-Type"]); // → "application/json"
 ## Combine middleware + transport
 
 ```ts
-import { DefaultHttpClient } from "@perfect/http";
-import { tracingMiddleware, tracingTransport } from "@perfect/http-otel";
+import { DefaultHttpClient } from "@spilne/perfect-http";
+import { tracingMiddleware, tracingTransport } from "@spilne/perfect-http-otel";
 
 const client = new DefaultHttpClient({
   transport: tracingTransport,            // injects traceparent

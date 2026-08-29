@@ -1,10 +1,10 @@
-# @perfect/postgres
+# @spilne/perfect-postgres
 
 PostgreSQL adapters for Perfect: PGMQ and `SKIP LOCKED` queues, change streams,
 coordination primitives, and durable topology state.
 
 ```bash
-bun add @perfect/postgres drizzle-orm postgres
+bun add @spilne/perfect-postgres drizzle-orm postgres
 ```
 
 > Not yet published to npm — install from the workspace for now.
@@ -22,14 +22,14 @@ duplicate suppression after old records are redelivered.
 
 `PgmqQueue` exposes transactional source envelopes and sinks. When the input
 queue, output queue, and `PgPartitionedStateBackend` use the same Drizzle
-database object, `@perfect/topology` accepts `deliveryGuarantee:
+database object, `@spilne/perfect-topology` accepts `deliveryGuarantee:
 "exactly-once"` and performs output publication, state/progress persistence,
 and source delete/archive in one PostgreSQL transaction.
 
 ```ts
-import { ConsumerGroup, StreamTopology, TopologyRunner } from "@perfect/topology";
-import { PgPartitionedStateBackend } from "@perfect/postgres";
-import { PgmqQueue } from "@perfect/postgres/pgmq";
+import { ConsumerGroup, StreamTopology, TopologyRunner } from "@spilne/perfect-topology";
+import { PgPartitionedStateBackend } from "@spilne/perfect-postgres";
+import { PgmqQueue } from "@spilne/perfect-postgres/pgmq";
 
 const state = new PgPartitionedStateBackend({ db });
 await state.ensureTables();

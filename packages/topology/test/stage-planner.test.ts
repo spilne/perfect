@@ -1,7 +1,7 @@
 import { describe, test, expect } from "bun:test";
-import { succeed } from "@perfect/core";
-import { Stream } from "@perfect/core/stream";
-import type { Streamable, Acknowledgeable, Sinkable, Codec } from "@perfect/core/connect";
+import { succeed } from "@spilne/perfect-core";
+import { Stream } from "@spilne/perfect-core/stream";
+import type { Streamable, Acknowledgeable, Sinkable, Codec } from "@spilne/perfect-core/connect";
 import { StreamTopology, planStages, ConsumerGroup, ChannelName } from "../src";
 
 // ---------------------------------------------------------------------------

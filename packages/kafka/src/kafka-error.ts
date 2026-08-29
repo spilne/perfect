@@ -1,4 +1,4 @@
-import { TaggedError } from "@perfect/core";
+import { TaggedError } from "@spilne/perfect-core";
 import type { TopicName } from "./brands";
 import type { KafkaOffsetCommit } from "./kafka-types";
 

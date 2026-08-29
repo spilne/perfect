@@ -1,7 +1,7 @@
 # Stateful Topologies
 
 Use `Stream` for general pull-based transformations. Use
-`@perfect/topology` for long-running event processing that needs keyed state,
+`@spilne/perfect-topology` for long-running event processing that needs keyed state,
 windows, joins, deduplication, checkpoints, partition ownership, or distributed
 shuffle stages.
 
@@ -13,9 +13,9 @@ sink implements `Sinkable`. Here both endpoints are Kafka topics, but a
 contracts works without changing the topology:
 
 ```ts
-import { kafkaConfig } from "@perfect/kafka";
-import { createKafkajsClient } from "@perfect/kafka-kafkajs";
-import { ConsumerGroup, StreamTopology, TopologyRunner } from "@perfect/topology";
+import { kafkaConfig } from "@spilne/perfect-kafka";
+import { createKafkajsClient } from "@spilne/perfect-kafka-kafkajs";
+import { ConsumerGroup, StreamTopology, TopologyRunner } from "@spilne/perfect-topology";
 
 interface Click {
   userId: string;
@@ -118,8 +118,8 @@ the stages through a `ShuffleTransport`. Kafka supplies
 `keyBy(...).shuffle()` boundary before distributed stateful operators.
 
 ```ts
-import { DistributedRunner } from "@perfect/topology";
-import { KafkaShuffleTransport } from "@perfect/kafka";
+import { DistributedRunner } from "@spilne/perfect-topology";
+import { KafkaShuffleTransport } from "@spilne/perfect-kafka";
 
 const handle = await DistributedRunner.run(topology, {
   group: ConsumerGroup("analytics"),
@@ -158,7 +158,7 @@ than silently weakening the guarantee.
 | Finite transformation or local reactive pipeline | `Stream` |
 | Local accumulator without recovery | `Stream.mapAccumulate` |
 | Pluggable keyed state in one stream | `Stream.statefulMap` |
-| Partition leases, fencing, restore, dedupe, checkpoints | `@perfect/topology` |
+| Partition leases, fencing, restore, dedupe, checkpoints | `@spilne/perfect-topology` |
 | Cross-stage repartitioning across instances | `DistributedRunner` |
 
 ## Next

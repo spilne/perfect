@@ -1,5 +1,5 @@
 {
-  "name": "@perfect/topology",
+  "name": "@spilne/perfect-topology",
   "sourceRoot": "packages/topology/src",
   "targets": {
     "build": {},

@@ -34,7 +34,7 @@ Each of these was a measured failure before it was a rule.
 **Prime every case before measuring any.** Measuring in declaration order made
 whichever case ran first look _slowest_, because it absorbed JIT tiering and
 connection setup that later cases then reused. The first HTTP run had
-`@perfect/http` apparently beating raw `fetch` — the baseline had simply gone
+`@spilne/perfect-http` apparently beating raw `fetch` — the baseline had simply gone
 first. Priming also changed `run(sync)` by ~20×, which is why thresholds
 calibrated before 2026-08-21 are not comparable to later numbers.
 

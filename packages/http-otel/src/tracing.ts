@@ -1,4 +1,4 @@
-// OpenTelemetry tracing for @perfect/http.
+// OpenTelemetry tracing for @spilne/perfect-http.
 //
 // Two integration points:
 //
@@ -27,13 +27,13 @@ import {
   context as otelContext,
   propagation,
 } from "@opentelemetry/api";
-import { type HttpMiddleware, type HttpRequestContext } from "@perfect/http";
-import type { HttpClientError, HttpRequestOptions, HttpTransport } from "@perfect/http";
-import { defaultTransport } from "@perfect/http";
-import { type Eff, type Throws } from "@perfect/core";
+import { type HttpMiddleware, type HttpRequestContext } from "@spilne/perfect-http";
+import type { HttpClientError, HttpRequestOptions, HttpTransport } from "@spilne/perfect-http";
+import { defaultTransport } from "@spilne/perfect-http";
+import { type Eff, type Throws } from "@spilne/perfect-core";
 import { type RedactionPolicy, defaultRedaction, redactUrl } from "./redact";
 
-const TRACER_NAME = "@perfect/http";
+const TRACER_NAME = "@spilne/perfect-http";
 
 // ── Per-request span storage ──────────────────────────────────────
 //
@@ -50,7 +50,7 @@ const TRACER_NAME = "@perfect/http";
 const spanByContext = new WeakMap<HttpRequestContext, Span>();
 
 export interface TracingOptions {
-  /** Custom tracer. Default: `trace.getTracer("@perfect/http")`. */
+  /** Custom tracer. Default: `trace.getTracer("@spilne/perfect-http")`. */
   readonly tracer?: Tracer;
   /** Header redaction policy for span attributes. */
   readonly redaction?: RedactionPolicy;

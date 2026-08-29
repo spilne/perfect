@@ -136,19 +136,19 @@ export default defineConfig({
     resolve: {
       alias: [
         {
-          find: "@perfect/core/stream",
+          find: "@spilne/perfect-core/stream",
           replacement: fileURLToPath(
             new URL("../../packages/core/src/stream/index.ts", import.meta.url),
           ),
         },
         {
-          find: "@perfect/core/retry",
+          find: "@spilne/perfect-core/retry",
           replacement: fileURLToPath(
             new URL("../../packages/core/src/retry/index.ts", import.meta.url),
           ),
         },
         {
-          find: "@perfect/core",
+          find: "@spilne/perfect-core",
           replacement: fileURLToPath(new URL("../../packages/core/src/index.ts", import.meta.url)),
         },
       ],

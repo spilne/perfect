@@ -1,6 +1,6 @@
-# @perfect/http
+# @spilne/perfect-http
 
-Typed-effect HTTP client for `@perfect/core`. Three tiers of fetch, a
+Typed-effect HTTP client for `@spilne/perfect-core`. Three tiers of fetch, a
 configurable client with middleware, retry with full outcome control, native
 streaming (text / lines / NDJSON / SSE), typed error response bodies, and a
 test-double mock — every request returns `Eff<A, Throws<HttpClientError>>`,
@@ -9,7 +9,7 @@ so failures are visible in the type and handled with `.catch` / `.catchTag`.
 ## Install
 
 ```bash
-bun add @perfect/http
+bun add @spilne/perfect-http
 ```
 
 > Not yet published to npm — install from the workspace for now.
@@ -17,8 +17,8 @@ bun add @perfect/http
 ## Quickstart
 
 ```ts
-import { succeed } from "@perfect/core";
-import { DefaultHttpClient, type ResponseParser } from "@perfect/http";
+import { succeed } from "@spilne/perfect-core";
+import { DefaultHttpClient, type ResponseParser } from "@spilne/perfect-http";
 
 interface User {
   id: number;
@@ -86,4 +86,4 @@ pass your own to mock, proxy, or instrument.
 - Repo: https://github.com/spilne/perfect
 - Full guide: [`documentation/13-http.md`](../../documentation/13-http.md)
 - Runnable examples: [`examples/`](./examples/)
-- OpenTelemetry tracing for this client: `@perfect/http-otel`
+- OpenTelemetry tracing for this client: `@spilne/perfect-http-otel`

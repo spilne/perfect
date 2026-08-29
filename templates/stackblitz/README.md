@@ -9,7 +9,7 @@ with a five-second limit. The editor exposes `Stream`, `RetryPolicy`, `delay`,
 
 The project intentionally depends on the registry package rather than a relative
 workspace path because StackBlitz imports only this directory. It becomes directly
-runnable when `@perfect/core@0.1.0` is published.
+runnable when `@spilne/perfect-core@0.1.0` is published.
 
 From the Perfect repository, validate the template against the local package:
 

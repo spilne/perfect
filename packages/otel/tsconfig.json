@@ -13,10 +13,10 @@
     "types": ["bun"],
     "typeRoots": ["../../node_modules/@types"],
     "paths": {
-      "@perfect/core": ["../core/src/index.ts"],
-      "@perfect/core/*": ["../core/src/*"],
-      "@perfect/http": ["../http/src/index.ts"],
-      "@perfect/http/*": ["../http/src/*"]
+      "@spilne/perfect-core": ["../core/src/index.ts"],
+      "@spilne/perfect-core/*": ["../core/src/*"],
+      "@spilne/perfect-http": ["../http/src/index.ts"],
+      "@spilne/perfect-http/*": ["../http/src/*"]
     }
   },
   "include": ["src", "test"]

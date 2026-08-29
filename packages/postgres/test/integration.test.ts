@@ -10,7 +10,7 @@ import { GenericContainer, Wait, type StartedTestContainer } from "testcontainer
 import { drizzle } from "drizzle-orm/postgres-js";
 import { sql } from "drizzle-orm";
 import postgres from "postgres";
-import { run } from "@perfect/core";
+import { run } from "@spilne/perfect-core";
 import {
   CheckpointName,
   Partition,
@@ -19,7 +19,7 @@ import {
   StateCheckpointId,
   TopologyId,
   TopologyInstanceId,
-} from "@perfect/core/connect";
+} from "@spilne/perfect-core/connect";
 import type { DrizzleDb } from "../src/lib/drizzle-db";
 import { PgQueue } from "../src/lib/pg-queue";
 import { PgChangeStream } from "../src/lib/pg-change-stream";

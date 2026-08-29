@@ -13,12 +13,12 @@
     "types": ["bun"],
     "typeRoots": ["../../node_modules/@types"],
     "paths": {
-      "@perfect/core": ["../core/src/index.ts"],
-      "@perfect/core/*": ["../core/src/*"],
-      "@perfect/kafka": ["../kafka/src/index.ts"],
-      "@perfect/kafka/*": ["../kafka/src/*"],
-      "@perfect/kafka-kafkajs": ["../kafka-kafkajs/src/index.ts"],
-      "@perfect/kafka-platformatic": ["../kafka-platformatic/src/index.ts"]
+      "@spilne/perfect-core": ["../core/src/index.ts"],
+      "@spilne/perfect-core/*": ["../core/src/*"],
+      "@spilne/perfect-kafka": ["../kafka/src/index.ts"],
+      "@spilne/perfect-kafka/*": ["../kafka/src/*"],
+      "@spilne/perfect-kafka-kafkajs": ["../kafka-kafkajs/src/index.ts"],
+      "@spilne/perfect-kafka-platformatic": ["../kafka-platformatic/src/index.ts"]
     }
   },
   "include": ["src", "test"]

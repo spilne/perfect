@@ -1,5 +1,5 @@
 {
-  "name": "@perfect/kafka-platformatic",
+  "name": "@spilne/perfect-kafka-platformatic",
   "sourceRoot": "packages/kafka-platformatic/src",
   "targets": {
     "build": {},

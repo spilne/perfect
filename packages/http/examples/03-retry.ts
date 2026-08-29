@@ -2,7 +2,7 @@
 //
 // Run: bun packages/http/examples/03-retry.ts
 
-import { type Eff, type Throws, sync } from "@perfect/core";
+import { type Eff, type Throws, sync } from "@spilne/perfect-core";
 import {
   type HttpClientError,
   type HttpRequestOptions,

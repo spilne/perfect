@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Real-broker integration tests for @perfect/kafka — Redpanda via
+// Real-broker integration tests for @spilne/perfect-kafka — Redpanda via
 // testcontainers. Suites skip cleanly when Docker is unavailable
 // (see src/infra.ts).
 // ---------------------------------------------------------------------------
@@ -11,14 +11,14 @@ import { join } from "node:path";
 // Kafka operations (consumer group join, rebalancing, commits) need generous timeouts
 setDefaultTimeout(300_000);
 
-import { die, run, sync } from "@perfect/core";
+import { die, run, sync } from "@spilne/perfect-core";
 import {
   autoCommitBatchWithin,
   ChannelName,
   ConsumerGroup,
   JsonCodec,
   type Codec,
-} from "@perfect/core/connect";
+} from "@spilne/perfect-core/connect";
 import {
   KafkaTopic,
   KafkaShuffleTransport,
@@ -28,10 +28,10 @@ import {
   KafkaOffset,
   type KafkaError,
   type KafkaClient,
-} from "@perfect/kafka";
-import type { Throws } from "@perfect/core";
+} from "@spilne/perfect-kafka";
+import type { Throws } from "@spilne/perfect-core";
 import { withKafka, withApacheKafka, eventually, uniqueName } from "../src/infra";
-import { createKafkajsClient, createKafkajsTopic } from "@perfect/kafka-kafkajs";
+import { createKafkajsClient, createKafkajsTopic } from "@spilne/perfect-kafka-kafkajs";
 
 // ---------------------------------------------------------------------------
 // Shared test suite — same tests, different adapter

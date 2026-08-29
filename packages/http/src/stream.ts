@@ -12,7 +12,7 @@
 // The 4 named wrappers (httpStreamText / Lines / NDJSON / SSE) are kept for
 // ergonomics — they just inline the pipe chain above.
 
-import { type Throws, type Pipe, Stream, sync, Pipes } from "@perfect/core";
+import { type Throws, type Pipe, Stream, sync, Pipes } from "@spilne/perfect-core";
 import { type HttpClientError, HttpParseError } from "./errors";
 import { type ResponseParser } from "./response";
 import { type HttpRequestOptions } from "./transport";

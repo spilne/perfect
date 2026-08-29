@@ -5,7 +5,7 @@ typed errors, dependency injection, structured concurrency, resource safety,
 all tracked in the type system.
 
 ```ts
-import { eff, succeed, run } from "@perfect/core";
+import { eff, succeed, run } from "@spilne/perfect-core";
 
 const program = eff(function* () {
   const a = yield* succeed(21);

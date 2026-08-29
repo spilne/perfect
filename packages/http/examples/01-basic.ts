@@ -2,7 +2,7 @@
 //
 // Run: bun packages/http/examples/01-basic.ts
 
-import { type Eff, type Throws, succeed, fail } from "@perfect/core";
+import { type Eff, type Throws, succeed, fail } from "@spilne/perfect-core";
 import {
   type HttpClientError,
   type HttpRequestOptions,

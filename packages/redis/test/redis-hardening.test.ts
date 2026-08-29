@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { run, type Eff } from "@perfect/core";
+import { run, type Eff } from "@spilne/perfect-core";
 import { RedisPubSub } from "../src/redis-pubsub";
 import { RedisStream } from "../src/redis-stream";
 import { redisKeyFamily } from "../src/internal";

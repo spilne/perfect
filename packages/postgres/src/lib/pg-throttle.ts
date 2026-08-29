@@ -1,13 +1,13 @@
 // ---------------------------------------------------------------------------
 // PgThrottle — Postgres-backed sliding-window throttle (blocks until a slot)
 //
-// Thin adapter over PgRateLimiter, mirroring how @perfect/core's Throttle
+// Thin adapter over PgRateLimiter, mirroring how @spilne/perfect-core's Throttle
 // wraps its in-process RateLimiter: acquire ≡ acquireWaiting, withPermit ≡
 // withLimitWaiting. Adapted from promin's Promise-typed Throttle
 // (acquireAsync/withPermitAsync + per-call resource suffix).
 // ---------------------------------------------------------------------------
 
-import type { Eff, Throttle, Throws } from "@perfect/core";
+import type { Eff, Throttle, Throws } from "@spilne/perfect-core";
 import { type DrizzleDb } from "./drizzle-db";
 import { PgRateLimiter } from "./pg-rate-limiter";
 import type { PostgresError } from "./postgres-error";

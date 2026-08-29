@@ -11,14 +11,14 @@ import {
   SpanKind,
   SpanStatusCode,
 } from "@opentelemetry/api";
-import { type Eff, type Throws, succeed } from "@perfect/core";
+import { type Eff, type Throws, succeed } from "@spilne/perfect-core";
 import {
   type HttpClientError,
   type HttpRequestOptions,
   type HttpTransport,
   type ResponseParser,
   DefaultHttpClient,
-} from "@perfect/http";
+} from "@spilne/perfect-http";
 import { makeRedaction, redactHeaders, tracingMiddleware } from "../src";
 import { assertEq } from "./_assert";
 

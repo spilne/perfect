@@ -28,7 +28,7 @@ type Eff<A, S = never> = ...;  // produces A; uses effects S
 | `sleep(ms)` | suspend for `ms` according to the Clock service |
 
 ```ts
-import { succeed, fail, sync, tryPromise } from "@perfect/core";
+import { succeed, fail, sync, tryPromise } from "@spilne/perfect-core";
 
 const a = succeed(42);                              // Eff<number, never>
 const b = sync(() => Date.now());                   // Eff<number, never>
@@ -54,7 +54,7 @@ The `S` channel is a union of opaque marker types — Perfect peels them off as
 you handle them.
 
 ```ts
-import type { Eff, Throws, Needs } from "@perfect/core";
+import type { Eff, Throws, Needs } from "@spilne/perfect-core";
 
 declare const fetchUser: (id: number) => Eff<User, Throws<NotFound> | Needs<Db>>;
 

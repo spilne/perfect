@@ -1,8 +1,8 @@
-import { fail, sleep, succeed } from "@perfect/core";
-import type { Codec } from "@perfect/core/connect";
-import { JsonCodec } from "@perfect/core/connect";
-import type { Eff, Queue, Throws } from "@perfect/core";
-import { QueueClosed } from "@perfect/core";
+import { fail, sleep, succeed } from "@spilne/perfect-core";
+import type { Codec } from "@spilne/perfect-core/connect";
+import { JsonCodec } from "@spilne/perfect-core/connect";
+import type { Eff, Queue, Throws } from "@spilne/perfect-core";
+import { QueueClosed } from "@spilne/perfect-core";
 import { decode, encode, numberResult, redisBlocking, redisEff, redisKeyFamily } from "./internal";
 import type { RedisClient } from "./redis-client";
 import { RedisError } from "./redis-error";

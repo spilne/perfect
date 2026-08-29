@@ -1,5 +1,5 @@
 {
-  "name": "@perfect/redis",
+  "name": "@spilne/perfect-redis",
   "sourceRoot": "packages/redis/src",
   "targets": {
     "build": {},

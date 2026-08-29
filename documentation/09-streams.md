@@ -190,7 +190,7 @@ Use a pipe when more streaming should happen after the operation. Use a sink
 when you want one final value or side effect.
 
 ```ts
-import { Stream, Pipes, Sinks } from "@perfect/core";
+import { Stream, Pipes, Sinks } from "@spilne/perfect-core";
 
 const words = await Stream.fromArray(["a\nb", "\nc"])
   .through(Pipes.lines)
@@ -253,7 +253,7 @@ independent base64 value, preserving message boundaries.
 <!-- @embed packages/core/examples/10-streams.ts#stream-collect -->
 
 ```ts
-import { Stream } from "@perfect/core";
+import { Stream } from "@spilne/perfect-core";
 
 // Build a stream from an array, transform, collect.
 const collected = await Stream.fromArray([1, 2, 3, 4, 5])
@@ -272,7 +272,7 @@ console.log(collected); // → [30, 40, 50]
 <!-- @embed packages/core/examples/10-streams.ts#stream-foreach -->
 
 ```ts
-import { Stream, succeed } from "@perfect/core";
+import { Stream, succeed } from "@spilne/perfect-core";
 
 // forEach — apply an effect per element, return when stream exhausts.
 const seen: number[] = [];
@@ -292,7 +292,7 @@ console.log(seen); // → [1, 2, 3]
 <!-- @embed packages/core/examples/10-streams.ts#stream-mapchunks -->
 
 ```ts
-import { Stream } from "@perfect/core";
+import { Stream } from "@spilne/perfect-core";
 
 // take(n) — short-circuit after n elements (lazy: never produces beyond).
 const first3 = await Stream.iterate(0, (n) => n + 1)
@@ -309,7 +309,7 @@ console.log(first3); // → [0, 1, 2]
 <!-- @embed packages/core/examples/11-stream-pipeline.ts#pipeline-etl -->
 
 ```ts
-import { Stream } from "@perfect/core";
+import { Stream } from "@spilne/perfect-core";
 
 // A small ETL: parse, filter, enrich, accumulate.
 type Row = { city: string; population: number };
@@ -369,7 +369,7 @@ operators. `onFinalize(finalizer)` runs exactly once when the terminal effect
 finishes, fails, or stops early:
 
 ```ts
-import { Stream, sync } from "@perfect/core";
+import { Stream, sync } from "@spilne/perfect-core";
 
 let finalized = 0;
 

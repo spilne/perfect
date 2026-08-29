@@ -1,7 +1,7 @@
 // HttpClient as a Perfect service — Layer-based DI.
 
 import { describe, test, expect } from "bun:test";
-import { type Eff, type Throws, eff, succeed, sync, run } from "@perfect/core";
+import { type Eff, type Throws, eff, succeed, sync, run } from "@spilne/perfect-core";
 import {
   DefaultHttpClient,
   type HttpClient,

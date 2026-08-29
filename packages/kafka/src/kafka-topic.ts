@@ -12,10 +12,10 @@
 // one native Stream chunk.
 // ---------------------------------------------------------------------------
 
-import { fromPromise, succeed, sync } from "@perfect/core";
-import type { Eff, Throws } from "@perfect/core";
-import { Chunk, Stream } from "@perfect/core/stream";
-import { JsonCodec, OffsetTracker } from "@perfect/core/connect";
+import { fromPromise, succeed, sync } from "@spilne/perfect-core";
+import type { Eff, Throws } from "@spilne/perfect-core";
+import { Chunk, Stream } from "@spilne/perfect-core/stream";
+import { JsonCodec, OffsetTracker } from "@spilne/perfect-core/connect";
 import type {
   KeyedSinkable,
   Partitionable,
@@ -32,7 +32,7 @@ import type {
   Codec,
   Offset,
   Partition,
-} from "@perfect/core/connect";
+} from "@spilne/perfect-core/connect";
 import type {
   KafkaClient,
   KafkaConsumer,

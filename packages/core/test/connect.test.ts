@@ -1,4 +1,4 @@
-// @perfect/core/connect — contracts, codecs, OffsetTracker, and
+// @spilne/perfect-core/connect — contracts, codecs, OffsetTracker, and
 // autoCommitBatchWithin. Guard + tracker tests ported from promin
 // (streaming-typeclasses.test.ts, offset-tracker.test.ts).
 

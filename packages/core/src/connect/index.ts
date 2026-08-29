@@ -1,9 +1,9 @@
-// @perfect/core/connect — queue-agnostic endpoint contracts.
+// @spilne/perfect-core/connect — queue-agnostic endpoint contracts.
 //
 // The "any queue" layer: capability interfaces every messaging backend
 // implements (Kafka, Redis Streams, in-memory, …) plus the helpers that are
 // shared across log-shaped backends. Backends live in their own packages
-// (@perfect/kafka, …); this subpath has no backend dependencies.
+// (@spilne/perfect-kafka, …); this subpath has no backend dependencies.
 
 export type {
   Streamable,

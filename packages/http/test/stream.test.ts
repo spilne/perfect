@@ -2,7 +2,7 @@
 // then assert on the Perfect Stream we get back.
 
 import { describe, test, expect } from "bun:test";
-import { type Eff, type Throws, succeed, fail, sync, run } from "@perfect/core";
+import { type Eff, type Throws, succeed, fail, sync, run } from "@spilne/perfect-core";
 import {
   type HttpClientError,
   type HttpRequestOptions,

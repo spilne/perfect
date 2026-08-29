@@ -1,7 +1,7 @@
 // withRetryAll + RetryAttempt tests.
 
 import { describe, test, expect } from "bun:test";
-import { RetryPolicy, type Eff, type Throws, succeed, fail, sync, run } from "@perfect/core";
+import { RetryPolicy, type Eff, type Throws, succeed, fail, sync, run } from "@spilne/perfect-core";
 import {
   type HttpClientError,
   type HttpRequestOptions,

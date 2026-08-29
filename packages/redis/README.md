@@ -1,15 +1,15 @@
-# @perfect/redis
+# @spilne/perfect-redis
 
 Distributed Redis implementations of the concurrency and coordination contracts in
-`@perfect/core`, plus durable Redis Streams and Pub/Sub connectors for
-`@perfect/core/connect`. Coordination operations and connector subscription streams expose
+`@spilne/perfect-core`, plus durable Redis Streams and Pub/Sub connectors for
+`@spilne/perfect-core/connect`. Coordination operations and connector subscription streams expose
 `Throws<RedisError>` in `Eff<A, S>`; driver failures are recoverable with
 `.catchTag("RedisError", ...)` instead of becoming defects.
 
 ## Install
 
 ```bash
-bun add @perfect/redis ioredis
+bun add @spilne/perfect-redis ioredis
 ```
 
 > Not yet published to npm — install from the workspace for now.
@@ -20,9 +20,9 @@ used by the integration suite but is not bundled at runtime.
 ## Example
 
 ```ts
-import { run, succeed } from "@perfect/core";
+import { run, succeed } from "@spilne/perfect-core";
 import Redis from "ioredis";
-import { RedisRef, type RedisClient } from "@perfect/redis";
+import { RedisRef, type RedisClient } from "@spilne/perfect-redis";
 
 const driver = new Redis("redis://localhost:6379");
 const redis = driver as unknown as RedisClient;
@@ -45,7 +45,7 @@ const value = await run(
 - `RedisCircuitBreaker`
 - `RedisCacheStore`
 - `RedisStateBackend` — durable keyed state and atomic checkpoints for
-  `Stream.statefulMap` and `@perfect/topology`
+  `Stream.statefulMap` and `@spilne/perfect-topology`
 - `RedisPartitionedStateBackend` — topology/stage/partition namespaces,
   server-time leases, fencing epochs, and one-Lua state/progress/dedupe commits
 - `RedisStream` — durable consumer groups, replay, manual acknowledgement, claiming,
@@ -60,8 +60,8 @@ interruption can close the blocked connection.
 ## Durable messaging
 
 ```ts
-import { run } from "@perfect/core";
-import { RedisStream } from "@perfect/redis";
+import { run } from "@spilne/perfect-core";
+import { RedisStream } from "@spilne/perfect-redis";
 
 const events = RedisStream.make<{ id: string }>({
   redis,

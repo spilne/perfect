@@ -1,5 +1,5 @@
 {
-  "name": "@perfect/transform",
+  "name": "@spilne/perfect-transform",
   "sourceRoot": "packages/transform/src",
   "targets": {
     "test": {},

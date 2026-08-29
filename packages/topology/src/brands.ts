@@ -15,4 +15,4 @@ export {
   SourceRecordId,
   StateCheckpointId,
   LeaseEpoch,
-} from "@perfect/core/connect";
+} from "@spilne/perfect-core/connect";

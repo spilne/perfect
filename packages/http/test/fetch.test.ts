@@ -1,7 +1,7 @@
 // Tests against a MockTransport — the whole fetch pipeline without a real server.
 
 import { describe, test, expect } from "bun:test";
-import { type Eff, type Throws, succeed, run, fail } from "@perfect/core";
+import { type Eff, type Throws, succeed, run, fail } from "@spilne/perfect-core";
 import {
   type HttpTransport,
   type HttpRequestOptions,

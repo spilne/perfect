@@ -1,5 +1,5 @@
 {
-  "name": "@perfect/otel",
+  "name": "@spilne/perfect-otel",
   "sourceRoot": "packages/otel/src",
   "targets": {
     "build": {},

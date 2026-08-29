@@ -13,18 +13,18 @@
 // Ported from promin's commit-batch-within.ts. The setInterval-based timer
 // became Stream.groupWithin — same batch-by-count-or-time semantics, but
 // fiber-native (matches core's autoCommitBatchWithin, the queue-agnostic
-// variant that lives in @perfect/core/connect). promin's `flushing`
+// variant that lives in @spilne/perfect-core/connect). promin's `flushing`
 // re-entrancy guard is gone because groupWithin + evalMap serializes
 // batches: each batch's commit completes before the next batch is
 // processed, so two commitOffsets calls can never be in flight at once.
 // ---------------------------------------------------------------------------
 
-import type { Eff, Throws } from "@perfect/core";
-import { fromPromise } from "@perfect/core";
-import { Stream } from "@perfect/core/stream";
-import type { Pipe } from "@perfect/core/stream";
-import { OffsetTracker } from "@perfect/core/connect";
-import type { Envelope } from "@perfect/core/connect";
+import type { Eff, Throws } from "@spilne/perfect-core";
+import { fromPromise } from "@spilne/perfect-core";
+import { Stream } from "@spilne/perfect-core/stream";
+import type { Pipe } from "@spilne/perfect-core/stream";
+import { OffsetTracker } from "@spilne/perfect-core/connect";
+import type { Envelope } from "@spilne/perfect-core/connect";
 import type { KafkaConsumer, KafkaOffsetCommit } from "./kafka-types";
 import { type TopicName, PartitionId, KafkaOffset } from "./brands";
 import { KafkaCommitError, type KafkaError } from "./kafka-error";

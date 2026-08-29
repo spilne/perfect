@@ -46,6 +46,6 @@ for (const row of rows) {
   );
 }
 console.log(
-  "\nThe number that matters is @perfect/http vs the fetch baseline: that gap is\n" +
+  "\nThe number that matters is @spilne/perfect-http vs the fetch baseline: that gap is\n" +
     "the cost of the Eff wrapper, typed errors and parsing — not of the network.\n",
 );

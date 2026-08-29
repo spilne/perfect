@@ -1,16 +1,16 @@
-# @perfect/topology
+# @spilne/perfect-topology
 
-Stateful stream processing on top of `@perfect/core`. Declare a processing
+Stateful stream processing on top of `@spilne/perfect-core`. Declare a processing
 DAG — keyed state, time windows, stream joins, deduplication, checkpointing —
 and run it over any source or sink that implements the
-`@perfect/core/connect` contracts (`Streamable`, `Sinkable`,
-`Acknowledgeable`, …). A `KafkaTopic` from `@perfect/kafka` plugs in
+`@spilne/perfect-core/connect` contracts (`Streamable`, `Sinkable`,
+`Acknowledgeable`, …). A `KafkaTopic` from `@spilne/perfect-kafka` plugs in
 directly; so does an in-memory test double.
 
 ## Install
 
 ```bash
-bun add @perfect/topology
+bun add @spilne/perfect-topology
 ```
 
 > Not yet published to npm — install from the workspace for now.
@@ -18,7 +18,7 @@ bun add @perfect/topology
 ## Quickstart
 
 ```ts
-import { ConsumerGroup, StreamTopology, TopologyRunner } from "@perfect/topology";
+import { ConsumerGroup, StreamTopology, TopologyRunner } from "@spilne/perfect-topology";
 
 // clicks / counts: configured KafkaTopic, RedisStream, PgmqQueue, or any
 // application endpoint implementing the connect contracts.
@@ -80,7 +80,7 @@ StreamTopology.source(readings)
   (throughput, buffer fill, backpressure stats)
 - **Distribution** — `DistributedRunner` + `planStages` split the DAG at
   explicit `shuffle()` boundaries into stages connected by a `ShuffleTransport`
-  (Kafka-backed one in `@perfect/kafka`)
+  (Kafka-backed one in `@spilne/perfect-kafka`)
 - **Partition state** — state is namespaced by topology, stage, operator, and
   partition; fenced lease epochs prevent stale instances from committing.
   Redis and PostgreSQL provide durable atomic state/progress/dedupe commits
@@ -98,8 +98,8 @@ StreamTopology.source(readings)
 ## Links
 
 - Repo: https://github.com/spilne/perfect
-- Connect contracts: `@perfect/core/connect`
-- Kafka source/sink: `@perfect/kafka`
+- Connect contracts: `@spilne/perfect-core/connect`
+- Kafka source/sink: `@spilne/perfect-kafka`
 - Stateful topology guide: [`documentation/18-topologies.md`](../../documentation/18-topologies.md)
 - Messaging contracts: [`documentation/16-messaging.md`](../../documentation/16-messaging.md)
 - Redis/PostgreSQL state backends: [`documentation/17-distributed-backends.md`](../../documentation/17-distributed-backends.md)

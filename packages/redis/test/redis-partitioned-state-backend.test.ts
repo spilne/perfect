@@ -7,7 +7,7 @@ import {
   StateCheckpointId,
   TopologyId,
   TopologyInstanceId,
-} from "@perfect/core/connect";
+} from "@spilne/perfect-core/connect";
 import type { RedisClient } from "../src/redis-client";
 import { RedisPartitionedStateBackend } from "../src/redis-partitioned-state-backend";
 

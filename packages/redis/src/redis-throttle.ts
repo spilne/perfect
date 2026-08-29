@@ -1,4 +1,4 @@
-import type { Eff, Throttle, Throws } from "@perfect/core";
+import type { Eff, Throttle, Throws } from "@spilne/perfect-core";
 import type { RedisClient } from "./redis-client";
 import { RedisError } from "./redis-error";
 import { RedisRateLimiter } from "./redis-rate-limiter";

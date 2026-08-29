@@ -1,6 +1,6 @@
-# @perfect/otel
+# @spilne/perfect-otel
 
-OpenTelemetry bridge for `@perfect/core` observability. Two pieces:
+OpenTelemetry bridge for `@spilne/perfect-core` observability. Two pieces:
 `OtelTracer` implements core's `Tracer` service on top of an OTel tracer, so
 every `withSpan` in your program becomes a real OTel span (with correct
 parentage); `OtelMetricsExporter` pushes `MetricsRegistry` snapshots into
@@ -8,12 +8,12 @@ OTel instruments.
 
 This is the general bridge — it knows nothing about HTTP. For HTTP-specific
 client tracing (CLIENT spans per request, `traceparent` propagation on
-`@perfect/http`), use `@perfect/http-otel`.
+`@spilne/perfect-http`), use `@spilne/perfect-http-otel`.
 
 ## Install
 
 ```bash
-bun add @perfect/otel @opentelemetry/api
+bun add @spilne/perfect-otel @opentelemetry/api
 ```
 
 > Not yet published to npm — install from the workspace for now.
@@ -24,8 +24,8 @@ bun add @perfect/otel @opentelemetry/api
 
 ```ts
 import { trace } from "@opentelemetry/api";
-import { provide, run, succeed, withSpan, Tracer } from "@perfect/core";
-import { OtelTracer } from "@perfect/otel";
+import { provide, run, succeed, withSpan, Tracer } from "@spilne/perfect-core";
+import { OtelTracer } from "@spilne/perfect-otel";
 
 const program = withSpan(
   succeed(21).map((n) => n * 2),
@@ -47,8 +47,8 @@ attribute. When no tracer is provided, `withSpan` is zero-cost.
 
 ```ts
 import { metrics } from "@opentelemetry/api";
-import { defaultMetricsRegistry } from "@perfect/core";
-import { OtelMetricsExporter } from "@perfect/otel";
+import { defaultMetricsRegistry } from "@spilne/perfect-core";
+import { OtelMetricsExporter } from "@spilne/perfect-otel";
 
 const exporter = new OtelMetricsExporter(metrics.getMeter("my-app"), defaultMetricsRegistry);
 
@@ -74,4 +74,4 @@ repeatedly and returns the snapshot it exported.
 - Repo: https://github.com/spilne/perfect
 - Core observability APIs (`Log`, `withSpan`, `Metrics`):
   [`documentation/15-observability.md`](../../documentation/15-observability.md)
-- HTTP client tracing: `@perfect/http-otel`
+- HTTP client tracing: `@spilne/perfect-http-otel`

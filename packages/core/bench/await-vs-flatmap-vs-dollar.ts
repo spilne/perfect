@@ -92,7 +92,7 @@ group(`pure compute × ${N}`, () => {
     return x;
   });
 
-  // (C) $ syntax — compiles to flatMap chain via @perfect/transform.
+  // (C) $ syntax — compiles to flatMap chain via @spilne/perfect-transform.
   // The execution cost is identical to (A); we include it to PROVE the
   // syntactic sugar has zero runtime tax. The rewriter only recognises
   // `const x = $(e)` (declarations), so we generate fresh names per step.

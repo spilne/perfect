@@ -8,7 +8,7 @@ import {
   Tracer,
   withSpan,
   MetricsRegistry,
-} from "@perfect/core";
+} from "@spilne/perfect-core";
 import { OtelTracer, OtelMetricsExporter } from "../src";
 
 // ── Fakes over the otel API surface we touch ───────────────────────

@@ -22,7 +22,7 @@
 // are standalone functions that read a `Response`, so you control the body
 // at the transport layer.
 
-import { type Eff, type Throws, succeed, fail, suspend } from "@perfect/core";
+import { type Eff, type Throws, succeed, fail, suspend } from "@spilne/perfect-core";
 import { type HttpClientError, HttpParseError, HttpStatusError } from "./errors";
 import {
   AbstractHttpClient,

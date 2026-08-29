@@ -1,14 +1,14 @@
 // ---------------------------------------------------------------------------
 // PgStateBackend — StateBackend backed by a Postgres JSONB table
 //
-// Implements @perfect/core/connect's StateBackend<string, unknown>
+// Implements @spilne/perfect-core/connect's StateBackend<string, unknown>
 // (Promise-based driver boundary — direct port from promin). Each
 // key-value pair is a row; checkpoints copy all live rows to a named
 // checkpoint partition in the same table.
 // ---------------------------------------------------------------------------
 
 import { sql } from "drizzle-orm";
-import type { StateBackend, CheckpointName } from "@perfect/core/connect";
+import type { StateBackend, CheckpointName } from "@spilne/perfect-core/connect";
 import type { DrizzleDb } from "./drizzle-db";
 import { execRaw } from "./drizzle-db";
 import { createTopologyStateTable, topologyState } from "./pg-state-schema";

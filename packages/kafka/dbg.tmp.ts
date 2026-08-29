@@ -1,4 +1,4 @@
-import { fromPromise, run } from "@perfect/core";
+import { fromPromise, run } from "@spilne/perfect-core";
 import { KafkaTopic } from "./src/kafka-topic";
 import type { KafkaClient, KafkaConsumer, KafkaMessage } from "./src/kafka-types";
 

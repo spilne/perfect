@@ -109,7 +109,7 @@ impl PerfectTransformVisitor {
             }
             if contains_dollar_deep(&ret_expr) {
                 panic!(
-                    "@perfect/swc-plugin: unsupported $ usage in a return expression — only \
+                    "@spilne/perfect-swc-plugin: unsupported $ usage in a return expression — only \
                      `return $(expr)` or a plain `return expr` compile. Bind first: \
                      `const x = $(expr); return f(x)`"
                 );
@@ -147,7 +147,7 @@ impl PerfectTransformVisitor {
         // any `$` still inside it would be a dangling identifier at runtime.
         if contains_dollar_deep(stmt) {
             panic!(
-                "@perfect/swc-plugin: unsupported $ usage inside eff(($) => …) — $ compiles only \
+                "@spilne/perfect-swc-plugin: unsupported $ usage inside eff(($) => …) — $ compiles only \
                  in `const x = $(expr)`, bare `$(expr)`, `return $(expr)`, and if/else branches. \
                  $ inside larger expressions, call arguments, loops, try/switch, or callbacks is \
                  not supported: bind first (`const x = $(e)`) and use the plain value"
@@ -229,7 +229,7 @@ impl PerfectTransformVisitor {
 
         if contains_dollar_deep(&*if_stmt.test) {
             panic!(
-                "@perfect/swc-plugin: $ inside an if condition is not supported — bind first: \
+                "@spilne/perfect-swc-plugin: $ inside an if condition is not supported — bind first: \
                  `const c = $(cond); if (c) {{ … }}`"
             );
         }
@@ -242,7 +242,7 @@ impl PerfectTransformVisitor {
                 || if_stmt.alt.as_deref().map_or(false, contains_return);
             if has_return {
                 panic!(
-                    "@perfect/swc-plugin: `return` inside an if branch followed by more \
+                    "@spilne/perfect-swc-plugin: `return` inside an if branch followed by more \
                      statements is not supported (the return would not skip them) — make the \
                      if/else the last statement, or restructure with a bound value"
                 );

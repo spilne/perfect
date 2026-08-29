@@ -1,5 +1,5 @@
-import { RetryPolicy } from "@perfect/core/retry";
-import { Stream } from "@perfect/core/stream";
+import { RetryPolicy } from "@spilne/perfect-core/retry";
+import { Stream } from "@spilne/perfect-core/stream";
 
 type PlaygroundFunction = (...values: unknown[]) => Promise<unknown>;
 type PlaygroundFunctionConstructor = new (...parameters: string[]) => PlaygroundFunction;

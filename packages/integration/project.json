@@ -1,5 +1,5 @@
 {
-  "name": "@perfect/integration",
+  "name": "@spilne/perfect-integration",
   "sourceRoot": "packages/integration/src",
   "targets": {
     "test": {},

@@ -11,7 +11,7 @@
 //
 // The `CircuitBreaker` interface is the contract; this module ships an
 // in-process implementation. Distributed implementations (Redis-backed,
-// Postgres-backed, etc.) live in @perfect-ext or downstream packages —
+// Postgres-backed, etc.) live in other @spilne/perfect-* or downstream packages —
 // they implement the same interface and are a drop-in swap.
 
 import { type Eff, type Throws } from "./eff";

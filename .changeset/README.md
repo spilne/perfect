@@ -1,6 +1,6 @@
 # Changesets
 
-Add a changeset for every user-visible change to a public `@perfect/*` package:
+Add a changeset for every user-visible change to a public `@spilne/perfect-*` package:
 
 ```sh
 bun run changeset

@@ -10,7 +10,7 @@ registry; application code can replace any of them with `provide` or `Layer`.
 the effect context across fibers.
 
 ```ts
-import { Log } from "@perfect/core";
+import { Log } from "@spilne/perfect-core";
 
 const program = Log.annotated(
   Log.info("order accepted", { amount: 42 }),
@@ -24,7 +24,7 @@ await program.run();
 line, and `TestLogger` captures entries without touching the console:
 
 ```ts
-import { Log, Logger, TestLogger, provide } from "@perfect/core";
+import { Log, Logger, TestLogger, provide } from "@spilne/perfect-core";
 
 const logger = new TestLogger();
 await provide(Log.warn("slow request", { elapsedMs: 900 }), Logger, logger).run();
@@ -43,7 +43,7 @@ spans inherit their parent through the effect context; success, typed failure,
 defect, and interruption all end the span exactly once.
 
 ```ts
-import { TestTracer, Tracer, provide, succeed, withSpan } from "@perfect/core";
+import { TestTracer, Tracer, provide, succeed, withSpan } from "@spilne/perfect-core";
 
 const tracer = new TestTracer();
 const program = withSpan(
@@ -65,7 +65,7 @@ Counters, gauges, and histograms are cheap mutable instruments obtained once
 from the `Metrics` service. Mutation is synchronous; snapshots are effects.
 
 ```ts
-import { Metrics, eff } from "@perfect/core";
+import { Metrics, eff } from "@spilne/perfect-core";
 
 const program = eff(function* () {
   const requests = yield* Metrics.counter("requests", { route: "/users" });
@@ -91,16 +91,16 @@ Install the general bridge when Perfect spans and metrics should feed an OTel
 SDK:
 
 ```bash
-bun add @perfect/otel @opentelemetry/api
+bun add @spilne/perfect-otel @opentelemetry/api
 ```
 
 - `OtelTracer` implements the core `Tracer` interface with an OTel tracer.
 - `OtelMetricsExporter` exports registry snapshots; counters and histograms
   use deltas between exports, while gauges remain absolute.
-- `@perfect/http-otel` separately supplies HTTP client spans and W3C
+- `@spilne/perfect-http-otel` separately supplies HTTP client spans and W3C
   `traceparent` propagation.
 
-See the [`@perfect/otel` package guide](../packages/otel/README.md) and
+See the [`@spilne/perfect-otel` package guide](../packages/otel/README.md) and
 [HTTP OpenTelemetry](./14-http-otel.md).
 
 ## Next

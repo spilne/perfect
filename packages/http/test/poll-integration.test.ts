@@ -10,7 +10,7 @@ import {
   sync,
   run,
   type RepeatTimeoutError,
-} from "@perfect/core";
+} from "@spilne/perfect-core";
 import {
   DefaultHttpClient,
   type HttpClientError,

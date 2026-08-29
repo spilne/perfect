@@ -477,7 +477,7 @@ function parseDollarStatements(body: string, blockLine: number): DollarStmt[] {
         `unsupported $ usage in eff(($) => …) block (line ~${blockLine}) — $ is only compiled in ` +
           `"const x = $(expr)", bare "$(expr)", and "return $(expr)". ` +
           `For $ inside expressions or control flow, bind first (const x = $(e)) or use the ` +
-          `SWC plugin (@perfect/swc-plugin), which supports if/else.`,
+          `SWC plugin (@spilne/perfect-swc-plugin), which supports if/else.`,
         trimmed,
       );
     }

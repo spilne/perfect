@@ -1,4 +1,4 @@
-# @perfect/swc-plugin
+# @spilne/perfect-swc-plugin
 
 SWC WASM plugin that desugars Perfect's `eff(($) => ...)` syntax to `.flatMap`
 chains at compile time, with source maps.
@@ -29,7 +29,7 @@ const PLUGIN = new URL("./packages/swc-plugin/dist/plugin.wasm", import.meta.url
 
 ### After publishing or `npm link` (package import)
 
-Once this package is on npm or linked into `node_modules/@perfect/swc-plugin`:
+Once this package is on npm or linked into `node_modules/@spilne/perfect-swc-plugin`:
 
 ```js
 // Next.js
@@ -38,7 +38,7 @@ const require = createRequire(import.meta.url);
 
 export default {
   experimental: {
-    swcPlugins: [[require.resolve("@perfect/swc-plugin"), {}]],
+    swcPlugins: [[require.resolve("@spilne/perfect-swc-plugin"), {}]],
   },
 };
 ```
@@ -54,7 +54,7 @@ export default {
     swc.vite({
       jsc: {
         experimental: {
-          plugins: [[require.resolve("@perfect/swc-plugin"), {}]],
+          plugins: [[require.resolve("@spilne/perfect-swc-plugin"), {}]],
         },
       },
     }),
@@ -66,7 +66,7 @@ export default {
 
 ```bash
 cd packages/swc-plugin && npm link
-cd /path/to/your-other-project && npm link @perfect/swc-plugin
+cd /path/to/your-other-project && npm link @spilne/perfect-swc-plugin
 ```
 
 ## What it handles
@@ -81,6 +81,6 @@ cd /path/to/your-other-project && npm link @perfect/swc-plugin
 ## What it does **not** handle
 
 - `for { x <- e } yield expr` — this is source-text rewriting, not AST. Use
-  `@perfect/transform` (the Bun plugin / preload) for that.
+  `@spilne/perfect-transform` (the Bun plugin / preload) for that.
 
 See `docs/transform-pipeline.md` at the repo root for the full picture.

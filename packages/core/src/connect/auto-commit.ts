@@ -2,7 +2,7 @@
 //
 // Queue-agnostic: operates purely on Envelope.ack(); zero backend knowledge.
 // (The Kafka-offset-writing variant, commitBatchWithin, lives in
-// @perfect/kafka.)
+// @spilne/perfect-kafka.)
 //
 // Ported from promin's kafka/commit-batch-within.ts. The setInterval-based
 // timer became Stream.groupWithin — same batch-by-count-or-time semantics,

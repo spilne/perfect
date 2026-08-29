@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { die, run, succeed, type Throws } from "@perfect/core";
-import type { Stream } from "@perfect/core/stream";
+import { die, run, succeed, type Throws } from "@spilne/perfect-core";
+import type { Stream } from "@spilne/perfect-core/stream";
 import { PgmqQueue, PgmqSchemaValidationError, type PgmqQueueError } from "../src/pgmq/pgmq-queue";
 import { PostgresError } from "../src/lib/postgres-error";
 import { fakeDb } from "./fake-db";

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { run } from "@perfect/core";
+import { run } from "@spilne/perfect-core";
 import { PgQueue } from "../src/lib/pg-queue";
 import { fakeDb } from "./fake-db";
 

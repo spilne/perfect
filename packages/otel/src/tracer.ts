@@ -1,4 +1,4 @@
-// OtelTracer — bridges @perfect/core's Tracer service to OpenTelemetry.
+// OtelTracer — bridges @spilne/perfect-core's Tracer service to OpenTelemetry.
 //
 //   import { trace } from "@opentelemetry/api";
 //   const tracer = new OtelTracer(trace.getTracer("my-app"));
@@ -16,7 +16,7 @@ import {
   context as otelContext,
   trace,
 } from "@opentelemetry/api";
-import type { Span, SpanOptions, SpanStatus, Tracer } from "@perfect/core";
+import type { Span, SpanOptions, SpanStatus, Tracer } from "@spilne/perfect-core";
 
 class OtelBridgeSpan implements Span {
   constructor(

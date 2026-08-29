@@ -6,7 +6,7 @@
 // Without errorSchema, behaviour is unchanged: HttpStatusError<string>.
 
 import { describe, test, expect } from "bun:test";
-import { type Eff, type Throws, succeed, fail, run } from "@perfect/core";
+import { type Eff, type Throws, succeed, fail, run } from "@spilne/perfect-core";
 import {
   type HttpClientError,
   type HttpRequestOptions,

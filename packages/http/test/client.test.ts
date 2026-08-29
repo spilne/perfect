@@ -2,7 +2,7 @@
 // MockTransport — no real HTTP.
 
 import { describe, test, expect } from "bun:test";
-import { type Eff, type Throws, succeed, fail, sync, run } from "@perfect/core";
+import { type Eff, type Throws, succeed, fail, sync, run } from "@spilne/perfect-core";
 import {
   AbstractHttpClient,
   DefaultHttpClient,
@@ -291,10 +291,10 @@ describe("AbstractHttpClient — minimal subclass", () => {
 
 describe("postMultipart", () => {
   test("builds FormData with file + fields and posts it", async () => {
-    const { run } = await import("@perfect/core");
+    const { run } = await import("@spilne/perfect-core");
     const { DefaultHttpClient } = await import("../src");
 
-    const { sync: syncFn } = await import("@perfect/core");
+    const { sync: syncFn } = await import("@spilne/perfect-core");
     let captured: { body?: unknown; method?: string; contentType?: string | undefined } = {};
     const transport = {
       execute: (options: any) =>
@@ -338,10 +338,10 @@ describe("postMultipart", () => {
   });
 
   test("defaults the file field name to 'file'", async () => {
-    const { run } = await import("@perfect/core");
+    const { run } = await import("@spilne/perfect-core");
     const { DefaultHttpClient, identityParser } = await import("../src");
 
-    const { sync: syncFn } = await import("@perfect/core");
+    const { sync: syncFn } = await import("@spilne/perfect-core");
     let fd: FormData | undefined;
     const transport = {
       execute: (options: any) =>

@@ -1,9 +1,9 @@
-// @perfect/postgres — Postgres coordination backends for @perfect/core.
+// @spilne/perfect-postgres — Postgres coordination backends for @spilne/perfect-core.
 //
 // Queues (pgmq + plain SKIP LOCKED), LISTEN/NOTIFY change streams, and
 // distributed implementations of core's coordination contracts
 // (RateLimiter, Throttle, Singleflight, Ref, StateBackend, LeaderElection).
-// The pgmq module also ships as the `@perfect/postgres/pgmq` subpath.
+// The pgmq module also ships as the `@spilne/perfect-postgres/pgmq` subpath.
 
 // Database plumbing
 export type { DrizzleDb } from "./lib/drizzle-db";

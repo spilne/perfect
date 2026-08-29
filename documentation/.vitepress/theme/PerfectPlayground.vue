@@ -65,7 +65,7 @@ onMounted(() => void execute());
 <template>
   <main class="playground-shell">
     <header class="playground-hero">
-      <p class="eyebrow">@perfect/core · stream lab</p>
+      <p class="eyebrow">@spilne/perfect-core · stream lab</p>
       <h1>Edit the stream. Run the effect.</h1>
       <p class="lede">
         Explore concurrency, typed failures, source retry, state, cancellation, reliable

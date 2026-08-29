@@ -7,7 +7,7 @@
 //
 // If the topology has no shuffle nodes, delegates directly to TopologyRunner.
 //
-// The ShuffleTransport interface lives in @perfect/core/connect (kafka
+// The ShuffleTransport interface lives in @spilne/perfect-core/connect (kafka
 // implements it, topology consumes it); DistributedTopologyConfig is local.
 // ---------------------------------------------------------------------------
 
@@ -25,9 +25,13 @@ import type {
   PartitionedStateBackend,
   TopologyId,
   TopologyInstanceId,
-} from "@perfect/core/connect";
-import { JsonCodec, ConsumerGroup, TopologyId as makeTopologyId } from "@perfect/core/connect";
-import type { Eff } from "@perfect/core";
+} from "@spilne/perfect-core/connect";
+import {
+  JsonCodec,
+  ConsumerGroup,
+  TopologyId as makeTopologyId,
+} from "@spilne/perfect-core/connect";
+import type { Eff } from "@spilne/perfect-core";
 
 /**
  * Config for DistributedRunner — extends TopologyConfig with shuffle transport.

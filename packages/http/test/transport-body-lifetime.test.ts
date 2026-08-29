@@ -6,7 +6,7 @@
 // with HttpParseError { cause: AbortError }.
 
 import { afterAll, describe, expect, test } from "bun:test";
-import { Cause, run, runExit } from "@perfect/core";
+import { Cause, run, runExit } from "@spilne/perfect-core";
 import { DefaultHttpClient, httpRequestJson, httpRequestText, identityParser } from "../src";
 
 const payload = JSON.stringify({ data: "x".repeat(200_000) });

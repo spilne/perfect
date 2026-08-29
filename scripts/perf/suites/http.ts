@@ -1,4 +1,4 @@
-// HTTP client suite — @perfect/http against the clients people reach for.
+// HTTP client suite — @spilne/perfect-http against the clients people reach for.
 //
 // globalThis.fetch is the baseline on purpose. Beating undici would be a
 // meaningless claim (it is a raw transport, we are a typed layer over fetch);
@@ -90,14 +90,14 @@ export const httpSuite: Suite = {
         run: async () => do_not_optimize((await axios.get(`${base}/json`)).data),
       },
       {
-        name: "GET @perfect/http httpRequestJson",
+        name: "GET @spilne/perfect-http httpRequestJson",
         unit: "ns/op",
         divisor: 1,
         run: async () =>
           do_not_optimize(await run(httpRequestJson({ url: `${base}/json` }) as any)),
       },
       {
-        name: "GET @perfect/http client",
+        name: "GET @spilne/perfect-http client",
         unit: "ns/op",
         divisor: 1,
         run: async () => do_not_optimize(await run(client!.get("/json", identityParser) as any)),
@@ -124,7 +124,7 @@ export const httpSuite: Suite = {
         run: async () => do_not_optimize((await axios.post(`${base}/echo`, body)).data),
       },
       {
-        name: "POST @perfect/http client",
+        name: "POST @spilne/perfect-http client",
         unit: "ns/op",
         divisor: 1,
         run: async () =>

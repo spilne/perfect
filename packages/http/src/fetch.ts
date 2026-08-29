@@ -11,7 +11,7 @@
 // All return `Eff<T, Throws<HttpClientError>>` — composes with retry,
 // timeout, race, etc. via Perfect's fluent API.
 
-import { type Eff, type Throws, fail, succeed, tryPromise } from "@perfect/core";
+import { type Eff, type Throws, fail, succeed, tryPromise } from "@spilne/perfect-core";
 import { type HttpClientError, HttpParseError, HttpStatusError, HttpUnknownError } from "./errors";
 import { type ResponseParser } from "./response";
 import { type HttpRequestOptions, type HttpTransport, defaultTransport } from "./transport";

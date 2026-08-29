@@ -13,8 +13,8 @@ import type {
   Streamable,
   Acknowledgeable,
   KeyedSinkable,
-} from "@perfect/core/connect";
-import type { Throws } from "@perfect/core";
+} from "@spilne/perfect-core/connect";
+import type { Throws } from "@spilne/perfect-core";
 import { KafkaTopic } from "./kafka-topic";
 import type { KafkaClient } from "./kafka-types";
 import { TopicName } from "./brands";

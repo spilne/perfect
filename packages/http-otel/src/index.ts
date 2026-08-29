@@ -1,4 +1,4 @@
-// @perfect/http-otel — OpenTelemetry tracing for @perfect/http.
+// @spilne/perfect-http-otel — OpenTelemetry tracing for @spilne/perfect-http.
 //
 //   tracingMiddleware(opts?)   — drop-in HttpMiddleware; starts/ends spans
 //   TracingFetchTransport      — wraps a transport; injects W3C traceparent

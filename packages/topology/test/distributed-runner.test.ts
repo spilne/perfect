@@ -2,15 +2,15 @@
 // ShuffleTransport; no real broker.
 
 import { describe, test, expect } from "bun:test";
-import { fail, succeed, sync, type Throws } from "@perfect/core";
-import { Stream } from "@perfect/core/stream";
+import { fail, succeed, sync, type Throws } from "@spilne/perfect-core";
+import { Stream } from "@spilne/perfect-core/stream";
 import type {
   Streamable,
   Acknowledgeable,
   Sinkable,
   Codec,
   ShuffleTransport,
-} from "@perfect/core/connect";
+} from "@spilne/perfect-core/connect";
 import {
   StreamTopology,
   DistributedRunner,

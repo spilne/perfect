@@ -1,13 +1,13 @@
 import { describe, test, expect } from "bun:test";
-import { fail, fromPromise, succeed, sync, type Throws } from "@perfect/core";
-import { Stream } from "@perfect/core/stream";
-import type { Streamable, Acknowledgeable, Sinkable, Codec } from "@perfect/core/connect";
+import { fail, fromPromise, succeed, sync, type Throws } from "@spilne/perfect-core";
+import { Stream } from "@spilne/perfect-core/stream";
+import type { Streamable, Acknowledgeable, Sinkable, Codec } from "@spilne/perfect-core/connect";
 import {
   InMemoryPartitionedState,
   Partition,
   type PartitionStateCommit,
   type TransactionalPartitionedStateBackend,
-} from "@perfect/core/connect";
+} from "@spilne/perfect-core/connect";
 import {
   StreamTopology,
   TopologyRunner,

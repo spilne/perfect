@@ -3,9 +3,9 @@
 // without a broker.
 
 import { describe, it, expect } from "bun:test";
-import { die, run, succeed, sync } from "@perfect/core";
-import { Stream } from "@perfect/core/stream";
-import type { Envelope } from "@perfect/core/connect";
+import { die, run, succeed, sync } from "@spilne/perfect-core";
+import { Stream } from "@spilne/perfect-core/stream";
+import type { Envelope } from "@spilne/perfect-core/connect";
 import { commitBatchWithin } from "../src/commit-batch-within";
 import type { KafkaConsumer, KafkaOffsetCommit } from "../src/kafka-types";
 import { TopicName, PartitionId, KafkaOffset } from "../src/brands";

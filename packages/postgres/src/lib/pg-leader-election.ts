@@ -1,14 +1,14 @@
 // ---------------------------------------------------------------------------
 // PgLeaderElection — Postgres advisory lock based leader election
 //
-// Implements @perfect/core/connect's LeaderElection contract. Advisory
+// Implements @spilne/perfect-core/connect's LeaderElection contract. Advisory
 // locks are session-scoped: acquire and release must run on the same
 // connection, so use a dedicated (or single-connection) client rather
 // than a large pool when leadership matters.
 // ---------------------------------------------------------------------------
 
 import { sql } from "drizzle-orm";
-import type { LeaderElection } from "@perfect/core/connect";
+import type { LeaderElection } from "@spilne/perfect-core/connect";
 import { type DrizzleDb, execRaw } from "./drizzle-db";
 
 export interface PgLeaderElectionConfig {

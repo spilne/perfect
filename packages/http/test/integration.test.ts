@@ -2,7 +2,7 @@
 // fluent API (.retry, .catch, .catchTag, .timeout, etc).
 
 import { describe, test, expect } from "bun:test";
-import { type Eff, type Throws, succeed, fail, sync, run, RetryPolicy } from "@perfect/core";
+import { type Eff, type Throws, succeed, fail, sync, run, RetryPolicy } from "@spilne/perfect-core";
 import {
   type HttpTransport,
   type HttpRequestOptions,

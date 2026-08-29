@@ -1,7 +1,7 @@
 # Messaging Contracts and Kafka
 
-`@perfect/core/connect` is the queue-agnostic boundary between applications,
-connectors, and `@perfect/topology`. Backends implement only the capabilities
+`@spilne/perfect-core/connect` is the queue-agnostic boundary between applications,
+connectors, and `@spilne/perfect-topology`. Backends implement only the capabilities
 they actually support.
 
 ## Capability interfaces
@@ -21,8 +21,8 @@ The `S` parameter is the backend effect union. A generic connector function
 therefore preserves both source and sink failures:
 
 ```ts
-import type { Eff } from "@perfect/core";
-import type { Sinkable, Streamable } from "@perfect/core/connect";
+import type { Eff } from "@spilne/perfect-core";
+import type { Sinkable, Streamable } from "@spilne/perfect-core/connect";
 
 function copy<T, SourceS, SinkS>(
   source: Streamable<T, SourceS>,
@@ -61,18 +61,18 @@ use `nack` only when the backend's immediate-redelivery behavior is desired.
 
 ## Kafka
 
-`@perfect/kafka` contains the connector and driver interfaces. Install one
+`@spilne/perfect-kafka` contains the connector and driver interfaces. Install one
 driver adapter separately:
 
 ```bash
-bun add @perfect/kafka @perfect/kafka-kafkajs kafkajs
+bun add @spilne/perfect-kafka @spilne/perfect-kafka-kafkajs kafkajs
 # or, on supported Node versions:
-bun add @perfect/kafka @perfect/kafka-platformatic @platformatic/kafka
+bun add @spilne/perfect-kafka @spilne/perfect-kafka-platformatic @platformatic/kafka
 ```
 
 ```ts
-import { kafkaConfig } from "@perfect/kafka";
-import { createKafkajsClient } from "@perfect/kafka-kafkajs";
+import { kafkaConfig } from "@spilne/perfect-kafka";
+import { createKafkajsClient } from "@spilne/perfect-kafka-kafkajs";
 
 interface Order {
   id: string;
@@ -108,8 +108,8 @@ This avoids committing through a different consumer-group member.
 
 | Package | Runtime | Consumption bridge | Configuration |
 | --- | --- | --- | --- |
-| `@perfect/kafka-kafkajs` | Bun and Node.js | callback `eachMessage` / `eachBatch` | broker string/array or KafkaJS `KafkaConfig`; `createKafkajsTopic` is available for bootstrap/tests |
-| `@perfect/kafka-platformatic` | Node.js | native async message stream through a bounded pause/resume bridge | broker string/array or `PlatformaticAdapterConfig` with producer, consumer, admin, and buffer options |
+| `@spilne/perfect-kafka-kafkajs` | Bun and Node.js | callback `eachMessage` / `eachBatch` | broker string/array or KafkaJS `KafkaConfig`; `createKafkajsTopic` is available for bootstrap/tests |
+| `@spilne/perfect-kafka-platformatic` | Node.js | native async message stream through a bounded pause/resume bridge | broker string/array or `PlatformaticAdapterConfig` with producer, consumer, admin, and buffer options |
 
 Both drivers implement the same `KafkaClient` boundary, including producer,
 consumer, admin, seek/replay, offset commits, and managed partition assignment.

@@ -13,8 +13,8 @@
     "types": ["bun"],
     "typeRoots": ["../../node_modules/@types"],
     "paths": {
-      "@perfect/core": ["../core/src/index.ts"],
-      "@perfect/core/*": ["../core/src/*"]
+      "@spilne/perfect-core": ["../core/src/index.ts"],
+      "@spilne/perfect-core/*": ["../core/src/*"]
     }
   },
   "include": ["src", "test"]

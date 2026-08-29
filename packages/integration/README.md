@@ -1,4 +1,4 @@
-# @perfect/integration
+# @spilne/perfect-integration
 
 Testcontainers-based Kafka integration tests and shared Redis/PostgreSQL
 container helpers. This package is private and never published. The default
@@ -37,9 +37,9 @@ default Redpanda lane exercises the KafkaJS adapter.
 
 - `src/infra.ts` — container lifecycle wrappers (`withKafka`, `withRedis`,
   `withPostgres`, `withAll`), Docker gating, `eventually()`, `uniqueName()`.
-- `@perfect/kafka-kafkajs` — KafkaJS → `KafkaClient`, branding identifiers at
+- `@spilne/perfect-kafka-kafkajs` — KafkaJS → `KafkaClient`, branding identifiers at
   the driver boundary.
-- `@perfect/kafka-platformatic` — Platformatic's event-emitting
+- `@spilne/perfect-kafka-platformatic` — Platformatic's event-emitting
   `MessagesStream` → bounded Perfect stream bridge.
 - `test/kafka.test.ts` — round-trip, batched-commit, and shuffle-transport
   suites against a real broker.

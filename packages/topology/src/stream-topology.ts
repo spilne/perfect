@@ -11,7 +11,12 @@
 // Think: Kafka Streams Topology / Flink JobGraph, with our API style.
 // ---------------------------------------------------------------------------
 
-import type { Streamable, Acknowledgeable, Sinkable, ChannelName } from "@perfect/core/connect";
+import type {
+  Streamable,
+  Acknowledgeable,
+  Sinkable,
+  ChannelName,
+} from "@spilne/perfect-core/connect";
 import type {
   TopologyNode,
   AggregateSpec,

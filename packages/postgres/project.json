@@ -1,5 +1,5 @@
 {
-  "name": "@perfect/postgres",
+  "name": "@spilne/perfect-postgres",
   "sourceRoot": "packages/postgres/src",
   "targets": {
     "build": {},

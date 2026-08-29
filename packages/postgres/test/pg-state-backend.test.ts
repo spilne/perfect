@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { CheckpointName } from "@perfect/core/connect";
+import { CheckpointName } from "@spilne/perfect-core/connect";
 import { PgStateBackend } from "../src/lib/pg-state-backend";
 import { fakeDb } from "./fake-db";
 

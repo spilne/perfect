@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // PgRef<T> — Postgres-backed atomic reference (JSON value stored as TEXT)
 //
-// Implements @perfect/core's Eff-typed Ref<A> contract. Atomicity comes
+// Implements @spilne/perfect-core's Eff-typed Ref<A> contract. Atomicity comes
 // from a SELECT ... FOR UPDATE transaction per mutation. Adapted from
 // promin's Promise-typed AtomicRef (getAsync/setAsync/updateAsync):
 // perfect's Ref adds modify/getAndSet/getAndUpdate/updateAndGet, all
@@ -9,8 +9,8 @@
 // as PostgresError in the effect union.
 // ---------------------------------------------------------------------------
 
-import { fromPromise } from "@perfect/core";
-import type { Eff, Ref, Throws } from "@perfect/core";
+import { fromPromise } from "@spilne/perfect-core";
+import type { Eff, Ref, Throws } from "@spilne/perfect-core";
 import { sql } from "drizzle-orm";
 import { type DrizzleDb, execRaw } from "./drizzle-db";
 import { PostgresError, toPostgresError } from "./postgres-error";

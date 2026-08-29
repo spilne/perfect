@@ -1,4 +1,4 @@
-// exportMetrics — push a @perfect/core MetricsRegistry snapshot into
+// exportMetrics — push a @spilne/perfect-core MetricsRegistry snapshot into
 // OpenTelemetry instruments. Call it on your export cadence (a Stream.tick
 // loop, an otel PeriodicExportingMetricReader callback, a shutdown hook).
 //
@@ -6,7 +6,7 @@
 // exports don't double-count; gauges are absolute.
 
 import type { Meter } from "@opentelemetry/api";
-import type { MetricsRegistry, MetricsSnapshot } from "@perfect/core";
+import type { MetricsRegistry, MetricsSnapshot } from "@spilne/perfect-core";
 
 export class OtelMetricsExporter {
   private lastCounters: Record<string, number> = {};

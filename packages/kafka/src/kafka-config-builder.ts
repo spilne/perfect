@@ -1,4 +1,4 @@
-import type { Codec } from "@perfect/core/connect";
+import type { Codec } from "@spilne/perfect-core/connect";
 import { GroupId, TopicName } from "./brands";
 import { KafkaTopic } from "./kafka-topic";
 import type { KafkaTopicConfig } from "./kafka-topic";

@@ -7,7 +7,7 @@
 
 import { z } from "zod";
 import * as v from "valibot";
-import { type Eff, type Throws, succeed } from "@perfect/core";
+import { type Eff, type Throws, succeed } from "@spilne/perfect-core";
 import {
   type HttpClientError,
   type HttpRequestOptions,

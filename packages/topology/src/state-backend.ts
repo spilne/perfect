@@ -1,3 +1,3 @@
-// StateBackend moved to @perfect/core/connect so durable backends can
+// StateBackend moved to @spilne/perfect-core/connect so durable backends can
 // implement it without depending on topology. Re-exported here for compat.
-export { type StateBackend, InMemoryState } from "@perfect/core/connect";
+export { type StateBackend, InMemoryState } from "@spilne/perfect-core/connect";

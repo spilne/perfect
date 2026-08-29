@@ -4,7 +4,7 @@
 //
 // Ported from promin's typeclasses/state-backend.ts + adapters/memory.
 // Lives in core/connect so durable backends (Postgres/Redis/SQLite) can
-// implement the checkpoint interface without depending on @perfect/topology.
+// implement the checkpoint interface without depending on @spilne/perfect-topology.
 // Persistence remains a Promise-based driver boundary; stateful operators
 // wrap it in an Eff when typed failures need to be exposed.
 // ---------------------------------------------------------------------------

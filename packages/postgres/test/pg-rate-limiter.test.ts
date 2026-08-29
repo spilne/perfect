@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { run } from "@perfect/core";
+import { run } from "@spilne/perfect-core";
 import { PgRateLimiter, slidingWindowDecision } from "../src/lib/pg-rate-limiter";
 import { fakeDb } from "./fake-db";
 

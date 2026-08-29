@@ -9,7 +9,7 @@
 // Each stage is a sub-topology that TopologyRunner can execute independently.
 // ---------------------------------------------------------------------------
 
-import { ChannelName, type ConsumerGroup } from "@perfect/core/connect";
+import { ChannelName, type ConsumerGroup } from "@spilne/perfect-core/connect";
 import { StageId } from "./brands";
 import type { TopologyNode, CompiledTopology, ShuffleNode, SinkNode } from "./types";
 

@@ -11,7 +11,7 @@
 // You can also use a DefaultHttpClient directly without Layer — the service
 // tag is just for when you want DI.
 
-import { service } from "@perfect/core";
+import { service } from "@spilne/perfect-core";
 import type { HttpClient as HttpClientT } from "./client";
 
 export const HttpClient = service<HttpClientT>("HttpClient");

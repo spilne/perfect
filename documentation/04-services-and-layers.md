@@ -14,7 +14,7 @@ effect channel).
 ::: syntax generator
 <!-- @embed packages/core/examples/04-services.ts#service-define -->
 ```ts
-import { eff, succeed, service, provide, type Eff } from "@perfect/core";
+import { eff, succeed, service, provide, type Eff } from "@spilne/perfect-core";
 
 // Define a service interface and a tag.
 interface Greeter {
@@ -40,7 +40,7 @@ console.log(wired.runSync()); // → "hello, world"
 ::: syntax chainable
 <!-- @embed packages/core/examples/04-services.ts#service-define-flat -->
 ```ts
-import { succeed, provide } from "@perfect/core";
+import { succeed, provide } from "@spilne/perfect-core";
 
 // Same program, chainable form: Greeter.get is an effect — flatMap into it.
 const programFlat = Greeter.get.flatMap((g) => g.greet("world"));
@@ -62,7 +62,7 @@ ugly for three or more. That's where Layers come in:
 ::: syntax generator
 <!-- @embed packages/core/examples/04-services.ts#service-multiple -->
 ```ts
-import { eff, succeed, service, provide, type Eff } from "@perfect/core";
+import { eff, succeed, service, provide, type Eff } from "@spilne/perfect-core";
 
 // Multiple services nest awkwardly with provide() — see Layer for the cure.
 interface Db {
@@ -97,7 +97,7 @@ console.log(captured); // → ["querying"]
 ::: syntax chainable
 <!-- @embed packages/core/examples/04-services.ts#service-multiple-flat -->
 ```ts
-import { succeed, provide } from "@perfect/core";
+import { succeed, provide } from "@spilne/perfect-core";
 
 // Multiple services in chainable form — nested .flatMap for each .get.
 const capturedFlat: string[] = [];
@@ -127,7 +127,7 @@ type, no new constructors — reuse `succeed` / `eff` / `scoped`.
 
 <!-- @embed packages/core/examples/05-layers.ts#layer-build -->
 ```ts
-import { succeed } from "@perfect/core";
+import { succeed } from "@spilne/perfect-core";
 
 // Build layers using existing constructors — succeed, eff, scoped.
 const DbLive = succeed({ Db: { query: (s: string) => succeed(`db:${s}`) } as Db });
@@ -148,7 +148,7 @@ Three equivalent chain styles. Pick whichever reads best at the call site:
 
 <!-- @embed packages/core/examples/05-layers.ts#layer-chain -->
 ```ts
-import { Layer } from "@perfect/core";
+import { Layer } from "@spilne/perfect-core";
 
 // Three equivalent chain styles:
 const a = program.with(Layer.merge(DbLive, CacheLive, LoggerLive));
@@ -168,7 +168,7 @@ the services, runs the program. Releases fire in LIFO order on exit.
 ::: syntax generator
 <!-- @embed packages/core/examples/05-layers.ts#layer-apply -->
 ```ts
-import { eff, Layer } from "@perfect/core";
+import { eff, Layer } from "@spilne/perfect-core";
 
 // Compose horizontally with Layer.merge, apply with .with()
 const AppLive = Layer.merge(DbLive, CacheLive, LoggerLive);
@@ -211,7 +211,7 @@ success, failure, or interrupt:
 
 <!-- @embed packages/core/examples/05-layers.ts#layer-scoped -->
 ```ts
-import { eff, sync, acquireRelease, Layer } from "@perfect/core";
+import { eff, sync, acquireRelease, Layer } from "@spilne/perfect-core";
 
 // Scoped layer: acquireRelease finalizers fire when the program exits.
 const events: string[] = [];
@@ -240,7 +240,7 @@ Pass a different layer:
 
 <!-- @embed packages/core/examples/05-layers.ts#layer-test-swap -->
 ```ts
-import { succeed } from "@perfect/core";
+import { succeed } from "@spilne/perfect-core";
 
 // Test-time swap is a one-liner — supply a different layer.
 const FakeAll = succeed({

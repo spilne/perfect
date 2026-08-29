@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
-import { run, succeed } from "@perfect/core";
-import type { Throws } from "@perfect/core";
-import type { Stream } from "@perfect/core/stream";
+import { run, succeed } from "@spilne/perfect-core";
+import type { Throws } from "@spilne/perfect-core";
+import type { Stream } from "@spilne/perfect-core/stream";
 import { RedisChannel } from "../src/redis-channel";
 import type { RedisClient } from "../src/redis-client";
 import { RedisError } from "../src/redis-error";

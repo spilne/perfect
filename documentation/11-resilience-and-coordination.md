@@ -5,7 +5,7 @@ circuit breaking, request deduplication, weighted permits, queues, broadcast,
 reactive state, barriers, latches, deferred values, and resource pooling.
 
 All are **interface-first** — the in-process implementation ships with
-`@perfect/core`, but distributed backends (Redis, Postgres, etc.) can
+`@spilne/perfect-core`, but distributed backends (Redis, Postgres, etc.) can
 implement the same `Eff`-typed interface and slot in via Layer.
 
 The backend effect parameter defaults to `never` for in-process use. Remote
@@ -23,7 +23,7 @@ success.
 <!-- @embed packages/core/examples/14-primitives.ts#circuit-breaker -->
 
 ```ts
-import { succeed, CircuitBreaker, type Eff, type Throws } from "@perfect/core";
+import { succeed, CircuitBreaker, type Eff, type Throws } from "@spilne/perfect-core";
 
 // 3-state breaker — Closed → Open after `failureThreshold` failures.
 // While Open, calls reject fast with typed `CircuitOpen` error.
@@ -60,7 +60,7 @@ should query the DB").
 <!-- @embed packages/core/examples/14-primitives.ts#singleflight -->
 
 ```ts
-import { eff, sleep, all, Singleflight } from "@perfect/core";
+import { eff, sleep, all, Singleflight } from "@spilne/perfect-core";
 
 // Deduplicate concurrent calls with the same key — leader runs the work
 // once, followers wait and receive the same result.
@@ -107,7 +107,7 @@ modes.
 <!-- @embed packages/core/examples/14-primitives.ts#rate-limiter -->
 
 ```ts
-import { eff, RateLimiter } from "@perfect/core";
+import { eff, RateLimiter } from "@spilne/perfect-core";
 
 // Three strategies. tryAcquire returns boolean; acquireWaiting blocks.
 const rl = await RateLimiter.tokenBucket({ limit: 5, windowMs: 1000 }).run();
@@ -150,7 +150,7 @@ zero. Single-shot.
 <!-- @embed packages/core/examples/14-primitives.ts#latch -->
 
 ```ts
-import { eff, sync, sleep, fork, join, Latch } from "@perfect/core";
+import { eff, sync, sleep, fork, join, Latch } from "@spilne/perfect-core";
 
 // CountDownLatch — N parties decrement, awaiters release when count hits 0.
 const events: string[] = [];
@@ -196,7 +196,7 @@ multi-phase tests.
 <!-- @embed packages/core/examples/14-primitives.ts#barrier -->
 
 ```ts
-import { eff, sleep, fork, join, Barrier } from "@perfect/core";
+import { eff, sleep, fork, join, Barrier } from "@spilne/perfect-core";
 
 // CyclicBarrier — N parties block until all have arrived, then all proceed.
 const arrived: number[] = [];
@@ -235,7 +235,7 @@ Broadcast channel. Every subscriber sees every message via its own queue.
 <!-- @embed packages/core/examples/14-primitives.ts#pubsub -->
 
 ```ts
-import { eff, sync, sleep, fork, join, PubSub } from "@perfect/core";
+import { eff, sync, sleep, fork, join, PubSub } from "@spilne/perfect-core";
 
 // Broadcast channel — every subscriber gets every message.
 const seen: number[][] = [[], [], []];
@@ -298,7 +298,7 @@ A `Ref<A>` that also exposes a change `Stream<A>`. The stream emits the
 <!-- @embed packages/core/examples/14-primitives.ts#subscription-ref -->
 
 ```ts
-import { eff, sync, sleep, fork, join, SubscriptionRef } from "@perfect/core";
+import { eff, sync, sleep, fork, join, SubscriptionRef } from "@spilne/perfect-core";
 
 // Ref<A> + change Stream — reactive cell. `changes` emits current value
 // first, then every subsequent set/update.
@@ -341,7 +341,7 @@ until a release frees a slot.
 <!-- @embed packages/core/examples/14-primitives.ts#pool -->
 
 ```ts
-import { eff, sync, Pool } from "@perfect/core";
+import { eff, sync, Pool } from "@spilne/perfect-core";
 
 // Resource pool with reuse. Acquire blocks at capacity, hands off to
 // waiters on release.
@@ -394,7 +394,7 @@ and acquires fresh.
   fire-and-forget at the cost of memory.
 - **Pool's `validate` runs ONLY on reuse.** A fresh `acquire` is trusted.
 - **All primitives are interface-first** — their backend effect parameter defaults to
-  `never`, while distributed implementations retain typed failures. `@perfect/redis`
+  `never`, while distributed implementations retain typed failures. `@spilne/perfect-redis`
   provides Redis-backed implementations with `Throws<RedisError>`.
 
 ## Distributed implementations
@@ -410,9 +410,9 @@ and acquires fresh.
 | `StateBackend` / partitioned topology state | Redis implementations | PostgreSQL implementations |
 | Leader election | — | `PgLeaderElection` |
 
-Use [`@perfect/redis`](./17-distributed-backends.md#redis) for the broadest
+Use [`@spilne/perfect-redis`](./17-distributed-backends.md#redis) for the broadest
 distributed primitive set. Use
-[`@perfect/postgres`](./17-distributed-backends.md#postgresql) when state,
+[`@spilne/perfect-postgres`](./17-distributed-backends.md#postgresql) when state,
 queue acknowledgement, and sink publication need one PostgreSQL transaction.
 
 ## Next

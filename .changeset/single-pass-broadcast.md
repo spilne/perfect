@@ -1,5 +1,5 @@
 ---
-"@perfect/core": minor
+"@spilne/perfect-core": minor
 ---
 
 Add typed stream recovery, source-reacquiring `retryFrom`, effect-preserving

@@ -7,9 +7,9 @@
 // interval. Driver rejections stay in the typed channel as PostgresError.
 // ---------------------------------------------------------------------------
 
-import { fromPromise, sleep, succeed } from "@perfect/core";
-import type { Throws } from "@perfect/core";
-import { Stream } from "@perfect/core/stream";
+import { fromPromise, sleep, succeed } from "@spilne/perfect-core";
+import type { Throws } from "@spilne/perfect-core";
+import { Stream } from "@spilne/perfect-core/stream";
 import { PostgresError, toPostgresError } from "./postgres-error";
 
 export function pollStream<R>(

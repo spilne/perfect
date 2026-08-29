@@ -1,5 +1,5 @@
 // Desugared output references bare `succeed` / `sync` identifiers. When the
-// module doesn't already bind them from @perfect/core, prepend an import so
+// module doesn't already bind them from @spilne/perfect-core, prepend an import so
 // the transformed file compiles without the user knowing about the
 // implementation detail.
 //
@@ -10,7 +10,7 @@ const HELPERS = ["succeed", "sync"] as const;
 
 function importedLocalNames(source: string): Set<string> {
   const names = new Set<string>();
-  const importRe = /import\s*(?:type\s+)?\{([^}]*)\}\s*from\s*["']@perfect\/core["']/g;
+  const importRe = /import\s*(?:type\s+)?\{([^}]*)\}\s*from\s*["']@spilne\/perfect-core["']/g;
   let m: RegExpExecArray | null;
   while ((m = importRe.exec(source)) !== null) {
     for (const entry of m[1]!.split(",")) {
@@ -29,5 +29,5 @@ export function ensureCoreImports(original: string, transformed: string): string
     (name) => !bound.has(name) && new RegExp(`\\b${name}\\(`).test(transformed),
   );
   if (missing.length === 0) return transformed;
-  return `import { ${missing.join(", ")} } from "@perfect/core";\n${transformed}`;
+  return `import { ${missing.join(", ")} } from "@spilne/perfect-core";\n${transformed}`;
 }

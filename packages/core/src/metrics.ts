@@ -3,7 +3,7 @@
 // Deliberately minimal (anti-goal: no metrics in the hot path). Instruments
 // are plain objects with SYNC mutation methods — grab one once, mutate
 // cheaply. The registry is a service so tests and exporters (e.g.
-// @perfect/otel) can swap it; `Metrics.*` effects read it from context.
+// @spilne/perfect-otel) can swap it; `Metrics.*` effects read it from context.
 //
 //   const program = Metrics.counter("requests").flatMap((c) =>
 //     handler.tap(() => sync(() => c.inc())),

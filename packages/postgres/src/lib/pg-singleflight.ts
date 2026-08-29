@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // PgSingleflight — Postgres-backed distributed singleflight (request dedup)
 //
-// Implements @perfect/core's Singleflight contract (`do(key, eff)`), backed
+// Implements @spilne/perfect-core's Singleflight contract (`do(key, eff)`), backed
 // by a status row per key: the winner runs the effect and stores the
 // JSON-serialized result; concurrent callers (in any process) poll for it.
 //
@@ -14,8 +14,8 @@
 //     claim, not a guarantee, across processes.
 // ---------------------------------------------------------------------------
 
-import { fromPromise, run } from "@perfect/core";
-import type { Eff, Throws, Singleflight } from "@perfect/core";
+import { fromPromise, run } from "@spilne/perfect-core";
+import type { Eff, Throws, Singleflight } from "@spilne/perfect-core";
 import { sql } from "drizzle-orm";
 import { type DrizzleDb, execRaw } from "./drizzle-db";
 import { PostgresError, toPostgresError } from "./postgres-error";

@@ -13,8 +13,8 @@
 // ---------------------------------------------------------------------------
 
 import { sql } from "drizzle-orm";
-import { fromPromise, type Throws } from "@perfect/core";
-import { JsonCodec } from "@perfect/core/connect";
+import { fromPromise, type Throws } from "@spilne/perfect-core";
+import { JsonCodec } from "@spilne/perfect-core/connect";
 import type {
   Streamable,
   Sinkable,
@@ -22,8 +22,8 @@ import type {
   Envelope,
   Codec,
   ConsumerGroup,
-} from "@perfect/core/connect";
-import type { Stream } from "@perfect/core/stream";
+} from "@spilne/perfect-core/connect";
+import type { Stream } from "@spilne/perfect-core/stream";
 import { type DrizzleDb, execRaw } from "./drizzle-db";
 import { createQueueTable } from "./pg-queue-schema";
 import { ensureTable as ensureTableFromSchema } from "./schema-utils";
@@ -65,7 +65,7 @@ export interface PgQueueConfig<T> {
  *
  * @example
  * ```ts
- * import { PgQueue } from "@perfect/postgres";
+ * import { PgQueue } from "@spilne/perfect-postgres";
  *
  * const queue = await PgQueue.create<{ userId: string }>(db, "jobs");
  *
@@ -164,7 +164,7 @@ export class PgQueue<T>
   publish(
     value: T,
     params?: { delay?: number; headers?: Record<string, string> },
-  ): import("@perfect/core").Eff<void, Throws<PostgresError>> {
+  ): import("@spilne/perfect-core").Eff<void, Throws<PostgresError>> {
     return fromPromise(
       async () => {
         const payload = JSON.stringify(this.codec.encode(value));

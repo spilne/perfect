@@ -11,7 +11,7 @@ the surrounding scope; nothing else changes about the program flow.
 
 <!-- @embed packages/core/examples/08-resources.ts#acquire-release -->
 ```ts
-import { sync } from "@perfect/core";
+import { sync } from "@spilne/perfect-core";
 
 // .acquireRelease(release) — fluent, pair an acquire with cleanup.
 // .scoped() — define when the cleanup fires (the scope boundary).
@@ -45,7 +45,7 @@ The release fires whether the inner effect succeeds or fails:
 ::: syntax generator
 <!-- @embed packages/core/examples/08-resources.ts#release-on-failure -->
 ```ts
-import { eff, succeed, fail, sync, acquireRelease, scoped, type Eff, type Throws } from "@perfect/core";
+import { eff, succeed, fail, sync, acquireRelease, scoped, type Eff, type Throws } from "@spilne/perfect-core";
 
 // Release fires even when the inner effect fails.
 const trace: string[] = [];
@@ -73,7 +73,7 @@ console.log(trace); // → ["acquire", "release"]
 ::: syntax chainable
 <!-- @embed packages/core/examples/08-resources.ts#release-on-failure-flat -->
 ```ts
-import { succeed, fail, sync, type Eff, type Throws } from "@perfect/core";
+import { succeed, fail, sync, type Eff, type Throws } from "@spilne/perfect-core";
 
 // Same guarantee, chainable form — .acquireRelease + .scoped + .catch.
 const traceFlat: string[] = [];
@@ -103,7 +103,7 @@ When you don't have an acquire/release pair, just want a finalizer:
 
 <!-- @embed packages/core/examples/08-resources.ts#ensuring -->
 ```ts
-import { succeed, sync } from "@perfect/core";
+import { succeed, sync } from "@spilne/perfect-core";
 
 // .ensuring(finalizer) — fluent try/finally for any effect.
 let cleanedUp = false;
@@ -151,7 +151,7 @@ That means `runExit` can distinguish "the program failed" from "the program
 failed, then cleanup also failed":
 
 ```ts
-import { Cause, die, fail, runExit } from "@perfect/core";
+import { Cause, die, fail, runExit } from "@spilne/perfect-core";
 
 const exit = await fail("body")
   .ensuring(die("release"))

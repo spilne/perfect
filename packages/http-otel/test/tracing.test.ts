@@ -11,14 +11,14 @@ import {
   trace,
   ROOT_CONTEXT,
 } from "@opentelemetry/api";
-import { type Eff, type Throws, succeed, fail, sync, run } from "@perfect/core";
+import { type Eff, type Throws, succeed, fail, sync, run } from "@spilne/perfect-core";
 import {
   type HttpClientError,
   type HttpRequestOptions,
   type HttpTransport,
   DefaultHttpClient,
   type ResponseParser,
-} from "@perfect/http";
+} from "@spilne/perfect-http";
 import {
   tracingMiddleware,
   TracingFetchTransport,

@@ -6,7 +6,7 @@
 // gives us:
 //
 //   1. Swappable runtimes — default is `FetchTransport` (Bun/Node global
-//      fetch). A future `@perfect/http-otel` can implement the same
+//      fetch). A future `@spilne/perfect-http-otel` can implement the same
 //      interface with OpenTelemetry tracing / test-time mocking.
 //
 //   2. Transport-level testing — inject a custom transport that returns
@@ -17,7 +17,7 @@
 //      INSIDE the transport. Higher layers only handle "I have a Response,
 //      what now?"
 
-import { type Eff, type Throws, sync, tryPromise, scoped } from "@perfect/core";
+import { type Eff, type Throws, sync, tryPromise, scoped } from "@spilne/perfect-core";
 import { HttpNetworkError, HttpTimeoutError, type HttpClientError } from "./errors";
 
 const DEFAULT_TIMEOUT_MS = 30_000;

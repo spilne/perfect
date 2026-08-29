@@ -1,5 +1,5 @@
-import { ensuring, sleep, succeed } from "@perfect/core";
-import type { Eff, Semaphore, Throws } from "@perfect/core";
+import { ensuring, sleep, succeed } from "@spilne/perfect-core";
+import type { Eff, Semaphore, Throws } from "@spilne/perfect-core";
 import { numberResult, redisEff } from "./internal";
 import type { RedisClient } from "./redis-client";
 import { RedisError } from "./redis-error";

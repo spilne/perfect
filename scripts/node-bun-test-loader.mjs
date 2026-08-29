@@ -37,7 +37,7 @@ const resolveLocalImport = (candidatePath) => {
 };
 
 const resolvePackageImport = (specifier) => {
-  const match = specifier.match(/^@perfect\/([^/]+)(\/.*)?$/);
+  const match = specifier.match(/^@spilne\/perfect-([^/]+)(\/.*)?$/);
   if (!match) {
     return null;
   }

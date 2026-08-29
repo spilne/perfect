@@ -16,7 +16,7 @@
 //
 // What gets rendered:
 //   1. The imports that the snippet body actually uses, rewritten so
-//      `from "../src"` becomes `from "@perfect/core"` and the internal
+//      `from "../src"` becomes `from "@spilne/perfect-core"` and the internal
 //      `_assert` helper is skipped (it's a test utility, not user-facing).
 //   2. The snippet body itself, with `assertEq(actual, expected)` rewritten to
 //      `console.log(actual); // → expected` so readers can copy-paste-and-run.
@@ -39,10 +39,10 @@ const CHECK_MODE = process.argv.includes("--check");
 const INTERNAL_IMPORT_RE = /^\.\.\/src(\/.*)?$/;
 
 // The package an embedded example belongs to — internal `../src` imports
-// rewrite to it (packages/http/examples → @perfect/http, etc.).
+// rewrite to it (packages/http/examples → @spilne/perfect-http, etc.).
 function packageNameFor(file: string): string {
   const m = file.match(/packages\/([\w-]+)\//);
-  return `@perfect/${m ? m[1] : "core"}`;
+  return `@spilne/perfect-${m ? m[1] : "core"}`;
 }
 const SKIP_IMPORT_SOURCES = new Set(["./_assert", "../_assert"]);
 
@@ -324,7 +324,9 @@ function verifyPackageCoverage(): void {
   }
 
   const documented = new Set(
-    [...coverage.slice(start, end).matchAll(/`(@perfect\/[\w-]+)`/g)].map((match) => match[1]!),
+    [...coverage.slice(start, end).matchAll(/`(@spilne\/perfect-[\w-]+)`/g)].map(
+      (match) => match[1]!,
+    ),
   );
   const discovered = new Set<string>();
 

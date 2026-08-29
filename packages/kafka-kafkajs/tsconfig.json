@@ -13,10 +13,10 @@
     "types": ["bun"],
     "typeRoots": ["../../node_modules/@types"],
     "paths": {
-      "@perfect/core": ["../core/src/index.ts"],
-      "@perfect/core/*": ["../core/src/*"],
-      "@perfect/kafka": ["../kafka/src/index.ts"],
-      "@perfect/kafka/*": ["../kafka/src/*"]
+      "@spilne/perfect-core": ["../core/src/index.ts"],
+      "@spilne/perfect-core/*": ["../core/src/*"],
+      "@spilne/perfect-kafka": ["../kafka/src/index.ts"],
+      "@spilne/perfect-kafka/*": ["../kafka/src/*"]
     }
   },
   "include": ["src", "test"]

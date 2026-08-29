@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { fail, fromPromise, run, sleep, succeed, type Eff } from "@perfect/core";
+import { fail, fromPromise, run, sleep, succeed, type Eff } from "@spilne/perfect-core";
 import {
   CheckpointName,
   Partition,
@@ -8,7 +8,7 @@ import {
   StateCheckpointId,
   TopologyId,
   TopologyInstanceId,
-} from "@perfect/core/connect";
+} from "@spilne/perfect-core/connect";
 import Redis from "ioredis";
 import { GenericContainer, Wait, type StartedTestContainer } from "testcontainers";
 import {

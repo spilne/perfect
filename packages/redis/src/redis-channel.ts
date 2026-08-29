@@ -1,8 +1,8 @@
-import { QueueClosed, fail } from "@perfect/core";
-import type { Eff, Throws } from "@perfect/core";
-import type { Codec, Sinkable, Streamable } from "@perfect/core/connect";
-import { JsonCodec } from "@perfect/core/connect";
-import { Stream } from "@perfect/core/stream";
+import { QueueClosed, fail } from "@spilne/perfect-core";
+import type { Eff, Throws } from "@spilne/perfect-core";
+import type { Codec, Sinkable, Streamable } from "@spilne/perfect-core/connect";
+import { JsonCodec } from "@spilne/perfect-core/connect";
+import { Stream } from "@spilne/perfect-core/stream";
 import { encode, redisEff } from "./internal";
 import type { RedisClient } from "./redis-client";
 import { RedisError, toRedisError } from "./redis-error";

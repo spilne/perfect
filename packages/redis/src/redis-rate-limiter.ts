@@ -1,5 +1,5 @@
-import { fail, sleep, succeed } from "@perfect/core";
-import type { Eff, RateLimitExceeded, RateLimiter, Throws } from "@perfect/core";
+import { fail, sleep, succeed } from "@spilne/perfect-core";
+import type { Eff, RateLimitExceeded, RateLimiter, Throws } from "@spilne/perfect-core";
 import { redisEff } from "./internal";
 import type { RedisClient } from "./redis-client";
 import { RedisError } from "./redis-error";

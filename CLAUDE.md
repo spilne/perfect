@@ -39,14 +39,14 @@ docs/                    Design docs, comparisons, research
 
 - Framework: `bun:test`
 - Location: `test/` directory in each package
-- Run: `bun test` in package dir, or `bun nx run @perfect/core:test`
+- Run: `bun test` in package dir, or `bun nx run @spilne/perfect-core:test`
 
 ## Commands
 
 ```bash
 bun test                          # all tests
-bun nx run @perfect/core:test     # core tests only
-bun nx run @perfect/core:lint     # lint core
+bun nx run @spilne/perfect-core:test     # core tests only
+bun nx run @spilne/perfect-core:lint     # lint core
 bun run bench                     # benchmarks
 bun run build:swc                 # build SWC WASM plugin
 ```

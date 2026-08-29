@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // PgRateLimiter — Postgres-backed sliding-window rate limiter
 //
-// Implements @perfect/core's Eff-typed RateLimiter contract on top of a
+// Implements @spilne/perfect-core's Eff-typed RateLimiter contract on top of a
 // Promise-based Postgres driver: one row per granted slot, expired rows
 // swept inside the acquire transaction. Driver rejections are typed
 // PostgresError failures; over-limit is RateLimitExceeded.
@@ -11,8 +11,8 @@
 // once at construction. Create one PgRateLimiter per resource key instead.
 // ---------------------------------------------------------------------------
 
-import { fail, fromPromise, sleep, succeed, sync } from "@perfect/core";
-import type { Eff, Throws, RateLimitExceeded, RateLimiter } from "@perfect/core";
+import { fail, fromPromise, sleep, succeed, sync } from "@spilne/perfect-core";
+import type { Eff, Throws, RateLimitExceeded, RateLimiter } from "@spilne/perfect-core";
 import { sql } from "drizzle-orm";
 import { type DrizzleDb, execRaw } from "./drizzle-db";
 import { PostgresError, toPostgresError } from "./postgres-error";
