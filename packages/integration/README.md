@@ -18,11 +18,38 @@ Without Docker the suites skip cleanly (a note is printed), so a plain
 `bun test --recursive packages/` stays green anywhere. In CI the suites also
 skip unless `PERFECT_INTEGRATION=1` is set — this package is opt-in.
 
-`KAFKA_FULL=1` additionally runs the `@platformatic/kafka` adapter suite
-against real Apache Kafka (slow JVM startup; Redpanda has API gaps that
-adapter needs). That test bundles the probe and runs it with the package-local
-Node.js 24 binary because Platformatic Kafka 2.9 does not support Bun. The
-default Redpanda lane exercises the KafkaJS adapter.
+`KAFKA_FULL=1` additionally runs the `@platformatic/kafka` lane of the adapter
+conformance suite against real Apache Kafka. That adapter negotiates a Metadata
+API version Redpanda does not advertise (`PLT_KFK_UNSUPPORTED_API`), and its
+consumer does not run on Bun at all, so the lane needs both the JVM broker and
+a Node subprocess — see below. The default Redpanda lane exercises the KafkaJS
+adapter and needs neither.
+
+## Adapter conformance suite
+
+`src/adapter-suite.ts` holds one suite of cases that every Kafka adapter must
+pass, written against the `@spilne/perfect-kafka` port rather than any driver. It
+imports no test framework, because the adapters do not share a runtime:
+
+| Adapter        | Runtime          | Broker                        | Binding                             |
+| -------------- | ---------------- | ----------------------------- | ----------------------------------- |
+| `kafkajs`      | Bun, in-process  | Redpanda                      | `test/kafka-conformance.test.ts`    |
+| `platformatic` | Node, subprocess | Apache Kafka (`KAFKA_FULL=1`) | bundled via `src/run-suite-node.ts` |
+
+The Node lane bundles the same suite with the `bun build` CLI, runs it under
+the package-local Node binary, and projects the per-case results back into
+individual `it()`s so a failure names the case that failed.
+
+Optional members of the port (`run`/`eachBatch`, `stream`, `seek`,
+`onPartitionsAssigned`, `createTopics`, `fetchTopicPartitionCount`) are
+declared per adapter in `ADAPTER_PROFILES`. A case that needs a member an
+adapter does not implement is reported as **skipped**, not failed — so
+`platformatic`, a stream-mode driver with no `run()`, skips the `batchEmit`
+case instead of failing it.
+
+Adding an adapter means adding one entry to `ADAPTER_PROFILES`, one client
+factory in `run-suite-node.ts` (or one `inProcessSuite` call if it runs on
+Bun), and nothing else.
 
 ## Containers
 

@@ -5,9 +5,6 @@
 // ---------------------------------------------------------------------------
 
 import { describe, it, expect, setDefaultTimeout } from "bun:test";
-import { rm } from "node:fs/promises";
-import { join } from "node:path";
-
 // Kafka operations (consumer group join, rebalancing, commits) need generous timeouts
 setDefaultTimeout(300_000);
 
@@ -30,7 +27,7 @@ import {
   type KafkaClient,
 } from "@spilne/perfect-kafka";
 import type { Throws } from "@spilne/perfect-core";
-import { withKafka, withApacheKafka, eventually, uniqueName } from "../src/infra";
+import { withKafka, eventually, uniqueName } from "../src/infra";
 import { createKafkajsClient, createKafkajsTopic } from "@spilne/perfect-kafka-kafkajs";
 
 // ---------------------------------------------------------------------------
@@ -406,66 +403,3 @@ withKafka("Kafka integration (Redpanda)", (ctx) => {
     });
   });
 });
-
-// ---------------------------------------------------------------------------
-// @platformatic/kafka — needs real Apache Kafka (Redpanda has API gaps).
-// Uses KafkaContainer from @testcontainers/kafka with the Confluent image.
-// Slow to start (~60s JVM): skipped by default, enable with KAFKA_FULL=1.
-// ---------------------------------------------------------------------------
-
-const runFullKafka = process.env.KAFKA_FULL === "1";
-
-if (runFullKafka) {
-  withApacheKafka("Kafka adapter compatibility (Apache Kafka)", (ctx) => {
-    const getBroker = () => ctx.broker;
-    adapterTests("kafkajs adapter (callback-based)", getBroker, createKafkajsClient);
-
-    it("runs the Platformatic stream adapter under its supported Node runtime", async () => {
-      const topic = TopicName(uniqueName("platformatic"));
-      await createKafkajsTopic(ctx.broker, topic, 3);
-      const bundleDirectory = join(
-        import.meta.dir,
-        `../.platformatic-probe-${crypto.randomUUID()}`,
-      );
-      const bundle = join(bundleDirectory, "probe.mjs");
-      const build = await Bun.build({
-        entrypoints: [new URL("../src/platformatic-node-probe.ts", import.meta.url).pathname],
-        outdir: bundleDirectory,
-        naming: "probe.mjs",
-        target: "node",
-        minify: false,
-        external: ["@platformatic/kafka"],
-      });
-      if (!build.success) {
-        throw new Error(build.logs.map((log) => log.message).join("\n"));
-      }
-
-      try {
-        const node = join(import.meta.dir, "../node_modules/.bin/node");
-        const child = Bun.spawn({
-          cmd: [node, bundle, ctx.broker, topic],
-          stdout: "pipe",
-          stderr: "pipe",
-        });
-        const timeout = setTimeout(() => child.kill(9), 45_000);
-        const [exitCode, stdout, stderr] = await Promise.all([
-          child.exited,
-          new Response(child.stdout).text(),
-          new Response(child.stderr).text(),
-        ]).finally(() => clearTimeout(timeout));
-        if (exitCode !== 0) throw new Error(stderr || stdout);
-
-        const marker = stdout
-          .split("\n")
-          .find((line) => line.startsWith("PERFECT_PLATFORMATIC_RESULT="));
-        expect(marker).toBeDefined();
-        const received = JSON.parse(marker!.slice("PERFECT_PLATFORMATIC_RESULT=".length));
-        expect(received.map((message: { sequence: number }) => message.sequence)).toEqual([
-          1, 2, 3,
-        ]);
-      } finally {
-        await rm(bundleDirectory, { recursive: true, force: true });
-      }
-    });
-  });
-}

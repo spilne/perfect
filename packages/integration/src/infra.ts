@@ -25,6 +25,35 @@ import { GenericContainer, Wait, type StartedTestContainer } from "testcontainer
 import { KafkaContainer } from "@testcontainers/kafka";
 
 // ---------------------------------------------------------------------------
+// kafkajs negative-delay warning
+//
+// kafkajs 2.2.4 computes `throttledUntil - Date.now()` in
+// scheduleCheckPendingRequests() and only clamps the result when its pending
+// queue is non-empty, so an idle queue hands setTimeout a delay of roughly
+// -Date.now(). The runtime clamps that to 1ms, making it purely cosmetic, but
+// it prints a TimeoutNegativeWarning on every integration run and kafkajs has
+// been unmaintained since 2023.
+//
+// Clamping here is behaviour-preserving — negative and zero both already mean
+// "as soon as possible". Scoped to this test-infra module rather than fixed
+// with a dependency patch or NODE_NO_WARNINGS, which would hide every other
+// warning too. Trade-off: a genuinely negative delay in our own code would
+// stop warning inside integration suites.
+// ---------------------------------------------------------------------------
+
+const nativeSetTimeout = globalThis.setTimeout;
+globalThis.setTimeout = ((
+  handler: Parameters<typeof nativeSetTimeout>[0],
+  timeout?: number,
+  ...args: unknown[]
+) =>
+  nativeSetTimeout(
+    handler,
+    typeof timeout === "number" && timeout < 0 ? 0 : timeout,
+    ...args,
+  )) as typeof globalThis.setTimeout;
+
+// ---------------------------------------------------------------------------
 // Docker gate
 // ---------------------------------------------------------------------------
 
