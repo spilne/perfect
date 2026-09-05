@@ -19,6 +19,30 @@ class ReleaseFailure {
 }
 
 describe("acquireRelease + scoped", () => {
+  test("all finalizers run in reverse order and preserve every failure", async () => {
+    const released: string[] = [];
+    const resource = (name: string) =>
+      acquireRelease(succeed(name), () => {
+        released.push(name);
+        if (name === "B") throw new Error("B defect");
+        return name === "C" ? fail("C failure") : sleep(1);
+      });
+    const exit = await runExit(
+      scoped(
+        resource("A")
+          .flatMap(() => resource("B"))
+          .flatMap(() => resource("C"))
+          .flatMap(() => fail("body failure")),
+      ),
+    );
+    expect(released).toEqual(["C", "B", "A"]);
+    expect(exit._tag).toBe("Failure");
+    if (exit._tag === "Failure") {
+      expect(Cause.failures(exit.cause)).toEqual(["body failure", "C failure"]);
+      expect(Cause.defects(exit.cause)).toEqual([new Error("B defect")]);
+    }
+  });
+
   test("release runs on success", async () => {
     const log: string[] = [];
 

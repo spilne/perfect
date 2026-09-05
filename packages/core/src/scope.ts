@@ -1,6 +1,5 @@
 import type { Eff } from "./eff";
-import { Suspend, Op } from "./eff";
-import { succeed } from "./constructors";
+import { succeed, suspend, ensuring } from "./constructors";
 
 export type Finalizer = () => Eff<void, unknown>;
 
@@ -20,16 +19,10 @@ export class Scope {
     const fns = this.finalizers.reverse();
     if (fns.length === 0) return succeed(undefined);
 
-    // chain: run fns[0], then fns[1], ... via flatMap — every finalizer
-    // (including the first) is invoked only when the returned Eff runs
-    let chain: Eff<void, unknown> = new Suspend(
-      Op.FlatMap,
-      new Suspend(Op.Succeed, undefined, null),
-      () => fns[0]!(),
-    ) as any;
+    let chain = suspend(fns[0]!);
     for (let i = 1; i < fns.length; i++) {
       const fin = fns[i]!;
-      chain = new Suspend(Op.FlatMap, chain, () => fin()) as any;
+      chain = ensuring(chain, suspend(fin));
     }
     return chain;
   }
