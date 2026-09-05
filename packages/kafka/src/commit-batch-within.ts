@@ -4,7 +4,7 @@
 // Usage:
 //   topic.subscribeAck()
 //     .parEvalMap(25, (env) => fromPromise(() => process(env.value), (e) => e).map(() => env))
-//     .through(commitBatchWithin({ maxBatchSize: 500, maxWaitMs: 15_000, consumer, topic }))
+//     .through(commitBatchWithin({ maxBatchSize: 500, maxWaitMs: 15_000, consumer, topic, startingOffsets }))
 //     .drain();
 //
 // Batches ack'd envelopes by count or time, commits offsets as a group.
@@ -38,6 +38,9 @@ export interface CommitBatchWithinConfig {
   consumer: KafkaConsumer;
   /** Topic name (for offset commits). */
   topic: TopicName;
+  /** First offset to process per partition, captured before parallel processing.
+   * Recreate the pipe with new positions after a seek or reassignment. */
+  startingOffsets: ReadonlyMap<PartitionId, KafkaOffset>;
 }
 
 /**
@@ -53,6 +56,15 @@ export function commitBatchWithin<T, AckS = Throws<KafkaError>>(
 ): Pipe<Envelope<T, AckS>, T, Throws<KafkaCommitError>> {
   return <S>(stream: Stream<Envelope<T, AckS>, S>) => {
     const tracker = new OffsetTracker();
+    const starts = new Map<PartitionId, number>();
+    for (const [partition, rawOffset] of config.startingOffsets) {
+      const offset = Number(rawOffset);
+      if (!Number.isSafeInteger(offset) || offset < 0) {
+        throw new Error("commitBatchWithin: starting offsets must be non-negative safe integers");
+      }
+      starts.set(partition, offset);
+      tracker.setFrontier(partition, offset);
+    }
 
     return stream
       .groupWithin(config.maxBatchSize, config.maxWaitMs)
@@ -66,10 +78,10 @@ export function commitBatchWithin<T, AckS = Throws<KafkaError>>(
               const partition = PartitionId((env.metadata.partition as number) ?? 0);
               const offset = Number(env.metadata.offset ?? 0);
 
-              // Seed the frontier from the lowest offset seen
-              // (reordering-safe) so commits start at the right place on a
-              // non-zero resume / rewind.
-              tracker.observe(partition, offset);
+              const start = starts.get(partition);
+              if (start === undefined || !Number.isSafeInteger(offset) || offset < start) {
+                throw new Error(`Missing or invalid starting position for partition ${partition}`);
+              }
               tracker.complete(partition, offset);
             }
 

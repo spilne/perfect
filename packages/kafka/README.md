@@ -67,6 +67,11 @@ await run(
 ```
 
 For explicit fs2-kafka-style batched commits, create a
+`startingOffsets: Map<PartitionId, KafkaOffset>` from the partition positions before
+processing begins. Pass it to `commitBatchWithin` so out-of-order completions cannot
+commit past unfinished records. Recreate the pipe after seeking or reassignment.
+
+Use a
 `subscribeAckWithHandle({ autoCommit: false })` subscription and pass its `consumer` and
 `topic` to `commitBatchWithin`. The handle guarantees that consumption and commits use
 the same joined consumer group member. Commit failures remain typed as

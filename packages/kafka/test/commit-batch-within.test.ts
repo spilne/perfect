@@ -15,6 +15,11 @@ function commit(partition: number, offset: string): KafkaOffsetCommit {
   return { topic: TopicName("t"), partition: PartitionId(partition), offset: KafkaOffset(offset) };
 }
 
+const startingOffsets = new Map([
+  [PartitionId(0), KafkaOffset("0")],
+  [PartitionId(1), KafkaOffset("0")],
+]);
+
 function makeFakeConsumer(opts?: { failCommits?: number }): {
   consumer: KafkaConsumer;
   committed: KafkaOffsetCommit[][];
@@ -48,6 +53,48 @@ function envelope<T>(value: T, partition: number, offset: number): Envelope<T> {
 }
 
 describe("commitBatchWithin", () => {
+  it("holds reordered completions across batches until earlier offsets finish", async () => {
+    const { consumer, committed } = makeFakeConsumer();
+    const snapshots: KafkaOffsetCommit[][][] = [];
+    await run(
+      Stream.of(...[502, 500, 501].map((i) => envelope(i, 0, i)))
+        .through(
+          commitBatchWithin({
+            startingOffsets: new Map([[PartitionId(0), KafkaOffset("500")]]),
+            maxBatchSize: 1,
+            maxWaitMs: 1000,
+            consumer,
+            topic: TopicName("t"),
+          }),
+        )
+        .tap(() => snapshots.push(committed.slice()))
+        .drain()
+        .catchTag("KafkaCommitError", die),
+    );
+    expect(snapshots).toEqual([[], [[commit(0, "501")]], [[commit(0, "501")], [commit(0, "503")]]]);
+  });
+
+  it("rejects unseeded partitions before committing", async () => {
+    const { consumer, committed } = makeFakeConsumer();
+    const result = await run(
+      Stream.of(envelope(1, 2, 0))
+        .through(
+          commitBatchWithin({
+            startingOffsets,
+            maxBatchSize: 1,
+            maxWaitMs: 1000,
+            consumer,
+            topic: TopicName("t"),
+          }),
+        )
+        .drain()
+        .map(() => false)
+        .catchTag("KafkaCommitError", () => succeed(true)),
+    );
+    expect(result).toBe(true);
+    expect(committed).toEqual([]);
+  });
+
   it("commits per full batch and unwraps envelopes to values", async () => {
     const { consumer, committed } = makeFakeConsumer();
     const envelopes = [0, 1, 2, 3].map((i) => envelope(`v${i}`, 0, i));
@@ -56,6 +103,7 @@ describe("commitBatchWithin", () => {
       Stream.fromIterable(envelopes)
         .through(
           commitBatchWithin({
+            startingOffsets,
             maxBatchSize: 2,
             maxWaitMs: 60_000,
             consumer,
@@ -78,6 +126,7 @@ describe("commitBatchWithin", () => {
       Stream.fromIterable(envelopes)
         .through(
           commitBatchWithin({
+            startingOffsets,
             maxBatchSize: 100,
             maxWaitMs: 60_000,
             consumer,
@@ -101,6 +150,7 @@ describe("commitBatchWithin", () => {
       Stream.fromIterable(envelopes)
         .through(
           commitBatchWithin({
+            startingOffsets,
             maxBatchSize: 3,
             maxWaitMs: 60_000,
             consumer,
@@ -123,6 +173,7 @@ describe("commitBatchWithin", () => {
       Stream.fromIterable(envelopes)
         .through(
           commitBatchWithin({
+            startingOffsets,
             maxBatchSize: 3,
             maxWaitMs: 60_000,
             consumer,
@@ -150,7 +201,13 @@ describe("commitBatchWithin", () => {
         return sync(() => {});
       })
         .through(
-          commitBatchWithin({ maxBatchSize: 100, maxWaitMs: 50, consumer, topic: TopicName("t") }),
+          commitBatchWithin({
+            startingOffsets,
+            maxBatchSize: 100,
+            maxWaitMs: 50,
+            consumer,
+            topic: TopicName("t"),
+          }),
         )
         .toArray()
         .catchTag("KafkaCommitError", (error) => die(error)),
@@ -176,6 +233,7 @@ describe("commitBatchWithin", () => {
       Stream.fromIterable(envelopes)
         .through(
           commitBatchWithin({
+            startingOffsets,
             maxBatchSize: 2,
             maxWaitMs: 60_000,
             consumer,
