@@ -10,7 +10,7 @@
 import { sql } from "drizzle-orm";
 import type { StateBackend, CheckpointName } from "@spilne/perfect-core/connect";
 import type { DrizzleDb } from "./drizzle-db";
-import { execRaw } from "./drizzle-db";
+import { execRaw, stringColumn } from "./drizzle-db";
 import { createTopologyStateTable, topologyState } from "./pg-state-schema";
 import { ensureTable as ensureTableFromSchema } from "./schema-utils";
 
@@ -63,8 +63,7 @@ export class PgStateBackend implements StateBackend<string, unknown> {
         `SELECT value FROM ${this.table} WHERE key = '${this.esc(key)}' AND checkpoint = 'live'`,
       ),
     );
-    if (rows.length === 0) return undefined;
-    return rows[0].value;
+    return rows[0]?.value;
   }
 
   async put(key: string, value: unknown): Promise<void> {
@@ -89,7 +88,7 @@ export class PgStateBackend implements StateBackend<string, unknown> {
       this.db,
       sql.raw(`SELECT key FROM ${this.table} WHERE checkpoint = 'live' ORDER BY key`),
     );
-    return rows.map((r: { key: string }) => r.key);
+    return rows.map((row) => stringColumn(row, "key"));
   }
 
   async entries(): Promise<[string, unknown][]> {
@@ -97,7 +96,7 @@ export class PgStateBackend implements StateBackend<string, unknown> {
       this.db,
       sql.raw(`SELECT key, value FROM ${this.table} WHERE checkpoint = 'live' ORDER BY key`),
     );
-    return rows.map((r: { key: string; value: unknown }) => [r.key, r.value]);
+    return rows.map((row) => [stringColumn(row, "key"), row.value]);
   }
 
   async checkpoint(params: { name: CheckpointName }): Promise<void> {

@@ -12,7 +12,7 @@
 import { fromPromise } from "@spilne/perfect-core";
 import type { Eff, Ref, Throws } from "@spilne/perfect-core";
 import { sql } from "drizzle-orm";
-import { type DrizzleDb, execRaw } from "./drizzle-db";
+import { type DrizzleDb, execRaw, stringColumn } from "./drizzle-db";
 import { PostgresError, toPostgresError } from "./postgres-error";
 
 export interface PgRefConfig<T> {
@@ -75,8 +75,9 @@ export class PgRef<T> implements Ref<T, Throws<PostgresError>> {
       this.db,
       sql`SELECT value FROM ${sql.raw(this.table)} WHERE name = ${this.name}`,
     );
-    if (rows.length === 0) throw new Error(`PgRef: row not found for name "${this.name}"`);
-    return JSON.parse(rows[0].value as string) as T;
+    const row = rows[0];
+    if (!row) throw new Error(`PgRef: row not found for name "${this.name}"`);
+    return JSON.parse(stringColumn(row, "value")) as T;
   }
 
   private async setAsync(value: T): Promise<void> {
@@ -100,8 +101,9 @@ export class PgRef<T> implements Ref<T, Throws<PostgresError>> {
         db,
         sql`SELECT value FROM ${sql.raw(table)} WHERE name = ${name} FOR UPDATE`,
       );
-      if (rows.length === 0) throw new Error(`PgRef: row not found for name "${name}"`);
-      const current = JSON.parse(rows[0].value as string) as T;
+      const row = rows[0];
+      if (!row) throw new Error(`PgRef: row not found for name "${name}"`);
+      const current = JSON.parse(stringColumn(row, "value")) as T;
       const [b, next] = f(current);
       result = b;
       await execRaw(

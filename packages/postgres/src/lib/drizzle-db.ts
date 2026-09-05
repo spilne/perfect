@@ -14,9 +14,24 @@ import postgres from "postgres";
 /** Drizzle database instance — driver-agnostic (postgres-js, bun:sql, etc). */
 export type DrizzleDb = PgDatabase<PgQueryResultHKT, Record<string, unknown>>;
 
-/** Execute raw SQL and return rows as any[] (for extension/dynamic queries). */
-export async function execRaw(db: DrizzleDb, query: SQL): Promise<any[]> {
-  return (await db.execute(query)) as any[];
+function isRow(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export function stringColumn(row: Record<string, unknown>, column: string): string {
+  const value = row[column];
+  if (typeof value !== "string") throw new TypeError(`Expected a string in column ${column}`);
+  return value;
+}
+
+/** Normalize postgres-js arrays and node-postgres/Neon result objects. */
+export async function execRaw(db: DrizzleDb, query: SQL): Promise<Record<string, unknown>[]> {
+  const result: unknown = await db.execute(query);
+  const rows: unknown = Array.isArray(result) ? result : isRow(result) ? result.rows : undefined;
+  if (!Array.isArray(rows) || !rows.every(isRow)) {
+    throw new TypeError("Postgres query did not return an array of row objects");
+  }
+  return rows;
 }
 
 /**

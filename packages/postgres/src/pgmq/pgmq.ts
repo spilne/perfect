@@ -4,7 +4,7 @@
 // ---------------------------------------------------------------------------
 
 import { sql } from "drizzle-orm";
-import { execRaw as exec } from "../lib/drizzle-db";
+import { execRaw as exec, stringColumn } from "../lib/drizzle-db";
 import type { DrizzleDb } from "../lib/drizzle-db";
 import type { PgmqMessage, PgmqRecord, ReadMode } from "./types";
 
@@ -255,8 +255,9 @@ export async function metrics(
   totalMessages: number;
 }> {
   const [row] = await exec(db, sql`SELECT * FROM pgmq.metrics(${queue})`);
+  if (!row) throw new Error(`No metrics returned for queue ${queue}`);
   return {
-    queueName: row.queue_name,
+    queueName: stringColumn(row, "queue_name"),
     queueLength: Number(row.queue_length),
     newestMsgAgeSec: row.newest_msg_age_sec != null ? Number(row.newest_msg_age_sec) : null,
     oldestMsgAgeSec: row.oldest_msg_age_sec != null ? Number(row.oldest_msg_age_sec) : null,

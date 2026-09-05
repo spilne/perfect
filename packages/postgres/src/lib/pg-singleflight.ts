@@ -36,6 +36,20 @@ interface FlightRow {
   error: string | null;
 }
 
+function flightRow(row: Record<string, unknown> | undefined): FlightRow {
+  if (
+    !row ||
+    typeof row.key !== "string" ||
+    typeof row.gen !== "number" ||
+    (row.status !== "running" && row.status !== "done" && row.status !== "error") ||
+    (row.result !== null && typeof row.result !== "string") ||
+    (row.error !== null && typeof row.error !== "string")
+  ) {
+    throw new TypeError("Invalid singleflight row");
+  }
+  return { key: row.key, gen: row.gen, status: row.status, result: row.result, error: row.error };
+}
+
 class UserEffectError extends Error {
   constructor(readonly value: unknown) {
     super("Singleflight user effect failed");
@@ -147,7 +161,7 @@ export class PgSingleflight implements Singleflight<Throws<PostgresError>> {
           );
           isWinner = true;
         } else {
-          const row = rows[0] as FlightRow;
+          const row = flightRow(rows[0]);
           if (row.status === "running") {
             // Another process is running — be a loser
             isWinner = false;
@@ -209,7 +223,7 @@ export class PgSingleflight implements Singleflight<Throws<PostgresError>> {
             break;
           }
 
-          const row = rows[0] as FlightRow;
+          const row = flightRow(rows[0]);
 
           if (row.gen !== loserGen) {
             // Generation changed — restart outer loop
