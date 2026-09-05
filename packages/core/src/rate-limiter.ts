@@ -68,8 +68,8 @@ function expireTimestamps(s: SlidingWindow, cutoff: number): void {
   if (s.head === s.timestamps.length) {
     s.timestamps = [];
     s.head = 0;
-    // Reclaim expired storage only after enough removals to amortize the copy.
   } else if (s.head >= 1024 && s.head * 2 >= s.timestamps.length) {
+    // Reclaim expired storage only after enough removals to amortize the copy.
     s.timestamps = s.timestamps.slice(s.head);
     s.head = 0;
   }
