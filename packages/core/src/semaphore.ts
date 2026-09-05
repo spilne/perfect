@@ -47,6 +47,7 @@ class InProcessSemaphore implements Semaphore {
       this.waiters.push(waiter);
       return () => {
         waiter.done = true;
+        this.releaseMany(0);
       };
     }) as any;
   }

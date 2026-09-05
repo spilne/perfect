@@ -8,7 +8,7 @@ describe("eff($) rewriter", () => {
   return x + 1
 })`;
     const output = rewriteEffBlocks(input);
-    expect(output).toContain("getX().flatMap((x) =>");
+    expect(output).toContain("(getX()).flatMap((x) =>");
     expect(output).toContain("succeed(x + 1)");
   });
 
@@ -19,8 +19,8 @@ describe("eff($) rewriter", () => {
   return a + b
 })`;
     const output = rewriteEffBlocks(input);
-    expect(output).toContain("getA().flatMap((a) =>");
-    expect(output).toContain("getB(a).flatMap((b) =>");
+    expect(output).toContain("(getA()).flatMap((a) =>");
+    expect(output).toContain("(getB(a)).flatMap((b) =>");
     expect(output).toContain("succeed(a + b)");
   });
 
@@ -31,7 +31,7 @@ describe("eff($) rewriter", () => {
   return x
 })`;
     const output = rewriteEffBlocks(input);
-    expect(output).toContain("log(x).flatMap(() =>");
+    expect(output).toContain("(log(x)).flatMap(() =>");
   });
 
   test("preserves non-eff code", () => {
@@ -127,6 +127,25 @@ const b = for {
 });
 
 describe("integration — desugared code runs", () => {
+  test("conditional and logical dollar binds preserve their continuation", async () => {
+    const { succeed, run } = await import("../../core/src");
+    for (const expression of [
+      "true ? succeed(1) : succeed(2)",
+      "false ? succeed(2) : succeed(1)",
+      "succeed(1) || succeed(2)",
+      "null ?? succeed(1)",
+    ]) {
+      for (const body of [
+        `const x = $(${expression}); return x + 10;`,
+        `$(${expression}); return 11;`,
+      ]) {
+        const output = rewriteEffBlocks(`eff(($) => { ${body} })`);
+        const program = new Function("succeed", `return ${output}`)(succeed);
+        expect(await run(program)).toBe(11);
+      }
+    }
+  });
+
   test("Eff — monad-generic tail (.map) still works", async () => {
     const { succeed, run } = await import("../../core/src");
 

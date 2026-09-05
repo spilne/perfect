@@ -498,11 +498,11 @@ function desugarDollarStatements(stmts: DollarStmt[]): string | null {
 
     switch (stmt.kind) {
       case "bind":
-        return `${stmt.expr}.flatMap((${stmt.pattern}) => ${desugar(index + 1)})`;
+        return `(${stmt.expr}).flatMap((${stmt.pattern}) => ${desugar(index + 1)})`;
       case "let":
         return `sync(() => (${stmt.expr})).flatMap((${stmt.pattern}) => ${desugar(index + 1)})`;
       case "bind_discard":
-        return isLast ? stmt.expr : `${stmt.expr}.flatMap(() => ${desugar(index + 1)})`;
+        return isLast ? stmt.expr : `(${stmt.expr}).flatMap(() => ${desugar(index + 1)})`;
       case "return": {
         const inner = stmt.expr.match(/^\$\(([\s\S]+)\)$/);
         return inner ? inner[1]! : `succeed(${stmt.expr})`;

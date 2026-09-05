@@ -15,7 +15,9 @@
 // interface.
 
 import { type Eff, type Throws } from "./eff";
-import { fail, sync, async, ensuring } from "./constructors";
+import { fail, sync, async, ensuring, suspend } from "./constructors";
+
+const retryAcquire = Symbol("retryAcquire");
 
 export class PoolClosed {
   readonly _tag = "PoolClosed" as const;
@@ -54,13 +56,21 @@ export interface Pool<R, S = never> {
 class InProcessPool<R, S> implements Pool<R, S> {
   private readonly idleList: R[] = [];
   private inUseCount = 0;
-  private waiters: Array<{ canceled: boolean; resume: (r: R | PoolClosed) => void }> = [];
+  private waiters: Array<{
+    canceled: boolean;
+    resume: (r: R | PoolClosed | typeof retryAcquire) => void;
+  }> = [];
   private closed = false;
 
   constructor(private readonly opts: PoolOptions<R, S>) {}
 
   use<A, S2>(fn: (resource: R) => Eff<A, S2>): Eff<A, S | S2 | Throws<PoolClosed>> {
-    return (this.acquireOne() as any).flatMap((r: R) => ensuring(fn(r), this.releaseOne(r))) as any;
+    return (this.acquireOne() as any).flatMap((r: R) =>
+      ensuring(
+        suspend(() => fn(r)),
+        this.releaseOne(r),
+      ),
+    ) as any;
   }
 
   get inUse(): Eff<number, S> {
@@ -126,15 +136,30 @@ class InProcessPool<R, S> implements Pool<R, S> {
           return (this.opts.release(r) as any).flatMap(() => this.acquireOne());
         });
       }
-      if (decision.kind === "create") return this.opts.acquire as any;
+      if (decision.kind === "create") {
+        let acquired = false;
+        return ensuring(
+          this.opts.acquire.map((resource) => {
+            acquired = true;
+            return resource;
+          }),
+          sync(() => {
+            if (acquired) return;
+            this.inUseCount--;
+            this.nextWaiter()?.resume(retryAcquire);
+          }),
+        );
+      }
       // Wait for release
       return async<R, PoolClosed>((resume) => {
         const waiter = {
           canceled: false,
-          resume: (r: R | PoolClosed) => {
+          resume: (r: R | PoolClosed | typeof retryAcquire) => {
             if (waiter.canceled) return;
             waiter.canceled = true;
-            if (r instanceof PoolClosed) {
+            if (r === retryAcquire) {
+              resume(this.acquireOne() as any);
+            } else if (r instanceof PoolClosed) {
               resume(fail(r) as any);
             } else {
               this.inUseCount++;
@@ -172,7 +197,9 @@ class InProcessPool<R, S> implements Pool<R, S> {
     }) as Eff<void, never>;
   }
 
-  private nextWaiter(): { canceled: boolean; resume: (r: R | PoolClosed) => void } | undefined {
+  private nextWaiter():
+    | { canceled: boolean; resume: (r: R | PoolClosed | typeof retryAcquire) => void }
+    | undefined {
     while (this.waiters.length > 0) {
       const waiter = this.waiters.shift()!;
       if (!waiter.canceled) return waiter;

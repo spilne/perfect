@@ -300,14 +300,24 @@ function runFiberLoop(fiber: Fiber<any>): void {
         fiber.context = context;
         fiber.state = FiberState.Suspended;
 
-        const cancel = register((value: any) => {
-          if (fiber.state === FiberState.Done) return;
-          fiber.interruptHandle = null;
-          fiber.current = value;
-          fiber.state = FiberState.Ready;
-          fiber.scheduler.schedule(() => runFiberLoop(fiber));
-        });
-        if (cancel) fiber.interruptHandle = cancel;
+        let resumed = false;
+        try {
+          const cancel = register((value: any) => {
+            if (resumed || fiber.state === FiberState.Done) return;
+            resumed = true;
+            fiber.interruptHandle = null;
+            fiber.current = value;
+            fiber.state = FiberState.Ready;
+            fiber.scheduler.schedule(() => runFiberLoop(fiber));
+          });
+          if (cancel && !resumed) fiber.interruptHandle = cancel;
+        } catch (error) {
+          if (resumed) return;
+          resumed = true;
+          fiber.state = FiberState.Running;
+          cur = new Suspend(Op.Fail, Cause.die(error), null);
+          continue loop;
+        }
         return;
       }
 
