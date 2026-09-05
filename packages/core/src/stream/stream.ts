@@ -1436,6 +1436,8 @@ export class Stream<A, S = never> {
   // ── Batching ─────────────────────────────────────────────────────
 
   grouped(size: number): Stream<Chunk<A>, S> {
+    if (!Number.isInteger(size) || size < 1)
+      throw new RangeError("grouped: size must be a positive integer");
     function go(buffer: A[], stream: Stream<A, any>): Stream<Chunk<A>, any> {
       return new Stream(
         (stream.step as any)
@@ -1446,16 +1448,16 @@ export class Stream<A, S = never> {
               }
               return DONE;
             }
-            const combined = [...buffer];
-            for (const item of s.chunk) combined.push(item);
             const groups: Chunk<A>[] = [];
-            let i = 0;
-            while (i + size <= combined.length) {
-              groups.push(Chunk.fromArray(combined.slice(i, i + size)));
-              i += size;
+            let current = buffer;
+            for (const item of s.chunk) {
+              current.push(item);
+              if (current.length === size) {
+                groups.push(Chunk.fromArray(current));
+                current = [];
+              }
             }
-            const remainder = combined.slice(i);
-            const next = go(remainder, s.next);
+            const next = go(current, s.next);
             if (groups.length === 0) return next.step;
             return emit(Chunk.fromArray(groups), next);
           })
@@ -1463,7 +1465,10 @@ export class Stream<A, S = never> {
         stream._finalizer,
       );
     }
-    return go([], this);
+    return new Stream(
+      suspend(() => go([], this).step),
+      this._finalizer,
+    );
   }
 
   rechunk(size: number): Stream<A, S> {
