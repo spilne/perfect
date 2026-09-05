@@ -88,6 +88,10 @@ function failAfterFinalizerInline(finalizer: Suspend, cause: Cause): Suspend {
   );
 }
 
+// Owns resumable execution: saves the continuation on suspension, honors
+// interruption, and yields through the scheduler for cooperative fairness.
+// Keep opcode handling aligned with stepInline, whose finalization contract
+// deliberately excludes normal fiber scheduling and completion.
 function runFiberLoop(fiber: Fiber<any>): void {
   if (fiber.state === FiberState.Done) return;
   fiber.state = FiberState.Running;
@@ -533,7 +537,12 @@ function runFiberLoop(fiber: Fiber<any>): void {
   }
 }
 
-// stepInline: run an effect synchronously where possible, used for finalizers
+// Drives cleanup through resolve/reject callbacks without completing the
+// original fiber again. Runs supported opcodes inline; Async resumes here,
+// while other opcodes delegate to a detached fiber with the same context.
+// parentFiber supplies scheduler/interruption state, not child ownership.
+// The separate loop keeps cleanup out of the normal completion path; changes
+// to shared opcode semantics must be checked in both interpreters.
 function stepInline(
   node: Suspend,
   ctx: Context,
