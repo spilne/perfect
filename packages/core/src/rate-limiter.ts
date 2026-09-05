@@ -56,14 +56,39 @@ export interface RateLimiter<S = never> {
 
 // ── Internal state shapes ──────────────────────────────────────────
 
-type SlidingWindow = { _tag: "sliding-window"; timestamps: number[] };
+type SlidingWindow = { _tag: "sliding-window"; timestamps: number[]; head: number };
 type FixedWindow = { _tag: "fixed-window"; windowStart: number; count: number };
 type TokenBucket = { _tag: "token-bucket"; tokens: number; lastRefill: number };
 type State = SlidingWindow | FixedWindow | TokenBucket;
 
 type AcquireResult = { _tag: "ok" } | { _tag: "rejected"; retryAfterMs: number };
 
-// ── Strategy logic — pure functions over State + now → (result, nextState) ──
+function expire(s: SlidingWindow, cutoff: number): void {
+  while (s.head < s.timestamps.length && s.timestamps[s.head]! <= cutoff) s.head++;
+  if (s.head === s.timestamps.length) {
+    s.timestamps = [];
+    s.head = 0;
+  } else if (s.head >= 1024 && s.head * 2 >= s.timestamps.length) {
+    s.timestamps = s.timestamps.slice(s.head);
+    s.head = 0;
+  }
+}
+
+function record(s: SlidingWindow, now: number): void {
+  if (s.timestamps.length === 0 || s.timestamps[s.timestamps.length - 1]! <= now) {
+    s.timestamps.push(now);
+    return;
+  }
+  // Wall clocks can move backwards; keep expiration order valid on that rare path.
+  let lo = s.head;
+  let hi = s.timestamps.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (s.timestamps[mid]! <= now) lo = mid + 1;
+    else hi = mid;
+  }
+  s.timestamps.splice(lo, 0, now);
+}
 
 function tryAcquireState(
   s: State,
@@ -74,16 +99,15 @@ function tryAcquireState(
 ): [AcquireResult, State] {
   switch (s._tag) {
     case "sliding-window": {
-      const cutoff = now - windowMs;
-      const active = s.timestamps.filter((t) => t > cutoff);
-      if (active.length < limit) {
-        const next = dryRun ? active : [...active, now];
-        return [{ _tag: "ok" }, { _tag: "sliding-window", timestamps: next }];
+      expire(s, now - windowMs);
+      if (s.timestamps.length - s.head < limit) {
+        if (!dryRun) record(s, now);
+        return [{ _tag: "ok" }, s];
       }
-      const oldest = active[0]!;
+      const oldest = s.timestamps[s.head]!;
       return [
         { _tag: "rejected", retryAfterMs: oldest + windowMs - now },
-        { _tag: "sliding-window", timestamps: active },
+        s,
       ];
     }
     case "fixed-window": {
@@ -129,8 +153,8 @@ function tryAcquireState(
 function computeRemaining(s: State, now: number, limit: number, windowMs: number): number {
   switch (s._tag) {
     case "sliding-window": {
-      const active = s.timestamps.filter((t) => t > now - windowMs);
-      return Math.max(0, limit - active.length);
+      expire(s, now - windowMs);
+      return Math.max(0, limit - (s.timestamps.length - s.head));
     }
     case "fixed-window": {
       if (now >= s.windowStart + windowMs) return limit;
@@ -147,9 +171,9 @@ function computeRemaining(s: State, now: number, limit: number, windowMs: number
 function computeResetAt(s: State, now: number, limit: number, windowMs: number): number {
   switch (s._tag) {
     case "sliding-window": {
-      const active = s.timestamps.filter((t) => t > now - windowMs);
-      if (active.length === 0) return now;
-      return active[0]! + windowMs;
+      expire(s, now - windowMs);
+      if (s.timestamps.length === s.head) return now;
+      return s.timestamps[s.head]! + windowMs;
     }
     case "fixed-window":
       return s.windowStart + windowMs;
@@ -166,7 +190,7 @@ function computeResetAt(s: State, now: number, limit: number, windowMs: number):
 function makeInitialState(strategy: RateLimitStrategy, limit: number, now: number): State {
   switch (strategy) {
     case "sliding-window":
-      return { _tag: "sliding-window", timestamps: [] };
+      return { _tag: "sliding-window", timestamps: [], head: 0 };
     case "fixed-window":
       return { _tag: "fixed-window", windowStart: now, count: 0 };
     case "token-bucket":
