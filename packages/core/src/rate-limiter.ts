@@ -63,18 +63,19 @@ type State = SlidingWindow | FixedWindow | TokenBucket;
 
 type AcquireResult = { _tag: "ok" } | { _tag: "rejected"; retryAfterMs: number };
 
-function expire(s: SlidingWindow, cutoff: number): void {
+function expireTimestamps(s: SlidingWindow, cutoff: number): void {
   while (s.head < s.timestamps.length && s.timestamps[s.head]! <= cutoff) s.head++;
   if (s.head === s.timestamps.length) {
     s.timestamps = [];
     s.head = 0;
+    // Reclaim expired storage only after enough removals to amortize the copy.
   } else if (s.head >= 1024 && s.head * 2 >= s.timestamps.length) {
     s.timestamps = s.timestamps.slice(s.head);
     s.head = 0;
   }
 }
 
-function record(s: SlidingWindow, now: number): void {
+function recordAcquisition(s: SlidingWindow, now: number): void {
   if (s.timestamps.length === 0 || s.timestamps[s.timestamps.length - 1]! <= now) {
     s.timestamps.push(now);
     return;
@@ -99,16 +100,13 @@ function tryAcquireState(
 ): [AcquireResult, State] {
   switch (s._tag) {
     case "sliding-window": {
-      expire(s, now - windowMs);
+      expireTimestamps(s, now - windowMs);
       if (s.timestamps.length - s.head < limit) {
-        if (!dryRun) record(s, now);
+        if (!dryRun) recordAcquisition(s, now);
         return [{ _tag: "ok" }, s];
       }
       const oldest = s.timestamps[s.head]!;
-      return [
-        { _tag: "rejected", retryAfterMs: oldest + windowMs - now },
-        s,
-      ];
+      return [{ _tag: "rejected", retryAfterMs: oldest + windowMs - now }, s];
     }
     case "fixed-window": {
       const windowEnd = s.windowStart + windowMs;
@@ -153,7 +151,7 @@ function tryAcquireState(
 function computeRemaining(s: State, now: number, limit: number, windowMs: number): number {
   switch (s._tag) {
     case "sliding-window": {
-      expire(s, now - windowMs);
+      expireTimestamps(s, now - windowMs);
       return Math.max(0, limit - (s.timestamps.length - s.head));
     }
     case "fixed-window": {
@@ -171,7 +169,7 @@ function computeRemaining(s: State, now: number, limit: number, windowMs: number
 function computeResetAt(s: State, now: number, limit: number, windowMs: number): number {
   switch (s._tag) {
     case "sliding-window": {
-      expire(s, now - windowMs);
+      expireTimestamps(s, now - windowMs);
       if (s.timestamps.length === s.head) return now;
       return s.timestamps[s.head]! + windowMs;
     }

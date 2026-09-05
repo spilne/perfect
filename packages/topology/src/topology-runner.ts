@@ -56,7 +56,7 @@ export class TopologyRunner {
   }
 }
 
-class LruSet {
+class InsertionOrderSet {
   private readonly set = new Set<string>();
   private readonly order: string[] = [];
 
@@ -157,7 +157,7 @@ class TopologyRunnerInstance {
 
   private readonly windowManagers: Map<Partition, WindowManager<unknown, unknown, unknown>>[] = [];
   private readonly joinBuffers: Map<Partition, JoinBuffer<unknown, unknown>>[] = [];
-  private readonly dedupSets: Map<Partition, LruSet>[] = [];
+  private readonly dedupSets: Map<Partition, InsertionOrderSet>[] = [];
 
   private itemsProcessed = 0;
   private readonly metricsStartTime = Date.now();
@@ -376,7 +376,7 @@ class TopologyRunnerInstance {
     node: Extract<TopologyNode, { type: "dedupe" }>,
   ): Stream<TopologyRecord, any> {
     const operatorId = this.operatorId(node, "dedupe");
-    const sets = new Map<Partition, LruSet>();
+    const sets = new Map<Partition, InsertionOrderSet>();
     this.dedupSets.push(sets);
     const maxSize = this.config.maxDedupeSize ?? 100_000;
 
@@ -385,7 +385,7 @@ class TopologyRunnerInstance {
       const context = record.completion.context;
       let seen = sets.get(record.partition);
       if (!seen) {
-        seen = new LruSet(maxSize);
+        seen = new InsertionOrderSet(maxSize);
         const prefix = `${operatorId}:item:`;
         for (const key of context.values.keys()) {
           if (key.startsWith(prefix)) seen.add(decodeURIComponent(key.slice(prefix.length)));
