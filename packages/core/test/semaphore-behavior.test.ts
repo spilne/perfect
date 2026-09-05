@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { fail, sleep, forkDaemon, interrupt, all, run, Semaphore, Ref } from "../src";
+import { fail, sync, sleep, forkDaemon, all, run, Semaphore, Ref } from "../src";
 
 describe("Semaphore", () => {
   test("withPermit limits concurrency", async () => {
@@ -51,7 +51,7 @@ describe("Semaphore", () => {
     const program = Semaphore.make(0).flatMap((sem) =>
       forkDaemon(sem.acquire()).flatMap((waiter) =>
         sleep(1).flatMap(() =>
-          interrupt(waiter).flatMap(() => sem.release().flatMap(() => sem.available)),
+          sync(() => waiter.interrupt()).flatMap(() => sem.release().flatMap(() => sem.available)),
         ),
       ),
     );

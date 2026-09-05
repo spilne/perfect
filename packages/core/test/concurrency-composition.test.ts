@@ -1,5 +1,17 @@
 import { describe, test, expect } from "bun:test";
-import { succeed, suspend, sleep, fork, all, run, Deferred, Queue, Semaphore, Ref } from "../src";
+import {
+  type Eff,
+  succeed,
+  suspend,
+  sleep,
+  fork,
+  all,
+  run,
+  Deferred,
+  Queue,
+  Semaphore,
+  Ref,
+} from "../src";
 
 describe("concurrency composition", () => {
   test("producer/consumer with Queue + Semaphore", async () => {
@@ -10,7 +22,7 @@ describe("concurrency composition", () => {
             q.shutdown(),
           );
 
-          const consumer = (function consume(): any {
+          const consumer = (function consume(): Eff<void, never> {
             return q
               .take()
               .flatMap((n) => sem.withPermit(results.update((r) => [...r, n])))

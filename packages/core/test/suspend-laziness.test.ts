@@ -16,7 +16,7 @@ describe("suspend", () => {
   test("recursive effects don't stack overflow", () => {
     function countdown(n: number): ReturnType<typeof succeed<number>> {
       if (n <= 0) return succeed(0);
-      return suspend(() => countdown(n - 1)) as any;
+      return suspend(() => countdown(n - 1));
     }
     expect(runSync(countdown(10_000))).toBe(0);
   });

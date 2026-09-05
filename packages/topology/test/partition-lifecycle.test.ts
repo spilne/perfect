@@ -46,7 +46,7 @@ test("revocation checkpoints the latest offset before releasing ownership", asyn
   spyOn(backend, "commit").mockImplementation(async (params) => {
     events.push("checkpoint");
     expect(params.sourceOffset).toBe("42");
-    expect(params.checkpointId).toBe("checkpoint");
+    expect(params.checkpointId).toBe(StateCheckpointId("checkpoint"));
     return commit(params);
   });
   spyOn(backend, "release").mockImplementation(async (lease) => {

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { AckSubscriptionLifecycle } from "../src/ack-subscription-lifecycle";
-import { TopicName, PartitionId } from "../src/brands";
+import { TopicName, PartitionId, KafkaOffset } from "../src/brands";
 import type { KafkaConsumer, KafkaOffsetCommit } from "../src/kafka-types";
 
 test("failed commits retain their batch and concurrent flushes share one request", async () => {
@@ -33,7 +33,7 @@ test("failed commits retain their batch and concurrent flushes share one request
   await lifecycle.flushCommits();
   expect(requests).toHaveLength(2);
   expect(requests[1]).toBe(requests[0]);
-  expect(requests[1]?.[0]?.offset).toBe("11");
+  expect(requests[1]?.[0]?.offset).toBe(KafkaOffset("11"));
   await lifecycle.close();
 });
 

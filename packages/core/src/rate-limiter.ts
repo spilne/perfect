@@ -244,9 +244,7 @@ class InProcessRateLimiter implements RateLimiter {
 
   get remaining(): Eff<number, never> {
     return clockNow.flatMap((now: number) =>
-      this.state.get.map((s: State) =>
-        computeRemaining(s, now, this.limit, this.windowMs),
-      ),
+      this.state.get.map((s: State) => computeRemaining(s, now, this.limit, this.windowMs)),
     );
   }
 
