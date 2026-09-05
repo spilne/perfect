@@ -63,29 +63,8 @@ function exitOf<B>(e: Eff<B, any>): Eff<Exit<unknown, B>, never> {
     .catchAllCause((cause: Cause) => succeed({ _tag: "Failure", cause }));
 }
 
-// Finalizer for driver fibers: interrupt every fiber registered so far.
-function interruptAllEff(drivers: Fiber<any>[]): Eff<void, never> {
-  return suspend(() => {
-    const fs = drivers.splice(0);
-    return fs.reduce<Eff<void, never>>(
-      (acc, f) =>
-        (acc as any)
-          .flatMap(() => interrupt(f))
-          .flatMap(() => awaitFiber(f))
-          .map(() => undefined),
-      succeed(undefined) as any,
-    );
-  }) as any;
-}
-
-function combineFinalizers(
-  first: Eff<void, unknown> | null,
-  second: Eff<void, unknown> | null,
-): Eff<void, unknown> | null {
-  if (first === null) return second;
-  if (second === null) return first;
-  return new Suspend(Op.Ensuring, first, second) as any;
-}
+import { interruptAllEff, combineFinalizers } from "./driver-lifecycle";
+import { mergeStreams } from "./merge";
 import { Chunk } from "./chunk";
 import { type FusibleOp, compileFused, hasFilterOps, SKIP } from "./fusion";
 
@@ -1791,58 +1770,7 @@ export class Stream<A, S = never> {
   }
 
   merge<S2>(that: Stream<A, S2>): Stream<A, S | S2> {
-    // Concurrent merge on the fiber runtime: one driver fiber per source,
-    // both offering chunks into a shared bounded queue (backpressure).
-    // Drivers are structured children of the consuming fiber; the stream
-    // finalizer interrupts them on early termination.
-    const self = this;
-    type Slot =
-      | { _tag: "chunk"; chunk: Chunk<A> }
-      | { _tag: "end" }
-      | { _tag: "fail"; cause: Cause };
-
-    const drivers: Fiber<any>[] = [];
-
-    const drain = (slots: Queue<Slot>, s: Stream<A, any>): Eff<void, any> =>
-      (s.step as any)
-        .flatMap((step: Step<A>) =>
-          step._tag === "Done"
-            ? slots.offer({ _tag: "end" })
-            : (slots.offer({ _tag: "chunk", chunk: step.chunk }) as any).flatMap(() =>
-                drain(slots, step.next),
-              ),
-        )
-        .catchAllCause((cause: Cause) =>
-          Cause.isInterruptedOnly(cause) ? failCause(cause) : slots.offer({ _tag: "fail", cause }),
-        );
-
-    const pull = (slots: Queue<Slot>, open: { count: number }): Eff<Step<A>, any> =>
-      (slots.take() as any).flatMap((slot: Slot): any => {
-        if (slot._tag === "fail") return failCause(slot.cause);
-        if (slot._tag === "end") {
-          open.count--;
-          return open.count === 0 ? succeed(DONE) : pull(slots, open);
-        }
-        return succeed(emit(slot.chunk, new Stream(suspend(() => pull(slots, open)) as any)));
-      });
-
-    const setup: Eff<Step<A>, any> = (QueueNS.bounded<Slot>(2) as any).flatMap(
-      (slots: Queue<Slot>) =>
-        (fork(drain(slots, self) as any) as any).flatMap((f1: Fiber<any>) =>
-          (fork(drain(slots, that as any) as any) as any).flatMap((f2: Fiber<any>) => {
-            drivers.push(f1, f2);
-            return pull(slots, { count: 2 });
-          }),
-        ),
-    );
-
-    return new Stream<A, any>(
-      suspend(() => setup) as any,
-      combineFinalizers(
-        interruptAllEff(drivers),
-        combineFinalizers(self._finalizer, that._finalizer),
-      ),
-    ) as any;
+    return mergeStreams({ left: this, right: that });
   }
 
   /**
