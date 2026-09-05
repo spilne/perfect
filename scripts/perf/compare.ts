@@ -29,7 +29,7 @@
 // be systematically slower for a whole job in a way no within-run statistic
 // sees.
 //
-// In practice this lands tolerances between the 8% floor (stable benchmarks
+// In practice this lands tolerances between the default 12% floor (stable benchmarks
 // like `all x100`, whose own statistical bar is ~1.5%) and ~20% (a 12 ns
 // measurement where timer granularity dominates).
 

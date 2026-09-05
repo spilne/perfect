@@ -58,18 +58,18 @@ export interface HttpRequestOptions {
  *   - `MockTransport` (this package, for tests)
  *   - `OtelTransport` (future, separate package)
  *
- * `execute()` returns a scoped effect — AbortController is tied to the
- * surrounding scope so interrupts abort the underlying request.
+ * The default transport cancels an interrupted fetch until headers arrive.
+ * After resolution the caller owns the response body; the request timeout
+ * and external abort signal still apply while that body is consumed.
  */
 export interface HttpTransport {
   execute(options: HttpRequestOptions): Eff<Response, Throws<HttpClientError>>;
 }
 
 /**
- * Default transport — delegates to global `fetch`. An AbortController is
- * acquired as a scoped resource; on fiber interrupt (timeout / race /
- * manual interrupt), the controller aborts the fetch, killing the TCP
- * connection immediately rather than waiting for the server.
+ * Default transport — delegates to global `fetch`. Its scoped controller
+ * cancels pending header acquisition on interruption. Closing that scope
+ * after success must leave the response body readable by the caller.
  */
 export class FetchTransport implements HttpTransport {
   execute(options: HttpRequestOptions): Eff<Response, Throws<HttpClientError>> {
