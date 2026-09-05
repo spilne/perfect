@@ -1,7 +1,21 @@
 import { describe, test, expect } from "bun:test";
-import { eff, succeed, sleep, fork, join, run, PubSub, SubscriptionRef } from "../src";
+import { eff, succeed, sleep, fork, join, run, runSync, PubSub, SubscriptionRef } from "../src";
 
 describe("PubSub", () => {
+  test("reusable publish effects use subscribers present at execution", () => {
+    const pubsub = runSync(PubSub.unbounded<number>());
+    const publish = pubsub.publish(42);
+    expect(runSync(publish)).toBe(false);
+    for (let i = 0; i < 2; i++) {
+      const stream = runSync(pubsub.subscribe);
+      expect(runSync(publish)).toBe(true);
+      expect(runSync(stream.head().orDie())).toBe(42);
+      expect(runSync(pubsub.subscriberCount)).toBe(0);
+    }
+    runSync(pubsub.shutdown());
+    expect(runSync(publish)).toBe(false);
+  });
+
   test("subscriber receives published messages", async () => {
     const result = await run(
       eff(function* () {

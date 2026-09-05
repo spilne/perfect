@@ -17,7 +17,7 @@
 // implementations (Redis Pub/Sub, NATS, etc.) implement the same interface.
 
 import { type Eff, type Throws } from "./eff";
-import { succeed, sync } from "./constructors";
+import { succeed, sync, suspend } from "./constructors";
 import { type Queue, Queue as QueueNS, QueueClosed } from "./queue";
 import { Stream } from "./stream";
 
@@ -39,19 +39,16 @@ class InProcessPubSub<T> implements PubSub<T> {
   constructor(private readonly capacity: number) {}
 
   publish(value: T): Eff<boolean, never> {
-    if (this._shutdown || this.subscribers.size === 0) {
-      return succeed(false);
-    }
-    // Sequentially offer to every subscriber. Each subscriber's offer
-    // returns Eff<boolean, Throws<QueueClosed>>; we ignore closed errors
-    // (subscriber disconnected mid-publish — drop them silently here).
-    const offers = Array.from(this.subscribers).map((q) =>
-      q.offer(value).catch(() => succeed(false)),
-    );
-    return offers.reduce<Eff<boolean, never>>(
-      (acc, o) => (acc as any).flatMap(() => o),
-      succeed(true) as any,
-    ) as Eff<boolean, never>;
+    return suspend(() => {
+      if (this._shutdown || this.subscribers.size === 0) return succeed(false);
+      const offers = Array.from(this.subscribers).map((q) =>
+        q.offer(value).catch(() => succeed(false)),
+      );
+      return offers.reduce<Eff<boolean, never>>(
+        (acc, offer) => acc.flatMap(() => offer),
+        succeed(true),
+      );
+    });
   }
 
   get subscribe(): Eff<Stream<T, Throws<QueueClosed>>, never> {
