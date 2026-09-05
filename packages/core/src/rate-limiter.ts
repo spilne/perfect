@@ -206,59 +206,59 @@ class InProcessRateLimiter implements RateLimiter {
   ) {}
 
   private get tryAcquireOnce(): Eff<AcquireResult, never> {
-    return (clockNow as any).flatMap((now: number) =>
+    return clockNow.flatMap((now: number) =>
       this.state.modify((s) => {
         const [result, next] = tryAcquireState(s, now, this.limit, this.windowMs, false);
         return [result, next];
       }),
-    ) as Eff<AcquireResult, never>;
+    );
   }
 
   get acquire(): Eff<void, Throws<RateLimitExceeded>> {
-    return (this.tryAcquireOnce as any).flatMap((r: AcquireResult) =>
+    return this.tryAcquireOnce.flatMap((r: AcquireResult) =>
       r._tag === "ok"
         ? sync(() => undefined)
-        : (fail({ _tag: "RateLimitExceeded", retryAfterMs: r.retryAfterMs }) as any),
-    ) as Eff<void, Throws<RateLimitExceeded>>;
+        : fail<RateLimitExceeded>({ _tag: "RateLimitExceeded", retryAfterMs: r.retryAfterMs }),
+    );
   }
 
   get tryAcquire(): Eff<boolean, never> {
-    return (this.tryAcquireOnce as any).map((r: AcquireResult) => r._tag === "ok");
+    return this.tryAcquireOnce.map((r: AcquireResult) => r._tag === "ok");
   }
 
   get acquireWaiting(): Eff<void, never> {
     const loop = (): Eff<void, never> =>
-      (this.tryAcquireOnce as any).flatMap((r: AcquireResult) =>
+      this.tryAcquireOnce.flatMap((r: AcquireResult) =>
         r._tag === "ok" ? sync(() => undefined) : sleep(r.retryAfterMs).flatMap(() => loop()),
       );
     return loop();
   }
 
   withLimit<A, S>(eff: Eff<A, S>): Eff<A, S | Throws<RateLimitExceeded>> {
-    return (this.acquire as any).flatMap(() => eff) as any;
+    return this.acquire.flatMap(() => eff);
   }
 
   withLimitWaiting<A, S>(eff: Eff<A, S>): Eff<A, S> {
-    return (this.acquireWaiting as any).flatMap(() => eff) as any;
+    return this.acquireWaiting.flatMap(() => eff);
   }
 
   get remaining(): Eff<number, never> {
-    return (clockNow as any).flatMap((now: number) =>
-      (this.state.get as any).map((s: State) =>
+    return clockNow.flatMap((now: number) =>
+      this.state.get.map((s: State) =>
         computeRemaining(s, now, this.limit, this.windowMs),
       ),
     );
   }
 
   get resetAt(): Eff<number, never> {
-    return (clockNow as any).flatMap((now: number) =>
-      (this.state.get as any).map((s: State) => computeResetAt(s, now, this.limit, this.windowMs)),
+    return clockNow.flatMap((now: number) =>
+      this.state.get.map((s: State) => computeResetAt(s, now, this.limit, this.windowMs)),
     );
   }
 
   get nextSlotIn(): Eff<number, never> {
-    return (clockNow as any).flatMap((now: number) =>
-      (this.state.get as any).map((s: State) => {
+    return clockNow.flatMap((now: number) =>
+      this.state.get.map((s: State) => {
         const [result] = tryAcquireState(s, now, this.limit, this.windowMs, true);
         return result._tag === "ok" ? 0 : result.retryAfterMs;
       }),
@@ -272,11 +272,11 @@ export const RateLimiter = {
     if (opts.limit < 1) throw new Error("RateLimiter.make: limit must be >= 1");
     if (opts.windowMs < 1) throw new Error("RateLimiter.make: windowMs must be >= 1");
     const strategy = opts.strategy ?? "sliding-window";
-    return (clockNow as any).flatMap((now: number) =>
+    return clockNow.flatMap((now: number) =>
       RefNS.make<State>(makeInitialState(strategy, opts.limit, now)).map(
-        (state) => new InProcessRateLimiter(opts.limit, opts.windowMs, state) as RateLimiter,
+        (state) => new InProcessRateLimiter(opts.limit, opts.windowMs, state),
       ),
-    ) as Eff<RateLimiter, never>;
+    );
   },
   /** Convenience: sliding-window strategy. */
   slidingWindow(opts: { limit: number; windowMs: number }): Eff<RateLimiter, never> {
