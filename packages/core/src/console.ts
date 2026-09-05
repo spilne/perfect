@@ -14,7 +14,7 @@ export interface Console {
   readonly readLine: () => Eff<string | undefined, never>;
 }
 
-export const Console: ServiceTag<Console> = service<Console>("Console");
+export const Console: ServiceTag<Console, "Console"> = service<Console>()("Console");
 
 function effSync<A>(f: () => A): Eff<A, never> {
   return new Suspend(Op.Sync, f, null) as any;

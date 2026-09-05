@@ -25,8 +25,8 @@ interface Logger {
   info(msg: string): Eff<void, never>;
 }
 
-const UserRepo = service<UserRepo>("UserRepo");
-const Logger = service<Logger>("Logger");
+const UserRepo = service<UserRepo>()("UserRepo");
+const Logger = service<Logger>()("Logger");
 
 // ── Business logic ─────────────────────────────────────────────────
 const getUser = (id: string) =>

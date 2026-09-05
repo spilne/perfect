@@ -73,10 +73,10 @@ interface Logger {
   error(msg: string): Eff<void, never>;
 }
 
-const UserRepo = service<UserRepo>("UserRepo");
-const OrderRepo = service<OrderRepo>("OrderRepo");
-const EmailService = service<EmailService>("EmailService");
-const Logger = service<Logger>("Logger");
+const UserRepo = service<UserRepo>()("UserRepo");
+const OrderRepo = service<OrderRepo>()("OrderRepo");
+const EmailService = service<EmailService>()("EmailService");
+const Logger = service<Logger>()("Logger");
 
 // ═══════════════════════════════════════════════════════════════════
 // Business logic — composing effects

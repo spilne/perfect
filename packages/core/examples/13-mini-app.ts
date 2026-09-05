@@ -44,9 +44,9 @@ interface Logger {
   log(msg: string): Eff<void, never>;
 }
 
-const Db = service<Db>("Db");
-const Cache = service<Cache>("Cache");
-const Logger = service<Logger>("Logger");
+const Db = service<Db>()("Db");
+const Cache = service<Cache>()("Cache");
+const Logger = service<Logger>()("Logger");
 
 // >>> example: app-program
 // The application is an effect that uses three services. Note: nothing in

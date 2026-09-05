@@ -14,4 +14,4 @@
 import { service } from "@spilne/perfect-core";
 import type { HttpClient as HttpClientT } from "./client";
 
-export const HttpClient = service<HttpClientT>("HttpClient");
+export const HttpClient = service<HttpClientT>()("HttpClient");

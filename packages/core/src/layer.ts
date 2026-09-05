@@ -9,7 +9,7 @@
 //   const AppLive = Layer.merge(DbLive, CacheLive, LoggerLive);
 //   await run(program.with(AppLive));
 //
-// The record key is the service name (matches `service<T>("Db")`'s name).
+// The record key is the service name (matches `service<T>()("Db")`'s name).
 // At .with() time we recover the tag's Symbol via Symbol.for — no global
 // registry needed because `service` already does that.
 //
@@ -34,6 +34,17 @@ import type { Scope } from "./scope";
  * concrete Services types flow through unchanged.
  */
 export type Layer<Services extends Record<string, any>, E = never> = Eff<Services, E>;
+
+type ProvidedByLayer<S, Services> =
+  S extends Needs<infer D, infer Name>
+    ? string extends keyof Services
+      ? S
+      : [Name] extends [keyof Services]
+        ? Services[Name] extends D
+          ? never
+          : S
+        : S
+    : S;
 
 // ── merge ──────────────────────────────────────────────────────────
 
@@ -140,7 +151,7 @@ export class LayerMissingDependencyError extends Error {
  *     eff(function* () { ... }),
  *   );
  *
- * Names are the same strings passed to `service<T>(name)`.
+ * Names are the same strings passed to `service<T>()(name)`.
  */
 export function describe<Services extends Record<string, any>, E>(
   deps: { readonly provides: readonly string[]; readonly requires?: readonly string[] },
@@ -266,7 +277,7 @@ declare module "./eff" {
     with<A, S, Services extends Record<string, any>, E>(
       this: Eff<A, S>,
       layer: Layer<Services, E>,
-    ): Eff<A, Exclude<S, Needs<Services[keyof Services]>> | E>;
+    ): Eff<A, ProvidedByLayer<S, Services> | E>;
 
     /**
      * Horizontal merge for layers — chain two layers together.
@@ -287,7 +298,7 @@ declare module "./eff" {
     provideTo<S1 extends Record<string, any>, E1, S2 extends Record<string, any>, E2>(
       this: Layer<S1, E1>,
       inner: Layer<S2, E2>,
-    ): Layer<S2, E1 | Exclude<E2, Needs<S1[keyof S1]>>>;
+    ): Layer<S2, E1 | ProvidedByLayer<E2, S1>>;
 
     /**
      * Memoize this layer once per active scope.

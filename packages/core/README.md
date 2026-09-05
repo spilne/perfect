@@ -44,7 +44,7 @@ import { eff, succeed, service, provide, type Eff } from "@spilne/perfect-core";
 interface Greeter {
   greet(name: string): Eff<string, never>;
 }
-const Greeter = service<Greeter>("Greeter");
+const Greeter = service<Greeter>()("Greeter");
 
 const app = eff(function* () {
   const greeter = yield* Greeter.get;

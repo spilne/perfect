@@ -18,7 +18,7 @@ export interface Random {
   readonly choice: <A>(arr: ReadonlyArray<A>) => Eff<A, never>;
 }
 
-export const Random: ServiceTag<Random> = service<Random>("Random");
+export const Random: ServiceTag<Random, "Random"> = service<Random>()("Random");
 
 // Helper for building Random impls — eff-wraps a sync function so users
 // don't have to write the Suspend(Op.Sync, ...) themselves.

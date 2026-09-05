@@ -1,6 +1,6 @@
 // Services — effect-tracked dependency injection.
 //
-// service<T>(name) creates a typed handle. .get is an effect that retrieves
+// service<T>()(name) creates a typed handle. .get is an effect that retrieves
 // the implementation from context. provide(eff, tag, impl) installs one.
 //
 // Run: bun packages/core/examples/04-services.ts
@@ -13,7 +13,7 @@ import { assertEq } from "./_assert";
 interface Greeter {
   greet(name: string): Eff<string, never>;
 }
-const Greeter = service<Greeter>("Greeter");
+const Greeter = service<Greeter>()("Greeter");
 
 // Use the service inside a program.
 const program = eff(function* () {
@@ -45,8 +45,8 @@ interface Logger {
   log(msg: string): void;
 }
 
-const Db = service<Db>("Db");
-const Logger = service<Logger>("Logger");
+const Db = service<Db>()("Db");
+const Logger = service<Logger>()("Logger");
 
 const captured: string[] = [];
 const app = eff(function* () {

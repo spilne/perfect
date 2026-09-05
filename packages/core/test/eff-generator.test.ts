@@ -77,7 +77,7 @@ describe("eff(function*)", () => {
     interface Counter {
       add(n: number): Eff<number, never>;
     }
-    const Counter = service<Counter>("Counter");
+    const Counter = service<Counter>()("Counter");
     const program = eff(function* () {
       const c = yield* Counter.get;
       const a = yield* c.add(1);

@@ -11,7 +11,7 @@ Same model (typed errors, services, fibers, scopes, streams). Differences:
 | Effect type | `Effect<A, E, R>` (3 params) | `Eff<A, S>` (2 params, S is flat union) |
 | Composition | `pipe(eff, Effect.flatMap(f))` | `eff.flatMap(f)` (fluent) |
 | Generator | `Effect.gen(function* () { yield* e })` | `eff(function* () { yield* e })` |
-| Services | `Context.Tag<T>` (class) | `service<T>("Name")` (function) |
+| Services | `Context.Tag<T>` (class) | `service<T>()("Name")` (function) |
 | Layer | `Layer<Out, E, In>` (class) | `Layer<Services, E>` (type alias over Eff) |
 | Layer apply | `Effect.provide(eff, layer)` | `eff.with(layer)` |
 | Layer chain | `Layer.merge(a, b)` / `Layer.provide` | `merge` / `.and` / `.provideTo` / `.with` (chains) |

@@ -23,11 +23,25 @@ interface Logger {
   log(msg: string): void;
 }
 
-const Db = service<Db>("Db");
-const Cache = service<Cache>("Cache");
-const Logger = service<Logger>("Logger");
+const Db = service<Db>()("Db");
+const Cache = service<Cache>()("Cache");
+const Logger = service<Logger>()("Logger");
 
 describe("Layer", () => {
+  test("same-shaped services retain their own implementations", async () => {
+    interface NamedDb {
+      query(): number;
+    }
+    const Primary = service<NamedDb>()("Primary");
+    const Replica = service<NamedDb>()("Replica");
+    const result = await run(
+      Primary.get
+        .flatMap((primary) => Replica.get.map((replica) => [primary.query(), replica.query()]))
+        .with(succeed({ Primary: { query: () => 1 }, Replica: { query: () => 2 } })),
+    );
+    expect(result).toEqual([1, 2]);
+  });
+
   test("simplest: succeed with a record installs services", () => {
     const DbLive = succeed({ Db: { query: (s: string) => succeed(`result:${s}`) } as Db });
 

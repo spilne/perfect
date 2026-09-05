@@ -29,7 +29,7 @@ export interface Tracer {
   startSpan(name: string, options?: SpanOptions): Span;
 }
 
-export const Tracer: ServiceTag<Tracer> = service<Tracer>("Tracer");
+export const Tracer: ServiceTag<Tracer, "Tracer"> = service<Tracer>()("Tracer");
 
 export const CURRENT_SPAN_KEY = Symbol.for("spilne/svc/CurrentSpan");
 

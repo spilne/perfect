@@ -337,7 +337,7 @@ describe("complex compositions", () => {
     interface ApiClient {
       fetch(url: string): Eff<string, Throws<string>>;
     }
-    const ApiClient = service<ApiClient>("ApiClient");
+    const ApiClient = service<ApiClient>()("ApiClient");
 
     let attempts = 0;
     let cleaned = false;

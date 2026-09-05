@@ -94,7 +94,7 @@ describe("for-comprehension e2e", () => {
 
   test("with services", async () => {
     const result = await runForComprehension(`
-      const Db = service("Db")
+      const Db = service()("Db")
       const program = for {
         db <- Db.get
         name <- db.find("1")
@@ -175,7 +175,7 @@ describe("eff($) e2e", () => {
 
   test("with services", async () => {
     const result = await runForComprehension(`
-      const Logger = service("Logger")
+      const Logger = service()("Logger")
       const logs = []
       const program = eff(($) => {
         const log = $(Logger.get)

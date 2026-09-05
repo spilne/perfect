@@ -6,8 +6,9 @@ type EFF_TAG = typeof EFF_TAG;
 export interface Throws<E> {
   readonly _throws: E;
 }
-export interface Needs<D> {
+export interface Needs<D, Name extends string = string> {
   readonly _needs: D;
+  readonly _service: Name;
 }
 
 // ── Op codes ───────────────────────────────────────────────────────

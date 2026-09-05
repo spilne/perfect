@@ -5,9 +5,15 @@ tag, request the service inside a program. Provide it once at the edge.
 
 ## Services
 
-`service<T>("Name")` creates a tag. The tag's `.get` is an effect that
-retrieves the implementation from context (and adds `Needs<T>` to the
+`service<T>()("Name")` creates a tag. The tag's `.get` is an effect that
+retrieves the implementation from context (and adds `Needs<T, "Name">` to the
 effect channel).
+
+Use `service<T>()("Name")` when migrating from `service<T>("Name")`. The second
+call preserves the literal name in the type. Layers and `provide` now match
+both that name and the implementation type, so two same-shaped services cannot
+accidentally satisfy each other's requirements. Keep names literal rather than
+widening tags to `ServiceTag<T>` when they will be used for provisioning.
 
 :::: syntax-tabs
 
@@ -20,7 +26,7 @@ import { eff, succeed, service, provide, type Eff } from "@spilne/perfect-core";
 interface Greeter {
   greet(name: string): Eff<string, never>;
 }
-const Greeter = service<Greeter>("Greeter");
+const Greeter = service<Greeter>()("Greeter");
 
 // Use the service inside a program.
 const program = eff(function* () {
@@ -72,8 +78,8 @@ interface Logger {
   log(msg: string): void;
 }
 
-const Db = service<Db>("Db");
-const Logger = service<Logger>("Logger");
+const Db = service<Db>()("Db");
+const Logger = service<Logger>()("Logger");
 
 const captured: string[] = [];
 const app = eff(function* () {
@@ -296,7 +302,7 @@ run builds the layer again and owns its own finalizers.
 
 | | |
 |---|---|
-| `service<T>(name)` | create a service tag |
+| `service<T>()(name)` | create a service tag |
 | `Tag.get` | effect that retrieves the impl, adds `Needs<T>` |
 | `provide(eff, tag, impl)` | install a single service |
 | `Layer.merge(...)` | horizontal: combine multiple layers |
@@ -307,7 +313,7 @@ run builds the layer again and owns its own finalizers.
 
 ## Pitfalls
 
-- **Service names must match the record key.** `service<T>("Db")` and
+- **Service names must match the record key.** `service<T>()("Db")` and
   `succeed({ Db: impl })` resolve to the same `Symbol.for("spilne/svc/Db")`.
 - **Never resolve a service inside a tight loop.** Get it once at the top of
   the block, reuse it. See the bench: per-step lookup is ~14× slower.

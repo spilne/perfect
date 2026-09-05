@@ -24,10 +24,10 @@ interface Api {
   summary: string;
 }
 
-const Db = service<Db>("Db");
-const Cache = service<Cache>("Cache");
-const Search = service<Search>("Search");
-const Api = service<Api>("Api");
+const Db = service<Db>()("Db");
+const Cache = service<Cache>()("Cache");
+const Search = service<Search>()("Search");
+const Api = service<Api>()("Api");
 
 describe("Layer.build — automatic wiring", () => {
   test("sorts layers regardless of the order they are passed in", async () => {

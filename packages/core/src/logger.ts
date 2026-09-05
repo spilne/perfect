@@ -41,7 +41,7 @@ export interface Logger {
   log(entry: LogEntry): void;
 }
 
-export const Logger: ServiceTag<Logger> = service<Logger>("Logger");
+export const Logger: ServiceTag<Logger, "Logger"> = service<Logger>()("Logger");
 
 // Annotations ride the context under their own key so they compose with
 // provide() scoping — Log.annotated regions nest and unwind naturally.

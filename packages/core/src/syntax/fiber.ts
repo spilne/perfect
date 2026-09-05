@@ -1,4 +1,4 @@
-import { type Eff, type Throws, type Needs, type ErrorsOf, Suspend, Op } from "../eff";
+import { type Eff, type Throws, type ErrorsOf, Suspend, Op } from "../eff";
 import { type Fiber } from "../fiber";
 import { type Exit } from "../exit";
 import {
@@ -15,7 +15,7 @@ import {
   retry,
   type RetryConfig,
 } from "../constructors";
-import { provide, type ServiceTag } from "../service";
+import { provide, type ServiceTag, type ProvidedService } from "../service";
 import { type RetryPolicy } from "../retry-policy";
 import { type Schedule, repeat, retryWith } from "../schedule";
 import {
@@ -55,11 +55,11 @@ declare module "../eff" {
      * when the surrounding `scoped` block ends.
      */
     acquireRelease<A, S, S2>(this: Eff<A, S>, release: (a: A) => Eff<void, S2>): Eff<A, S | S2>;
-    provide<A, S, T>(
-      this: Eff<A, S | Needs<T>>,
-      tag: ServiceTag<T>,
-      impl: T,
-    ): Eff<A, Exclude<S, Needs<T>>>;
+    provide<A, S, T, Name extends string>(
+      this: Eff<A, S>,
+      tag: ServiceTag<T, Name>,
+      impl: NoInfer<T>,
+    ): Eff<A, ProvidedService<S, T, Name>>;
     retry<A, S>(this: Eff<A, S>, policy: RetryPolicy | RetryConfig): Eff<A, S>;
     retryAllBy<A, S, E = ErrorsOf<S>>(this: Eff<A, S>, options: RetryAllByOptions<A, E>): Eff<A, S>;
     repeat<A, S>(this: Eff<A, S>, schedule: Schedule<A>): Eff<A, S>;

@@ -153,7 +153,7 @@ describe("services", () => {
     interface Logger {
       log(msg: string): void;
     }
-    const Logger = service<Logger>("Logger");
+    const Logger = service<Logger>()("Logger");
 
     let logged = "";
     const program = Logger.get.flatMap((logger) =>
@@ -179,7 +179,7 @@ describe("services", () => {
     interface Db {
       query(): string;
     }
-    const Db = service<Db>("Db");
+    const Db = service<Db>()("Db");
 
     const program = Db.get.map((db) => db.query());
     await expect(run(program)).rejects.toBeInstanceOf(Error);

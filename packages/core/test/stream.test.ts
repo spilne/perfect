@@ -334,7 +334,7 @@ describe("Stream + services", () => {
     interface Db {
       query(id: number): ReturnType<typeof succeed<string>>;
     }
-    const Db = service<Db>("Db");
+    const Db = service<Db>()("Db");
 
     const program = Stream.of(1, 2, 3)
       .evalMap((id) => Db.get.flatMap((db) => db.query(id)))

@@ -56,7 +56,7 @@ class NotFound {
 }
 
 {
-  const dependency = service<{ read(): number }>("ForkDependency");
+  const dependency = service<{ read(): number }>()("ForkDependency");
   const child = dependency.get.map((value) => value.read());
   // @ts-expect-error fork must preserve missing services
   run(fork(child));
@@ -66,7 +66,9 @@ class NotFound {
   run(child.fork());
   // @ts-expect-error fluent daemon fork must preserve missing services
   run(child.forkDaemon());
-  const tapped = Stream.of(1).tapEffectFork(() => child).drain();
+  const tapped = Stream.of(1)
+    .tapEffectFork(() => child)
+    .drain();
   // @ts-expect-error fire-and-forget stream taps still require services
   run(tapped);
   run(provide(fork(child), dependency, { read: () => 42 }));
@@ -201,8 +203,41 @@ interface UserRepo {
 interface Logger {
   info(msg: string): Eff<void, never>;
 }
-const UserRepo = service<UserRepo>("UserRepo");
-const Logger = service<Logger>("Logger");
+const UserRepo = service<UserRepo>()("UserRepo");
+const Logger = service<Logger>()("Logger");
+
+{
+  interface Db {
+    query(): number;
+  }
+  const Db = service<Db>()("Db");
+  const OtherDb = service<Db>()("OtherDb");
+  const impl: Db = { query: () => 42 };
+  const wrongLayer = succeed({ WrongName: impl });
+  // @ts-expect-error matching implementation types do not supply the right service name
+  run(Db.get.with(wrongLayer));
+  // @ts-expect-error provideTo must preserve dependencies not supplied by name
+  run(wrongLayer.provideTo(Db.get.map((db) => ({ Result: db.query() }))));
+  // @ts-expect-error same-shaped tags with different names are distinct dependencies
+  run(provide(Db.get, OtherDb, impl));
+  // @ts-expect-error fluent provide must distinguish service names
+  run(Db.get.provide(OtherDb, impl));
+  // @ts-expect-error providing one service cannot discharge another same-shaped service
+  run(Db.get.flatMap(() => OtherDb.get).with(succeed({ Db: impl })));
+  // @ts-expect-error layer implementation must satisfy the service contract
+  run(Db.get.with(succeed({ Db: { query: () => "wrong type" } })));
+  // @ts-expect-error tag inference must not widen to accept an incompatible implementation
+  provide(Db.get, Db, { query: () => "wrong type" });
+  const dynamicLayer = succeed<Record<string, Db>>({ WrongName: impl });
+  // @ts-expect-error a string index signature does not guarantee a named service exists
+  run(Db.get.with(dynamicLayer));
+  const selectedTag = Math.random() < 0.5 ? Db : OtherDb;
+  // @ts-expect-error a runtime choice of tag cannot guarantee either named dependency
+  run(provide(Db.get, selectedTag, impl));
+  run(Db.get.with(succeed({ Db: impl })));
+  run(succeed({ Db: impl }).provideTo(Db.get.map((db) => ({ Result: db.query() }))));
+  run(Db.get.flatMap(() => OtherDb.get).with(succeed({ Db: impl, OtherDb: impl })));
+}
 
 // ── Reactive stream requirement propagation ──────────────────────
 

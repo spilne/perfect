@@ -2,22 +2,23 @@ import { type Eff, type Needs, Suspend, Op } from "./eff";
 
 const SERVICE_TAG: unique symbol = Symbol.for("spilne/service");
 
-export interface ServiceTag<T> {
+export interface ServiceTag<T, Name extends string = string> {
   readonly [SERVICE_TAG]: true;
   readonly key: symbol;
-  readonly name: string;
-  readonly get: Eff<T, Needs<T>>;
+  readonly name: Name;
+  readonly get: Eff<T, Needs<T, Name>>;
 }
 
-export function service<T>(name: string): ServiceTag<T> {
-  const key = Symbol.for(`spilne/svc/${name}`);
-  const tag: ServiceTag<T> = {
-    [SERVICE_TAG]: true,
-    key,
-    name,
-    get: new Suspend(Op.GetCtx, key, null) as any,
+export function service<T>(): <const Name extends string>(name: Name) => ServiceTag<T, Name> {
+  return (name) => {
+    const key = Symbol.for(`spilne/svc/${name}`);
+    return {
+      [SERVICE_TAG]: true,
+      key,
+      name,
+      get: new Suspend(Op.GetCtx, key, null) as any,
+    };
   };
-  return tag;
 }
 
 export type Context = Map<symbol, unknown>;
@@ -36,10 +37,18 @@ export function mergeContexts(a: Context, b: Context): Context {
   return merged;
 }
 
-export function provide<A, S, T>(
-  eff: Eff<A, S | Needs<T>>,
-  tag: ServiceTag<T>,
-  impl: T,
-): Eff<A, Exclude<S, Needs<T>>> {
+type IsUnion<T, Whole = T> = T extends Whole ? ([Whole] extends [T] ? false : true) : never;
+
+export type ProvidedService<S, T, Name extends string> = string extends Name
+  ? S
+  : true extends IsUnion<Name>
+    ? S
+    : Exclude<S, Needs<T, Name>>;
+
+export function provide<A, S, T, Name extends string>(
+  eff: Eff<A, S>,
+  tag: ServiceTag<T, Name>,
+  impl: NoInfer<T>,
+): Eff<A, ProvidedService<S, T, Name>> {
   return new Suspend(Op.Provide, eff, makeContext(tag, impl)) as any;
 }

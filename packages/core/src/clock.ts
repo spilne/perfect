@@ -10,7 +10,7 @@ export interface Clock {
   readonly now: () => number;
 }
 
-export const Clock: ServiceTag<Clock> = service<Clock>("Clock");
+export const Clock: ServiceTag<Clock, "Clock"> = service<Clock>()("Clock");
 
 /**
  * Current time in ms read from the context's Clock service — the effectful

@@ -172,7 +172,7 @@ describe("integration — desugared code runs", () => {
     interface Db {
       find(id: string): ReturnType<typeof succeed<string>>;
     }
-    const Db = service<Db>("Db");
+    const Db = service<Db>()("Db");
 
     // for { db <- Db.get; name <- db.find("1") } yield name
     const program = Db.get.flatMap((db) => db.find("1").map((name) => name));

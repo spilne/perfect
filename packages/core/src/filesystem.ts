@@ -62,7 +62,7 @@ export interface FileSystem {
   readonly watch: (path: string, options?: { recursive?: boolean }) => Stream<FileEvent, never>;
 }
 
-export const FileSystem: ServiceTag<FileSystem> = service<FileSystem>("FileSystem");
+export const FileSystem: ServiceTag<FileSystem, "FileSystem"> = service<FileSystem>()("FileSystem");
 
 // ── Real filesystem ────────────────────────────────────────────────
 

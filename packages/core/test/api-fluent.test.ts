@@ -25,7 +25,7 @@ describe("fluent API additions", () => {
     interface Greeter {
       greet(n: string): Eff<string, never>;
     }
-    const Greeter = service<Greeter>("Greeter");
+    const Greeter = service<Greeter>()("Greeter");
     const program = Greeter.get.flatMap((g: Greeter) => g.greet("world"));
     const wired = program.provide(Greeter, { greet: (n) => succeed(`hello, ${n}`) });
     expect(runSync(wired)).toBe("hello, world");

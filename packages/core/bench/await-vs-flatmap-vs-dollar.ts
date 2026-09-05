@@ -196,7 +196,7 @@ group(`all-async sleep(0) × ${N_SMALL}`, () => {
 interface Counter {
   add(n: number): Eff<number, never>;
 }
-const Counter = service<Counter>("Counter");
+const Counter = service<Counter>()("Counter");
 const counterImpl: Counter = { add: (n: number) => succeed(n + 1) };
 
 group(`service lookup × ${N}`, () => {

@@ -111,7 +111,7 @@ describe("Fiber.childrenSnapshot", () => {
 interface Db {
   query(sql: string): Eff<string, never>;
 }
-const Db = service<Db>("Db");
+const Db = service<Db>()("Db");
 
 describe("Layer.memoize (standalone function)", () => {
   test("reuses one layer build within a scope", async () => {

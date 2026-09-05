@@ -172,7 +172,7 @@ export class MetricsRegistry {
   }
 }
 
-export const Metrics: ServiceTag<MetricsRegistry> & {
+export const Metrics: ServiceTag<MetricsRegistry, "Metrics"> & {
   counter: (name: string, labels?: Labels) => Eff<Counter, never>;
   gauge: (name: string, labels?: Labels) => Eff<Gauge, never>;
   histogram: (
@@ -181,7 +181,7 @@ export const Metrics: ServiceTag<MetricsRegistry> & {
   ) => Eff<Histogram, never>;
   snapshot: Eff<MetricsSnapshot, never>;
 } = (() => {
-  const tag = service<MetricsRegistry>("Metrics");
+  const tag = service<MetricsRegistry>()("Metrics");
   const registryEff: Eff<MetricsRegistry, never> = new Suspend(Op.GetCtx, tag.key, null) as any;
   const withRegistry = <A>(f: (r: MetricsRegistry) => A): Eff<A, never> =>
     new Suspend(

@@ -16,9 +16,9 @@ interface Logger {
   log(msg: string): void;
 }
 
-const Db = service<Db>("Db");
-const Cache = service<Cache>("Cache");
-const Logger = service<Logger>("Logger");
+const Db = service<Db>()("Db");
+const Cache = service<Cache>()("Cache");
+const Logger = service<Logger>()("Logger");
 
 const logs: string[] = [];
 
