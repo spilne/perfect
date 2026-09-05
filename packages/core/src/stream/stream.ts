@@ -2029,7 +2029,7 @@ export class Stream<A, S = never> {
                 (d: Deferred<Exit<unknown, B>>) =>
                   (slots.offer({ _tag: "item", deferred: d }) as any).flatMap(() =>
                     fork(
-                      (exitOf(f(item)) as any).flatMap((exit: Exit<unknown, B>) =>
+                      (exitOf(suspend(() => f(item))) as any).flatMap((exit: Exit<unknown, B>) =>
                         (d.succeed(exit) as any).flatMap(() => sem.release()),
                       ),
                     ),
@@ -2102,7 +2102,7 @@ export class Stream<A, S = never> {
           const enqueue = (item: A): Eff<void, any> =>
             (sem.acquire() as any).flatMap(() =>
               fork(
-                (exitOf(f(item)) as any).flatMap((exit: Exit<unknown, B>) =>
+                (exitOf(suspend(() => f(item))) as any).flatMap((exit: Exit<unknown, B>) =>
                   (slots.offer({ _tag: "item", exit }) as any).flatMap(() => sem.release()),
                 ),
               ),
