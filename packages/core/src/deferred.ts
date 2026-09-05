@@ -5,7 +5,7 @@ import { type Eff, type Throws } from "./eff";
 import { succeed, fail, sync, async } from "./constructors";
 
 export type DeferredState<A, E> =
-  | { readonly _tag: "Pending"; readonly waiters: Array<(result: DeferredResult<A, E>) => void> }
+  | { readonly _tag: "Pending"; readonly waiters: Set<(result: DeferredResult<A, E>) => void> }
   | { readonly _tag: "Done"; readonly result: DeferredResult<A, E> };
 
 type DeferredResult<A, E> =
@@ -29,7 +29,7 @@ export interface Deferred<A, E = never, S = never> {
  * register). Most users should call `Deferred.make()` instead.
  */
 export class InProcessDeferred<A, E = never> implements Deferred<A, E> {
-  private state: DeferredState<A, E> = { _tag: "Pending", waiters: [] };
+  private state: DeferredState<A, E> = { _tag: "Pending", waiters: new Set() };
 
   succeed(value: A): Eff<boolean, never> {
     return sync(() => {
@@ -37,6 +37,7 @@ export class InProcessDeferred<A, E = never> implements Deferred<A, E> {
       const waiters = this.state.waiters;
       this.state = { _tag: "Done", result: { ok: true, value } };
       for (const w of waiters) w({ ok: true, value });
+      waiters.clear();
       return true;
     });
   }
@@ -47,6 +48,7 @@ export class InProcessDeferred<A, E = never> implements Deferred<A, E> {
       const waiters = this.state.waiters;
       this.state = { _tag: "Done", result: { ok: false, error } };
       for (const w of waiters) w({ ok: false, error });
+      waiters.clear();
       return true;
     });
   }
@@ -64,9 +66,11 @@ export class InProcessDeferred<A, E = never> implements Deferred<A, E> {
         canceled = true;
         resume(result.ok ? (succeed(result.value) as any) : (fail(result.error) as any));
       };
-      this.state.waiters.push(waiter);
+      const waiters = this.state.waiters;
+      waiters.add(waiter);
       return () => {
         canceled = true;
+        waiters.delete(waiter);
       };
     }) as any;
   }
