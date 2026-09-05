@@ -322,12 +322,16 @@ export class Stream<A, S = never> {
     // stays memory-bounded on very large ranges.
     const CHUNK_SIZE = 4096;
     function chunkFrom(from: number): Stream<number, never> {
-      if (from >= end) return Stream.empty();
-      const remaining = Math.max(0, Math.ceil((end - from) / step));
-      const size = Math.min(remaining, CHUNK_SIZE);
-      const arr = new Array<number>(size);
-      for (let i = 0; i < size; i++) arr[i] = from + i * step;
-      return new Stream(succeed(emit(Chunk.fromArray(arr), chunkFrom(from + size * step))));
+      return new Stream(
+        sync(() => {
+          if (from >= end) return DONE;
+          const remaining = Math.max(0, Math.ceil((end - from) / step));
+          const size = Math.min(remaining, CHUNK_SIZE);
+          const arr = new Array<number>(size);
+          for (let i = 0; i < size; i++) arr[i] = from + i * step;
+          return emit(Chunk.fromArray(arr), chunkFrom(from + size * step));
+        }),
+      );
     }
     return chunkFrom(start);
   }
