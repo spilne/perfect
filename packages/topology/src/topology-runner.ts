@@ -42,6 +42,7 @@ import type { StateBackend } from "./state-backend";
 import { BuiltTopology } from "./stream-topology";
 import { WindowManager } from "./window-manager";
 import { JoinBuffer } from "./join-buffer";
+import { PartitionLifecycle, type PartitionContext } from "./partition-lifecycle";
 import type {
   TopologyConfig,
   TopologyHandle,
@@ -105,13 +106,6 @@ class RateLimiter {
   }
 }
 
-interface PartitionContext {
-  lease: StatePartitionLease;
-  readonly values: Map<string, unknown>;
-  inflight: number;
-  sourceOffset?: string;
-}
-
 interface RecordCompletion {
   pending: number;
   readonly context: PartitionContext;
@@ -137,8 +131,7 @@ class TopologyRunnerInstance {
   private readonly leaseMs: number;
   private readonly stateBackend: PartitionedStateBackend<unknown>;
   private readonly legacyStateBackend?: StateBackend<string, unknown>;
-  private readonly partitions = new Map<Partition, PartitionContext>();
-  private readonly partitionActivations = new Map<Partition, Promise<PartitionContext>>();
+  private readonly partitionLifecycle: PartitionLifecycle;
   private readonly operatorIds = new Map<TopologyNode, string>();
   private readonly operatorCounts = new Map<string, number>();
   private readonly managedSubscriptions: ManagedAcknowledgementSubscription<unknown, unknown>[] =
@@ -184,6 +177,15 @@ class TopologyRunnerInstance {
     ) {
       throw new TypeError("exactly-once delivery requires a transactional partitionedStateBackend");
     }
+    this.partitionLifecycle = new PartitionLifecycle({
+      topologyId: this.topologyId,
+      stageId: this.stageId,
+      instanceId: this.instanceId,
+      leaseMs: this.leaseMs,
+      stateBackend: this.stateBackend,
+      nextCheckpointId: () =>
+        StateCheckpointId(`${this.instanceId}:revoke:${++this.checkpointSequence}`),
+    });
     this.rateLimiter = config.maxItemsPerSecond ? new RateLimiter(config.maxItemsPerSecond) : null;
   }
 
@@ -229,7 +231,7 @@ class TopologyRunnerInstance {
     });
 
     this.leaseInterval = setInterval(
-      () => void this.renewLeases().catch((error) => this.failBackground(error)),
+      () => void this.partitionLifecycle.renew().catch((error) => this.failBackground(error)),
       Math.max(1, Math.floor(this.leaseMs / 3)),
     );
     if (this.config.checkpointIntervalMs) {
@@ -293,10 +295,14 @@ class TopologyRunnerInstance {
       const subscription = source.subscribeAckManaged({ group: this.config.group });
       subscription.setPartitionLifecycle({
         assigned: async ({ partitions }) => {
-          await Promise.all(partitions.map((partition) => this.activatePartition(partition)));
+          await Promise.all(
+            partitions.map((partition) => this.partitionLifecycle.activate(partition)),
+          );
         },
         revoking: async ({ partitions }) => {
-          await Promise.all(partitions.map((partition) => this.revokePartition(partition)));
+          await Promise.all(
+            partitions.map((partition) => this.partitionLifecycle.revoke(partition)),
+          );
         },
       });
       this.managedSubscriptions.push(
@@ -450,7 +456,7 @@ class TopologyRunnerInstance {
     const partition = Partition(
       typeof rawPartition === "number" && Number.isInteger(rawPartition) ? rawPartition : 0,
     );
-    const context = await this.activatePartition(partition);
+    const context = await this.partitionLifecycle.activate(partition);
     const sourceOffset =
       envelope.metadata.offset === undefined ? undefined : String(envelope.metadata.offset);
     const sourceId =
@@ -602,88 +608,9 @@ class TopologyRunnerInstance {
     }
   }
 
-  private async activatePartition(partition: Partition): Promise<PartitionContext> {
-    const active = this.partitions.get(partition);
-    if (active) return active;
-    const pending = this.partitionActivations.get(partition);
-    if (pending) return pending;
-    const activation = this.acquirePartition(partition).finally(() => {
-      this.partitionActivations.delete(partition);
-    });
-    this.partitionActivations.set(partition, activation);
-    return activation;
-  }
-
-  private async acquirePartition(partition: Partition): Promise<PartitionContext> {
-    const scope: StatePartitionScope = {
-      topologyId: this.topologyId,
-      stageId: this.stageId,
-      partition,
-    };
-    const deadline = Date.now() + this.leaseMs;
-    let lease: StatePartitionLease | undefined;
-    while (!lease && Date.now() < deadline) {
-      lease = await this.stateBackend.acquire({
-        scope,
-        ownerId: this.instanceId,
-        leaseMs: this.leaseMs,
-      });
-      if (!lease) await new Promise((resolve) => setTimeout(resolve, 25));
-    }
-    if (!lease) throw new Error(`partition ${partition} is owned by another instance`);
-    const snapshot = await this.stateBackend.load(lease);
-    if (!snapshot) throw new Error(`partition ${partition} lease was lost during restore`);
-    const context: PartitionContext = {
-      lease,
-      values: new Map(snapshot.values),
-      inflight: 0,
-      sourceOffset: snapshot.sourceOffset,
-    };
-    this.partitions.set(partition, context);
-    return context;
-  }
-
-  private async revokePartition(partition: Partition): Promise<void> {
-    const pending = this.partitionActivations.get(partition);
-    if (pending) await pending;
-    const context = this.partitions.get(partition);
-    if (!context) return;
-    const deadline = Date.now() + this.leaseMs;
-    while (context.inflight > 0 && Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
-    if (context.inflight > 0) {
-      throw new Error(`partition ${partition} did not drain before lease revocation`);
-    }
-    const checkpoint = await this.stateBackend.commit({
-      lease: context.lease,
-      mutations: [],
-      sourceOffset: context.sourceOffset,
-      checkpointId: StateCheckpointId(`${this.instanceId}:revoke:${++this.checkpointSequence}`),
-    });
-    if (checkpoint === "fenced") {
-      throw new Error(`partition ${partition} was fenced during revocation checkpoint`);
-    }
-    if (!(await this.stateBackend.release(context.lease))) {
-      throw new Error(`partition ${partition} lease was lost during revocation`);
-    }
-    this.partitions.delete(partition);
-  }
-
-  private async renewLeases(): Promise<void> {
-    for (const context of this.partitions.values()) {
-      const renewed = await this.stateBackend.renew({
-        lease: context.lease,
-        leaseMs: this.leaseMs,
-      });
-      if (!renewed) throw new Error(`partition ${context.lease.scope.partition} lease was fenced`);
-      context.lease = renewed;
-    }
-  }
-
   private checkpointAllState(): Promise<void> {
     return (async () => {
-      for (const context of this.partitions.values()) {
+      for (const context of this.partitionLifecycle.contexts.values()) {
         const result = await this.stateBackend.commit({
           lease: context.lease,
           mutations: [],
@@ -738,7 +665,8 @@ class TopologyRunnerInstance {
       await this.drainPromise;
       await this.checkpointInFlight;
       await this.checkpointAllState();
-      for (const partition of this.partitions.keys()) await this.revokePartition(partition);
+      for (const partition of this.partitionLifecycle.contexts.keys())
+        await this.partitionLifecycle.revoke(partition);
     })();
     return this.shutdownPromise;
   }
