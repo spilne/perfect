@@ -15,7 +15,7 @@
 //
 // So the two mechanisms have different jobs. The comparison catches drift; the
 // thresholds catch "something went catastrophically wrong" and must never
-// false-positive. They are set at 20x the worst median observed locally
+// false-positive. The original cases were set at 20x the worst median observed locally
 // (Apple Silicon, three runs, primed), which leaves ~7x margin even on a
 // runner 3x slower.
 //
@@ -30,9 +30,18 @@
 // primes every case before measuring any. run(sync) in particular reads ~20x
 // faster once the async path is warm; the old un-primed figures were measuring
 // JIT tiering as much as the runtime.
+// Scaling cases use broad safety ceilings; paired sizes participate in relative
+// comparisons. Historical stream timings above used an inaccurate denominator;
+// the renamed early-termination case now reports time per entire run.
 
 import { do_not_optimize } from "mitata";
-import { all, run, runSync, Stream, succeed, sync } from "../../../packages/core/src";
+import { all, run, runSync, Stream, succeed, sync, yieldNow } from "../../../packages/core/src";
+import {
+  cancelDeferredWaiters,
+  completeChildren,
+  fillSlidingWindow,
+  groupedSingletons,
+} from "./core-workloads";
 import type { Eff } from "../../../packages/core/src";
 import type { BenchCase, Suite } from "./types";
 
@@ -89,25 +98,84 @@ export const coreSuite: Suite = {
         run: () => do_not_optimize(runSync(flatMapChain(FLATMAP_N))),
       },
       {
-        name: "all x100 run",
+        name: "all(succeed) x100 fast path",
         unit: "ns/op",
         divisor: ALL_N,
         threshold: 270,
         run: async () =>
-          do_not_optimize(
-            await run(all(Array.from({ length: ALL_N }, (_, i) => succeed(i))) as any),
-          ),
+          do_not_optimize(await run(all(Array.from({ length: ALL_N }, (_, i) => succeed(i))))),
       },
       {
-        name: "stream map/filter/take",
-        unit: "ns/item",
-        divisor: STREAM_N,
-        threshold: 45,
-        // Same reasoning: ~2-5ns per item. Observed swinging +32% on CI and
-        // +30% locally between identical trees.
+        name: "stream map/filter/take end-to-end",
+        unit: "ns/op",
+        divisor: 1,
+        threshold: 900_000,
+        // Early termination and chunking make input-item normalization misleading.
         gating: false,
         run: async () => do_not_optimize(await run(streamProgram(STREAM_N))),
       },
+      ...[false, true].map((suspended): BenchCase => ({
+        name: suspended ? "all(yieldNow) x100 fibers" : "all(sync) x100 fibers",
+        unit: "ns/item",
+        divisor: ALL_N,
+        threshold: 50_000,
+        run: async () =>
+          do_not_optimize(
+            await run(
+              all(
+                Array.from({ length: ALL_N }, (_, i) =>
+                  suspended ? yieldNow.map(() => i) : sync(() => i),
+                ),
+              ),
+            ),
+          ),
+      })),
+      {
+        name: "stream map/filter full traversal",
+        unit: "ns/item",
+        divisor: STREAM_N,
+        threshold: 1_000,
+        run: () =>
+          do_not_optimize(
+            runSync(
+              Stream.range(0, STREAM_N)
+                .map((x) => x + 1)
+                .filter((x) => x % 3 === 0)
+                .drain(),
+            ),
+          ),
+      },
+      ...[10_000, 1_000_000].flatMap((n): BenchCase[] => [
+        {
+          name: `range construction x${n}`,
+          unit: "ns/op",
+          divisor: 1,
+          threshold: 100_000,
+          gating: false,
+          run: () => do_not_optimize(Stream.range(0, n)),
+        },
+        {
+          name: `range take(1) x${n}`,
+          unit: "ns/op",
+          divisor: 1,
+          threshold: 1_000_000,
+          run: () => do_not_optimize(runSync(Stream.range(0, n).take(1).toArray())),
+        },
+      ]),
+      ...[
+        { name: "group singleton chunks", workload: groupedSingletons },
+        { name: "sliding window fill", workload: fillSlidingWindow },
+        { name: "fiber reverse completion", workload: completeChildren },
+        { name: "deferred waiter cancellation", workload: cancelDeferredWaiters },
+      ].flatMap(({ name, workload }) =>
+        [1_000, 8_000].map((n): BenchCase => ({
+          name: `${name} x${n}`,
+          unit: "ns/item",
+          divisor: n,
+          threshold: 20_000,
+          run: () => do_not_optimize(workload(n)),
+        })),
+      ),
     ];
   },
 };
