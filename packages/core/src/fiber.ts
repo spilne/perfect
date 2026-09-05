@@ -64,7 +64,7 @@ export class Fiber<A = unknown> {
   interruptHandle: (() => void) | null = null;
   // Fiber<any>: see FiberSupervisor note — Fiber is invariant in A, so a
   // heterogeneous parent/child tree needs `any`.
-  private children: Fiber<any>[] = [];
+  private children = new Set<Fiber<any>>();
   parent: Fiber<any> | null = null;
   scope: Scope | null = null;
 
@@ -88,13 +88,12 @@ export class Fiber<A = unknown> {
     this.result = result;
     this.interruptHandle = null;
     if (this.parent) {
-      const index = this.parent.children.indexOf(this);
-      if (index >= 0) this.parent.children.splice(index, 1);
+      this.parent.children.delete(this);
       this.parent = null;
     }
     // interrupt children on completion
     for (const child of this.children) child.interrupt();
-    this.children.length = 0;
+    this.children.clear();
     notify((supervisor) => supervisor.onEnd?.(this, result));
     for (const listener of this.listeners) listener(result);
     this.listeners.length = 0;
@@ -141,7 +140,7 @@ export class Fiber<A = unknown> {
   _resume?: () => void;
 
   addChild(child: Fiber<any>): void {
-    this.children.push(child);
+    this.children.add(child);
     child.parent = this;
     notify((supervisor) => supervisor.onFork?.(this, child));
   }
@@ -165,11 +164,11 @@ export class Fiber<A = unknown> {
   }
 
   get childCount(): number {
-    return this.children.length;
+    return this.children.size;
   }
 
   childrenSnapshot(): readonly Fiber<any>[] {
-    return this.children.slice();
+    return Array.from(this.children);
   }
 
   snapshot(): FiberSnapshot {
