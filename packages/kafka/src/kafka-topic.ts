@@ -15,7 +15,7 @@
 import { fromPromise, succeed, sync } from "@spilne/perfect-core";
 import type { Eff, Throws } from "@spilne/perfect-core";
 import { Chunk, Stream } from "@spilne/perfect-core/stream";
-import { JsonCodec, OffsetTracker } from "@spilne/perfect-core/connect";
+import { JsonCodec } from "@spilne/perfect-core/connect";
 import type {
   KeyedSinkable,
   Partitionable,
@@ -24,8 +24,6 @@ import type {
   AcknowledgeOptions,
   ManagedAcknowledgeable,
   ManagedAcknowledgementSubscription,
-  PartitionAssignment,
-  PartitionLifecycle,
   Checkpointable,
   ConsumerGroup,
   Envelope,
@@ -43,6 +41,7 @@ import type {
 } from "./kafka-types";
 import { type TopicName, type GroupId, PartitionId, KafkaOffset } from "./brands";
 import { KafkaError, toKafkaError } from "./kafka-error";
+import { AckSubscriptionLifecycle } from "./ack-subscription-lifecycle";
 
 export interface KafkaTopicConfig<T> {
   /** Kafka client instance. */
@@ -228,88 +227,8 @@ export class KafkaTopic<T>
     const offset = params?.offset ?? (params?.fromBeginning ? { type: "earliest" } : undefined);
     const consumerOptions = this.consumerOptions;
     const consumer = kafka.consumer({ groupId, ...consumerOptions });
-    const tracker = new OffsetTracker();
-    let commitTimer: ReturnType<typeof setInterval> | undefined;
-    let stopped = false;
-    let flushPromise: Promise<void> | null = null;
-    let closePromise: Promise<void> | null = null;
-    let pendingCommit: Array<{
-      topic: TopicName;
-      partition: PartitionId;
-      offset: KafkaOffset;
-    }> | null = null;
-    let lifecycle: PartitionLifecycle | undefined;
-    const activePartitions = new Set<Partition>();
-    let activeGeneration: number | undefined;
-    const removeAssigned = consumer.onPartitionsAssigned?.(async (assignment) => {
-      for (const partition of assignment.partitions) activePartitions.add(partition);
-      activeGeneration = assignment.generation;
-      await lifecycle?.assigned({
-        partitions: assignment.partitions,
-        generation: assignment.generation,
-      });
-    });
-    const handleRevocation = async (assignment: PartitionAssignment) => {
-      await lifecycle?.revoking({
-        partitions: assignment.partitions,
-        generation: assignment.generation,
-      });
-      await flushCommits();
-      for (const partition of assignment.partitions) activePartitions.delete(partition);
-    };
-    const removeRevoked = consumer.onPartitionsRevoked?.(handleRevocation);
-
-    const flushCommits = (): Promise<void> => {
-      if (!autoCommit) return Promise.resolve();
-      if (flushPromise) return flushPromise;
-      flushPromise = (async () => {
-        if (pendingCommit === null) {
-          const committable = tracker.committable();
-          if (committable.size === 0) return;
-          pendingCommit = [...committable.entries()].map(([partition, nextOffset]) => ({
-            topic,
-            partition,
-            offset: KafkaOffset(nextOffset.toString()),
-          }));
-        }
-
-        await consumer.commitOffsets(pendingCommit);
-        pendingCommit = null;
-      })().finally(() => {
-        flushPromise = null;
-      });
-      return flushPromise;
-    };
-
-    const close = (): Promise<void> => {
-      if (closePromise) return closePromise;
-      stopped = true;
-      if (commitTimer) clearInterval(commitTimer);
-      closePromise = (async () => {
-        let failure: unknown;
-        try {
-          if (activePartitions.size > 0) {
-            await handleRevocation({
-              partitions: [...activePartitions],
-              generation: activeGeneration,
-            });
-          } else {
-            await flushCommits();
-          }
-        } catch (cause) {
-          failure = cause;
-        }
-        removeAssigned?.();
-        removeRevoked?.();
-        try {
-          await consumer.disconnect();
-        } catch (cause) {
-          if (failure === undefined) failure = cause;
-        }
-        if (failure !== undefined) throw failure;
-      })();
-      return closePromise;
-    };
+    const lifecycle = new AckSubscriptionLifecycle({ consumer, topic, autoCommit });
+    const tracker = lifecycle.tracker;
 
     const makeEnvelope = (msg: KafkaMessage): Envelope<T, Throws<KafkaError>> => {
       const raw = msg.message.value;
@@ -343,21 +262,16 @@ export class KafkaTopic<T>
         await consumer.connect();
         await consumer.subscribe({ topic, fromBeginning: offset?.type === "earliest" });
 
-        if (autoCommit) {
-          commitTimer = setInterval(
-            () =>
-              void flushCommits().catch((cause) =>
-                failStream(toKafkaError("topic.commit", topic, cause)),
-              ),
-            commitIntervalMs,
-          );
-        }
+        lifecycle.startCommitTimer({
+          intervalMs: commitIntervalMs,
+          onFailure: (cause) => failStream(toKafkaError("topic.commit", topic, cause)),
+        });
 
         if (consumer.stream) {
           // Platformatic-style per-message iteration.
           await this.seekConsumer(consumer, offset);
           for await (const msg of consumer.stream()) {
-            if (stopped) break;
+            if (lifecycle.stopped) break;
             emitBatch([makeEnvelope(msg)]);
           }
         } else if (consumer.run) {
@@ -367,7 +281,7 @@ export class KafkaTopic<T>
               offset,
               autoCommit: false,
               onBatch: async ({ batch }) => {
-                if (stopped || batch.messages.length === 0) return;
+                if (lifecycle.stopped || batch.messages.length === 0) return;
                 emitBatch(
                   batch.messages.map((message) =>
                     makeEnvelope({ topic: batch.topic, partition: batch.partition, message }),
@@ -381,7 +295,7 @@ export class KafkaTopic<T>
               offset,
               autoCommit: false,
               onMessage: async (msg) => {
-                if (stopped) return;
+                if (lifecycle.stopped) return;
                 emitBatch([makeEnvelope(msg)]);
               },
             });
@@ -422,9 +336,9 @@ export class KafkaTopic<T>
       topic,
       groupId,
       setPartitionLifecycle(next) {
-        lifecycle = next;
+        lifecycle.setPartitionLifecycle(next);
       },
-      close,
+      close: () => lifecycle.close(),
     };
   }
 
