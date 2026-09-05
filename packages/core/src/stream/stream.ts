@@ -1372,8 +1372,8 @@ export class Stream<A, S = never> {
   /** Start a fire-and-forget effect for every value without delaying delivery.
    *  Fork failures are detached; use `observe` when completion and failures must
    *  remain coupled to the stream. */
-  tapEffectFork<S2>(f: (a: A) => Eff<unknown, S2>): Stream<A, S> {
-    return this.rechunk(1).evalMap((a) => (forkDaemon(f(a)) as any).map(() => a)) as Stream<A, S>;
+  tapEffectFork<S2>(f: (a: A) => Eff<unknown, S2>): Stream<A, S | Exclude<S2, Throws<unknown>>> {
+    return this.rechunk(1).evalMap((a) => forkDaemon(f(a)).map(() => a));
   }
 
   zipWithIndex(): Stream<[A, number], S> {

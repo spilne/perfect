@@ -27,6 +27,8 @@ import {
   runSync,
   all,
   race,
+  fork,
+  forkDaemon,
   RetryPolicy,
   Stream,
   StreamDeadlineError,
@@ -51,6 +53,24 @@ import {
 
 class NotFound {
   readonly _tag = "NotFound" as const;
+}
+
+{
+  const dependency = service<{ read(): number }>("ForkDependency");
+  const child = dependency.get.map((value) => value.read());
+  // @ts-expect-error fork must preserve missing services
+  run(fork(child));
+  // @ts-expect-error daemon fork must preserve missing services
+  run(forkDaemon(child));
+  // @ts-expect-error fluent fork must preserve missing services
+  run(child.fork());
+  // @ts-expect-error fluent daemon fork must preserve missing services
+  run(child.forkDaemon());
+  const tapped = Stream.of(1).tapEffectFork(() => child).drain();
+  // @ts-expect-error fire-and-forget stream taps still require services
+  run(tapped);
+  run(provide(fork(child), dependency, { read: () => 42 }));
+  run(fork(fail("child failure")));
 }
 class Forbidden {
   readonly _tag = "Forbidden" as const;

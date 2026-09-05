@@ -68,13 +68,13 @@ export function tryPromise<A, E>(
 
 // ── Fiber constructors ─────────────────────────────────────────────
 
-export function fork<A, S>(eff: Eff<A, S>): Eff<Fiber<A>, never> {
+export function fork<A, S>(eff: Eff<A, S>): Eff<Fiber<A>, Exclude<S, Throws<unknown>>> {
   return new Suspend(Op.Fork, eff, null) as any;
 }
 
 // Spawn a fiber that is NOT tied to the parent's lifecycle.
 // Use for long-running background workers.
-export function forkDaemon<A, S>(eff: Eff<A, S>): Eff<Fiber<A>, never> {
+export function forkDaemon<A, S>(eff: Eff<A, S>): Eff<Fiber<A>, Exclude<S, Throws<unknown>>> {
   return new Suspend(Op.ForkDaemon, eff, null) as any;
 }
 
