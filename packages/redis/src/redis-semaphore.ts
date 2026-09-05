@@ -1,4 +1,11 @@
-import { ensuring, sleep, succeed } from "@spilne/perfect-core";
+import {
+  acquireRelease,
+  scoped,
+  uninterruptible,
+  interruptible,
+  sleep,
+  succeed,
+} from "@spilne/perfect-core";
 import type { Eff, Semaphore, Throws } from "@spilne/perfect-core";
 import { numberResult, redisEff } from "./internal";
 import type { RedisClient } from "./redis-client";
@@ -57,7 +64,9 @@ export class RedisSemaphore implements Semaphore<Throws<RedisError>> {
       redisEff("semaphore.acquire", async () =>
         numberResult(await this.redis.eval(ACQUIRE_SCRIPT, 1, this.key, n)),
       ).flatMap((remaining) =>
-        remaining >= 0 ? succeed(undefined) : sleep(this.pollIntervalMs).flatMap(() => loop()),
+        remaining >= 0
+          ? succeed(undefined)
+          : interruptible(sleep(this.pollIntervalMs)).flatMap(() => loop()),
       );
     return loop();
   }
@@ -85,7 +94,13 @@ export class RedisSemaphore implements Semaphore<Throws<RedisError>> {
     if (!Number.isInteger(n) || n > this.permits) {
       throw new Error(`RedisSemaphore.withPermits: n must be between 1 and ${this.permits}`);
     }
-    return this.acquireMany(n).flatMap(() => ensuring(eff, this.releaseMany(n)));
+    // A Redis command may take effect before its response arrives. Defer
+    // interruption until ownership and its release finalizer are registered.
+    return scoped(
+      uninterruptible(acquireRelease(this.acquireMany(n), () => this.releaseMany(n))).flatMap(
+        () => eff,
+      ),
+    );
   }
 
   get available(): Eff<number, Throws<RedisError>> {
