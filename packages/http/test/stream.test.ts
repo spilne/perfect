@@ -48,6 +48,55 @@ class OneShotTransport implements HttpTransport {
 // ── httpStreamText ─────────────────────────────────────────────────
 
 describe("httpStreamText", () => {
+  test("body failures preserve emitted data and enter the typed error channel", async () => {
+    const cause = new Error("connection reset");
+    let pulls = 0;
+    const transport = new OneShotTransport(
+      () =>
+        new Response(
+          new ReadableStream({
+            pull(controller) {
+              if (pulls++ === 0) controller.enqueue(new TextEncoder().encode("partial"));
+              else controller.error(cause);
+            },
+          }),
+        ),
+    );
+    const seen: string[] = [];
+    const result = await run(
+      httpStreamText({ url: "https://example.com", transport })
+        .tap((value) => seen.push(value))
+        .toArray()
+        .catchTag("HttpNetworkError", (error) => {
+          expect(error.cause).toBe(cause);
+          return succeed(["recovered"]);
+        })
+        .catch(() => succeed(["unexpected error"])),
+    );
+    expect(seen).toEqual(["partial"]);
+    expect(result).toEqual(["recovered"]);
+  });
+
+  test("body timeouts remain typed timeout failures", async () => {
+    const transport = new OneShotTransport(
+      () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.error(new DOMException("timeout", "TimeoutError"));
+            },
+          }),
+        ),
+    );
+    const result = await run(
+      httpStreamText({ url: "https://example.com", transport, timeoutMs: 10 })
+        .drain()
+        .catchTag("HttpTimeoutError", (error) => succeed(error.timeoutMs))
+        .catch(() => succeed(-1)),
+    );
+    expect(result).toBe(10);
+  });
+
   test("emits decoded chunks as they arrive", async () => {
     const transport = new OneShotTransport(() => streamingResponse(["hello ", "world", "!"]));
     const collected = await run(httpStreamText({ url: "/x", transport }).toArray());

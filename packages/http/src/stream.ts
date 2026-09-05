@@ -13,7 +13,7 @@
 // ergonomics — they just inline the pipe chain above.
 
 import { type Throws, type Pipe, Stream, sync, Pipes } from "@spilne/perfect-core";
-import { type HttpClientError, HttpParseError } from "./errors";
+import { type HttpClientError, HttpParseError, HttpNetworkError, HttpTimeoutError } from "./errors";
 import { type ResponseParser } from "./response";
 import { type HttpRequestOptions } from "./transport";
 import { type WithTransport } from "./fetch";
@@ -40,7 +40,7 @@ type StreamOptions = HttpRequestOptions &
  */
 export function httpStream(opts: StreamOptions): Stream<Uint8Array, Throws<HttpClientError>> {
   return Stream.fromEffect(httpFetchOk(opts)).flatMap((response) =>
-    Stream.async<Uint8Array, Throws<HttpClientError>>((emit, close) =>
+    Stream.async<Uint8Array, Throws<HttpClientError>>((emit, close, failStream) =>
       sync(() => {
         if (!response.body) {
           close();
@@ -57,8 +57,21 @@ export function httpStream(opts: StreamOptions): Stream<Uint8Array, Throws<HttpC
               }
               emit(value);
             }
-          } catch {
-            close();
+          } catch (cause) {
+            const url = String(opts.url);
+            failStream(
+              cause instanceof DOMException && cause.name === "TimeoutError"
+                ? new HttpTimeoutError({
+                    url,
+                    timeoutMs: opts.timeoutMs ?? 30_000,
+                    message: `Response body from ${url} timed out`,
+                  })
+                : new HttpNetworkError({
+                    url,
+                    cause,
+                    message: `Failed to read response body from ${url}`,
+                  }),
+            );
           }
         })();
         return () => {
