@@ -20,7 +20,7 @@ concurrency:
 
 jobs:
   release:
-    if: github.event_name == 'workflow_dispatch' || vars.NPM_RELEASE_ENABLED == 'true'
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || vars.NPM_RELEASE_ENABLED == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -45,6 +45,15 @@ jobs:
 
       - run: bun run ci
 
+      - name: Validate all release artifacts before publishing
+        run: bun run release:check
+
+      - name: Test the built SWC plugin
+        run: bun test packages/transform/test/swc-e2e.test.ts
+
+      - name: Build the documentation site
+        run: bun run documentation:build:html
+
       - name: Create version PR or publish packages
         id: changesets
         uses: changesets/action@v2
@@ -60,10 +69,6 @@ jobs:
       # the live site always describes the version that is actually on npm.
       # `published` is false when this run only opened or updated the version
       # PR, which is most runs -- those must not deploy.
-      - name: Build the documentation site
-        if: steps.changesets.outputs.published == 'true'
-        run: bun run documentation:build:html
-
       - uses: actions/configure-pages@v5
         if: steps.changesets.outputs.published == 'true'
 
