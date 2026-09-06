@@ -28,8 +28,12 @@ interface User {
 // Any { safeParse } object works — zod schemas satisfy this directly.
 const UserSchema: ResponseParser<User> = {
   safeParse: (d: unknown) =>
-    d !== null && typeof d === "object" && "id" in d && "name" in d &&
-    typeof d.id === "number" && typeof d.name === "string"
+    d !== null &&
+    typeof d === "object" &&
+    "id" in d &&
+    "name" in d &&
+    typeof d.id === "number" &&
+    typeof d.name === "string"
       ? { success: true, data: { id: d.id, name: d.name } }
       : { success: false, error: "not a User" },
 };
