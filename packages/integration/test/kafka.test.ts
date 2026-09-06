@@ -23,6 +23,7 @@ import {
   TopicName,
   GroupId,
   KafkaOffset,
+  PartitionId,
   type KafkaError,
   type KafkaClient,
 } from "@spilne/perfect-kafka";
@@ -151,6 +152,7 @@ withKafka("Kafka integration (Redpanda)", (ctx) => {
               maxWaitMs: 1000,
               consumer: subscription.consumer,
               topic: subscription.topic,
+              startingOffsets: new Map([[PartitionId(0), KafkaOffset("0")]]),
             }),
           )
           .drain()
@@ -325,6 +327,7 @@ withKafka("Kafka integration (Redpanda)", (ctx) => {
               maxWaitMs: 1_000,
               consumer: subscription.consumer,
               topic: subscription.topic,
+              startingOffsets: new Map([[PartitionId(0), KafkaOffset("0")]]),
             }),
           )
           .drain()
