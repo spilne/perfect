@@ -161,10 +161,9 @@ assertEq(errSpans[0]!.attributes["error.type"], "HttpStatusError");
 // <<< example
 
 // >>> example: tracing-redaction
-// URL queries are stripped from url.full by default to keep span attributes
-// PII-free. Pass includeQuery: true to keep them. Header redaction is
-// pluggable via makeRedaction({ extra, override }) — defaults cover
-// authorization, cookie, x-api-key, and similar.
+// Query stripping does not sanitize paths or error messages. For custom
+// header attributes, apply redactHeaders explicitly; the middleware itself
+// does not record headers.
 const r = makeRedaction({ extra: ["x-secret"] });
 const out = redactHeaders(
   { Authorization: "Bearer xyz", "X-Secret": "shh", "Content-Type": "application/json" },

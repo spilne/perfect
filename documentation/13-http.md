@@ -11,9 +11,20 @@ bun add @spilne/perfect-http
 
 ## Three tiers of fetch
 
+Examples below are excerpts from the [HTTP example files](../packages/http/examples/).
+`StubTransport`, `json`, and `UserSchema` are shared fixtures in those files,
+so they run without a network service. Run the full file to include that setup.
+`.orDie().run()` rejects the Promise if a request fails; use `.catchTag(...)`
+to recover or `.runExit()` to inspect an outcome without rejecting.
+
 Every request flows through a `HttpTransport`. The default transport is
 `globalThis.fetch`; pass your own to mock, proxy, or instrument. The three
 tiers compose: pick the level of automation you need.
+
+The default transport owns cancellation until response headers arrive. After
+that, the caller owns the body stream; finishing the fetch effect does not
+abort it. The request timeout and an external abort signal still apply during
+body consumption. Consume or cancel a raw `Response` body when you are done.
 
 ### Tier 1 — `httpFetch` (raw Response)
 

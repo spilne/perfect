@@ -48,7 +48,7 @@ const orders = kafkaConfig<Order>()
 await run(orders.publish({ id: "o-1", amount: 42 }, { key: "o-1" }));
 
 // consume — decoded values as a core Stream; take() closes the consumer
-const first = await orders.subscribe().take(1).toArray().run();
+const first = await orders.subscribe().take(1).toArray().orDie().run();
 
 // at-least-once — Envelope<T> with ack/nack; acked offsets are committed
 // contiguously in the background (commitIntervalMs, default 1s)

@@ -23,7 +23,7 @@ import { eff, succeed, fail, type Eff, type Throws } from "@spilne/perfect-core"
 type Err = { _tag: "NotFound"; id: number };
 
 const lookup = (id: number): Eff<string, Throws<Err>> =>
-  id === 1 ? succeed("alice") : (fail({ _tag: "NotFound", id }) as Eff<never, Throws<Err>>);
+  id === 1 ? succeed("alice") : fail<Err>({ _tag: "NotFound", id });
 
 const program = eff(function* () {
   const name = yield* lookup(1).catchTag("NotFound", (e) => succeed(`missing ${e.id}`));

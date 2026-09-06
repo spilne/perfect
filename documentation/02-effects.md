@@ -7,9 +7,7 @@ union of effect tags — typed errors (`Throws<E>`), service dependencies
 
 ## The shape
 
-```ts
-type Eff<A, S = never> = ...;  // produces A; uses effects S
-```
+Read `Eff<A, S>` as “produces `A`, with requirements `S`.”
 
 - `Eff<number, never>` — produces a number with no typed failures or service requirements; it may still perform side effects or encounter defects
 - `Eff<User, Throws<NotFound>>` — produces a User, may fail with NotFound
@@ -54,19 +52,21 @@ The `S` channel is a union of opaque marker types — Perfect peels them off as
 you handle them.
 
 ```ts
-import type { Eff, Throws, Needs } from "@spilne/perfect-core";
+import { fail, provide, run, service, succeed } from "@spilne/perfect-core";
 
-declare const fetchUser: (id: number) => Eff<User, Throws<NotFound> | Needs<Db>>;
+interface User { name: string }
+interface Db { user: User }
+type NotFound = { _tag: "NotFound" };
+const Db = service<Db>()("Db");
 
-// .catch removes Throws<NotFound>
-const safe = fetchUser(1).catch((_e) => succeed(defaultUser));
-//    Eff<User, Needs<Db>>
+const fetchUser = (id: number) => Db.get.flatMap((db) =>
+  id === 1 ? succeed(db.user) : fail<NotFound>({ _tag: "NotFound" }),
+);
 
-// provide() removes Needs<Db>
-const wired = provide(safe, Db, dbImpl);
-//    Eff<User, never>
-
-// Now run() is available — only effects with `S = never` can run.
+// Handle the typed failure; Needs<Db, "Db"> remains.
+const safe = fetchUser(1).catch(() => succeed({ name: "anonymous" }));
+// Supply the named dependency; the result is Eff<User, never>.
+const wired = provide(safe, Db, { user: { name: "Ada" } });
 await run(wired);
 ```
 
