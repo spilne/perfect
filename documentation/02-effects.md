@@ -11,9 +11,9 @@ union of effect tags — typed errors (`Throws<E>`), service dependencies
 type Eff<A, S = never> = ...;  // produces A; uses effects S
 ```
 
-- `Eff<number, never>` — a pure effect that produces a number, no errors, no deps
+- `Eff<number, never>` — produces a number with no typed failures or service requirements; it may still perform side effects or encounter defects
 - `Eff<User, Throws<NotFound>>` — produces a User, may fail with NotFound
-- `Eff<Db, Needs<Config>>` — needs a Config service to produce a Db
+- `Eff<Db, Needs<Config, "Config">>` — needs the named Config service to produce a Db
 
 ## Constructors
 
@@ -75,7 +75,9 @@ shows a TypeScript error pointing at the unhandled tags.
 
 ## Pure values, side effects, and laziness
 
-`succeed(v)` does *nothing* until run. `sync(() => v)` runs the lambda each
+`succeed(v)` stores an already-evaluated value: `succeed(doWork())` calls
+`doWork()` immediately. Use `sync(() => doWork())` to defer that work.
+`sync(() => v)` runs the lambda each
 time the effect is executed. The runtime guarantees the lambda fires inside
 the fiber, so any thrown exception becomes a defect (`Cause.Die`).
 
@@ -90,7 +92,8 @@ runSync(lazy); // e.g. 0.91
 ## Pitfalls
 
 - **Don't `await` a Promise inside `sync`.** Use `tryPromise` to bridge.
-- **`runSync` throws on Async/Fork/Sleep.** If you need them, use `run`.
+- **`runSync` requires synchronous completion.** Use `run` for programs that
+  wait on timers, I/O, or asynchronous callbacks.
 - **Throwing inside a `sync` body is a defect, not a typed failure.** Use
   `fail()` for expected, recoverable errors. See [error handling](./05-error-handling.md).
 

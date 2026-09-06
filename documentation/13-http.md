@@ -27,7 +27,9 @@ import { httpFetch } from "@spilne/perfect-http";
 const tier1 = await httpFetch({
   url: "https://api/users/1",
   transport: new StubTransport(() => json({ id: 1, name: "alice" })),
-}).run();
+})
+  .orDie()
+  .run();
 console.log(tier1.status); // → 200
 ```
 
@@ -45,7 +47,9 @@ import { httpFetchOk } from "@spilne/perfect-http";
 const tier2 = await httpFetchOk({
   url: "https://api/users/1",
   transport: new StubTransport(() => json({ id: 1, name: "alice" })),
-}).run();
+})
+  .orDie()
+  .run();
 console.log(tier2.status); // → 200
 ```
 
@@ -64,7 +68,9 @@ const user = await httpRequest({
   url: "https://api/users/1",
   schema: UserSchema,
   transport: new StubTransport(() => json({ id: 1, name: "alice" })),
-}).run();
+})
+  .orDie()
+  .run();
 console.log(user); // → { id: 1, name: "alice" }
 ```
 
@@ -93,12 +99,12 @@ import { HttpStatusError, httpFetchOk } from "@spilne/perfect-http";
 // 5xx/429 with .isRetryable.
 let caught: HttpStatusError | undefined;
 try {
-  await (
-    httpFetchOk({
-      url: "https://api/users/1",
-      transport: new StubTransport(() => new Response("nope", { status: 404 })),
-    }) as any
-  ).run();
+  await httpFetchOk({
+    url: "https://api/users/1",
+    transport: new StubTransport(() => new Response("nope", { status: 404 })),
+  })
+    .orDie()
+    .run();
 } catch (e) {
   caught = e as HttpStatusError;
 }
@@ -129,7 +135,7 @@ const client = new DefaultHttpClient({
   transport,
 });
 
-const user = await client.get("/users/1", UserSchema).run();
+const user = await client.get("/users/1", UserSchema).orDie().run();
 console.log(user); // → { id: 1, name: "alice" }
 console.log(transport.last!.url); // → "https://api.example.com/users/1"
 console.log(transport.last!.headers!.authorization); // → "Bearer xyz"
@@ -145,7 +151,7 @@ console.log(transport.last!.headers!.authorization); // → "Bearer xyz"
 // withOverrides returns a derived client. Headers spread-merge; everything
 // else falls back to the base when the override is undefined.
 const traced = client.withOverrides({ headers: { "x-trace": "t-123" } });
-await traced.get("/users/1", UserSchema).run();
+await traced.get("/users/1", UserSchema).orDie().run();
 assertContains(JSON.stringify(transport.last!.headers), "x-trace");
 assertContains(JSON.stringify(transport.last!.headers), "Bearer xyz"); // base header preserved
 ```
@@ -178,7 +184,7 @@ const observed = new DefaultHttpClient({
   transport: new StubTransport(() => json({ id: 2, name: "bob" })),
   middleware: [logging],
 });
-await observed.get("/users/2", UserSchema).run();
+await observed.get("/users/2", UserSchema).orDie().run();
 assertContains(calls.join("|"), "→ GET https://api.example.com/users/2");
 assertContains(calls.join("|"), "← GET");
 ```
@@ -236,7 +242,9 @@ const job = await withRetryAll(client2.get("/job/123", JobSchema), {
   maxRetries: 5,
   baseDelayMs: 1,
   shouldRetry: (r) => (RetryAttempt.isSuccess(r) ? r.value.state !== "done" : true),
-}).run();
+})
+  .orDie()
+  .run();
 console.log(job); // → { state: "done", result: 42 }
 console.log(t2.attempts); // → 3
 ```
@@ -258,7 +266,7 @@ const t4 = new ScriptedTransport([
 ]);
 const client4 = new DefaultHttpClient({ transport: t4 });
 
-const user = await retryHttp(client4.get("/u", UserSchema), { baseDelayMs: 1 }).run();
+const user = await retryHttp(client4.get("/u", UserSchema), { baseDelayMs: 1 }).orDie().run();
 console.log(user); // → { id: 1, name: "alice" }
 console.log(t4.attempts); // → 3
 ```
@@ -280,7 +288,7 @@ const t5 = new ScriptedTransport([
 ]);
 const client5 = new DefaultHttpClient({ transport: t5 });
 
-const user2 = await Retry.http(client5.get("/u", UserSchema), { baseDelayMs: 1 }).run();
+const user2 = await Retry.http(client5.get("/u", UserSchema), { baseDelayMs: 1 }).orDie().run();
 console.log(user2); // → { id: 1, name: "alice" }
 console.log(t5.attempts); // → 3
 ```
@@ -331,7 +339,7 @@ const client = new DefaultHttpClient({
 
 let caught: HttpStatusError<ApiError> | undefined;
 try {
-  await client.get<User, ApiError>("/u", UserSchema).run();
+  await client.get<User, ApiError>("/u", UserSchema).orDie().run();
 } catch (e) {
   caught = e as HttpStatusError<ApiError>;
 }
@@ -362,7 +370,7 @@ const broken = new DefaultHttpClient({
 
 let unknown: HttpUnknownError | undefined;
 try {
-  await broken.get<User, ApiError>("/u", UserSchema).run();
+  await broken.get<User, ApiError>("/u", UserSchema).orDie().run();
 } catch (e) {
   unknown = e as HttpUnknownError;
 }
@@ -396,7 +404,7 @@ import { httpStreamLines } from "@spilne/perfect-http";
 // httpStreamLines = bytes → utf8Decode → lines. Every emitted item is one
 // complete line (without the terminator).
 const linesT = new StubTransport(() => streamOf(["alpha\nbe", "ta\ngamma\n"]));
-const lines = await httpStreamLines({ url: "/log", transport: linesT }).toArray().run();
+const lines = await httpStreamLines({ url: "/log", transport: linesT }).toArray().orDie().run();
 console.log(lines); // → ["alpha", "beta", "gamma"]
 ```
 
@@ -412,7 +420,7 @@ import { httpStreamSSE } from "@spilne/perfect-http";
 const sseT = new StubTransport(() =>
   streamOf(["event: tick\ndata: 1\n\n", "event: tick\ndata: 2\nid: m-2\n\n"]),
 );
-const events = await httpStreamSSE({ url: "/events", transport: sseT }).toArray().run();
+const events = await httpStreamSSE({ url: "/events", transport: sseT }).toArray().orDie().run();
 console.log(events.length); // → 2
 console.log(events[0]!.event); // → "tick"
 console.log(events[0]!.data); // → "1"
@@ -445,7 +453,7 @@ import { MockHttpClient } from "@spilne/perfect-http";
 const mock = new MockHttpClient();
 mock.on("GET", "/users/1", { id: 1, name: "alice" });
 
-const user = await mock.get("/users/1", UserSchema).run();
+const user = await mock.get("/users/1", UserSchema).orDie().run();
 console.log(user); // → { id: 1, name: "alice" }
 console.log(mock.calledTimes("GET", "/users/1")); // → 1
 ```
@@ -463,7 +471,7 @@ mock.on("GET", "/users/999", MockHttpClient.fail(404, "not found"));
 
 let caught: any;
 try {
-  await mock.get("/users/999", UserSchema).run();
+  await mock.get("/users/999", UserSchema).orDie().run();
 } catch (e) {
   caught = e;
 }
@@ -485,13 +493,13 @@ mock.onSequence("GET", "/u", [MockHttpClient.fail(503, "down"), { id: 7, name: "
 
 let firstErr: any;
 try {
-  await mock.get("/u", UserSchema).run();
+  await mock.get("/u", UserSchema).orDie().run();
 } catch (e) {
   firstErr = e;
 }
 console.log(firstErr.status); // → 503
 
-const second = await mock.get("/u", UserSchema).run();
+const second = await mock.get("/u", UserSchema).orDie().run();
 console.log(second); // → { id: 7, name: "after-retry" }
 ```
 
@@ -532,7 +540,7 @@ const zodClient = new DefaultHttpClient({
   transport: new StubTransport(() => json({ id: 1, name: "alice" })),
 });
 
-const zodUser: ZodUser = await zodClient.get("/u/1", ZodUser).run();
+const zodUser: ZodUser = await zodClient.get("/u/1", ZodUser).orDie().run();
 console.log(zodUser); // → { id: 1, name: "alice" }
 ```
 
@@ -568,7 +576,7 @@ const errClient = new DefaultHttpClient({
 
 let caught: HttpStatusError<ApiError> | undefined;
 try {
-  await errClient.get<ZodUser, ApiError>("/u/1", ZodUser).run();
+  await errClient.get<ZodUser, ApiError>("/u/1", ZodUser).orDie().run();
 } catch (e) {
   caught = e as HttpStatusError<ApiError>;
 }
@@ -607,7 +615,10 @@ const valibotClient = new DefaultHttpClient({
   transport: new StubTransport(() => json({ id: 2, name: "bob" })),
 });
 
-const valibotUser: ValibotUser = await valibotClient.get("/u/2", valibotParser(ValibotUser)).run();
+const valibotUser: ValibotUser = await valibotClient
+  .get("/u/2", valibotParser(ValibotUser))
+  .orDie()
+  .run();
 console.log(valibotUser); // → { id: 2, name: "bob" }
 ```
 

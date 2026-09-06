@@ -66,10 +66,10 @@ const safe = scoped(
     );
     yield* fail("crashed") as Eff<never, Throws<string>>;
     return "unreachable";
-  }) as any,
-).catch((e: any) => succeed(`recovered: ${e}`));
+  }),
+).catch((e) => succeed(`recovered: ${e}`));
 
-assertEq(await (safe as any).run(), "recovered: crashed");
+assertEq(await safe.run(), "recovered: crashed");
 assertEq(trace, ["acquire", "release"]);
 // <<< example
 
@@ -88,6 +88,6 @@ const safeFlat = sync(() => {
   .scoped()
   .catch((e) => succeed(`recovered: ${e}`));
 
-assertEq(await (safeFlat as any).run(), "recovered: crashed");
+assertEq(await safeFlat.run(), "recovered: crashed");
 assertEq(traceFlat, ["acquire", "release"]);
 // <<< example

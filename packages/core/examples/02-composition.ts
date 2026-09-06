@@ -20,9 +20,11 @@ assertEq(program.runSync(), "22");
 // .tap — observe a value without changing it (returns the same value)
 let seen = 0;
 const traced = succeed(42)
-  .tap((x) => {
-    seen = x;
-  })
+  .tap((x) =>
+    sync(() => {
+      seen = x;
+    }),
+  )
   .map((x) => x + 1);
 
 assertEq(traced.runSync(), 43);

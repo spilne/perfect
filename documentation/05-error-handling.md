@@ -52,8 +52,9 @@ console.log(safe.runSync()); // → "(missing 99)"
 
 <!-- @end -->
 
-After all tags are handled, the type is `Throws<never>` — equivalent to no
-error.
+After all error tags are handled, the error requirement is removed. Other
+requirements, such as named services, remain. This does not rule out defects
+or interruption.
 
 ## Full causes with `.catchAllCause`
 
@@ -96,11 +97,10 @@ import { succeed, fail, sync, type Eff, type Throws } from "@spilne/perfect-core
 // .tapError — observe a typed failure without handling it (re-fails).
 let observedError: string | null = null;
 const observed = (fail("bad") as Eff<never, Throws<string>>)
-  .tapError(
-    (e) =>
-      sync(() => {
-        observedError = e;
-      }) as any,
+  .tapError((e) =>
+    sync(() => {
+      observedError = e;
+    }),
   )
   .catch(() => succeed("ok"));
 
@@ -133,7 +133,7 @@ console.log(await fallback.run()); // → "second"
 | You want `retry` to retry it | You don't want `retry` to retry it |
 
 `retry` only retries `Throws<E>` failures by default. Defects don't retry —
-use `retryAllCause` if you really want to.
+use `.retryAllBy(...)` or a `RetryPolicy.whenCause(...)` policy to opt in.
 
 ## API summary
 

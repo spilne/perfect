@@ -25,7 +25,7 @@ class NotFound extends TaggedError("NotFound")<{ id: string }>() {}
 interface Db {
   findUser(id: string): Eff<User, Throws<NotFound>>;
 }
-const Db = service<Db>("Db");
+const Db = service<Db>()("Db");
 
 const liveDb: Db = {
   findUser: (id) =>
@@ -61,10 +61,10 @@ runnable when `@spilne/perfect-core` is published to npm.
   (`eff(function* () { yield* e })`), and compile-time `eff(($) => { … })`
   sugar via the SWC plugin.
 - **Structured concurrency** — fibers with parent/child lifecycles, scopes
-  with never-dropped finalizers, interruption that reaches every driver.
-- **Deterministic time** — every time-gated primitive reads the `Clock`
-  service; a `TestClock` drives retries, streams, and rate limiters in tests
-  with zero real waiting.
+  with cleanup on exit and cooperative interruption.
+- **Deterministic core time** — core sleep, retry, stream timing, and rate
+  limiting use the `Clock` service. `TestClock` advances these without real
+  delays; network clients and distributed backends can still use real timers.
 - **Pull-based streams** — chunked, resource-safe, with structural
   backpressure and a full concurrency/time operator set.
 
@@ -120,7 +120,7 @@ Package versioning and publication are documented in [`RELEASING.md`](RELEASING.
 ## Status
 
 Pre-1.0, developed in the open. The runtime core is extensively tested
-(1,000+ tests, benchmarked against effect-ts) and the API surface is
+(covered by unit tests and local benchmarks) and the API surface is
 stabilizing; expect breaking changes until the first npm release.
 
 ## License

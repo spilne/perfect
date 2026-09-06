@@ -50,7 +50,7 @@ const client = new DefaultHttpClient({
   transport,
 });
 
-const user = await client.get("/users/1", UserSchema).run();
+const user = await client.get("/users/1", UserSchema).orDie().run();
 assertEq(user, { id: 1, name: "alice" });
 assertEq(transport.last!.url, "https://api.example.com/users/1");
 assertEq(transport.last!.headers!.authorization, "Bearer xyz");
@@ -60,7 +60,7 @@ assertEq(transport.last!.headers!.authorization, "Bearer xyz");
 // withOverrides returns a derived client. Headers spread-merge; everything
 // else falls back to the base when the override is undefined.
 const traced = client.withOverrides({ headers: { "x-trace": "t-123" } });
-await traced.get("/users/1", UserSchema).run();
+await traced.get("/users/1", UserSchema).orDie().run();
 assertContains(JSON.stringify(transport.last!.headers), "x-trace");
 assertContains(JSON.stringify(transport.last!.headers), "Bearer xyz"); // base header preserved
 // <<< example
@@ -80,7 +80,7 @@ const observed = new DefaultHttpClient({
   transport: new StubTransport(() => json({ id: 2, name: "bob" })),
   middleware: [logging],
 });
-await observed.get("/users/2", UserSchema).run();
+await observed.get("/users/2", UserSchema).orDie().run();
 assertContains(calls.join("|"), "→ GET https://api.example.com/users/2");
 assertContains(calls.join("|"), "← GET");
 // <<< example

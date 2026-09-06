@@ -3,8 +3,9 @@
 ## Duration
 
 Type-safe time arithmetic. Eliminates magic millisecond numbers in your
-code. Functions that take time can accept `DurationInput`
-(`number | string | Duration`) and resolve via `resolveMs`.
+code. APIs explicitly typed with `DurationInput` accept
+`number | string | Duration`. For APIs that accept milliseconds as a number,
+pass `.toMillis()` or `resolveMs(...)`.
 
 <!-- @embed packages/core/examples/15-duration-cache.ts#duration-basics -->
 
@@ -81,21 +82,19 @@ const store = CacheStore.memory<string, number>({
   maxSize: 100,
 });
 
-await (
-  eff(function* () {
-    yield* store.set("hits", 0);
-    yield* store.set("hits", 1);
-    const v = yield* store.get("hits");
-    console.log(v); // → 1
+await eff(function* () {
+  yield* store.set("hits", 0);
+  yield* store.set("hits", 1);
+  const v = yield* store.get("hits");
+  console.log(v); // → 1
 
-    const present = yield* store.has("hits");
-    console.log(present); // → true
+  const present = yield* store.has("hits");
+  console.log(present); // → true
 
-    yield* store.delete("hits");
-    const after = yield* store.get("hits");
-    console.log(after); // → undefined
-  }) as any
-).run();
+  yield* store.delete("hits");
+  const after = yield* store.get("hits");
+  console.log(after); // → undefined
+}).run();
 ```
 
 <!-- @end -->

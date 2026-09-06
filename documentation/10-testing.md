@@ -31,8 +31,10 @@ console.log(await fiber); // → 1000
 <!-- @end -->
 
 The `tick()` helper (`Promise<void>` resolving on the next macrotask) lets
-the fiber register its sleep before you advance — necessary because
-`run()` returns synchronously while the fiber is still booting.
+the fiber reach its next suspension before you advance. `run()` starts work
+immediately, but earlier asynchronous operations may delay sleep registration.
+Check `pendingCount` or use a synchronous test scheduler when you need an exact
+registration boundary.
 
 | | |
 |---|---|
@@ -76,8 +78,9 @@ console.log(guess); // → second
 
 <!-- @end -->
 
-You can also queue specific values for fully scripted tests — see
-`packages/core/src/random.ts` for the full API.
+Use `random.setNextValues([0.1, 0.9])` to supply the next two floats in `[0, 1)`.
+After that queue is consumed, generation resumes from the seeded PRNG.
+`reseed(seed)` resets the generator and clears queued values.
 
 ## TestConsole
 

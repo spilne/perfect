@@ -2,7 +2,8 @@
 
 A TypeScript effect runtime. Effects are values you build, compose, and run —
 typed errors, dependency injection, structured concurrency, resource safety,
-all tracked in the type system.
+with typed errors and service requirements tracked in the type system.
+Defects, interruption, and resource lifetimes are runtime concerns.
 
 ```ts
 import { eff, succeed, run } from "@spilne/perfect-core";
@@ -53,9 +54,10 @@ from real, executable files in
 bun packages/core/examples/01-hello.ts
 ```
 
-To verify all examples still compile + run:
+To typecheck the examples and run their assertions:
 
 ```bash
+bun run typecheck:examples
 bun test packages/core/test/examples.test.ts
 ```
 
@@ -64,8 +66,16 @@ bun test packages/core/test/examples.test.ts
 Embedded code blocks in `.md` files are generated from `examples/` via
 `bun documentation/build.ts`. CI runs `bun documentation/build.ts --check` —
 if anyone edits an embedded example without rebuilding, the docs go red.
-Connector examples that require Redis, PostgreSQL, or Kafka are verified by
-their package unit and opt-in real-service integration suites.
+The example test covers the core, HTTP, and HTTP tracing example files.
+Embedded blocks are excerpts: some use shared fixtures from their source file,
+such as `StubTransport`, `UserSchema`, or `tick`. Run the full example file for
+that setup. Connector snippets require the stated external services; the
+unit example test does not start Redis, PostgreSQL, or Kafka.
+
+Some examples end with `.orDie().run()`: this explicitly converts any remaining
+typed failure to a defect, causing the returned Promise to reject. In an
+application, prefer `.catchTag(...)` for recovery or `.runExit()` for inspecting
+the full outcome. Retrying an operation does not remove its failure type.
 
 The documentation build also checks the [package map](./19-packages.md)
 against every workspace manifest and requires every package to carry its own

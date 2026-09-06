@@ -28,7 +28,7 @@ const safe = eff(function* () {
   }
 });
 
-assertEq(await (safe as any).run(), "caught: boom");
+assertEq(await safe.orDie().run(), "caught: boom");
 // <<< example
 
 // >>> example: gen-flatten

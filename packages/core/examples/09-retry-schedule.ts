@@ -24,7 +24,7 @@ const flaky: Eff<string, Throws<string>> = eff(function* () {
   return "ok";
 });
 
-assertEq(await flaky.retry({ times: 5, delay: 5 }).run(), "ok");
+assertEq(await flaky.retry({ times: 5, delay: 5 }).orDie().run(), "ok");
 assertEq(calls, 3);
 // <<< example
 
@@ -35,7 +35,7 @@ const flakyFlat: Eff<string, Throws<string>> = sync(() => ++callsFlat).flatMap((
   c < 3 ? (fail("still failing") as Eff<never, Throws<string>>) : succeed("ok"),
 );
 
-assertEq(await flakyFlat.retry({ times: 5, delay: 5 }).run(), "ok");
+assertEq(await flakyFlat.retry({ times: 5, delay: 5 }).orDie().run(), "ok");
 assertEq(callsFlat, 3);
 // <<< example
 
@@ -53,7 +53,7 @@ const flaky2: Eff<string, Throws<string>> = eff(function* () {
   return "recovered";
 });
 
-assertEq(await flaky2.retry(policy).run(), "recovered");
+assertEq(await flaky2.retry(policy).orDie().run(), "recovered");
 assertEq(calls, 3);
 // <<< example
 
@@ -61,11 +61,12 @@ assertEq(calls, 3);
 // Don't retry defects (real bugs) or interrupts — only typed failures.
 const probablyABug = sync(() => {
   throw new Error("this is a defect, not a typed failure");
-}) as any;
+});
 
 const failed = await probablyABug
   .retry(RetryPolicy.recurs(3))
-  .catchAllCause((c: any) => succeed(`gave up: cause=${c._tag}`))
+  .catchAllCause((c) => succeed(`gave up: cause=${c._tag}`))
+  .orDie()
   .run();
 assertEq(failed, "gave up: cause=Die"); // no retries — defects don't retry
 // <<< example
@@ -92,6 +93,7 @@ const recovered = await mayFail
       return RetryDecision.retry();
     },
   })
+  .orDie()
   .run();
 
 assertEq(recovered, "ok");

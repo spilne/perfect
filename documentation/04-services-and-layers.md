@@ -323,7 +323,7 @@ run builds the layer again and owns its own finalizers.
 | | |
 |---|---|
 | `service<T>()(name)` | create a service tag |
-| `Tag.get` | effect that retrieves the impl, adds `Needs<T>` |
+| `Tag.get` | retrieves the implementation, adds `Needs<T, Name>` |
 | `provide(eff, tag, impl)` | install a single service |
 | `Layer.merge(...)` | horizontal: combine multiple layers |
 | `layer.and(other)` | fluent merge — chainable |
@@ -335,8 +335,8 @@ run builds the layer again and owns its own finalizers.
 
 - **Service names must match the record key.** `service<T>()("Db")` and
   `succeed({ Db: impl })` resolve to the same `Symbol.for("spilne/svc/Db")`.
-- **Never resolve a service inside a tight loop.** Get it once at the top of
-  the block, reuse it. See the bench: per-step lookup is ~14× slower.
+- **Resolve reusable services outside hot loops.** Fetch once at the start
+  of the operation when the context is unchanged, then reuse the implementation.
 - **Memoization is per scope.** Chained `.with(A).with(A)` creates nested
   scopes; use `Layer.merge(A.memoize(), A.memoize())` or share the same
   memoized layer inside one `.with(...)` when you want reuse.

@@ -403,14 +403,16 @@ rather than silently ending the stream.
 
 ## Pitfalls
 
-- **Streams are lazy.** Building a 10M-element stream costs nothing until
-  you run it.
+- **Pulling is lazy; input construction may not be.** `Stream.range` builds
+  chunks on demand, while `Stream.fromArray(buildLargeArray())` builds its
+  array immediately and `fromIterable` materializes the iterable. `take(1)`
+  can still evaluate a full upstream chunk.
 - **`Pipe` is not terminal.** If you need a final value, use a terminal
   operator or `runSink`.
 - **`forEach` doesn't collect.** If you need both side effects AND a result,
   use `tap` + `toArray`, or write a custom `Sink`.
 - **Fusion stops at non-fusible ops.** `mapEffect`, `flatMap`, and `take`
-  break the fused walk; expect a perf cliff if you mix them tight.
+  break a fused chain; benchmark the actual pipeline if throughput matters.
 
 ## Next
 

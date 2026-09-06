@@ -63,7 +63,7 @@ const client = new DefaultHttpClient({
 
 let caught: HttpStatusError<ApiError> | undefined;
 try {
-  await client.get<User, ApiError>("/u", UserSchema).run();
+  await client.get<User, ApiError>("/u", UserSchema).orDie().run();
 } catch (e) {
   caught = e as HttpStatusError<ApiError>;
 }
@@ -85,7 +85,7 @@ const broken = new DefaultHttpClient({
 
 let unknown: HttpUnknownError | undefined;
 try {
-  await broken.get<User, ApiError>("/u", UserSchema).run();
+  await broken.get<User, ApiError>("/u", UserSchema).orDie().run();
 } catch (e) {
   unknown = e as HttpUnknownError;
 }

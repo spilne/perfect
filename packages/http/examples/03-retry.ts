@@ -73,7 +73,9 @@ const job = await withRetryAll(client2.get("/job/123", JobSchema), {
   maxRetries: 5,
   baseDelayMs: 1,
   shouldRetry: (r) => (RetryAttempt.isSuccess(r) ? r.value.state !== "done" : true),
-}).run();
+})
+  .orDie()
+  .run();
 assertEq(job, { state: "done", result: 42 });
 assertEq(t2.attempts, 3);
 // <<< example
@@ -95,7 +97,9 @@ const jobBy = await withRetryAllBy(client3.get("/job/456", JobSchema), {
     RetryAttempt.isSuccess(r) && r.value.state === "pending"
       ? RetryDecision.retry()
       : RetryDecision.stop(),
-}).run();
+})
+  .orDie()
+  .run();
 assertEq(jobBy, { state: "done", result: 99 });
 assertEq(t3.attempts, 3);
 // <<< example
@@ -109,7 +113,7 @@ const t4 = new ScriptedTransport([
 ]);
 const client4 = new DefaultHttpClient({ transport: t4 });
 
-const user = await retryHttp(client4.get("/u", UserSchema), { baseDelayMs: 1 }).run();
+const user = await retryHttp(client4.get("/u", UserSchema), { baseDelayMs: 1 }).orDie().run();
 assertEq(user, { id: 1, name: "alice" });
 assertEq(t4.attempts, 3);
 // <<< example
@@ -123,7 +127,7 @@ const t5 = new ScriptedTransport([
 ]);
 const client5 = new DefaultHttpClient({ transport: t5 });
 
-const user2 = await Retry.http(client5.get("/u", UserSchema), { baseDelayMs: 1 }).run();
+const user2 = await Retry.http(client5.get("/u", UserSchema), { baseDelayMs: 1 }).orDie().run();
 assertEq(user2, { id: 1, name: "alice" });
 assertEq(t5.attempts, 3);
 // <<< example

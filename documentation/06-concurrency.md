@@ -17,14 +17,16 @@ const forkExample = sleep(10)
   .fork()
   .flatMap((fiber) => join(fiber));
 
-console.log(await forkExample.run()); // → 42
+console.log(await forkExample.orDie().run()); // → 42
 ```
 
 <!-- @end -->
 
-`fork(eff)` returns `Eff<Fiber<A>, never>`. The fiber starts immediately on
-the next scheduler tick. `join(fiber)` awaits its result, threading typed
-errors and interrupts back through.
+`fork(eff)` returns an effect producing `Fiber<A>`. It retains the child's
+service requirements, but child failures are observed through the fiber.
+The scheduler starts the child. `join(fiber)` awaits its result and exposes a
+failed child as `Throws<Cause>`; use `awaitFiber(fiber)` to inspect its `Exit`
+without adding a typed failure.
 
 ## Race
 
@@ -40,7 +42,7 @@ import { succeed, sleep, race } from "@spilne/perfect-core";
 const fast = sleep(10).flatMap(() => succeed("fast"));
 const slow = sleep(50).flatMap(() => succeed("slow"));
 
-console.log(await fast.race(slow).run()); // → "fast"
+console.log(await fast.race(slow).orDie().run()); // → "fast"
 ```
 
 <!-- @end -->
@@ -57,7 +59,9 @@ const winner = await race([
   sleep(30).flatMap(() => succeed("a")),
   sleep(10).flatMap(() => succeed("b")),
   sleep(20).flatMap(() => succeed("c")),
-]).run();
+])
+  .orDie()
+  .run();
 console.log(winner); // → "b"
 ```
 
@@ -82,7 +86,9 @@ const results = await all([
   sleep(10).flatMap(() => succeed("a")),
   sleep(20).flatMap(() => succeed("b")),
   sleep(30).flatMap(() => succeed("c")),
-]).run();
+])
+  .orDie()
+  .run();
 
 console.log(results); // → ["a", "b", "c"]
 ```
@@ -101,7 +107,9 @@ const { user, posts, friends } = await all({
   user: sleep(10).flatMap(() => succeed({ id: 7, name: "alice" })),
   posts: sleep(20).flatMap(() => succeed([{ id: 1 }, { id: 2 }])),
   friends: sleep(15).flatMap(() => succeed(["bob", "carol"])),
-}).run();
+})
+  .orDie()
+  .run();
 
 console.log(user); // → { id: 7, name: "alice" }
 console.log(posts); // → [{ id: 1 }, { id: 2 }]

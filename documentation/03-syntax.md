@@ -53,7 +53,10 @@ console.log(program.runSync()); // → 60
 
 <!-- @end -->
 
-`try/catch` works too — typed failures get routed back through `gen.throw`:
+`try/catch` works at runtime — failures get routed back through `gen.throw`.
+TypeScript still includes the yielded failure in the generator's effect type;
+use `.catch(...)` or `.catchTag(...)` to discharge it statically. The example
+below uses `.orDie()` at the runner boundary for any remaining failure:
 
 <!-- @embed packages/core/examples/03-generator-syntax.ts#gen-trycatch -->
 
@@ -70,7 +73,7 @@ const safe = eff(function* () {
   }
 });
 
-console.log(await (safe as any).run()); // → "caught: boom"
+console.log(await safe.orDie().run()); // → "caught: boom"
 ```
 
 <!-- @end -->

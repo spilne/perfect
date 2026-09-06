@@ -63,10 +63,10 @@ const safe = scoped(
     );
     yield* fail("crashed") as Eff<never, Throws<string>>;
     return "unreachable";
-  }) as any,
-).catch((e: any) => succeed(`recovered: ${e}`));
+  }),
+).catch((e) => succeed(`recovered: ${e}`));
 
-console.log(await (safe as any).run()); // → "recovered: crashed"
+console.log(await safe.run()); // → "recovered: crashed"
 console.log(trace); // → ["acquire", "release"]
 ```
 
@@ -94,7 +94,7 @@ const safeFlat = sync(() => {
   .scoped()
   .catch((e) => succeed(`recovered: ${e}`));
 
-console.log(await (safeFlat as any).run()); // → "recovered: crashed"
+console.log(await safeFlat.run()); // → "recovered: crashed"
 console.log(traceFlat); // → ["acquire", "release"]
 ```
 
@@ -190,8 +190,9 @@ program built with `.with(layer)` ends. See
 
 ## Pitfalls
 
-- **`acquireRelease` outside `scoped` leaks.** Without a scope, there's
-  nowhere to register the finalizer.
+- **Use `scoped` to choose the release boundary.** Without an explicit scope,
+  the runtime registers release in a fiber-level scope and runs it when that
+  fiber completes. An explicit scope can release resources earlier.
 - **Release runs are uninterruptible.** If your release effect is slow, it
   will block scope exit. Make releases fast.
 - **Release failures are visible.** Handle them with `runExit`,

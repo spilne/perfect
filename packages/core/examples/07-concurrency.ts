@@ -12,7 +12,7 @@ const forkExample = sleep(10)
   .fork()
   .flatMap((fiber) => join(fiber));
 
-assertEq(await forkExample.run(), 42);
+assertEq(await forkExample.orDie().run(), 42);
 // <<< example
 
 // >>> example: race-method
@@ -20,7 +20,7 @@ assertEq(await forkExample.run(), 42);
 const fast = sleep(10).flatMap(() => succeed("fast"));
 const slow = sleep(50).flatMap(() => succeed("slow"));
 
-assertEq(await fast.race(slow).run(), "fast");
+assertEq(await fast.race(slow).orDie().run(), "fast");
 // <<< example
 
 // >>> example: race-variadic
@@ -29,7 +29,9 @@ const winner = await race([
   sleep(30).flatMap(() => succeed("a")),
   sleep(10).flatMap(() => succeed("b")),
   sleep(20).flatMap(() => succeed("c")),
-]).run();
+])
+  .orDie()
+  .run();
 assertEq(winner, "b");
 // <<< example
 
@@ -39,7 +41,9 @@ const results = await all([
   sleep(10).flatMap(() => succeed("a")),
   sleep(20).flatMap(() => succeed("b")),
   sleep(30).flatMap(() => succeed("c")),
-]).run();
+])
+  .orDie()
+  .run();
 
 assertEq(results, ["a", "b", "c"]);
 // <<< example
@@ -50,7 +54,9 @@ const { user, posts, friends } = await all({
   user: sleep(10).flatMap(() => succeed({ id: 7, name: "alice" })),
   posts: sleep(20).flatMap(() => succeed([{ id: 1 }, { id: 2 }])),
   friends: sleep(15).flatMap(() => succeed(["bob", "carol"])),
-}).run();
+})
+  .orDie()
+  .run();
 
 assertEq(user, { id: 7, name: "alice" });
 assertEq(posts, [{ id: 1 }, { id: 2 }]);

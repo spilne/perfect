@@ -34,7 +34,7 @@ const client = new DefaultHttpClient({
   middleware: [tracingMiddleware({ tracer })],
 });
 
-await client.get("/users/1", UserSchema, { tag: "user.lookup" }).run();
+await client.get("/users/1", UserSchema, { tag: "user.lookup" }).orDie().run();
 
 console.log(spans.length); // → 1
 console.log(spans[0]!.name); // → "GET https://api.example.com/users/1"
@@ -69,7 +69,7 @@ const failing = new DefaultHttpClient({
 
 let caught: any;
 try {
-  await failing.get("/u", UserSchema).run();
+  await failing.get("/u", UserSchema).orDie().run();
 } catch (e) {
   caught = e;
 }

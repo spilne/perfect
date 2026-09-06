@@ -21,7 +21,7 @@ class StubTransport implements HttpTransport {
   constructor(private readonly reply: () => Response | HttpClientError) {}
   execute(_options: HttpRequestOptions): Eff<Response, Throws<HttpClientError>> {
     const r = this.reply();
-    return r instanceof Response ? succeed(r) : (fail(r) as any);
+    return r instanceof Response ? succeed(r) : fail(r);
   }
 }
 
@@ -48,7 +48,9 @@ const UserSchema: ResponseParser<User> = {
 const tier1 = await httpFetch({
   url: "https://api/users/1",
   transport: new StubTransport(() => json({ id: 1, name: "alice" })),
-}).run();
+})
+  .orDie()
+  .run();
 assertEq(tier1.status, 200);
 // <<< example
 
@@ -58,7 +60,9 @@ assertEq(tier1.status, 200);
 const tier2 = await httpFetchOk({
   url: "https://api/users/1",
   transport: new StubTransport(() => json({ id: 1, name: "alice" })),
-}).run();
+})
+  .orDie()
+  .run();
 assertEq(tier2.status, 200);
 // <<< example
 
@@ -69,7 +73,9 @@ const user = await httpRequest({
   url: "https://api/users/1",
   schema: UserSchema,
   transport: new StubTransport(() => json({ id: 1, name: "alice" })),
-}).run();
+})
+  .orDie()
+  .run();
 assertEq(user, { id: 1, name: "alice" });
 // <<< example
 
@@ -78,12 +84,12 @@ assertEq(user, { id: 1, name: "alice" });
 // 5xx/429 with .isRetryable.
 let caught: HttpStatusError | undefined;
 try {
-  await (
-    httpFetchOk({
-      url: "https://api/users/1",
-      transport: new StubTransport(() => new Response("nope", { status: 404 })),
-    }) as any
-  ).run();
+  await httpFetchOk({
+    url: "https://api/users/1",
+    transport: new StubTransport(() => new Response("nope", { status: 404 })),
+  })
+    .orDie()
+    .run();
 } catch (e) {
   caught = e as HttpStatusError;
 }

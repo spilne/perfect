@@ -34,7 +34,8 @@ console.log(await program.run()); // → "hello, alice"
 ```
 
 Handling an error removes it from the type: after `.catchTag("NotFound", …)`
-the `Throws<Err>` is gone, so the compiler knows the program can't fail.
+the `Throws<Err>` requirement is gone. Defects and interruption remain possible;
+`never` in the effect channel does not mean an operation is infallible.
 
 Services work the same way — a dependency is an effect tag until you provide it:
 

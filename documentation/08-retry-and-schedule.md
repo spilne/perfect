@@ -22,7 +22,7 @@ const flaky: Eff<string, Throws<string>> = eff(function* () {
   return "ok";
 });
 
-console.log(await flaky.retry({ times: 5, delay: 5 }).run()); // → "ok"
+console.log(await flaky.retry({ times: 5, delay: 5 }).orDie().run()); // → "ok"
 console.log(calls); // → 3
 ```
 
@@ -42,7 +42,7 @@ const flakyFlat: Eff<string, Throws<string>> = sync(() => ++callsFlat).flatMap((
   c < 3 ? (fail("still failing") as Eff<never, Throws<string>>) : succeed("ok"),
 );
 
-console.log(await flakyFlat.retry({ times: 5, delay: 5 }).run()); // → "ok"
+console.log(await flakyFlat.retry({ times: 5, delay: 5 }).orDie().run()); // → "ok"
 console.log(callsFlat); // → 3
 ```
 
@@ -83,7 +83,7 @@ const flaky2: Eff<string, Throws<string>> = eff(function* () {
   return "recovered";
 });
 
-console.log(await flaky2.retry(policy).run()); // → "recovered"
+console.log(await flaky2.retry(policy).orDie().run()); // → "recovered"
 console.log(calls); // → 3
 ```
 
@@ -130,11 +130,12 @@ import { succeed, sync, RetryPolicy } from "@spilne/perfect-core";
 // Don't retry defects (real bugs) or interrupts — only typed failures.
 const probablyABug = sync(() => {
   throw new Error("this is a defect, not a typed failure");
-}) as any;
+});
 
 const failed = await probablyABug
   .retry(RetryPolicy.recurs(3))
-  .catchAllCause((c: any) => succeed(`gave up: cause=${c._tag}`))
+  .catchAllCause((c) => succeed(`gave up: cause=${c._tag}`))
+  .orDie()
   .run();
 // no retries — defects don't retry
 console.log(failed); // → "gave up: cause=Die"
@@ -176,6 +177,7 @@ const recovered = await mayFail
       return RetryDecision.retry();
     },
   })
+  .orDie()
   .run();
 
 console.log(recovered); // → "ok"
