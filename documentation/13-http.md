@@ -18,6 +18,7 @@ tiers compose: pick the level of automation you need.
 ### Tier 1 — `httpFetch` (raw Response)
 
 <!-- @embed packages/http/examples/01-basic.ts#tier-1-raw -->
+
 ```ts
 import { httpFetch } from "@spilne/perfect-http";
 
@@ -29,11 +30,13 @@ const tier1 = await httpFetch({
 }).run();
 console.log(tier1.status); // → 200
 ```
+
 <!-- @end -->
 
 ### Tier 2 — `httpFetchOk` (status check)
 
 <!-- @embed packages/http/examples/01-basic.ts#tier-2-status-check -->
+
 ```ts
 import { httpFetchOk } from "@spilne/perfect-http";
 
@@ -45,11 +48,13 @@ const tier2 = await httpFetchOk({
 }).run();
 console.log(tier2.status); // → 200
 ```
+
 <!-- @end -->
 
 ### Tier 3 — `httpRequest` (full pipeline)
 
 <!-- @embed packages/http/examples/01-basic.ts#tier-3-validated -->
+
 ```ts
 import { httpRequest } from "@spilne/perfect-http";
 
@@ -62,6 +67,7 @@ const user = await httpRequest({
 }).run();
 console.log(user); // → { id: 1, name: "alice" }
 ```
+
 <!-- @end -->
 
 `schema` accepts anything with a `safeParse(unknown)` method — Zod, Valibot,
@@ -79,6 +85,7 @@ below for concrete adapters.
 | `HttpParseError` | success-path body parse failure (bad JSON / schema mismatch) |
 
 <!-- @embed packages/http/examples/01-basic.ts#status-error -->
+
 ```ts
 import { HttpStatusError, httpFetchOk } from "@spilne/perfect-http";
 
@@ -99,6 +106,7 @@ console.log(caught!._tag); // → "HttpStatusError"
 console.log(caught!.status); // → 404
 console.log(caught!.isClientError); // → true
 ```
+
 <!-- @end -->
 
 ## HttpClient
@@ -107,6 +115,7 @@ A reusable client carries `baseUrl`, default headers, transport, middleware,
 and an optional `errorSchema`.
 
 <!-- @embed packages/http/examples/02-client.ts#client-basic -->
+
 ```ts
 import { DefaultHttpClient } from "@spilne/perfect-http";
 
@@ -125,11 +134,13 @@ console.log(user); // → { id: 1, name: "alice" }
 console.log(transport.last!.url); // → "https://api.example.com/users/1"
 console.log(transport.last!.headers!.authorization); // → "Bearer xyz"
 ```
+
 <!-- @end -->
 
 ### Derive a client with `withOverrides`
 
 <!-- @embed packages/http/examples/02-client.ts#client-overrides -->
+
 ```ts
 // withOverrides returns a derived client. Headers spread-merge; everything
 // else falls back to the base when the override is undefined.
@@ -138,6 +149,7 @@ await traced.get("/users/1", UserSchema).run();
 assertContains(JSON.stringify(transport.last!.headers), "x-trace");
 assertContains(JSON.stringify(transport.last!.headers), "Bearer xyz"); // base header preserved
 ```
+
 <!-- @end -->
 
 ### Middleware
@@ -148,6 +160,7 @@ key per-request state by reference (e.g. `WeakMap<Context, Span>` for
 tracing).
 
 <!-- @embed packages/http/examples/02-client.ts#client-middleware -->
+
 ```ts
 import { type HttpMiddleware, DefaultHttpClient } from "@spilne/perfect-http";
 
@@ -169,6 +182,7 @@ await observed.get("/users/2", UserSchema).run();
 assertContains(calls.join("|"), "→ GET https://api.example.com/users/2");
 assertContains(calls.join("|"), "← GET");
 ```
+
 <!-- @end -->
 
 ## Retry
@@ -183,6 +197,7 @@ with default backoff, then hands through failures and success values unchanged.
 ### `withRetryAll` — outcome-aware retry
 
 <!-- @embed packages/http/examples/03-retry.ts#with-retry-all -->
+
 ```ts
 import { type ResponseParser, DefaultHttpClient, RetryAttempt, withRetryAll } from "@spilne/perfect-http";
 
@@ -225,11 +240,13 @@ const job = await withRetryAll(client2.get("/job/123", JobSchema), {
 console.log(job); // → { state: "done", result: 42 }
 console.log(t2.attempts); // → 3
 ```
+
 <!-- @end -->
 
 ### `retryHttp` — transient HTTP retry
 
 <!-- @embed packages/http/examples/03-retry.ts#retryHttp -->
+
 ```ts
 import { DefaultHttpClient, retryHttp } from "@spilne/perfect-http";
 
@@ -245,11 +262,13 @@ const user = await retryHttp(client4.get("/u", UserSchema), { baseDelayMs: 1 }).
 console.log(user); // → { id: 1, name: "alice" }
 console.log(t4.attempts); // → 3
 ```
+
 <!-- @end -->
 
 ### `Retry.http` — namespace-style wrapper
 
 <!-- @embed packages/http/examples/03-retry.ts#retry-namespace-http -->
+
 ```ts
 import { DefaultHttpClient, Retry } from "@spilne/perfect-http";
 
@@ -265,6 +284,7 @@ const user2 = await Retry.http(client5.get("/u", UserSchema), { baseDelayMs: 1 }
 console.log(user2); // → { id: 1, name: "alice" }
 console.log(t5.attempts); // → 3
 ```
+
 <!-- @end -->
 
 For polling cadence with a max-attempts/max-duration cap, prefer core's
@@ -277,6 +297,7 @@ bodies are parsed into `HttpStatusError<B>`. `e.body` carries the typed
 shape — no narrowing required.
 
 <!-- @embed packages/http/examples/04-error-schema.ts#error-schema-typed -->
+
 ```ts
 import { type ResponseParser, DefaultHttpClient, HttpStatusError } from "@spilne/perfect-http";
 
@@ -319,12 +340,14 @@ console.log(caught!.status); // → 429
 console.log(caught!.body.code); // → "RATE_LIMITED"
 console.log(caught!.body.detail); // → "slow down"
 ```
+
 <!-- @end -->
 
 When the body doesn't match (bad JSON or wrong shape), `HttpUnknownError`
 is raised instead — carries the raw text + parse cause + status code.
 
 <!-- @embed packages/http/examples/04-error-schema.ts#error-schema-mismatch -->
+
 ```ts
 import { DefaultHttpClient, HttpUnknownError } from "@spilne/perfect-http";
 
@@ -349,6 +372,7 @@ console.log(unknown!.body); // → "<html>500</html>"
 // 500 is retryable
 console.log(unknown!.isRetryable); // → true
 ```
+
 <!-- @end -->
 
 ## Streaming
@@ -365,6 +389,7 @@ Every other helper is a composition of this base + composable `Pipe`s
 | `httpStreamSSE(opts)` | lines → `parseSSE` |
 
 <!-- @embed packages/http/examples/06-streaming.ts#stream-lines -->
+
 ```ts
 import { httpStreamLines } from "@spilne/perfect-http";
 
@@ -374,9 +399,11 @@ const linesT = new StubTransport(() => streamOf(["alpha\nbe", "ta\ngamma\n"]));
 const lines = await httpStreamLines({ url: "/log", transport: linesT }).toArray().run();
 console.log(lines); // → ["alpha", "beta", "gamma"]
 ```
+
 <!-- @end -->
 
 <!-- @embed packages/http/examples/06-streaming.ts#stream-sse -->
+
 ```ts
 import { httpStreamSSE } from "@spilne/perfect-http";
 
@@ -391,6 +418,7 @@ console.log(events[0]!.event); // → "tick"
 console.log(events[0]!.data); // → "1"
 console.log(events[1]!.id); // → "m-2"
 ```
+
 <!-- @end -->
 
 For ad-hoc compositions, drop down to the base:
@@ -409,6 +437,7 @@ Drop-in `HttpClient` for tests. Records every call; responds per registered
 route via `.on` / `.onFn` / `.onSequence` / `.respondWith`.
 
 <!-- @embed packages/http/examples/05-mock.ts#mock-basic -->
+
 ```ts
 import { MockHttpClient } from "@spilne/perfect-http";
 
@@ -420,9 +449,11 @@ const user = await mock.get("/users/1", UserSchema).run();
 console.log(user); // → { id: 1, name: "alice" }
 console.log(mock.calledTimes("GET", "/users/1")); // → 1
 ```
+
 <!-- @end -->
 
 <!-- @embed packages/http/examples/05-mock.ts#mock-failure -->
+
 ```ts
 import { MockHttpClient } from "@spilne/perfect-http";
 
@@ -439,9 +470,11 @@ try {
 console.log(caught._tag); // → "HttpStatusError"
 console.log(caught.status); // → 404
 ```
+
 <!-- @end -->
 
 <!-- @embed packages/http/examples/05-mock.ts#mock-sequence -->
+
 ```ts
 import { MockHttpClient } from "@spilne/perfect-http";
 
@@ -461,6 +494,7 @@ console.log(firstErr.status); // → 503
 const second = await mock.get("/u", UserSchema).run();
 console.log(second); // → { id: 7, name: "after-retry" }
 ```
+
 <!-- @end -->
 
 Assertions: `.calledWith` / `.calledTimes` / `.calledWithJson` /
@@ -484,6 +518,7 @@ Zod schemas have `.safeParse` natively — they **are** `ResponseParser<T>`.
 Pass the schema directly.
 
 <!-- @embed packages/http/examples/07-schema-libs.ts#zod-direct -->
+
 ```ts
 import { z } from "zod";
 import { DefaultHttpClient } from "@spilne/perfect-http";
@@ -500,11 +535,13 @@ const zodClient = new DefaultHttpClient({
 const zodUser: ZodUser = await zodClient.get("/u/1", ZodUser).run();
 console.log(zodUser); // → { id: 1, name: "alice" }
 ```
+
 <!-- @end -->
 
 The same applies to `errorSchema`:
 
 <!-- @embed packages/http/examples/07-schema-libs.ts#zod-error-schema -->
+
 ```ts
 import { z } from "zod";
 import { DefaultHttpClient, HttpStatusError } from "@spilne/perfect-http";
@@ -538,6 +575,7 @@ try {
 console.log(caught!.body.code); // → "FORBIDDEN"
 console.log(caught!.body.detail); // → "no access"
 ```
+
 <!-- @end -->
 
 ### Valibot (3-line adapter)
@@ -546,6 +584,7 @@ Valibot uses `safeParse(schema, input)` — wrap it once and reuse for any
 schema:
 
 <!-- @embed packages/http/examples/07-schema-libs.ts#valibot-adapter -->
+
 ```ts
 import * as v from "valibot";
 import { type ResponseParser, DefaultHttpClient } from "@spilne/perfect-http";
@@ -571,6 +610,7 @@ const valibotClient = new DefaultHttpClient({
 const valibotUser: ValibotUser = await valibotClient.get("/u/2", valibotParser(ValibotUser)).run();
 console.log(valibotUser); // → { id: 2, name: "bob" }
 ```
+
 <!-- @end -->
 
 ### arktype, custom validators

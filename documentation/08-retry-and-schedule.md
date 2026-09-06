@@ -10,6 +10,7 @@ Retry transient failures with controlled backoff and jitter. Use the fluent
 
 ::: syntax generator
 <!-- @embed packages/core/examples/09-retry-schedule.ts#retry-config -->
+
 ```ts
 import { eff, fail, type Eff, type Throws } from "@spilne/perfect-core";
 
@@ -24,12 +25,14 @@ const flaky: Eff<string, Throws<string>> = eff(function* () {
 console.log(await flaky.retry({ times: 5, delay: 5 }).run()); // → "ok"
 console.log(calls); // → 3
 ```
+
 <!-- @end -->
 
 :::
 
 ::: syntax chainable
 <!-- @embed packages/core/examples/09-retry-schedule.ts#retry-config-flat -->
+
 ```ts
 import { succeed, fail, sync, type Eff, type Throws } from "@spilne/perfect-core";
 
@@ -42,6 +45,7 @@ const flakyFlat: Eff<string, Throws<string>> = sync(() => ++callsFlat).flatMap((
 console.log(await flakyFlat.retry({ times: 5, delay: 5 }).run()); // → "ok"
 console.log(callsFlat); // → 3
 ```
+
 <!-- @end -->
 :::
 
@@ -62,6 +66,7 @@ The config form takes:
 For anything beyond trivial:
 
 <!-- @embed packages/core/examples/09-retry-schedule.ts#retry-policy-fluent -->
+
 ```ts
 import { eff, fail, RetryPolicy, type Eff, type Throws } from "@spilne/perfect-core";
 
@@ -81,6 +86,7 @@ const flaky2: Eff<string, Throws<string>> = eff(function* () {
 console.log(await flaky2.retry(policy).run()); // → "recovered"
 console.log(calls); // → 3
 ```
+
 <!-- @end -->
 
 ### Builders
@@ -117,6 +123,7 @@ Only `Throws<E>` failures are retried — defects (`throw` inside `sync`)
 aren't, so a real bug doesn't loop forever.
 
 <!-- @embed packages/core/examples/09-retry-schedule.ts#retry-on-cause-only -->
+
 ```ts
 import { succeed, sync, RetryPolicy } from "@spilne/perfect-core";
 
@@ -132,6 +139,7 @@ const failed = await probablyABug
 // no retries — defects don't retry
 console.log(failed); // → "gave up: cause=Die"
 ```
+
 <!-- @end -->
 
 If you really want to retry defects, opt in with `.whenCause(...)` or use
@@ -143,6 +151,7 @@ Use `.retryAllBy(...)` when you want retry decisions to inspect both typed
 errors and defects from thrown exceptions.
 
 <!-- @embed packages/core/examples/09-retry-schedule.ts#retry-all-by -->
+
 ```ts
 import { eff, fail, RetryDecision, type Eff, type Throws } from "@spilne/perfect-core";
 
@@ -171,6 +180,7 @@ const recovered = await mayFail
 
 console.log(recovered); // → "ok"
 ```
+
 <!-- @end -->
 
 ## Schedule (for repetition, not retry)

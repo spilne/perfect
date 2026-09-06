@@ -7,6 +7,7 @@ is interrupted, children are interrupted too.
 ## Fork and join
 
 <!-- @embed packages/core/examples/07-concurrency.ts#fork-join -->
+
 ```ts
 import { succeed, sleep, join } from "@spilne/perfect-core";
 
@@ -18,6 +19,7 @@ const forkExample = sleep(10)
 
 console.log(await forkExample.run()); // → 42
 ```
+
 <!-- @end -->
 
 `fork(eff)` returns `Eff<Fiber<A>, never>`. The fiber starts immediately on
@@ -30,6 +32,7 @@ errors and interrupts back through.
 interrupted:
 
 <!-- @embed packages/core/examples/07-concurrency.ts#race-method -->
+
 ```ts
 import { succeed, sleep } from "@spilne/perfect-core";
 
@@ -39,11 +42,13 @@ const slow = sleep(50).flatMap(() => succeed("slow"));
 
 console.log(await fast.race(slow).run()); // → "fast"
 ```
+
 <!-- @end -->
 
 For 3+ effects, use the variadic form:
 
 <!-- @embed packages/core/examples/07-concurrency.ts#race-variadic -->
+
 ```ts
 import { succeed, sleep, race } from "@spilne/perfect-core";
 
@@ -55,6 +60,7 @@ const winner = await race([
 ]).run();
 console.log(winner); // → "b"
 ```
+
 <!-- @end -->
 
 `raceFirst([a, b])` — first to **finish** wins (success OR failure).
@@ -67,6 +73,7 @@ console.log(winner); // → "b"
 ### Array form — `all([a, b, c])` → tuple
 
 <!-- @embed packages/core/examples/07-concurrency.ts#all-parallel -->
+
 ```ts
 import { succeed, sleep, all } from "@spilne/perfect-core";
 
@@ -79,11 +86,13 @@ const results = await all([
 
 console.log(results); // → ["a", "b", "c"]
 ```
+
 <!-- @end -->
 
 ### Object form — `all({ a, b, c })` → record (named destructure)
 
 <!-- @embed packages/core/examples/07-concurrency.ts#all-object -->
+
 ```ts
 import { succeed, sleep, all } from "@spilne/perfect-core";
 
@@ -98,6 +107,7 @@ console.log(user); // → { id: 7, name: "alice" }
 console.log(posts); // → [{ id: 1 }, { id: 2 }]
 console.log(friends); // → ["bob", "carol"]
 ```
+
 <!-- @end -->
 
 ## Daemons

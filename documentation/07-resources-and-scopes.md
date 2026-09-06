@@ -10,6 +10,7 @@ Pair an acquire effect with a release function. Release is registered with
 the surrounding scope; nothing else changes about the program flow.
 
 <!-- @embed packages/core/examples/08-resources.ts#acquire-release -->
+
 ```ts
 import { sync } from "@spilne/perfect-core";
 
@@ -31,6 +32,7 @@ const useFile = sync(() => {
 console.log(await useFile.run()); // → "contents"
 console.log(events); // → ["opened", "closed"]
 ```
+
 <!-- @end -->
 
 `scoped(eff)` defines the scope boundary. When the scope ends, all
@@ -44,6 +46,7 @@ The release fires whether the inner effect succeeds or fails:
 
 ::: syntax generator
 <!-- @embed packages/core/examples/08-resources.ts#release-on-failure -->
+
 ```ts
 import { eff, succeed, fail, sync, acquireRelease, scoped, type Eff, type Throws } from "@spilne/perfect-core";
 
@@ -66,12 +69,14 @@ const safe = scoped(
 console.log(await (safe as any).run()); // → "recovered: crashed"
 console.log(trace); // → ["acquire", "release"]
 ```
+
 <!-- @end -->
 
 :::
 
 ::: syntax chainable
 <!-- @embed packages/core/examples/08-resources.ts#release-on-failure-flat -->
+
 ```ts
 import { succeed, fail, sync, type Eff, type Throws } from "@spilne/perfect-core";
 
@@ -92,6 +97,7 @@ const safeFlat = sync(() => {
 console.log(await (safeFlat as any).run()); // → "recovered: crashed"
 console.log(traceFlat); // → ["acquire", "release"]
 ```
+
 <!-- @end -->
 :::
 
@@ -102,6 +108,7 @@ console.log(traceFlat); // → ["acquire", "release"]
 When you don't have an acquire/release pair, just want a finalizer:
 
 <!-- @embed packages/core/examples/08-resources.ts#ensuring -->
+
 ```ts
 import { succeed, sync } from "@spilne/perfect-core";
 
@@ -116,6 +123,7 @@ const tracked = succeed("done").ensuring(
 console.log(await tracked.run()); // → "done"
 console.log(cleanedUp); // → true
 ```
+
 <!-- @end -->
 
 ## Nesting

@@ -9,6 +9,7 @@ Virtual time. `sleep(ms)` doesn't actually wait — you `advance(ms)` to fire
 the sleep. Run with `provide(eff, Clock, testClock)`.
 
 <!-- @embed packages/core/examples/12-testing.ts#test-clock -->
+
 ```ts
 import { eff, sleep, provide, run, Clock, TestClock } from "@spilne/perfect-core";
 
@@ -26,6 +27,7 @@ clock.advance(1000); // fire the sleep
 // 1000ms elapsed in virtual time, ~0ms real
 console.log(await fiber); // → 1000
 ```
+
 <!-- @end -->
 
 The `tick()` helper (`Promise<void>` resolving on the next macrotask) lets
@@ -46,6 +48,7 @@ the fiber register its sleep before you advance — necessary because
 Seeded PRNG for reproducibility:
 
 <!-- @embed packages/core/examples/12-testing.ts#test-random -->
+
 ```ts
 import { eff, provide, Random, TestRandom } from "@spilne/perfect-core";
 
@@ -70,6 +73,7 @@ const second = await provide(
 ).run();
 console.log(guess); // → second
 ```
+
 <!-- @end -->
 
 You can also queue specific values for fully scripted tests — see
@@ -80,6 +84,7 @@ You can also queue specific values for fully scripted tests — see
 Captures `log` / `warn` / `error` calls instead of writing to stdout:
 
 <!-- @embed packages/core/examples/12-testing.ts#test-console -->
+
 ```ts
 import { eff, provide, Console, TestConsole } from "@spilne/perfect-core";
 
@@ -97,6 +102,7 @@ await provide(
 ).run();
 console.log(captured.logs()); // → ["hello", "world"]
 ```
+
 <!-- @end -->
 
 | | |

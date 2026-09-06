@@ -31,6 +31,7 @@
 
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
+import { rewriteEmbeddedExamples } from "./embeds";
 
 const ROOT = join(import.meta.dir, "..");
 const DOC_DIR = join(ROOT, "documentation");
@@ -45,9 +46,6 @@ function packageNameFor(file: string): string {
   return `@spilne/perfect-${m ? m[1] : "core"}`;
 }
 const SKIP_IMPORT_SOURCES = new Set(["./_assert", "../_assert"]);
-
-const EMBED_RE =
-  /<!-- @embed (?<file>[^#\s]+)#(?<region>[^\s]+) -->\n```[a-z]*\n[\s\S]*?\n```\n<!-- @end -->/g;
 
 function regionRe(name: string): RegExp {
   // Match `// >>> example: name` ... `// <<< example`
@@ -361,17 +359,18 @@ verifyPackageCoverage();
 
 for (const md of walkMarkdown(DOC_DIR)) {
   const original = readFileSync(md, "utf8");
-  const rewritten = original.replace(EMBED_RE, (_match, ...args) => {
-    const groups = args[args.length - 1] as { file: string; region: string };
-    try {
-      const code = extractRegion(groups.file, groups.region);
-      return `<!-- @embed ${groups.file}#${groups.region} -->\n\`\`\`ts\n${code}\n\`\`\`\n<!-- @end -->`;
-    } catch (e) {
-      errors++;
-      console.error(`✗ ${relative(ROOT, md)}: ${(e as Error).message}`);
-      return _match;
-    }
-  });
+  let rewritten: string;
+  try {
+    rewritten = rewriteEmbeddedExamples(original, ({ file, region }) =>
+      extractRegion(file, region),
+    );
+  } catch (error) {
+    errors++;
+    console.error(
+      `✗ ${relative(ROOT, md)}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    continue;
+  }
 
   if (rewritten !== original) {
     if (CHECK_MODE) {

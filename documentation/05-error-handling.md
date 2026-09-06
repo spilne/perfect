@@ -14,6 +14,7 @@ There's also `Cause.Interrupt` for cooperative cancellation.
 `.catch(handler)` removes `Throws<E>` from the type:
 
 <!-- @embed packages/core/examples/06-error-handling.ts#catch-typed -->
+
 ```ts
 import { succeed, fail, type Eff, type Throws } from "@spilne/perfect-core";
 
@@ -24,6 +25,7 @@ const program: Eff<string, never> = (fail("nope") as Eff<never, Throws<string>>)
 
 console.log(program.runSync()); // → "recovered: nope"
 ```
+
 <!-- @end -->
 
 ## Tagged errors with `.catchTag`
@@ -31,6 +33,7 @@ console.log(program.runSync()); // → "recovered: nope"
 When your error is a discriminated union, handle one variant at a time:
 
 <!-- @embed packages/core/examples/06-error-handling.ts#catch-tag -->
+
 ```ts
 import { succeed, fail, type Eff, type Throws } from "@spilne/perfect-core";
 
@@ -46,6 +49,7 @@ const safe = lookup(99)
 
 console.log(safe.runSync()); // → "(missing 99)"
 ```
+
 <!-- @end -->
 
 After all tags are handled, the type is `Throws<never>` — equivalent to no
@@ -56,6 +60,7 @@ error.
 If you need to see defects and interrupts too, use `.catchAllCause`:
 
 <!-- @embed packages/core/examples/06-error-handling.ts#catch-cause -->
+
 ```ts
 import { succeed, fail, type Eff, type Throws } from "@spilne/perfect-core";
 
@@ -66,6 +71,7 @@ const wild = (fail("boom") as Eff<never, Throws<string>>).catchAllCause((cause) 
 
 console.log(wild.runSync()); // → "cause: Fail"
 ```
+
 <!-- @end -->
 
 `Cause` is one of:
@@ -83,6 +89,7 @@ console.log(wild.runSync()); // → "cause: Fail"
 `.tapError(f)` runs a side-effect on failure but re-fails:
 
 <!-- @embed packages/core/examples/06-error-handling.ts#tap-error -->
+
 ```ts
 import { succeed, fail, sync, type Eff, type Throws } from "@spilne/perfect-core";
 
@@ -100,11 +107,13 @@ const observed = (fail("bad") as Eff<never, Throws<string>>)
 console.log(observed.runSync()); // → "ok"
 console.log(observedError); // → "bad"
 ```
+
 <!-- @end -->
 
 ## Fallback with `.orElse`
 
 <!-- @embed packages/core/examples/06-error-handling.ts#orelse -->
+
 ```ts
 import { succeed, fail, type Eff, type Throws } from "@spilne/perfect-core";
 
@@ -112,6 +121,7 @@ import { succeed, fail, type Eff, type Throws } from "@spilne/perfect-core";
 const fallback = (fail("first") as Eff<never, Throws<string>>).orElse(() => succeed("second"));
 console.log(await fallback.run()); // → "second"
 ```
+
 <!-- @end -->
 
 ## Defects vs failures — when to use `fail` vs `throw`

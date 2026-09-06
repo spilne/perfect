@@ -18,6 +18,7 @@ bun add @spilne/perfect-http-otel @opentelemetry/api
 ## Spans on every request
 
 <!-- @embed packages/http-otel/examples/01-tracing.ts#tracing-success -->
+
 ```ts
 import { SpanKind, SpanStatusCode } from "@opentelemetry/api";
 import { DefaultHttpClient } from "@spilne/perfect-http";
@@ -42,6 +43,7 @@ console.log(spans[0]!.attributes["http.route"]); // → "user.lookup"
 console.log(spans[0]!.status.code); // → SpanStatusCode.OK
 console.log(spans[0]!.ended); // → true
 ```
+
 <!-- @end -->
 
 The request `tag` (when provided to `client.get`/`post`/etc.) becomes
@@ -50,6 +52,7 @@ The request `tag` (when provided to `client.get`/`post`/etc.) becomes
 ### Errors
 
 <!-- @embed packages/http-otel/examples/01-tracing.ts#tracing-error -->
+
 ```ts
 import { SpanStatusCode } from "@opentelemetry/api";
 import { DefaultHttpClient } from "@spilne/perfect-http";
@@ -74,6 +77,7 @@ console.log(errSpans[0]!.status.code); // → SpanStatusCode.ERROR
 console.log(errSpans[0]!.attributes["http.response.status_code"]); // → 503
 console.log(errSpans[0]!.attributes["error.type"]); // → "HttpStatusError"
 ```
+
 <!-- @end -->
 
 ## W3C trace propagation
@@ -109,6 +113,7 @@ URL queries are stripped from `url.full` by default to avoid PII leaks into
 spans. Header redaction is pluggable.
 
 <!-- @embed packages/http-otel/examples/01-tracing.ts#tracing-redaction -->
+
 ```ts
 import { makeRedaction, redactHeaders } from "@spilne/perfect-http-otel";
 
@@ -125,6 +130,7 @@ console.log(out.Authorization); // → "<redacted>"
 console.log(out["X-Secret"]); // → "<redacted>"
 console.log(out["Content-Type"]); // → "application/json"
 ```
+
 <!-- @end -->
 
 ## Options

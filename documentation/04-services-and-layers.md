@@ -19,6 +19,7 @@ widening tags to `ServiceTag<T>` when they will be used for provisioning.
 
 ::: syntax generator
 <!-- @embed packages/core/examples/04-services.ts#service-define -->
+
 ```ts
 import { eff, succeed, service, provide, type Eff } from "@spilne/perfect-core";
 
@@ -39,12 +40,14 @@ const wired = provide(program, Greeter, { greet: (name) => succeed(`hello, ${nam
 
 console.log(wired.runSync()); // → "hello, world"
 ```
+
 <!-- @end -->
 
 :::
 
 ::: syntax chainable
 <!-- @embed packages/core/examples/04-services.ts#service-define-flat -->
+
 ```ts
 import { succeed, provide } from "@spilne/perfect-core";
 
@@ -55,6 +58,7 @@ const wiredFlat = provide(programFlat, Greeter, { greet: (name) => succeed(`hell
 
 console.log(wiredFlat.runSync()); // → "hello, world"
 ```
+
 <!-- @end -->
 :::
 
@@ -67,6 +71,7 @@ ugly for three or more. That's where Layers come in:
 
 ::: syntax generator
 <!-- @embed packages/core/examples/04-services.ts#service-multiple -->
+
 ```ts
 import { eff, succeed, service, provide, type Eff } from "@spilne/perfect-core";
 
@@ -96,12 +101,14 @@ const wired2 = provide(provide(app, Db, { query: (s) => succeed(`row:${s}`) }), 
 console.log(wired2.runSync()); // → "row:SELECT 1"
 console.log(captured); // → ["querying"]
 ```
+
 <!-- @end -->
 
 :::
 
 ::: syntax chainable
 <!-- @embed packages/core/examples/04-services.ts#service-multiple-flat -->
+
 ```ts
 import { succeed, provide } from "@spilne/perfect-core";
 
@@ -121,6 +128,7 @@ const wired2Flat = provide(provide(appFlat, Db, { query: (s) => succeed(`row:${s
 console.log(wired2Flat.runSync()); // → "row:SELECT 1"
 console.log(capturedFlat); // → ["querying"]
 ```
+
 <!-- @end -->
 :::
 
@@ -132,6 +140,7 @@ A `Layer<S>` is just an `Eff` that produces a record of services. No new
 type, no new constructors — reuse `succeed` / `eff` / `scoped`.
 
 <!-- @embed packages/core/examples/05-layers.ts#layer-build -->
+
 ```ts
 import { succeed } from "@spilne/perfect-core";
 
@@ -146,6 +155,7 @@ const LoggerLive = succeed({
   Logger: { log: (m: string) => logs.push(m) } as Logger,
 });
 ```
+
 <!-- @end -->
 
 ### Compose
@@ -153,6 +163,7 @@ const LoggerLive = succeed({
 Three equivalent chain styles. Pick whichever reads best at the call site:
 
 <!-- @embed packages/core/examples/05-layers.ts#layer-chain -->
+
 ```ts
 import { Layer } from "@spilne/perfect-core";
 
@@ -162,6 +173,7 @@ const b = program.with(DbLive.and(CacheLive).and(LoggerLive));
 const c = program.with(DbLive).with(CacheLive).with(LoggerLive);
 console.log([a.runSync(), b.runSync(), c.runSync()]); // → ["db:SELECT 1", "db:SELECT 1", "db:SELECT 1"]
 ```
+
 <!-- @end -->
 
 ### Apply
@@ -173,6 +185,7 @@ the services, runs the program. Releases fire in LIFO order on exit.
 
 ::: syntax generator
 <!-- @embed packages/core/examples/05-layers.ts#layer-apply -->
+
 ```ts
 import { eff, Layer } from "@spilne/perfect-core";
 
@@ -188,12 +201,14 @@ const program = eff(function* () {
 
 console.log(program.with(AppLive).runSync()); // → "db:SELECT 1"
 ```
+
 <!-- @end -->
 
 :::
 
 ::: syntax chainable
 <!-- @embed packages/core/examples/05-layers.ts#layer-apply-flat -->
+
 ```ts
 // Same program, chainable form — .flatMap into each service, .with() the layer.
 const programFlat = Db.get.flatMap((db) =>
@@ -205,6 +220,7 @@ const programFlat = Db.get.flatMap((db) =>
 
 console.log(programFlat.with(AppLive).runSync()); // → "db:SELECT 1"
 ```
+
 <!-- @end -->
 :::
 
@@ -216,6 +232,7 @@ If a layer uses `acquireRelease`, the release fires when the program ends —
 success, failure, or interrupt:
 
 <!-- @embed packages/core/examples/05-layers.ts#layer-scoped -->
+
 ```ts
 import { eff, sync, acquireRelease, Layer } from "@spilne/perfect-core";
 
@@ -238,6 +255,7 @@ const ScopedLogger = eff(function* () {
 await program.with(Layer.merge(DbLive, CacheLive, ScopedLogger)).run();
 console.log(events); // → ["acquire", "log:running", "release"]
 ```
+
 <!-- @end -->
 
 ### Test-time swap
@@ -245,6 +263,7 @@ console.log(events); // → ["acquire", "log:running", "release"]
 Pass a different layer:
 
 <!-- @embed packages/core/examples/05-layers.ts#layer-test-swap -->
+
 ```ts
 import { succeed } from "@spilne/perfect-core";
 
@@ -257,6 +276,7 @@ const FakeAll = succeed({
 
 console.log(program.with(FakeAll).runSync()); // → "FAKE"
 ```
+
 <!-- @end -->
 
 ## Vertical composition
