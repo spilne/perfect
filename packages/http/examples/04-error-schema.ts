@@ -26,25 +26,33 @@ interface User {
   name: string;
 }
 const UserSchema: ResponseParser<User> = {
-  safeParse: (d: any) =>
-    d && typeof d.id === "number" && typeof d.name === "string"
-      ? { success: true, data: d }
+  safeParse: (d: unknown) =>
+    d !== null &&
+    typeof d === "object" &&
+    "id" in d &&
+    "name" in d &&
+    typeof d.id === "number" &&
+    typeof d.name === "string"
+      ? { success: true, data: { id: d.id, name: d.name } }
       : { success: false, error: "no" },
 };
 
 // >>> example: error-schema-typed
 // Pass errorSchema and non-2xx JSON bodies are parsed into HttpStatusError<B>.
-// e.body has the typed shape — no narrowing required.
+// JavaScript catch values are unknown; check the error and its body before use.
 interface ApiError {
   code: "NOT_FOUND" | "FORBIDDEN" | "RATE_LIMITED";
   detail: string;
 }
 const ApiErrorSchema: ResponseParser<ApiError> = {
-  safeParse: (d: any) =>
-    d &&
-    ["NOT_FOUND", "FORBIDDEN", "RATE_LIMITED"].includes(d?.code) &&
+  safeParse: (d: unknown) =>
+    d !== null &&
+    typeof d === "object" &&
+    "code" in d &&
+    "detail" in d &&
+    (d.code === "NOT_FOUND" || d.code === "FORBIDDEN" || d.code === "RATE_LIMITED") &&
     typeof d.detail === "string"
-      ? { success: true, data: d }
+      ? { success: true, data: { code: d.code, detail: d.detail } }
       : { success: false, error: "not ApiError" },
 };
 
@@ -61,16 +69,19 @@ const client = new DefaultHttpClient({
   errorSchema: ApiErrorSchema,
 });
 
-let caught: HttpStatusError<ApiError> | undefined;
+let caught: unknown;
 try {
   await client.get<User, ApiError>("/u", UserSchema).orDie().run();
 } catch (e) {
-  caught = e as HttpStatusError<ApiError>;
+  caught = e;
 }
-assertEq(caught!._tag, "HttpStatusError");
-assertEq(caught!.status, 429);
-assertEq(caught!.body.code, "RATE_LIMITED");
-assertEq(caught!.body.detail, "slow down");
+if (!(caught instanceof HttpStatusError)) throw new Error("Expected HttpStatusError");
+const parsedError = ApiErrorSchema.safeParse(caught.body);
+if (!parsedError.success) throw new Error("Expected ApiError body");
+assertEq(caught._tag, "HttpStatusError");
+assertEq(caught.status, 429);
+assertEq(parsedError.data.code, "RATE_LIMITED");
+assertEq(parsedError.data.detail, "slow down");
 // <<< example
 
 // >>> example: error-schema-mismatch

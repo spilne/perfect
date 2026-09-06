@@ -56,7 +56,7 @@ The smallest possible Eff:
 ```ts
 import { succeed } from "@spilne/perfect-core";
 
-// runSync — for purely synchronous programs (no Async, no Sleep, no Fork).
+// runSync — for programs that complete synchronously.
 const greet = succeed("hello, perfect");
 console.log(greet.runSync()); // → "hello, perfect"
 ```

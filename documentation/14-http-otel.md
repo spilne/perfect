@@ -63,7 +63,7 @@ The request `tag` (when provided to `client.get`/`post`/etc.) becomes
 
 ```ts
 import { SpanStatusCode } from "@opentelemetry/api";
-import { DefaultHttpClient } from "@spilne/perfect-http";
+import { DefaultHttpClient, HttpStatusError } from "@spilne/perfect-http";
 import { tracingMiddleware } from "@spilne/perfect-http-otel";
 
 // On error, the span status flips to ERROR, http.response.status_code is
@@ -74,12 +74,13 @@ const failing = new DefaultHttpClient({
   middleware: [tracingMiddleware({ tracer: t2 })],
 });
 
-let caught: any;
+let caught: unknown;
 try {
   await failing.get("/u", UserSchema).orDie().run();
 } catch (e) {
   caught = e;
 }
+if (!(caught instanceof HttpStatusError)) throw new Error("Expected HttpStatusError");
 console.log(caught._tag); // → "HttpStatusError"
 console.log(errSpans[0]!.status.code); // → SpanStatusCode.ERROR
 console.log(errSpans[0]!.attributes["http.response.status_code"]); // → 503

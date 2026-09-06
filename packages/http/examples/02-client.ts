@@ -33,9 +33,14 @@ interface User {
   name: string;
 }
 const UserSchema: ResponseParser<User> = {
-  safeParse: (d: any) =>
-    d && typeof d.id === "number" && typeof d.name === "string"
-      ? { success: true, data: d as User }
+  safeParse: (d: unknown) =>
+    d !== null &&
+    typeof d === "object" &&
+    "id" in d &&
+    "name" in d &&
+    typeof d.id === "number" &&
+    typeof d.name === "string"
+      ? { success: true, data: { id: d.id, name: d.name } }
       : { success: false, error: "no" },
 };
 

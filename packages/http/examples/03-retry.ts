@@ -46,9 +46,14 @@ interface User {
   name: string;
 }
 const UserSchema: ResponseParser<User> = {
-  safeParse: (d: any) =>
-    d && typeof d.id === "number" && typeof d.name === "string"
-      ? { success: true, data: d }
+  safeParse: (d: unknown) =>
+    d !== null &&
+    typeof d === "object" &&
+    "id" in d &&
+    "name" in d &&
+    typeof d.id === "number" &&
+    typeof d.name === "string"
+      ? { success: true, data: { id: d.id, name: d.name } }
       : { success: false, error: "no" },
 };
 interface JobStatus {
@@ -56,9 +61,19 @@ interface JobStatus {
   result?: number;
 }
 const JobSchema: ResponseParser<JobStatus> = {
-  safeParse: (d: any) =>
-    d && (d.state === "pending" || d.state === "done")
-      ? { success: true, data: d }
+  safeParse: (d: unknown) =>
+    d !== null &&
+    typeof d === "object" &&
+    "state" in d &&
+    (d.state === "pending" || d.state === "done") &&
+    (!("result" in d) || d.result === undefined || typeof d.result === "number")
+      ? {
+          success: true,
+          data: {
+            state: d.state,
+            result: "result" in d ? (d.result as number | undefined) : undefined,
+          },
+        }
       : { success: false, error: "no" },
 };
 

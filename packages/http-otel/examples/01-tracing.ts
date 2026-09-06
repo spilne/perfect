@@ -18,6 +18,7 @@ import {
   type HttpTransport,
   type ResponseParser,
   DefaultHttpClient,
+  HttpStatusError,
 } from "@spilne/perfect-http";
 import { makeRedaction, redactHeaders, tracingMiddleware } from "../src";
 import { assertEq } from "./_assert";
@@ -111,9 +112,14 @@ interface User {
   name: string;
 }
 const UserSchema: ResponseParser<User> = {
-  safeParse: (d: any) =>
-    d && typeof d.id === "number" && typeof d.name === "string"
-      ? { success: true, data: d }
+  safeParse: (d: unknown) =>
+    d !== null &&
+    typeof d === "object" &&
+    "id" in d &&
+    "name" in d &&
+    typeof d.id === "number" &&
+    typeof d.name === "string"
+      ? { success: true, data: { id: d.id, name: d.name } }
       : { success: false, error: "no" },
 };
 
@@ -148,12 +154,13 @@ const failing = new DefaultHttpClient({
   middleware: [tracingMiddleware({ tracer: t2 })],
 });
 
-let caught: any;
+let caught: unknown;
 try {
   await failing.get("/u", UserSchema).orDie().run();
 } catch (e) {
   caught = e;
 }
+if (!(caught instanceof HttpStatusError)) throw new Error("Expected HttpStatusError");
 assertEq(caught._tag, "HttpStatusError");
 assertEq(errSpans[0]!.status.code, SpanStatusCode.ERROR);
 assertEq(errSpans[0]!.attributes["http.response.status_code"], 503);

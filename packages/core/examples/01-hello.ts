@@ -6,7 +6,7 @@ import { eff, succeed } from "../src";
 import { assertEq } from "./_assert";
 
 // >>> example: hello-sync
-// runSync — for purely synchronous programs (no Async, no Sleep, no Fork).
+// runSync — for programs that complete synchronously.
 const greet = succeed("hello, perfect");
 assertEq(greet.runSync(), "hello, perfect");
 // <<< example

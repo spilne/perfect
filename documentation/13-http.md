@@ -226,9 +226,14 @@ interface User {
   name: string;
 }
 const UserSchema: ResponseParser<User> = {
-  safeParse: (d: any) =>
-    d && typeof d.id === "number" && typeof d.name === "string"
-      ? { success: true, data: d }
+  safeParse: (d: unknown) =>
+    d !== null &&
+    typeof d === "object" &&
+    "id" in d &&
+    "name" in d &&
+    typeof d.id === "number" &&
+    typeof d.name === "string"
+      ? { success: true, data: { id: d.id, name: d.name } }
       : { success: false, error: "no" },
 };
 interface JobStatus {
@@ -236,9 +241,19 @@ interface JobStatus {
   result?: number;
 }
 const JobSchema: ResponseParser<JobStatus> = {
-  safeParse: (d: any) =>
-    d && (d.state === "pending" || d.state === "done")
-      ? { success: true, data: d }
+  safeParse: (d: unknown) =>
+    d !== null &&
+    typeof d === "object" &&
+    "state" in d &&
+    (d.state === "pending" || d.state === "done") &&
+    (!("result" in d) || d.result === undefined || typeof d.result === "number")
+      ? {
+          success: true,
+          data: {
+            state: d.state,
+            result: "result" in d ? (d.result as number | undefined) : undefined,
+          },
+        }
       : { success: false, error: "no" },
 };
 
@@ -312,8 +327,9 @@ For polling cadence with a max-attempts/max-duration cap, prefer core's
 ## Typed error response bodies
 
 Pass `errorSchema` (per-request or on the client config) and non-2xx JSON
-bodies are parsed into `HttpStatusError<B>`. `e.body` carries the typed
-shape — no narrowing required.
+bodies are parsed into `HttpStatusError<B>`. Its `body` is the parsed value.
+A JavaScript `catch` variable is still `unknown`; narrow the error before
+inspecting it, and validate its body when the generic type is not available.
 
 <!-- @embed packages/http/examples/04-error-schema.ts#error-schema-typed -->
 
@@ -321,17 +337,20 @@ shape — no narrowing required.
 import { type ResponseParser, DefaultHttpClient, HttpStatusError } from "@spilne/perfect-http";
 
 // Pass errorSchema and non-2xx JSON bodies are parsed into HttpStatusError<B>.
-// e.body has the typed shape — no narrowing required.
+// JavaScript catch values are unknown; check the error and its body before use.
 interface ApiError {
   code: "NOT_FOUND" | "FORBIDDEN" | "RATE_LIMITED";
   detail: string;
 }
 const ApiErrorSchema: ResponseParser<ApiError> = {
-  safeParse: (d: any) =>
-    d &&
-    ["NOT_FOUND", "FORBIDDEN", "RATE_LIMITED"].includes(d?.code) &&
+  safeParse: (d: unknown) =>
+    d !== null &&
+    typeof d === "object" &&
+    "code" in d &&
+    "detail" in d &&
+    (d.code === "NOT_FOUND" || d.code === "FORBIDDEN" || d.code === "RATE_LIMITED") &&
     typeof d.detail === "string"
-      ? { success: true, data: d }
+      ? { success: true, data: { code: d.code, detail: d.detail } }
       : { success: false, error: "not ApiError" },
 };
 
@@ -348,16 +367,19 @@ const client = new DefaultHttpClient({
   errorSchema: ApiErrorSchema,
 });
 
-let caught: HttpStatusError<ApiError> | undefined;
+let caught: unknown;
 try {
   await client.get<User, ApiError>("/u", UserSchema).orDie().run();
 } catch (e) {
-  caught = e as HttpStatusError<ApiError>;
+  caught = e;
 }
-console.log(caught!._tag); // → "HttpStatusError"
-console.log(caught!.status); // → 429
-console.log(caught!.body.code); // → "RATE_LIMITED"
-console.log(caught!.body.detail); // → "slow down"
+if (!(caught instanceof HttpStatusError)) throw new Error("Expected HttpStatusError");
+const parsedError = ApiErrorSchema.safeParse(caught.body);
+if (!parsedError.success) throw new Error("Expected ApiError body");
+console.log(caught._tag); // → "HttpStatusError"
+console.log(caught.status); // → 429
+console.log(parsedError.data.code); // → "RATE_LIMITED"
+console.log(parsedError.data.detail); // → "slow down"
 ```
 
 <!-- @end -->
@@ -474,18 +496,19 @@ console.log(mock.calledTimes("GET", "/users/1")); // → 1
 <!-- @embed packages/http/examples/05-mock.ts#mock-failure -->
 
 ```ts
-import { MockHttpClient } from "@spilne/perfect-http";
+import { HttpStatusError, MockHttpClient } from "@spilne/perfect-http";
 
 // MockHttpClient.fail builds an HttpStatusError for use as a route response.
 mock.reset();
 mock.on("GET", "/users/999", MockHttpClient.fail(404, "not found"));
 
-let caught: any;
+let caught: unknown;
 try {
   await mock.get("/users/999", UserSchema).orDie().run();
 } catch (e) {
   caught = e;
 }
+if (!(caught instanceof HttpStatusError)) throw new Error("Expected HttpStatusError");
 console.log(caught._tag); // → "HttpStatusError"
 console.log(caught.status); // → 404
 ```
@@ -495,19 +518,20 @@ console.log(caught.status); // → 404
 <!-- @embed packages/http/examples/05-mock.ts#mock-sequence -->
 
 ```ts
-import { MockHttpClient } from "@spilne/perfect-http";
+import { HttpStatusError, MockHttpClient } from "@spilne/perfect-http";
 
 // onSequence consumes responses in order; the last item is reused after the
 // queue exhausts. Useful for simulating retry-then-succeed scenarios.
 mock.reset();
 mock.onSequence("GET", "/u", [MockHttpClient.fail(503, "down"), { id: 7, name: "after-retry" }]);
 
-let firstErr: any;
+let firstErr: unknown;
 try {
   await mock.get("/u", UserSchema).orDie().run();
 } catch (e) {
   firstErr = e;
 }
+if (!(firstErr instanceof HttpStatusError)) throw new Error("Expected HttpStatusError");
 console.log(firstErr.status); // → 503
 
 const second = await mock.get("/u", UserSchema).orDie().run();
@@ -585,14 +609,17 @@ const errClient = new DefaultHttpClient({
   errorSchema: ApiError,
 });
 
-let caught: HttpStatusError<ApiError> | undefined;
+let caught: unknown;
 try {
   await errClient.get<ZodUser, ApiError>("/u/1", ZodUser).orDie().run();
 } catch (e) {
-  caught = e as HttpStatusError<ApiError>;
+  caught = e;
 }
-console.log(caught!.body.code); // → "FORBIDDEN"
-console.log(caught!.body.detail); // → "no access"
+if (!(caught instanceof HttpStatusError)) throw new Error("Expected HttpStatusError");
+const parsedError = ApiError.safeParse(caught.body);
+if (!parsedError.success) throw new Error("Expected ApiError body");
+console.log(parsedError.data.code); // → "FORBIDDEN"
+console.log(parsedError.data.detail); // → "no access"
 ```
 
 <!-- @end -->
