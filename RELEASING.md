@@ -21,10 +21,6 @@ live registry or account-permission check.
 GitHub and npm organisations are independent. Membership in the `spilne` GitHub
 organisation does not grant permission to publish under the `@spilne` npm scope.
 
-As of 2026-08-28, `@spilne/perfect-core` and `@spilne/perfect-kafka` return 404.
-That confirms those package names have not been published, but it does not prove
-the current npm account can write to the scope.
-
 Check properly:
 
 ```sh
@@ -52,12 +48,15 @@ npm whoami
 npm org ls spilne        # must list you
 ```
 
-Do not continue until `npm org ls spilne` shows you as a member. Everything
-downstream assumes the account can actually write to the scope.
+Membership alone does not prove package publishing rights. Verify that your
+account has write access to the packages, or permission to create them in the
+scope for the first release.
 
 ### 4. Validate the release locally
 
 ```sh
+bun install --frozen-lockfile
+bun run ci
 bun run release:check
 ```
 
@@ -66,8 +65,8 @@ twelve public packages, and rejects leaked `workspace:*` dependency ranges. This
 is the cheapest place to catch problems — it needs no token and touches no
 registry.
 
-Requires the Rust toolchain, which is pinned to 1.90.0 (see
-[Pinned toolchain](#pinned-rust-toolchain) below).
+Requires Rust and the `wasm32-wasip1` target. The repository uses the `stable`
+toolchain; see [Rust toolchain](#rust-toolchain) below.
 
 ### 5. Configure publishing credentials
 
@@ -87,15 +86,38 @@ separate workflow change; the existing Bun publisher is not configured for it.
 
 ```sh
 gh secret set NPM_TOKEN --repo spilne/perfect            # paste the token
-gh variable set NPM_RELEASE_ENABLED --repo spilne/perfect --body true
 ```
 
-While `NPM_RELEASE_ENABLED` is unset, `release.yml` runs only via manual
-dispatch. That is deliberate: a stray push to `main` cannot publish.
+In GitHub repository settings:
 
-For the very first release, consider leaving the variable unset and triggering
-the workflow manually instead — same path end to end, with an explicit finger on
-the button.
+- Under **Actions → General → Workflow permissions**, enable **Allow GitHub
+  Actions to create and approve pull requests**. The workflow declares the
+  write permissions it needs; the repository default can remain read-only.
+- Under **Pages → Build and deployment**, set **Source** to **GitHub Actions**.
+
+Leave `NPM_RELEASE_ENABLED` unset for the first release. The release job then
+runs only via manual dispatch; pushes to `main` cannot publish automatically.
+
+After merging the release candidate and its changesets into `main`, run:
+
+```sh
+gh workflow run release.yml --repo spilne/perfect --ref main
+```
+
+With pending changesets, this creates or updates a version PR. Review the
+versions, changelogs, and internal dependency updates, then merge that PR.
+Run the same command again to publish. **With no pending changesets, a manual
+run can publish immediately**; it is not a dry run. Only runs on `main` can
+release. The workflow checks all package artifacts, tests the built SWC plugin,
+and builds the documentation before attempting publication. Monitor both the
+package release and documentation deployment in GitHub's Actions tab.
+
+After the first successful release, optionally enable automatic processing on
+pushes to `main`:
+
+```sh
+gh variable set NPM_RELEASE_ENABLED --repo spilne/perfect --body true
+```
 
 ### 7. Verify the first publish
 
@@ -120,10 +142,12 @@ Create a changeset with every user-visible package change:
 bun run changeset
 ```
 
-On `main`, the release workflow maintains a version PR. Merging that PR builds
-and publishes changed packages in internal dependency order, then creates git
-tags. Changesets owns version calculation and changelogs; the Bun-native
-publisher owns packing and registry publication.
+When automatic processing is enabled, the release workflow maintains a version
+PR on pushes to `main`. Merging that PR builds and publishes unpublished package
+versions in internal dependency order, then creates git tags. In manual mode,
+dispatch the workflow once to prepare the PR and again after merging to publish.
+Changesets owns version calculation and changelogs; the Bun-native publisher
+owns packing and registry publication.
 
 Before merging a release PR, validate every package locally:
 
@@ -147,20 +171,19 @@ has additional eligibility conditions. Check the [npm unpublish policy](https://
 before relying on removal. Prefer a corrected release when users already
 depend on the package.
 
-### Pinned Rust toolchain
+### Rust toolchain
 
-`rust-toolchain.toml`, `ci.yml` and `release.yml` all pin **rustc 1.90.0**. This
-is not incidental: on 2026-08-23 the runner's floating `stable` reached 1.98.0
-and the `wasm32-wasip1` link began rejecting SWC's host imports —
+`rust-toolchain.toml`, `ci.yml` and `release.yml` all use **stable** Rust with
+the `wasm32-wasip1` target. An earlier SWC version caused the linker error:
 
 ```
 rust-lld: error: undefined symbol: __set_transform_result
 ```
 
-— which a plugin is supposed to leave undefined for the WASM host to supply at
-load time. `release:publish` runs `build:swc`, so an unpinned release would fail
-at the wasm build *after* passing every other gate. If you raise the pin, raise
-it in all three places and run `bun run build:swc` before trusting it.
+Upgrading `swc_core` resolved that issue and removed the need for the temporary
+Rust pin. Keep the Rust plugin and JavaScript `@swc/core` host compatible when
+upgrading. Always run `bun run release:check` with the release toolchain: the
+ordinary `ci` script does not build the WASM artifact.
 
 ### Provenance is granted but not used
 
