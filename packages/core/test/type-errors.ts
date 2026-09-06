@@ -3,6 +3,7 @@
 // Run: bunx tsc --noEmit test/type-errors.ts
 
 import {
+  eff,
   type Eff,
   type Throws,
   type Needs,
@@ -35,6 +36,34 @@ import {
   Chunk,
   Sinks,
 } from "../src";
+
+{
+  const Left = service<{ value: number }>()("IteratorLeft");
+  const Right = service<{ value: string }>()("IteratorRight");
+  const program = eff(function* () {
+    const left = yield* Left.get;
+    const right = yield* Right.get;
+    // @ts-expect-error yield* retains the service value type
+    const wrong: string = left.value;
+    void wrong;
+    return left.value + right.value.length;
+  });
+  const typed: Eff<
+    number,
+    Needs<{ value: number }, "IteratorLeft"> | Needs<{ value: string }, "IteratorRight">
+  > = program;
+  // @ts-expect-error both service requirements remain until provided
+  const missing: Eff<number, never> = program;
+  const flattened: Eff<number, never> = eff(function* () {
+    return succeed(42);
+  });
+  const failure = eff(function* () {
+    return yield* fail("failure");
+  });
+  // @ts-expect-error yielded failures remain in the effect channel
+  const unhandled: Eff<never, never> = failure;
+  void [typed, missing, flattened, unhandled];
+}
 import {
   AckError,
   autoCommitBatchWithin,

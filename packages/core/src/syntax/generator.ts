@@ -14,19 +14,20 @@
 // `try/catch` inside the generator catches failures (both typed errors and
 // defects) because the driver threads causes back via `gen.throw`.
 
-import { type Eff, Suspend, Op } from "../eff";
+import { type Eff, type InferEffects, Suspend, Op } from "../eff";
 import { succeed, fail, failCause } from "../constructors";
 import { Cause } from "../cause";
 
 // Make Suspend iterable so `yield* effect` works inside generator bodies.
-// TReturn/TNext are `any` by design: TNext=any is what lets
-// `const x: T = yield* effect` typecheck (the yield expression's type must
-// unify with every effect's value type in the body), and TReturn=any admits
-// generators returning any value. `unknown` in either slot breaks the
-// for-comprehension ergonomics.
+// Yield the concrete effect so the generator retains each requirement, and
+// return its value type so yield* preserves the type at the call site.
 declare module "../eff" {
   interface Suspend {
-    [Symbol.iterator](): Iterator<Suspend, any, any>;
+    [Symbol.iterator](): Generator<
+      this,
+      this extends { readonly _A: infer A } ? A : never,
+      unknown
+    >;
   }
 }
 
@@ -38,7 +39,11 @@ declare module "../eff" {
 
 type EffGenFn<A, S> = () => Generator<Eff<any, S>, A, any>;
 
-export function eff<A, S = never>(fn: EffGenFn<A, S>): Eff<A, S> {
+export function eff<Y extends Eff<any, any>, A>(
+  fn: () => Generator<Y, A, any>,
+): Eff<A extends Eff<infer B, any> ? B : A, InferEffects<Y> | InferEffects<A>>;
+export function eff<A, S = never>(fn: EffGenFn<A, S>): Eff<A, S>;
+export function eff(fn: EffGenFn<any, any>): Eff<any, any> {
   // Lazy: build the generator inside a Sync so the fn runs on each execution.
   return (new Suspend(Op.Sync, () => fn(), null) as any).flatMap((gen: any) =>
     drive(gen, undefined, null),
