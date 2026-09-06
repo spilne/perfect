@@ -12,7 +12,7 @@ the surrounding scope; nothing else changes about the program flow.
 <!-- @embed packages/core/examples/08-resources.ts#acquire-release -->
 
 ```ts
-import { sync } from "@spilne/perfect-core";
+import { sync, acquireRelease, scoped } from "@spilne/perfect-core";
 
 // .acquireRelease(release) — fluent, pair an acquire with cleanup.
 // .scoped() — define when the cleanup fires (the scope boundary).
@@ -78,7 +78,7 @@ console.log(trace); // → ["acquire", "release"]
 <!-- @embed packages/core/examples/08-resources.ts#release-on-failure-flat -->
 
 ```ts
-import { succeed, fail, sync, type Eff, type Throws } from "@spilne/perfect-core";
+import { succeed, fail, sync, acquireRelease, scoped, type Eff, type Throws } from "@spilne/perfect-core";
 
 // Same guarantee, chainable form — .acquireRelease + .scoped + .catch.
 const traceFlat: string[] = [];

@@ -16,3 +16,16 @@ export function rewriteEmbeddedExamples(
     return `<!-- @embed ${reference.file}#${reference.region} -->\n\n\`\`\`ts\n${code}\n\`\`\`\n\n<!-- @end -->`;
   });
 }
+export function identifiersIn(code: string): Set<string> {
+  const identifiers = new Set<string>();
+  // Tokenize strings before comments so https:// cannot erase the next line.
+  // Keep template tokens conservatively: interpolations may reference imports.
+  const tokens =
+    /"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`|\/\/[^\n]*|\/\*[\s\S]*?\*\/|[A-Za-z_$][A-Za-z0-9_$]*/g;
+  for (const [token] of code.matchAll(tokens)) {
+    if (token.startsWith('"') || token.startsWith("'") || token.startsWith("/")) continue;
+    for (const [identifier] of token.matchAll(/[A-Za-z_$][A-Za-z0-9_$]*/g))
+      identifiers.add(identifier);
+  }
+  return identifiers;
+}

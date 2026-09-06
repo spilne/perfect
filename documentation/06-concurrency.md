@@ -34,7 +34,7 @@ interrupted:
 <!-- @embed packages/core/examples/07-concurrency.ts#race-method -->
 
 ```ts
-import { succeed, sleep } from "@spilne/perfect-core";
+import { succeed, sleep, race } from "@spilne/perfect-core";
 
 // .race(other) — fluent two-way race. First to succeed wins.
 const fast = sleep(10).flatMap(() => succeed("fast"));

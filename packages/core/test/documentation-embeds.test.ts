@@ -1,5 +1,15 @@
 import { expect, test } from "bun:test";
-import { rewriteEmbeddedExamples } from "../../../documentation/embeds";
+import { identifiersIn, rewriteEmbeddedExamples } from "../../../documentation/embeds";
+
+test("example imports survive URLs and include template interpolation dependencies", () => {
+  const used = identifiersIn(
+    'const url = "https://api.example.com";\ntracingMiddleware();\nconst message = `hello ${nameOf(user)}`; // unusedHelper()',
+  );
+  expect(used.has("tracingMiddleware")).toBe(true);
+  expect(used.has("nameOf")).toBe(true);
+  expect(used.has("user")).toBe(true);
+  expect(used.has("unusedHelper")).toBe(false);
+});
 
 test("documentation embeds accept formatter blank lines and stay idempotent", () => {
   for (const gap of ["\n", "\n\n", "\r\n\r\n"]) {

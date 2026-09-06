@@ -50,7 +50,7 @@ Seeded PRNG for reproducibility:
 <!-- @embed packages/core/examples/12-testing.ts#test-random -->
 
 ```ts
-import { eff, provide, Random, TestRandom } from "@spilne/perfect-core";
+import { eff, provide, run, Random, TestRandom } from "@spilne/perfect-core";
 
 // TestRandom — seeded for reproducibility.
 const seeded = new TestRandom(42);
@@ -86,7 +86,7 @@ Captures `log` / `warn` / `error` calls instead of writing to stdout:
 <!-- @embed packages/core/examples/12-testing.ts#test-console -->
 
 ```ts
-import { eff, provide, Console, TestConsole } from "@spilne/perfect-core";
+import { eff, provide, run, Console, TestConsole } from "@spilne/perfect-core";
 
 // TestConsole captures log output instead of writing to stdout.
 const captured = new TestConsole();

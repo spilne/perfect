@@ -22,6 +22,7 @@ bun add @spilne/perfect-http-otel @opentelemetry/api
 ```ts
 import { SpanKind, SpanStatusCode } from "@opentelemetry/api";
 import { DefaultHttpClient } from "@spilne/perfect-http";
+import { tracingMiddleware } from "@spilne/perfect-http-otel";
 
 // tracingMiddleware starts a CLIENT span on every request, fills semantic
 // HTTP attributes (http.request.method, url.full, http.response.status_code,

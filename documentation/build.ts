@@ -31,7 +31,7 @@
 
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
-import { rewriteEmbeddedExamples } from "./embeds";
+import { identifiersIn, rewriteEmbeddedExamples } from "./embeds";
 
 const ROOT = join(import.meta.dir, "..");
 const DOC_DIR = join(ROOT, "documentation");
@@ -150,21 +150,6 @@ function parseSingleImport(stmt: string): ParsedImport | null {
   }
 
   return out;
-}
-
-function identifiersIn(code: string): Set<string> {
-  // Strip strings and block/line comments, then collect identifier-like tokens.
-  // Skip property/method accesses (preceded by `.`) so e.g. `x.runSync()`
-  // doesn't mark `runSync` as a used import.
-  const stripped = code
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/\/\/[^\n]*/g, "")
-    .replace(/(["'`])(?:\\.|(?!\1)[\s\S])*?\1/g, "");
-  const set = new Set<string>();
-  const idRe = /(?<!\.)\b[A-Za-z_$][A-Za-z0-9_$]*\b/g;
-  let m: RegExpExecArray | null;
-  while ((m = idRe.exec(stripped)) !== null) set.add(m[0]);
-  return set;
 }
 
 function renderImports(imports: ParsedImport[], body: string, packageName: string): string {
