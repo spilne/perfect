@@ -91,7 +91,7 @@ console.log(calls); // → 3
 
 ### Builders
 
-| | |
+| API / concept | Behavior |
 |---|---|
 | `RetryPolicy.recurs(n)` | retry up to n times, no delay |
 | `RetryPolicy.spaced(ms)` | fixed delay between retries |
@@ -104,7 +104,7 @@ console.log(calls); // → 3
 
 ### Modifiers (chainable)
 
-| | |
+| API / concept | Behavior |
 |---|---|
 | `.withMaxRetries(n)` | cap retry count |
 | `.withMaxDelay(ms)` | cap per-retry delay |

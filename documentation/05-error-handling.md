@@ -77,7 +77,7 @@ console.log(wild.runSync()); // → "cause: Fail"
 
 `Cause` is one of:
 
-| | |
+| API / concept | Behavior |
 |---|---|
 | `Cause.Fail` | typed failure (`fail(e)`) |
 | `Cause.Die` | defect (uncaught throw, `die(e)`) |
@@ -137,7 +137,7 @@ use `.retryAllBy(...)` or a `RetryPolicy.whenCause(...)` policy to opt in.
 
 ## API summary
 
-| | |
+| API / concept | Behavior |
 |---|---|
 | `.catch(f)` | handle any typed failure |
 | `.catchTag(tag, f)` | handle one discriminated variant |

@@ -33,7 +33,7 @@ console.log(resolveMs(Duration.hours(1))); // → 3_600_000
 
 <!-- @end -->
 
-| | |
+| API / concept | Behavior |
 |---|---|
 | `Duration.millis(n)` / `seconds` / `minutes` / `hours` / `days` / `weeks` | factories |
 | `Duration.parse("5m")` | parse `ms`, `s`, `m`, `h`, `d`, `w` |
@@ -143,7 +143,7 @@ console.log(lru.has("b").runSync()); // → false
 
 ### API
 
-| | |
+| API / concept | Behavior |
 |---|---|
 | `CacheStore.memory<K, V>({ ttlMs?, maxSize? })` | in-process LRU + TTL |
 | `store.get(k)` | returns `V | undefined` (`undefined` if missing or expired) |

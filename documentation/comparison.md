@@ -4,7 +4,10 @@ How Perfect compares to effect-ts, RxJS, and plain Promises.
 
 ## vs effect-ts
 
-Same model (typed errors, services, fibers, scopes, streams). Differences:
+Both model typed errors, services, fibers, scopes, and streams. The Effect
+column uses v3-style API names as an orientation aid, not a migration guide;
+check the [Effect documentation](https://effect.website/) for your installed
+major version.
 
 | | effect-ts | Perfect |
 |---|---|---|
@@ -12,10 +15,9 @@ Same model (typed errors, services, fibers, scopes, streams). Differences:
 | Composition | `pipe(eff, Effect.flatMap(f))` | `eff.flatMap(f)` (fluent) |
 | Generator | `Effect.gen(function* () { yield* e })` | `eff(function* () { yield* e })` |
 | Services | `Context.Tag<T>` (class) | `service<T>()("Name")` (function) |
-| Layer | `Layer<Out, E, In>` (class) | `Layer<Services, E>` (type alias over Eff) |
+| Layer | `Layer<Out, E, In>` | `Layer<Services, E>` (type alias over Eff) |
 | Layer apply | `Effect.provide(eff, layer)` | `eff.with(layer)` |
 | Layer chain | `Layer.merge(a, b)` / `Layer.provide` | `merge` / `.and` / `.provideTo` / `.with` (chains) |
-| Bundle | larger surface, more constructors | leaner — reuses primitives where possible |
 
 When to pick which:
 - **effect-ts** — established ecosystem, more batteries (Schema, HttpApi,
@@ -26,17 +28,19 @@ When to pick which:
 
 ## vs RxJS
 
-RxJS is **multi-shot** push streams. Perfect's `Eff` is **single-shot** pull.
-Different semantics, different problems.
+An [RxJS `Observable`](https://rxjs.dev/guide/observable) can emit multiple values per subscription. A Perfect
+`Eff` produces one successful result per execution, or fails or is interrupted;
+the same effect value can be executed again. Perfect's `Stream` is the
+multi-value, pull-based abstraction.
 
 | | RxJS | Perfect |
 |---|---|---|
-| Cardinality | `Observable<T>` — 0..N values | `Eff<A>` — exactly 1 |
+| Cardinality | `Observable<T>` — 0..N values | `Eff<A>` — one value on success |
 | Streams | first-class (everything is one) | `Stream<A>` is the multi-value variant |
 | Cancellation | `subscription.unsubscribe()` | structured: scope/fiber boundaries |
 | Errors | one terminal `error` channel | typed `Throws<E>` + structured `Cause` |
 | DI | external | first-class via services |
-| Resource management | `using` operator (limited) | `acquireRelease` + `scoped` (guaranteed) |
+| Resource management | subscription teardown / `using` | `acquireRelease` + `scoped` |
 
 For an RxJS-like API on Perfect, use `Stream<A>` — but it's a pull model with
 a fused interpreter, not a push model.
@@ -50,15 +54,16 @@ Promises are great until you need:
 | Typed errors | `try/catch` + cast `unknown` | `Throws<E>` in the type |
 | Cancellation | `AbortController` (manual, viral) | structured fiber interrupts |
 | Dependency injection | constructor injection or globals | `service<T>` + `provide` / `Layer` |
-| Retry | hand-rolled | `RetryPolicy.exponential().withFullJitter()` |
+| Retry | application code or a library | `RetryPolicy.exponential({ initial: 100 }).withFullJitter()` |
 | Resource cleanup | `try/finally` | `acquireRelease` + `scoped` |
 | Concurrency limit | `Promise.all` chunked manually | `Semaphore`, `WorkerPool` |
 | Race | `Promise.race` (winner only, others orphaned) | `race` (interrupts losers) |
 | Testing time | mock `setTimeout` | `TestClock` |
 
 Performance depends on runtime and hardware. The repository performance gate
-tracks direct `.flatMap`, generator, Promise, and stream paths so regressions
-are measured instead of frozen into documentation claims.
+tracks core execution, fiber fan-out, streams, and primitive scaling. The
+separate syntax benchmarks compare generator and direct method-chain costs;
+not every benchmark is an enforced gate.
 
 ## When NOT to use Perfect
 

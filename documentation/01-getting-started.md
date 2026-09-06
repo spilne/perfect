@@ -130,7 +130,7 @@ the experimental `for { ... } yield` syntax.
 | --------------- | ------------------------------------------------------------- |
 | `runSync(eff)`  | Sync only — throws if the effect suspends.                    |
 | `run(eff)`      | Returns `Promise<A>`, rejects with squashed cause on failure. |
-| `runExit(eff)`  | Returns `Promise<Exit<E, A>>` — never throws.                 |
+| `runExit(eff)`  | Returns `Promise<Exit<unknown, A>>` — preserves the full failure cause.                 |
 | `runFiber(eff)` | Returns a `Fiber<A>` you can join, interrupt, race.           |
 
 Each runner is also available as a fluent method, so a chain can close on

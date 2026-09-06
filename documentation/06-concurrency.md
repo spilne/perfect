@@ -173,7 +173,7 @@ stop();
 
 Available fiber diagnostics:
 
-| | |
+| API / concept | Behavior |
 |---|---|
 | `fiber.status` | `"ready"`, `"running"`, `"suspended"`, or `"done"` |
 | `fiber.interrupted` | true when interrupted or pending interruption |
@@ -184,7 +184,7 @@ Available fiber diagnostics:
 
 ## API summary
 
-| | |
+| API / concept | Behavior |
 |---|---|
 | `fork(eff)` | spawn a fiber, scoped to parent |
 | `forkDaemon(eff)` | spawn an unscoped fiber |

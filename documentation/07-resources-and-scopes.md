@@ -181,7 +181,7 @@ program built with `.with(layer)` ends. See
 
 ## API summary
 
-| | |
+| API / concept | Behavior |
 |---|---|
 | `acquireRelease(acquire, release)` | pair acquire effect + release function |
 | `scoped(eff)` | define scope boundary; finalizers fire on exit |

@@ -13,7 +13,8 @@ Twelve packages publish: `core`, `http`, `http-otel`, `kafka`, `kafka-kafkajs`,
 
 ## One-time setup
 
-Nothing has been published yet, so every step below is still pending.
+Verify these prerequisites before a release; repository banners are not a
+live registry or account-permission check.
 
 ### 1. Verify the npm scope
 
@@ -68,15 +69,19 @@ registry.
 Requires the Rust toolchain, which is pinned to 1.90.0 (see
 [Pinned toolchain](#pinned-rust-toolchain) below).
 
-### 5. Create an automation token
+### 5. Configure publishing credentials
 
-<https://www.npmjs.com/settings/~/tokens> → **Generate New Token** → **Granular
-Access**, or Classic → **Automation**.
+The current workflow uses `NPM_TOKEN` and invokes `bun publish`. For that
+workflow, create a granular access token with write access to the required
+packages or scope, an expiration date, and only the permissions needed.
+Organization-management access alone does not grant package publishing rights.
+Classic tokens are no longer supported. See [npm's token documentation](https://docs.npmjs.com/about-access-tokens/).
 
-The token type matters. An **automation** token bypasses two-factor auth; a
-plain publish token under 2FA enforcement will hang the release waiting for an
-OTP that CI can never supply. Scope it to the `@spilne` org with read+write and
-set an expiry you will remember to rotate.
+Unattended publication must satisfy the package's 2FA policy. Check the
+[current token creation guidance](https://docs.npmjs.com/creating-and-viewing-access-tokens/)
+before selecting Bypass 2FA; do not enable it where fully enforced 2FA is
+required. Never commit credentials. Moving to trusted publishing requires a
+separate workflow change; the existing Bun publisher is not configured for it.
 
 ### 6. Wire it into GitHub
 
@@ -96,7 +101,10 @@ the button.
 
 ```sh
 npm view @spilne/perfect-core
-cd /tmp && npm init -y && npm install @spilne/perfect-core     # from the real registry
+release_smoke_dir=$(mktemp -d)
+cd "$release_smoke_dir"
+npm init -y
+npm install @spilne/perfect-core     # from the real registry
 ```
 
 Then drop the "not yet on npm" banner from `README.md`. The StackBlitz template
@@ -133,9 +141,11 @@ different distribution tag.
 
 ### Publishing is effectively irreversible
 
-`npm unpublish` is restricted to the first 72 hours, and only while nothing
-depends on the package. Treat the first publish as permanent — which is why
-step 1 comes first.
+Do not treat unpublishing as a rollback strategy. npm allows it within the
+first 72 hours when registry dependency conditions are met; later removal
+has additional eligibility conditions. Check the [npm unpublish policy](https://docs.npmjs.com/policies/unpublish/)
+before relying on removal. Prefer a corrected release when users already
+depend on the package.
 
 ### Pinned Rust toolchain
 

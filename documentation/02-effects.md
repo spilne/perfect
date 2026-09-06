@@ -15,7 +15,7 @@ Read `Eff<A, S>` as “produces `A`, with requirements `S`.”
 
 ## Constructors
 
-| | |
+| API / concept | Behavior |
 |---|---|
 | `succeed(a)` | wrap a pure value as `Eff<A, never>` |
 | `sync(() => a)` | run a synchronous side-effect |
@@ -36,11 +36,11 @@ const d = tryPromise(() => fetch("/api/users"));    // Eff<Response, Throws<unkn
 
 ## Running
 
-| | When to use |
+| Runner | When to use |
 |---|---|
 | `runSync(eff)` | synchronous-only programs (throws if the effect suspends) |
 | `run(eff)` | returns `Promise<A>`, rejects with squashed cause on failure |
-| `runExit(eff)` | returns `Promise<Exit<E, A>>` — never throws; you switch on the exit |
+| `runExit(eff)` | returns `Promise<Exit<unknown, A>>` — preserves the full failure cause; you switch on the exit |
 | `runFiber(eff)` | returns a `Fiber<A>` you can join, interrupt, race externally |
 
 Use `runExit` when you need to inspect the failure structure (typed error,

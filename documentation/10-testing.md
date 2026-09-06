@@ -36,7 +36,7 @@ immediately, but earlier asynchronous operations may delay sleep registration.
 Check `pendingCount` or use a synchronous test scheduler when you need an exact
 registration boundary.
 
-| | |
+| API / concept | Behavior |
 |---|---|
 | `new TestClock(start = 0)` | construct with optional start time |
 | `.now()` | current virtual time |
@@ -108,7 +108,7 @@ console.log(captured.logs()); // → ["hello", "world"]
 
 <!-- @end -->
 
-| | |
+| API / concept | Behavior |
 |---|---|
 | `.logs()` | array of `log()` messages |
 | `.warns()` | array of `warn()` messages |

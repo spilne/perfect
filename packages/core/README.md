@@ -82,7 +82,7 @@ const c = eff(($) => {
 | --------------- | ------------------------------------------------------------- |
 | `runSync(eff)`  | Sync only — throws if the effect suspends.                    |
 | `run(eff)`      | Returns `Promise<A>`, rejects with squashed cause on failure. |
-| `runExit(eff)`  | Returns `Promise<Exit<E, A>>` — never throws.                 |
+| `runExit(eff)`  | Returns `Promise<Exit<unknown, A>>` — preserves the full failure cause.                 |
 | `runFiber(eff)` | Returns a `Fiber<A>` you can join, interrupt, race.           |
 
 Each is also a fluent method: `program.run()`, `.runSync()`, `.runExit()`, `.runFiber()`.

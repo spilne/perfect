@@ -320,7 +320,7 @@ run builds the layer again and owns its own finalizers.
 
 ## API summary
 
-| | |
+| API / concept | Behavior |
 |---|---|
 | `service<T>()(name)` | create a service tag |
 | `Tag.get` | retrieves the implementation, adds `Needs<T, Name>` |
