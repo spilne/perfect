@@ -16,11 +16,11 @@
     "@spilne/perfect-kafka-platformatic": "workspace:*"
   },
   "devDependencies": {
-    "@platformatic/kafka": "^2.9.0",
+    "@platformatic/kafka": "^2.11.0",
     "@testcontainers/kafka": "^12.1.0",
     "@types/debug": "^4.1.12",
     "kafkajs": "^2.2.4",
-    "node": "26.7.0",
+    "node": "26.8.1",
     "testcontainers": "^12.1.0"
   }
 }
