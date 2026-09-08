@@ -116,7 +116,12 @@ async function isPublished({ name, version }: PackageManifest): Promise<boolean>
 const packages = dependencyOrder(await workspacePackages());
 if (packages.length === 0) throw new Error("No public workspace packages found");
 
-if (!dryRun) await run(["bun", "pm", "whoami"]);
+for (const entry of packages) assertPublishableManifest(entry.manifest);
+
+if (!dryRun) {
+  await run(["bun", "scripts/release.ts", "--verify-tag"]);
+  await run(["bun", "pm", "whoami"]);
+}
 
 for (const entry of packages) {
   const id = `${entry.manifest.name}@${entry.manifest.version}`;
@@ -131,8 +136,4 @@ for (const entry of packages) {
     ? ["bun", "pm", "pack", "--dry-run"]
     : ["bun", "publish", "--frozen-lockfile", "--no-save", "--access", "public", "--tag", npmTag];
   await run(command, entry.directory);
-}
-
-if (!dryRun) {
-  await run(["bun", "./node_modules/@changesets/cli/bin.js", "git-tag"]);
 }
