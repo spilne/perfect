@@ -43,13 +43,20 @@ const program = eff(function* () {
 console.log(await provide(program, Db, liveDb).run()); // Ada
 ```
 
-> **Pre-release.** The packages are not on npm yet — clone the repo and use
-> the Bun workspace. Install lines below describe the post-publish shape.
+## Install
 
-Try the [playground built into the guide](documentation/playground.md), or
+```bash
+npm install @spilne/perfect-core
+```
+
+See the [getting started guide](https://spilne.github.io/perfect/01-getting-started)
+for setup and the [release notes](https://github.com/spilne/perfect/releases)
+for published versions.
+
+Try the [playground built into the guide](https://spilne.github.io/perfect/playground), or
 [open its project in StackBlitz](https://stackblitz.com/fork/github/spilne/perfect/tree/main/templates/stackblitz?title=Perfect%20Playground).
-The standalone starter is checked against the monorepo in CI and becomes directly
-runnable when `@spilne/perfect-core` is published to npm.
+The standalone starter installs the published npm package and is checked against
+the monorepo in CI.
 
 ## Core ideas
 
@@ -70,20 +77,20 @@ runnable when `@spilne/perfect-core` is published to npm.
 
 ## Packages
 
-| Package                       | What it is                                                                                                                                                                                                                                                  |
-| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@spilne/perfect-core`               | The runtime: `Eff`, fibers, scheduler, `Stream`, concurrency primitives (Queue, Semaphore, CircuitBreaker, RateLimiter, Pool, PubSub, …), Layer DI, Clock/Random/Console/Logger/Tracer/Metrics services, and the `connect` contracts for messaging backends |
-| `@spilne/perfect-http`               | HTTP client: typed errors, retry, streaming (SSE/NDJSON), mock client, schema-library-agnostic validation                                                                                                                                                   |
-| `@spilne/perfect-kafka`              | Driver-neutral Kafka backend for the `connect` contracts — typed failures, offset-safe parallel commits, and a config builder                                                                                                                               |
-| `@spilne/perfect-kafka-kafkajs`      | KafkaJS adapter for `@spilne/perfect-kafka` (Bun and Node.js)                                                                                                                                                                                                      |
-| `@spilne/perfect-kafka-platformatic` | Platformatic Kafka adapter for `@spilne/perfect-kafka` (Node.js)                                                                                                                                                                                                   |
-| `@spilne/perfect-postgres`           | Postgres coordination, LISTEN/NOTIFY streams, durable state, and PGMQ queues with optional FIFO message groups                                                                                                                                              |
-| `@spilne/perfect-redis`              | Redis-backed concurrency primitives, durable state, Redis Streams, and bounded Pub/Sub connectors                                                                                                                                                           |
-| `@spilne/perfect-topology`           | Flink-style stream topology engine: windows, joins, stage planning, distributed runs over a shuffle transport                                                                                                                                               |
-| `@spilne/perfect-otel`               | OpenTelemetry bridge for the core `Tracer` and `Metrics` services                                                                                                                                                                                           |
-| `@spilne/perfect-http-otel`          | HTTP-specific tracing middleware + W3C trace propagation for `@spilne/perfect-http`                                                                                                                                                                                |
-| `@spilne/perfect-transform`          | Build-time compiler for the `eff(($) => …)` and `for { x <- e } yield` syntaxes (Bun plugin)                                                                                                                                                                |
-| `@spilne/perfect-swc-plugin`         | SWC WASM plugin — the canonical `eff(($) => …)` compiler for Next.js/Vite/anything SWC                                                                                                                                                                      |
+| Package | What it is |
+| --- | --- |
+| [@spilne/perfect-core](https://www.npmjs.com/package/@spilne/perfect-core) | The runtime: `Eff`, fibers, scheduler, `Stream`, concurrency primitives (Queue, Semaphore, CircuitBreaker, RateLimiter, Pool, PubSub, …), Layer DI, Clock/Random/Console/Logger/Tracer/Metrics services, and the `connect` contracts for messaging backends |
+| [@spilne/perfect-http](https://www.npmjs.com/package/@spilne/perfect-http) | HTTP client: typed errors, retry, streaming (SSE/NDJSON), mock client, schema-library-agnostic validation |
+| [@spilne/perfect-kafka](https://www.npmjs.com/package/@spilne/perfect-kafka) | Driver-neutral Kafka backend for the `connect` contracts — typed failures, offset-safe parallel commits, and a config builder |
+| [@spilne/perfect-kafka-kafkajs](https://www.npmjs.com/package/@spilne/perfect-kafka-kafkajs) | KafkaJS adapter for `@spilne/perfect-kafka` (Bun and Node.js) |
+| [@spilne/perfect-kafka-platformatic](https://www.npmjs.com/package/@spilne/perfect-kafka-platformatic) | Platformatic Kafka adapter for `@spilne/perfect-kafka` (Node.js) |
+| [@spilne/perfect-postgres](https://www.npmjs.com/package/@spilne/perfect-postgres) | Postgres coordination, LISTEN/NOTIFY streams, durable state, and PGMQ queues with optional FIFO message groups |
+| [@spilne/perfect-redis](https://www.npmjs.com/package/@spilne/perfect-redis) | Redis-backed concurrency primitives, durable state, Redis Streams, and bounded Pub/Sub connectors |
+| [@spilne/perfect-topology](https://www.npmjs.com/package/@spilne/perfect-topology) | Flink-style stream topology engine: windows, joins, stage planning, distributed runs over a shuffle transport |
+| [@spilne/perfect-otel](https://www.npmjs.com/package/@spilne/perfect-otel) | OpenTelemetry bridge for the core `Tracer` and `Metrics` services |
+| [@spilne/perfect-http-otel](https://www.npmjs.com/package/@spilne/perfect-http-otel) | HTTP-specific tracing middleware + W3C trace propagation for `@spilne/perfect-http` |
+| [@spilne/perfect-transform](https://www.npmjs.com/package/@spilne/perfect-transform) | Build-time compiler for the `eff(($) => …)` and `for { x <- e } yield` syntaxes (Bun plugin) |
+| [@spilne/perfect-swc-plugin](https://www.npmjs.com/package/@spilne/perfect-swc-plugin) | SWC WASM plugin — the canonical `eff(($) => …)` compiler for Next.js/Vite/anything SWC |
 
 ## Development
 
@@ -110,19 +117,19 @@ The `node-runtime` CI job runs this script in a Node matrix (`22.x`, `24.x`) on
 macOS for manual/dispatch runs.
 
 Rust toolchain needed only for `bun run build:swc` (the SWC WASM plugin).
-The [full guide](documentation/README.md) covers the core runtime, HTTP,
+The [full guide](https://spilne.github.io/perfect/) covers the core runtime, HTTP,
 observability, connector contracts, Kafka, Redis/PostgreSQL backends, and
-stateful topologies. The [package map](documentation/19-packages.md) tracks
+stateful topologies. The [package map](https://spilne.github.io/perfect/19-packages) tracks
 every public adapter, compiler integration, subpath export, and the private
 real-service test workspace.
-Package versioning and publication are documented in [`RELEASING.md`](RELEASING.md).
+Package versioning and publication are documented in the [release guide](https://github.com/spilne/perfect/blob/main/RELEASING.md).
 
 ## Status
 
 Pre-1.0, developed in the open. The runtime core is extensively tested
 (covered by unit tests and local benchmarks) and the API surface is
-stabilizing; expect breaking changes until the first npm release.
+stabilizing; expect breaking changes before version 1.0.0.
 
 ## License
 
-MIT
+[MIT](https://github.com/spilne/perfect/blob/main/LICENSE)
