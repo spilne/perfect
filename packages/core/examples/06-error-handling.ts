@@ -42,11 +42,10 @@ assertEq(wild.runSync(), "cause: Fail");
 // .tapError — observe a typed failure without handling it (re-fails).
 let observedError: string | null = null;
 const observed = (fail("bad") as Eff<never, Throws<string>>)
-  .tapError(
-    (e) =>
-      sync(() => {
-        observedError = e;
-      }) as any,
+  .tapError((e) =>
+    sync(() => {
+      observedError = e;
+    }),
   )
   .catch(() => succeed("ok"));
 

@@ -1,73 +1,46 @@
 {
   "$schema": "./node_modules/nx/schemas/nx-schema.json",
   "namedInputs": {
-    "default": [
-      "{projectRoot}/**/*",
-      "sharedGlobals"
-    ],
-    "production": [
-      "default"
-    ],
+    "default": ["{projectRoot}/**/*", "sharedGlobals"],
+    "production": ["default"],
     "sharedGlobals": []
   },
   "targetDefaults": {
     "build": {
       "executor": "nx:run-commands",
-      "dependsOn": [
-        "^build"
-      ],
+      "dependsOn": ["^build"],
       "options": {
-        "commands": [
-          "bun run build"
-        ],
+        "commands": ["bun run build"],
         "cwd": "{projectRoot}"
       },
-      "outputs": [
-        "{projectRoot}/dist"
-      ]
+      "outputs": ["{projectRoot}/dist"]
     },
     "typecheck": {
       "executor": "nx:run-commands",
-      "dependsOn": [
-        "^typecheck"
-      ],
+      "dependsOn": ["^typecheck"],
       "options": {
-        "commands": [
-          "bun run typecheck"
-        ],
+        "commands": ["bun run typecheck"],
         "cwd": "{projectRoot}"
       }
     },
     "test": {
       "executor": "nx:run-commands",
       "options": {
-        "commands": [
-          "bun test --pass-with-no-tests"
-        ],
+        "commands": ["bun test --pass-with-no-tests"],
         "cwd": "{projectRoot}"
       }
     },
     "lint": {
       "executor": "nx:run-commands",
       "options": {
-        "commands": [
-          "oxlint -c .oxlintrc.json {projectRoot}"
-        ],
+        "commands": ["oxlint -c .oxlintrc.json {projectRoot}"],
         "cwd": "{workspaceRoot}"
       },
-      "inputs": [
-        "default",
-        "{workspaceRoot}/.oxlintrc.json"
-      ]
+      "inputs": ["default", "{workspaceRoot}/.oxlintrc.json"]
     },
     "ci": {
       "executor": "nx:noop",
-      "dependsOn": [
-        "typecheck",
-        "lint",
-        "test",
-        "^ci"
-      ]
+      "dependsOn": ["typecheck", "lint", "test", "^ci"]
     }
   },
   "pluginsConfig": {
@@ -76,5 +49,35 @@
       "analyzeLockfile": false
     }
   },
-  "analytics": false
+  "analytics": false,
+  "release": {
+    "projects": ["packages/*", "templates/*", "!@spilne/perfect-integration"],
+    "projectsRelationship": "fixed",
+    "releaseTag": {
+      "pattern": "v{version}"
+    },
+    "version": {
+      "currentVersionResolver": "disk",
+      "preserveMatchingDependencyRanges": false,
+      "adjustSemverBumpsForZeroMajorVersion": false,
+      "versionActionsOptions": {
+        "installIgnoreScripts": true
+      }
+    },
+    "changelog": {
+      "workspaceChangelog": {
+        "createRelease": false,
+        "renderOptions": {
+          "authors": false
+        }
+      },
+      "projectChangelogs": false
+    },
+    "git": {
+      "commit": true,
+      "tag": true,
+      "push": false,
+      "commitMessage": "chore(release): {version}"
+    }
+  }
 }

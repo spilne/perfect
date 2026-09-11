@@ -64,3 +64,12 @@ build-swc:
 	bun run build:swc
 
 ci: fmt-check lint typecheck test build smoke docs-check perf-gate
+
+.PHONY: release release-dry
+export VERSION
+
+release:
+	bun run release
+
+release-dry:
+	bun run release --dry-run

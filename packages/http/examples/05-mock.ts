@@ -2,7 +2,7 @@
 //
 // Run: bun packages/http/examples/05-mock.ts
 
-import { type ResponseParser, MockHttpClient } from "../src";
+import { type ResponseParser, HttpStatusError, MockHttpClient } from "../src";
 import { assertEq } from "./_assert";
 
 interface User {
@@ -10,9 +10,14 @@ interface User {
   name: string;
 }
 const UserSchema: ResponseParser<User> = {
-  safeParse: (d: any) =>
-    d && typeof d.id === "number" && typeof d.name === "string"
-      ? { success: true, data: d }
+  safeParse: (d: unknown) =>
+    d !== null &&
+    typeof d === "object" &&
+    "id" in d &&
+    "name" in d &&
+    typeof d.id === "number" &&
+    typeof d.name === "string"
+      ? { success: true, data: { id: d.id, name: d.name } }
       : { success: false, error: "no" },
 };
 
@@ -21,7 +26,7 @@ const UserSchema: ResponseParser<User> = {
 const mock = new MockHttpClient();
 mock.on("GET", "/users/1", { id: 1, name: "alice" });
 
-const user = await mock.get("/users/1", UserSchema).run();
+const user = await mock.get("/users/1", UserSchema).orDie().run();
 assertEq(user, { id: 1, name: "alice" });
 assertEq(mock.calledTimes("GET", "/users/1"), 1);
 // <<< example
@@ -31,12 +36,13 @@ assertEq(mock.calledTimes("GET", "/users/1"), 1);
 mock.reset();
 mock.on("GET", "/users/999", MockHttpClient.fail(404, "not found"));
 
-let caught: any;
+let caught: unknown;
 try {
-  await mock.get("/users/999", UserSchema).run();
+  await mock.get("/users/999", UserSchema).orDie().run();
 } catch (e) {
   caught = e;
 }
+if (!(caught instanceof HttpStatusError)) throw new Error("Expected HttpStatusError");
 assertEq(caught._tag, "HttpStatusError");
 assertEq(caught.status, 404);
 // <<< example
@@ -47,14 +53,15 @@ assertEq(caught.status, 404);
 mock.reset();
 mock.onSequence("GET", "/u", [MockHttpClient.fail(503, "down"), { id: 7, name: "after-retry" }]);
 
-let firstErr: any;
+let firstErr: unknown;
 try {
-  await mock.get("/u", UserSchema).run();
+  await mock.get("/u", UserSchema).orDie().run();
 } catch (e) {
   firstErr = e;
 }
+if (!(firstErr instanceof HttpStatusError)) throw new Error("Expected HttpStatusError");
 assertEq(firstErr.status, 503);
 
-const second = await mock.get("/u", UserSchema).run();
+const second = await mock.get("/u", UserSchema).orDie().run();
 assertEq(second, { id: 7, name: "after-retry" });
 // <<< example

@@ -27,9 +27,14 @@ interface User {
 
 // Any { safeParse } object works — zod schemas satisfy this directly.
 const UserSchema: ResponseParser<User> = {
-  safeParse: (d: any) =>
-    d && typeof d.id === "number" && typeof d.name === "string"
-      ? { success: true, data: d as User }
+  safeParse: (d: unknown) =>
+    d !== null &&
+    typeof d === "object" &&
+    "id" in d &&
+    "name" in d &&
+    typeof d.id === "number" &&
+    typeof d.name === "string"
+      ? { success: true, data: { id: d.id, name: d.name } }
       : { success: false, error: "not a User" },
 };
 
@@ -39,7 +44,7 @@ const client = new DefaultHttpClient({
 });
 
 // fetch → status check → JSON → schema, as one typed effect
-const user = await client.get("/users/1", UserSchema).run();
+const user = await client.get("/users/1", UserSchema).orDie().run();
 
 // errors are tagged — handle them in the type
 const safe = client

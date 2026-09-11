@@ -2,12 +2,10 @@ name: Release
 
 on:
   push:
-    branches: [main]
-  workflow_dispatch:
+    tags: ["v*"]
 
 permissions:
   contents: write
-  pull-requests: write
   pages: write
   id-token: write
 
@@ -20,7 +18,6 @@ concurrency:
 
 jobs:
   release:
-    if: github.event_name == 'workflow_dispatch' || vars.NPM_RELEASE_ENABLED == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -43,41 +40,43 @@ jobs:
 
       - run: bun install --frozen-lockfile
 
+      - name: Verify tag and package versions
+        run: bun run release:verify
+
       - run: bun run ci
 
-      - name: Create version PR or publish packages
-        id: changesets
-        uses: changesets/action@v2
-        with:
-          version-script: bun run version-packages
-          publish-script: bun run release:publish
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Validate all release artifacts before publishing
+        run: bun run release:check
 
-      # Documentation publishes with the release, not on every push to main, so
-      # the live site always describes the version that is actually on npm.
-      # `published` is false when this run only opened or updated the version
-      # PR, which is most runs -- those must not deploy.
+      - name: Test the built SWC plugin
+        run: bun test packages/transform/test/swc-e2e.test.ts
+
       - name: Build the documentation site
-        if: steps.changesets.outputs.published == 'true'
         run: bun run documentation:build:html
 
+      - name: Publish packages
+        run: bun run release:publish
+        env:
+          NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --verify-tag --title "$RELEASE_TAG" --generate-notes
+          fi
+
       - uses: actions/configure-pages@v5
-        if: steps.changesets.outputs.published == 'true'
 
       - uses: actions/upload-pages-artifact@v4
-        if: steps.changesets.outputs.published == 'true'
         with:
           path: documentation/.vitepress/dist
 
-    outputs:
-      published: ${{ steps.changesets.outputs.published }}
-
   deploy-docs:
     needs: release
-    if: needs.release.outputs.published == 'true'
     runs-on: ubuntu-latest
     permissions:
       pages: write

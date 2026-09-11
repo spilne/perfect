@@ -2,14 +2,27 @@
 
 Perfect is a TypeScript effect runtime — like effect-ts or ZIO, but with a
 flat union type, fluent API, and three syntactic styles for the same
-underlying machinery. This guide takes you from zero to a working program in
-five minutes.
+underlying machinery. Start with a runnable repository example, then compose
+and run your own effects.
 
 ## Install
 
 > **Pre-release**: the packages are not published to npm yet — clone the
 > repo and use the Bun workspace. The commands below describe the
 > post-publish shape.
+
+For the repository workflow:
+
+```bash
+git clone https://github.com/spilne/perfect.git
+cd perfect
+bun install
+bun packages/core/examples/01-hello.ts
+```
+
+To read the guide locally, run `bun run documentation:dev` and open the URL
+printed by VitePress. `bun run smoke:stackblitz` builds and tests the standalone
+starter; it does not start an interactive server.
 
 The [built-in playground](./playground.md) includes editable examples for typed
 errors, concurrency, retry, state, cancellation, and observation. Programs run
@@ -43,15 +56,15 @@ The smallest possible Eff:
 ```ts
 import { succeed } from "@spilne/perfect-core";
 
-// runSync — for purely synchronous programs (no Async, no Sleep, no Fork).
+// runSync — for programs that complete synchronously.
 const greet = succeed("hello, perfect");
 console.log(greet.runSync()); // → "hello, perfect"
 ```
 
 <!-- @end -->
 
-`runSync` works for any program that doesn't suspend (no `sleep`, no `Fork`,
-no `Async`). For everything else, use `run`, which returns a `Promise`.
+`runSync` requires the program to complete synchronously. For timers, I/O,
+or other work that waits asynchronously, use `run`, which returns a `Promise`.
 
 ## Three syntactic styles
 
@@ -96,7 +109,7 @@ console.log(composed.runSync()); // → 42
 
 <!-- @end -->
 
-### `eff($)` source syntax (cleanest, requires SWC plugin)
+### `eff($)` source syntax (requires a compiler plugin)
 
 ```ts
 const program = eff(($) => {
@@ -117,7 +130,7 @@ the experimental `for { ... } yield` syntax.
 | --------------- | ------------------------------------------------------------- |
 | `runSync(eff)`  | Sync only — throws if the effect suspends.                    |
 | `run(eff)`      | Returns `Promise<A>`, rejects with squashed cause on failure. |
-| `runExit(eff)`  | Returns `Promise<Exit<E, A>>` — never throws.                 |
+| `runExit(eff)`  | Returns `Promise<Exit<unknown, A>>` — preserves the full failure cause.                 |
 | `runFiber(eff)` | Returns a `Fiber<A>` you can join, interrupt, race.           |
 
 Each runner is also available as a fluent method, so a chain can close on

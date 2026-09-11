@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.scripts.json",
+  "compilerOptions": {
+    "paths": {
+      "@spilne/perfect-core": ["./packages/core/src/index.ts"],
+      "@spilne/perfect-core/*": ["./packages/core/src/*"],
+      "@spilne/perfect-http": ["./packages/http/src/index.ts"],
+      "@spilne/perfect-http/*": ["./packages/http/src/*"]
+    }
+  },
+  "include": ["packages/*/examples/**/*.ts"],
+  "references": []
+}

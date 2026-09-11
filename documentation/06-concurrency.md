@@ -7,6 +7,7 @@ is interrupted, children are interrupted too.
 ## Fork and join
 
 <!-- @embed packages/core/examples/07-concurrency.ts#fork-join -->
+
 ```ts
 import { succeed, sleep, join } from "@spilne/perfect-core";
 
@@ -16,13 +17,16 @@ const forkExample = sleep(10)
   .fork()
   .flatMap((fiber) => join(fiber));
 
-console.log(await forkExample.run()); // → 42
+console.log(await forkExample.orDie().run()); // → 42
 ```
+
 <!-- @end -->
 
-`fork(eff)` returns `Eff<Fiber<A>, never>`. The fiber starts immediately on
-the next scheduler tick. `join(fiber)` awaits its result, threading typed
-errors and interrupts back through.
+`fork(eff)` returns an effect producing `Fiber<A>`. It retains the child's
+service requirements, but child failures are observed through the fiber.
+The scheduler starts the child. `join(fiber)` awaits its result and exposes a
+failed child as `Throws<Cause>`; use `awaitFiber(fiber)` to inspect its `Exit`
+without adding a typed failure.
 
 ## Race
 
@@ -30,20 +34,23 @@ errors and interrupts back through.
 interrupted:
 
 <!-- @embed packages/core/examples/07-concurrency.ts#race-method -->
+
 ```ts
-import { succeed, sleep } from "@spilne/perfect-core";
+import { succeed, sleep, race } from "@spilne/perfect-core";
 
 // .race(other) — fluent two-way race. First to succeed wins.
 const fast = sleep(10).flatMap(() => succeed("fast"));
 const slow = sleep(50).flatMap(() => succeed("slow"));
 
-console.log(await fast.race(slow).run()); // → "fast"
+console.log(await fast.race(slow).orDie().run()); // → "fast"
 ```
+
 <!-- @end -->
 
 For 3+ effects, use the variadic form:
 
 <!-- @embed packages/core/examples/07-concurrency.ts#race-variadic -->
+
 ```ts
 import { succeed, sleep, race } from "@spilne/perfect-core";
 
@@ -52,9 +59,12 @@ const winner = await race([
   sleep(30).flatMap(() => succeed("a")),
   sleep(10).flatMap(() => succeed("b")),
   sleep(20).flatMap(() => succeed("c")),
-]).run();
+])
+  .orDie()
+  .run();
 console.log(winner); // → "b"
 ```
+
 <!-- @end -->
 
 `raceFirst([a, b])` — first to **finish** wins (success OR failure).
@@ -67,6 +77,7 @@ console.log(winner); // → "b"
 ### Array form — `all([a, b, c])` → tuple
 
 <!-- @embed packages/core/examples/07-concurrency.ts#all-parallel -->
+
 ```ts
 import { succeed, sleep, all } from "@spilne/perfect-core";
 
@@ -75,15 +86,19 @@ const results = await all([
   sleep(10).flatMap(() => succeed("a")),
   sleep(20).flatMap(() => succeed("b")),
   sleep(30).flatMap(() => succeed("c")),
-]).run();
+])
+  .orDie()
+  .run();
 
 console.log(results); // → ["a", "b", "c"]
 ```
+
 <!-- @end -->
 
 ### Object form — `all({ a, b, c })` → record (named destructure)
 
 <!-- @embed packages/core/examples/07-concurrency.ts#all-object -->
+
 ```ts
 import { succeed, sleep, all } from "@spilne/perfect-core";
 
@@ -92,12 +107,15 @@ const { user, posts, friends } = await all({
   user: sleep(10).flatMap(() => succeed({ id: 7, name: "alice" })),
   posts: sleep(20).flatMap(() => succeed([{ id: 1 }, { id: 2 }])),
   friends: sleep(15).flatMap(() => succeed(["bob", "carol"])),
-}).run();
+})
+  .orDie()
+  .run();
 
 console.log(user); // → { id: 7, name: "alice" }
 console.log(posts); // → [{ id: 1 }, { id: 2 }]
 console.log(friends); // → ["bob", "carol"]
 ```
+
 <!-- @end -->
 
 ## Daemons
@@ -155,7 +173,7 @@ stop();
 
 Available fiber diagnostics:
 
-| | |
+| API / concept | Behavior |
 |---|---|
 | `fiber.status` | `"ready"`, `"running"`, `"suspended"`, or `"done"` |
 | `fiber.interrupted` | true when interrupted or pending interruption |
@@ -166,7 +184,7 @@ Available fiber diagnostics:
 
 ## API summary
 
-| | |
+| API / concept | Behavior |
 |---|---|
 | `fork(eff)` | spawn a fiber, scoped to parent |
 | `forkDaemon(eff)` | spawn an unscoped fiber |

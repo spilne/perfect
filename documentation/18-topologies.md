@@ -148,8 +148,9 @@ must be idempotent.
 `"exactly-once"` is accepted only when source envelope, sinks, and partitioned
 state backend advertise the same transaction domain. Today the complete
 atomic path is PGMQ source + PGMQ sink + `PgPartitionedStateBackend` sharing
-one Drizzle database object. Unsupported combinations fail at startup rather
-than silently weakening the guarantee.
+one Drizzle database object. Backend and sink compatibility is checked during
+startup; source-envelope compatibility is checked when committing a record.
+Unsupported combinations fail rather than silently weakening the guarantee.
 
 ## Choosing Stream vs topology
 

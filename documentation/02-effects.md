@@ -7,17 +7,15 @@ union of effect tags — typed errors (`Throws<E>`), service dependencies
 
 ## The shape
 
-```ts
-type Eff<A, S = never> = ...;  // produces A; uses effects S
-```
+Read `Eff<A, S>` as “produces `A`, with requirements `S`.”
 
-- `Eff<number, never>` — a pure effect that produces a number, no errors, no deps
+- `Eff<number, never>` — produces a number with no typed failures or service requirements; it may still perform side effects or encounter defects
 - `Eff<User, Throws<NotFound>>` — produces a User, may fail with NotFound
-- `Eff<Db, Needs<Config>>` — needs a Config service to produce a Db
+- `Eff<Db, Needs<Config, "Config">>` — needs the named Config service to produce a Db
 
 ## Constructors
 
-| | |
+| API / concept | Behavior |
 |---|---|
 | `succeed(a)` | wrap a pure value as `Eff<A, never>` |
 | `sync(() => a)` | run a synchronous side-effect |
@@ -38,11 +36,11 @@ const d = tryPromise(() => fetch("/api/users"));    // Eff<Response, Throws<unkn
 
 ## Running
 
-| | When to use |
+| Runner | When to use |
 |---|---|
 | `runSync(eff)` | synchronous-only programs (throws if the effect suspends) |
 | `run(eff)` | returns `Promise<A>`, rejects with squashed cause on failure |
-| `runExit(eff)` | returns `Promise<Exit<E, A>>` — never throws; you switch on the exit |
+| `runExit(eff)` | returns `Promise<Exit<unknown, A>>` — preserves the full failure cause; you switch on the exit |
 | `runFiber(eff)` | returns a `Fiber<A>` you can join, interrupt, race externally |
 
 Use `runExit` when you need to inspect the failure structure (typed error,
@@ -54,19 +52,21 @@ The `S` channel is a union of opaque marker types — Perfect peels them off as
 you handle them.
 
 ```ts
-import type { Eff, Throws, Needs } from "@spilne/perfect-core";
+import { fail, provide, run, service, succeed } from "@spilne/perfect-core";
 
-declare const fetchUser: (id: number) => Eff<User, Throws<NotFound> | Needs<Db>>;
+interface User { name: string }
+interface Db { user: User }
+type NotFound = { _tag: "NotFound" };
+const Db = service<Db>()("Db");
 
-// .catch removes Throws<NotFound>
-const safe = fetchUser(1).catch((_e) => succeed(defaultUser));
-//    Eff<User, Needs<Db>>
+const fetchUser = (id: number) => Db.get.flatMap((db) =>
+  id === 1 ? succeed(db.user) : fail<NotFound>({ _tag: "NotFound" }),
+);
 
-// provide() removes Needs<Db>
-const wired = provide(safe, Db, dbImpl);
-//    Eff<User, never>
-
-// Now run() is available — only effects with `S = never` can run.
+// Handle the typed failure; Needs<Db, "Db"> remains.
+const safe = fetchUser(1).catch(() => succeed({ name: "anonymous" }));
+// Supply the named dependency; the result is Eff<User, never>.
+const wired = provide(safe, Db, { user: { name: "Ada" } });
 await run(wired);
 ```
 
@@ -75,7 +75,9 @@ shows a TypeScript error pointing at the unhandled tags.
 
 ## Pure values, side effects, and laziness
 
-`succeed(v)` does *nothing* until run. `sync(() => v)` runs the lambda each
+`succeed(v)` stores an already-evaluated value: `succeed(doWork())` calls
+`doWork()` immediately. Use `sync(() => doWork())` to defer that work.
+`sync(() => v)` runs the lambda each
 time the effect is executed. The runtime guarantees the lambda fires inside
 the fiber, so any thrown exception becomes a defect (`Cause.Die`).
 
@@ -90,7 +92,8 @@ runSync(lazy); // e.g. 0.91
 ## Pitfalls
 
 - **Don't `await` a Promise inside `sync`.** Use `tryPromise` to bridge.
-- **`runSync` throws on Async/Fork/Sleep.** If you need them, use `run`.
+- **`runSync` requires synchronous completion.** Use `run` for programs that
+  wait on timers, I/O, or asynchronous callbacks.
 - **Throwing inside a `sync` body is a defect, not a typed failure.** Use
   `fail()` for expected, recoverable errors. See [error handling](./05-error-handling.md).
 

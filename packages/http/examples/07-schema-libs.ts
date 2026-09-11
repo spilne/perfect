@@ -43,7 +43,7 @@ const zodClient = new DefaultHttpClient({
   transport: new StubTransport(() => json({ id: 1, name: "alice" })),
 });
 
-const zodUser: ZodUser = await zodClient.get("/u/1", ZodUser).run();
+const zodUser: ZodUser = await zodClient.get("/u/1", ZodUser).orDie().run();
 assertEq(zodUser, { id: 1, name: "alice" });
 // <<< example
 
@@ -66,7 +66,10 @@ const valibotClient = new DefaultHttpClient({
   transport: new StubTransport(() => json({ id: 2, name: "bob" })),
 });
 
-const valibotUser: ValibotUser = await valibotClient.get("/u/2", valibotParser(ValibotUser)).run();
+const valibotUser: ValibotUser = await valibotClient
+  .get("/u/2", valibotParser(ValibotUser))
+  .orDie()
+  .run();
 assertEq(valibotUser, { id: 2, name: "bob" });
 // <<< example
 
@@ -91,12 +94,15 @@ const errClient = new DefaultHttpClient({
   errorSchema: ApiError,
 });
 
-let caught: HttpStatusError<ApiError> | undefined;
+let caught: unknown;
 try {
-  await errClient.get<ZodUser, ApiError>("/u/1", ZodUser).run();
+  await errClient.get<ZodUser, ApiError>("/u/1", ZodUser).orDie().run();
 } catch (e) {
-  caught = e as HttpStatusError<ApiError>;
+  caught = e;
 }
-assertEq(caught!.body.code, "FORBIDDEN");
-assertEq(caught!.body.detail, "no access");
+if (!(caught instanceof HttpStatusError)) throw new Error("Expected HttpStatusError");
+const parsedError = ApiError.safeParse(caught.body);
+if (!parsedError.success) throw new Error("Expected ApiError body");
+assertEq(parsedError.data.code, "FORBIDDEN");
+assertEq(parsedError.data.detail, "no access");
 // <<< example

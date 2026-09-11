@@ -23,7 +23,7 @@ import { eff, succeed, fail, type Eff, type Throws } from "@spilne/perfect-core"
 type Err = { _tag: "NotFound"; id: number };
 
 const lookup = (id: number): Eff<string, Throws<Err>> =>
-  id === 1 ? succeed("alice") : (fail({ _tag: "NotFound", id }) as Eff<never, Throws<Err>>);
+  id === 1 ? succeed("alice") : fail<Err>({ _tag: "NotFound", id });
 
 const program = eff(function* () {
   const name = yield* lookup(1).catchTag("NotFound", (e) => succeed(`missing ${e.id}`));
@@ -34,7 +34,8 @@ console.log(await program.run()); // → "hello, alice"
 ```
 
 Handling an error removes it from the type: after `.catchTag("NotFound", …)`
-the `Throws<Err>` is gone, so the compiler knows the program can't fail.
+the `Throws<Err>` requirement is gone. Defects and interruption remain possible;
+`never` in the effect channel does not mean an operation is infallible.
 
 Services work the same way — a dependency is an effect tag until you provide it:
 
@@ -77,12 +78,12 @@ const c = eff(($) => {
 
 ## Running
 
-| Function        | When to use                                                   |
-| --------------- | ------------------------------------------------------------- |
-| `runSync(eff)`  | Sync only — throws if the effect suspends.                    |
-| `run(eff)`      | Returns `Promise<A>`, rejects with squashed cause on failure. |
-| `runExit(eff)`  | Returns `Promise<Exit<E, A>>` — never throws.                 |
-| `runFiber(eff)` | Returns a `Fiber<A>` you can join, interrupt, race.           |
+| Function        | When to use                                                             |
+| --------------- | ----------------------------------------------------------------------- |
+| `runSync(eff)`  | Sync only — throws if the effect suspends.                              |
+| `run(eff)`      | Returns `Promise<A>`, rejects with squashed cause on failure.           |
+| `runExit(eff)`  | Returns `Promise<Exit<unknown, A>>` — preserves the full failure cause. |
+| `runFiber(eff)` | Returns a `Fiber<A>` you can join, interrupt, race.                     |
 
 Each is also a fluent method: `program.run()`, `.runSync()`, `.runExit()`, `.runFiber()`.
 

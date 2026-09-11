@@ -3,10 +3,12 @@
 ## Duration
 
 Type-safe time arithmetic. Eliminates magic millisecond numbers in your
-code. Functions that take time can accept `DurationInput`
-(`number | string | Duration`) and resolve via `resolveMs`.
+code. APIs explicitly typed with `DurationInput` accept
+`number | string | Duration`. For APIs that accept milliseconds as a number,
+pass `.toMillis()` or `resolveMs(...)`.
 
 <!-- @embed packages/core/examples/15-duration-cache.ts#duration-basics -->
+
 ```ts
 import { Duration, resolveMs } from "@spilne/perfect-core";
 
@@ -28,9 +30,10 @@ console.log(resolveMs(100)); // → 100
 console.log(resolveMs("5s")); // → 5000
 console.log(resolveMs(Duration.hours(1))); // → 3_600_000
 ```
+
 <!-- @end -->
 
-| | |
+| API / concept | Behavior |
 |---|---|
 | `Duration.millis(n)` / `seconds` / `minutes` / `hours` / `days` / `weeks` | factories |
 | `Duration.parse("5m")` | parse `ms`, `s`, `m`, `h`, `d`, `w` |
@@ -68,6 +71,7 @@ key-value backend.
 ### In-memory store
 
 <!-- @embed packages/core/examples/15-duration-cache.ts#cache-store-memory -->
+
 ```ts
 import { eff, CacheStore } from "@spilne/perfect-core";
 
@@ -78,27 +82,27 @@ const store = CacheStore.memory<string, number>({
   maxSize: 100,
 });
 
-await (
-  eff(function* () {
-    yield* store.set("hits", 0);
-    yield* store.set("hits", 1);
-    const v = yield* store.get("hits");
-    console.log(v); // → 1
+await eff(function* () {
+  yield* store.set("hits", 0);
+  yield* store.set("hits", 1);
+  const v = yield* store.get("hits");
+  console.log(v); // → 1
 
-    const present = yield* store.has("hits");
-    console.log(present); // → true
+  const present = yield* store.has("hits");
+  console.log(present); // → true
 
-    yield* store.delete("hits");
-    const after = yield* store.get("hits");
-    console.log(after); // → undefined
-  }) as any
-).run();
+  yield* store.delete("hits");
+  const after = yield* store.get("hits");
+  console.log(after); // → undefined
+}).run();
 ```
+
 <!-- @end -->
 
 ### TTL — default + per-entry override
 
 <!-- @embed packages/core/examples/15-duration-cache.ts#cache-store-ttl -->
+
 ```ts
 import { CacheStore } from "@spilne/perfect-core";
 
@@ -114,11 +118,13 @@ await new Promise((r) => setTimeout(r, 40));
 console.log(ttlStore.get("short").runSync()); // → undefined
 console.log(ttlStore.get("long").runSync()); // → "stays-around"
 ```
+
 <!-- @end -->
 
 ### LRU eviction
 
 <!-- @embed packages/core/examples/15-duration-cache.ts#cache-store-lru -->
+
 ```ts
 import { CacheStore } from "@spilne/perfect-core";
 
@@ -132,11 +138,12 @@ lru.set("d", 4).runSync(); // evicts "b" (now LRU), not "a"
 console.log(lru.has("a").runSync()); // → true
 console.log(lru.has("b").runSync()); // → false
 ```
+
 <!-- @end -->
 
 ### API
 
-| | |
+| API / concept | Behavior |
 |---|---|
 | `CacheStore.memory<K, V>({ ttlMs?, maxSize? })` | in-process LRU + TTL |
 | `store.get(k)` | returns `V | undefined` (`undefined` if missing or expired) |

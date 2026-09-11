@@ -11,13 +11,25 @@ bun add @spilne/perfect-http
 
 ## Three tiers of fetch
 
+Examples below are excerpts from the [HTTP example files](../packages/http/examples/).
+`StubTransport`, `json`, and `UserSchema` are shared fixtures in those files,
+so they run without a network service. Run the full file to include that setup.
+`.orDie().run()` rejects the Promise if a request fails; use `.catchTag(...)`
+to recover or `.runExit()` to inspect an outcome without rejecting.
+
 Every request flows through a `HttpTransport`. The default transport is
 `globalThis.fetch`; pass your own to mock, proxy, or instrument. The three
 tiers compose: pick the level of automation you need.
 
+The default transport owns cancellation until response headers arrive. After
+that, the caller owns the body stream; finishing the fetch effect does not
+abort it. The request timeout and an external abort signal still apply during
+body consumption. Consume or cancel a raw `Response` body when you are done.
+
 ### Tier 1 — `httpFetch` (raw Response)
 
 <!-- @embed packages/http/examples/01-basic.ts#tier-1-raw -->
+
 ```ts
 import { httpFetch } from "@spilne/perfect-http";
 
@@ -26,14 +38,18 @@ import { httpFetch } from "@spilne/perfect-http";
 const tier1 = await httpFetch({
   url: "https://api/users/1",
   transport: new StubTransport(() => json({ id: 1, name: "alice" })),
-}).run();
+})
+  .orDie()
+  .run();
 console.log(tier1.status); // → 200
 ```
+
 <!-- @end -->
 
 ### Tier 2 — `httpFetchOk` (status check)
 
 <!-- @embed packages/http/examples/01-basic.ts#tier-2-status-check -->
+
 ```ts
 import { httpFetchOk } from "@spilne/perfect-http";
 
@@ -42,14 +58,18 @@ import { httpFetchOk } from "@spilne/perfect-http";
 const tier2 = await httpFetchOk({
   url: "https://api/users/1",
   transport: new StubTransport(() => json({ id: 1, name: "alice" })),
-}).run();
+})
+  .orDie()
+  .run();
 console.log(tier2.status); // → 200
 ```
+
 <!-- @end -->
 
 ### Tier 3 — `httpRequest` (full pipeline)
 
 <!-- @embed packages/http/examples/01-basic.ts#tier-3-validated -->
+
 ```ts
 import { httpRequest } from "@spilne/perfect-http";
 
@@ -59,9 +79,12 @@ const user = await httpRequest({
   url: "https://api/users/1",
   schema: UserSchema,
   transport: new StubTransport(() => json({ id: 1, name: "alice" })),
-}).run();
+})
+  .orDie()
+  .run();
 console.log(user); // → { id: 1, name: "alice" }
 ```
+
 <!-- @end -->
 
 `schema` accepts anything with a `safeParse(unknown)` method — Zod, Valibot,
@@ -79,6 +102,7 @@ below for concrete adapters.
 | `HttpParseError` | success-path body parse failure (bad JSON / schema mismatch) |
 
 <!-- @embed packages/http/examples/01-basic.ts#status-error -->
+
 ```ts
 import { HttpStatusError, httpFetchOk } from "@spilne/perfect-http";
 
@@ -86,12 +110,12 @@ import { HttpStatusError, httpFetchOk } from "@spilne/perfect-http";
 // 5xx/429 with .isRetryable.
 let caught: HttpStatusError | undefined;
 try {
-  await (
-    httpFetchOk({
-      url: "https://api/users/1",
-      transport: new StubTransport(() => new Response("nope", { status: 404 })),
-    }) as any
-  ).run();
+  await httpFetchOk({
+    url: "https://api/users/1",
+    transport: new StubTransport(() => new Response("nope", { status: 404 })),
+  })
+    .orDie()
+    .run();
 } catch (e) {
   caught = e as HttpStatusError;
 }
@@ -99,6 +123,7 @@ console.log(caught!._tag); // → "HttpStatusError"
 console.log(caught!.status); // → 404
 console.log(caught!.isClientError); // → true
 ```
+
 <!-- @end -->
 
 ## HttpClient
@@ -107,6 +132,7 @@ A reusable client carries `baseUrl`, default headers, transport, middleware,
 and an optional `errorSchema`.
 
 <!-- @embed packages/http/examples/02-client.ts#client-basic -->
+
 ```ts
 import { DefaultHttpClient } from "@spilne/perfect-http";
 
@@ -120,24 +146,27 @@ const client = new DefaultHttpClient({
   transport,
 });
 
-const user = await client.get("/users/1", UserSchema).run();
+const user = await client.get("/users/1", UserSchema).orDie().run();
 console.log(user); // → { id: 1, name: "alice" }
 console.log(transport.last!.url); // → "https://api.example.com/users/1"
 console.log(transport.last!.headers!.authorization); // → "Bearer xyz"
 ```
+
 <!-- @end -->
 
 ### Derive a client with `withOverrides`
 
 <!-- @embed packages/http/examples/02-client.ts#client-overrides -->
+
 ```ts
 // withOverrides returns a derived client. Headers spread-merge; everything
 // else falls back to the base when the override is undefined.
 const traced = client.withOverrides({ headers: { "x-trace": "t-123" } });
-await traced.get("/users/1", UserSchema).run();
+await traced.get("/users/1", UserSchema).orDie().run();
 assertContains(JSON.stringify(transport.last!.headers), "x-trace");
 assertContains(JSON.stringify(transport.last!.headers), "Bearer xyz"); // base header preserved
 ```
+
 <!-- @end -->
 
 ### Middleware
@@ -148,6 +177,7 @@ key per-request state by reference (e.g. `WeakMap<Context, Span>` for
 tracing).
 
 <!-- @embed packages/http/examples/02-client.ts#client-middleware -->
+
 ```ts
 import { type HttpMiddleware, DefaultHttpClient } from "@spilne/perfect-http";
 
@@ -165,10 +195,11 @@ const observed = new DefaultHttpClient({
   transport: new StubTransport(() => json({ id: 2, name: "bob" })),
   middleware: [logging],
 });
-await observed.get("/users/2", UserSchema).run();
+await observed.get("/users/2", UserSchema).orDie().run();
 assertContains(calls.join("|"), "→ GET https://api.example.com/users/2");
 assertContains(calls.join("|"), "← GET");
 ```
+
 <!-- @end -->
 
 ## Retry
@@ -183,6 +214,7 @@ with default backoff, then hands through failures and success values unchanged.
 ### `withRetryAll` — outcome-aware retry
 
 <!-- @embed packages/http/examples/03-retry.ts#with-retry-all -->
+
 ```ts
 import { type ResponseParser, DefaultHttpClient, RetryAttempt, withRetryAll } from "@spilne/perfect-http";
 
@@ -194,9 +226,14 @@ interface User {
   name: string;
 }
 const UserSchema: ResponseParser<User> = {
-  safeParse: (d: any) =>
-    d && typeof d.id === "number" && typeof d.name === "string"
-      ? { success: true, data: d }
+  safeParse: (d: unknown) =>
+    d !== null &&
+    typeof d === "object" &&
+    "id" in d &&
+    "name" in d &&
+    typeof d.id === "number" &&
+    typeof d.name === "string"
+      ? { success: true, data: { id: d.id, name: d.name } }
       : { success: false, error: "no" },
 };
 interface JobStatus {
@@ -204,9 +241,19 @@ interface JobStatus {
   result?: number;
 }
 const JobSchema: ResponseParser<JobStatus> = {
-  safeParse: (d: any) =>
-    d && (d.state === "pending" || d.state === "done")
-      ? { success: true, data: d }
+  safeParse: (d: unknown) =>
+    d !== null &&
+    typeof d === "object" &&
+    "state" in d &&
+    (d.state === "pending" || d.state === "done") &&
+    (!("result" in d) || d.result === undefined || typeof d.result === "number")
+      ? {
+          success: true,
+          data: {
+            state: d.state,
+            result: "result" in d ? (d.result as number | undefined) : undefined,
+          },
+        }
       : { success: false, error: "no" },
 };
 
@@ -221,15 +268,19 @@ const job = await withRetryAll(client2.get("/job/123", JobSchema), {
   maxRetries: 5,
   baseDelayMs: 1,
   shouldRetry: (r) => (RetryAttempt.isSuccess(r) ? r.value.state !== "done" : true),
-}).run();
+})
+  .orDie()
+  .run();
 console.log(job); // → { state: "done", result: 42 }
 console.log(t2.attempts); // → 3
 ```
+
 <!-- @end -->
 
 ### `retryHttp` — transient HTTP retry
 
 <!-- @embed packages/http/examples/03-retry.ts#retryHttp -->
+
 ```ts
 import { DefaultHttpClient, retryHttp } from "@spilne/perfect-http";
 
@@ -241,15 +292,17 @@ const t4 = new ScriptedTransport([
 ]);
 const client4 = new DefaultHttpClient({ transport: t4 });
 
-const user = await retryHttp(client4.get("/u", UserSchema), { baseDelayMs: 1 }).run();
+const user = await retryHttp(client4.get("/u", UserSchema), { baseDelayMs: 1 }).orDie().run();
 console.log(user); // → { id: 1, name: "alice" }
 console.log(t4.attempts); // → 3
 ```
+
 <!-- @end -->
 
 ### `Retry.http` — namespace-style wrapper
 
 <!-- @embed packages/http/examples/03-retry.ts#retry-namespace-http -->
+
 ```ts
 import { DefaultHttpClient, Retry } from "@spilne/perfect-http";
 
@@ -261,10 +314,11 @@ const t5 = new ScriptedTransport([
 ]);
 const client5 = new DefaultHttpClient({ transport: t5 });
 
-const user2 = await Retry.http(client5.get("/u", UserSchema), { baseDelayMs: 1 }).run();
+const user2 = await Retry.http(client5.get("/u", UserSchema), { baseDelayMs: 1 }).orDie().run();
 console.log(user2); // → { id: 1, name: "alice" }
 console.log(t5.attempts); // → 3
 ```
+
 <!-- @end -->
 
 For polling cadence with a max-attempts/max-duration cap, prefer core's
@@ -273,25 +327,30 @@ For polling cadence with a max-attempts/max-duration cap, prefer core's
 ## Typed error response bodies
 
 Pass `errorSchema` (per-request or on the client config) and non-2xx JSON
-bodies are parsed into `HttpStatusError<B>`. `e.body` carries the typed
-shape — no narrowing required.
+bodies are parsed into `HttpStatusError<B>`. Its `body` is the parsed value.
+A JavaScript `catch` variable is still `unknown`; narrow the error before
+inspecting it, and validate its body when the generic type is not available.
 
 <!-- @embed packages/http/examples/04-error-schema.ts#error-schema-typed -->
+
 ```ts
 import { type ResponseParser, DefaultHttpClient, HttpStatusError } from "@spilne/perfect-http";
 
 // Pass errorSchema and non-2xx JSON bodies are parsed into HttpStatusError<B>.
-// e.body has the typed shape — no narrowing required.
+// JavaScript catch values are unknown; check the error and its body before use.
 interface ApiError {
   code: "NOT_FOUND" | "FORBIDDEN" | "RATE_LIMITED";
   detail: string;
 }
 const ApiErrorSchema: ResponseParser<ApiError> = {
-  safeParse: (d: any) =>
-    d &&
-    ["NOT_FOUND", "FORBIDDEN", "RATE_LIMITED"].includes(d?.code) &&
+  safeParse: (d: unknown) =>
+    d !== null &&
+    typeof d === "object" &&
+    "code" in d &&
+    "detail" in d &&
+    (d.code === "NOT_FOUND" || d.code === "FORBIDDEN" || d.code === "RATE_LIMITED") &&
     typeof d.detail === "string"
-      ? { success: true, data: d }
+      ? { success: true, data: { code: d.code, detail: d.detail } }
       : { success: false, error: "not ApiError" },
 };
 
@@ -308,23 +367,28 @@ const client = new DefaultHttpClient({
   errorSchema: ApiErrorSchema,
 });
 
-let caught: HttpStatusError<ApiError> | undefined;
+let caught: unknown;
 try {
-  await client.get<User, ApiError>("/u", UserSchema).run();
+  await client.get<User, ApiError>("/u", UserSchema).orDie().run();
 } catch (e) {
-  caught = e as HttpStatusError<ApiError>;
+  caught = e;
 }
-console.log(caught!._tag); // → "HttpStatusError"
-console.log(caught!.status); // → 429
-console.log(caught!.body.code); // → "RATE_LIMITED"
-console.log(caught!.body.detail); // → "slow down"
+if (!(caught instanceof HttpStatusError)) throw new Error("Expected HttpStatusError");
+const parsedError = ApiErrorSchema.safeParse(caught.body);
+if (!parsedError.success) throw new Error("Expected ApiError body");
+console.log(caught._tag); // → "HttpStatusError"
+console.log(caught.status); // → 429
+console.log(parsedError.data.code); // → "RATE_LIMITED"
+console.log(parsedError.data.detail); // → "slow down"
 ```
+
 <!-- @end -->
 
 When the body doesn't match (bad JSON or wrong shape), `HttpUnknownError`
 is raised instead — carries the raw text + parse cause + status code.
 
 <!-- @embed packages/http/examples/04-error-schema.ts#error-schema-mismatch -->
+
 ```ts
 import { DefaultHttpClient, HttpUnknownError } from "@spilne/perfect-http";
 
@@ -339,7 +403,7 @@ const broken = new DefaultHttpClient({
 
 let unknown: HttpUnknownError | undefined;
 try {
-  await broken.get<User, ApiError>("/u", UserSchema).run();
+  await broken.get<User, ApiError>("/u", UserSchema).orDie().run();
 } catch (e) {
   unknown = e as HttpUnknownError;
 }
@@ -349,6 +413,7 @@ console.log(unknown!.body); // → "<html>500</html>"
 // 500 is retryable
 console.log(unknown!.isRetryable); // → true
 ```
+
 <!-- @end -->
 
 ## Streaming
@@ -365,18 +430,21 @@ Every other helper is a composition of this base + composable `Pipe`s
 | `httpStreamSSE(opts)` | lines → `parseSSE` |
 
 <!-- @embed packages/http/examples/06-streaming.ts#stream-lines -->
+
 ```ts
 import { httpStreamLines } from "@spilne/perfect-http";
 
 // httpStreamLines = bytes → utf8Decode → lines. Every emitted item is one
 // complete line (without the terminator).
 const linesT = new StubTransport(() => streamOf(["alpha\nbe", "ta\ngamma\n"]));
-const lines = await httpStreamLines({ url: "/log", transport: linesT }).toArray().run();
+const lines = await httpStreamLines({ url: "/log", transport: linesT }).toArray().orDie().run();
 console.log(lines); // → ["alpha", "beta", "gamma"]
 ```
+
 <!-- @end -->
 
 <!-- @embed packages/http/examples/06-streaming.ts#stream-sse -->
+
 ```ts
 import { httpStreamSSE } from "@spilne/perfect-http";
 
@@ -385,12 +453,13 @@ import { httpStreamSSE } from "@spilne/perfect-http";
 const sseT = new StubTransport(() =>
   streamOf(["event: tick\ndata: 1\n\n", "event: tick\ndata: 2\nid: m-2\n\n"]),
 );
-const events = await httpStreamSSE({ url: "/events", transport: sseT }).toArray().run();
+const events = await httpStreamSSE({ url: "/events", transport: sseT }).toArray().orDie().run();
 console.log(events.length); // → 2
 console.log(events[0]!.event); // → "tick"
 console.log(events[0]!.data); // → "1"
 console.log(events[1]!.id); // → "m-2"
 ```
+
 <!-- @end -->
 
 For ad-hoc compositions, drop down to the base:
@@ -409,6 +478,7 @@ Drop-in `HttpClient` for tests. Records every call; responds per registered
 route via `.on` / `.onFn` / `.onSequence` / `.respondWith`.
 
 <!-- @embed packages/http/examples/05-mock.ts#mock-basic -->
+
 ```ts
 import { MockHttpClient } from "@spilne/perfect-http";
 
@@ -416,51 +486,58 @@ import { MockHttpClient } from "@spilne/perfect-http";
 const mock = new MockHttpClient();
 mock.on("GET", "/users/1", { id: 1, name: "alice" });
 
-const user = await mock.get("/users/1", UserSchema).run();
+const user = await mock.get("/users/1", UserSchema).orDie().run();
 console.log(user); // → { id: 1, name: "alice" }
 console.log(mock.calledTimes("GET", "/users/1")); // → 1
 ```
+
 <!-- @end -->
 
 <!-- @embed packages/http/examples/05-mock.ts#mock-failure -->
+
 ```ts
-import { MockHttpClient } from "@spilne/perfect-http";
+import { HttpStatusError, MockHttpClient } from "@spilne/perfect-http";
 
 // MockHttpClient.fail builds an HttpStatusError for use as a route response.
 mock.reset();
 mock.on("GET", "/users/999", MockHttpClient.fail(404, "not found"));
 
-let caught: any;
+let caught: unknown;
 try {
-  await mock.get("/users/999", UserSchema).run();
+  await mock.get("/users/999", UserSchema).orDie().run();
 } catch (e) {
   caught = e;
 }
+if (!(caught instanceof HttpStatusError)) throw new Error("Expected HttpStatusError");
 console.log(caught._tag); // → "HttpStatusError"
 console.log(caught.status); // → 404
 ```
+
 <!-- @end -->
 
 <!-- @embed packages/http/examples/05-mock.ts#mock-sequence -->
+
 ```ts
-import { MockHttpClient } from "@spilne/perfect-http";
+import { HttpStatusError, MockHttpClient } from "@spilne/perfect-http";
 
 // onSequence consumes responses in order; the last item is reused after the
 // queue exhausts. Useful for simulating retry-then-succeed scenarios.
 mock.reset();
 mock.onSequence("GET", "/u", [MockHttpClient.fail(503, "down"), { id: 7, name: "after-retry" }]);
 
-let firstErr: any;
+let firstErr: unknown;
 try {
-  await mock.get("/u", UserSchema).run();
+  await mock.get("/u", UserSchema).orDie().run();
 } catch (e) {
   firstErr = e;
 }
+if (!(firstErr instanceof HttpStatusError)) throw new Error("Expected HttpStatusError");
 console.log(firstErr.status); // → 503
 
-const second = await mock.get("/u", UserSchema).run();
+const second = await mock.get("/u", UserSchema).orDie().run();
 console.log(second); // → { id: 7, name: "after-retry" }
 ```
+
 <!-- @end -->
 
 Assertions: `.calledWith` / `.calledTimes` / `.calledWithJson` /
@@ -484,6 +561,7 @@ Zod schemas have `.safeParse` natively — they **are** `ResponseParser<T>`.
 Pass the schema directly.
 
 <!-- @embed packages/http/examples/07-schema-libs.ts#zod-direct -->
+
 ```ts
 import { z } from "zod";
 import { DefaultHttpClient } from "@spilne/perfect-http";
@@ -497,14 +575,16 @@ const zodClient = new DefaultHttpClient({
   transport: new StubTransport(() => json({ id: 1, name: "alice" })),
 });
 
-const zodUser: ZodUser = await zodClient.get("/u/1", ZodUser).run();
+const zodUser: ZodUser = await zodClient.get("/u/1", ZodUser).orDie().run();
 console.log(zodUser); // → { id: 1, name: "alice" }
 ```
+
 <!-- @end -->
 
 The same applies to `errorSchema`:
 
 <!-- @embed packages/http/examples/07-schema-libs.ts#zod-error-schema -->
+
 ```ts
 import { z } from "zod";
 import { DefaultHttpClient, HttpStatusError } from "@spilne/perfect-http";
@@ -529,15 +609,19 @@ const errClient = new DefaultHttpClient({
   errorSchema: ApiError,
 });
 
-let caught: HttpStatusError<ApiError> | undefined;
+let caught: unknown;
 try {
-  await errClient.get<ZodUser, ApiError>("/u/1", ZodUser).run();
+  await errClient.get<ZodUser, ApiError>("/u/1", ZodUser).orDie().run();
 } catch (e) {
-  caught = e as HttpStatusError<ApiError>;
+  caught = e;
 }
-console.log(caught!.body.code); // → "FORBIDDEN"
-console.log(caught!.body.detail); // → "no access"
+if (!(caught instanceof HttpStatusError)) throw new Error("Expected HttpStatusError");
+const parsedError = ApiError.safeParse(caught.body);
+if (!parsedError.success) throw new Error("Expected ApiError body");
+console.log(parsedError.data.code); // → "FORBIDDEN"
+console.log(parsedError.data.detail); // → "no access"
 ```
+
 <!-- @end -->
 
 ### Valibot (3-line adapter)
@@ -546,6 +630,7 @@ Valibot uses `safeParse(schema, input)` — wrap it once and reuse for any
 schema:
 
 <!-- @embed packages/http/examples/07-schema-libs.ts#valibot-adapter -->
+
 ```ts
 import * as v from "valibot";
 import { type ResponseParser, DefaultHttpClient } from "@spilne/perfect-http";
@@ -568,9 +653,13 @@ const valibotClient = new DefaultHttpClient({
   transport: new StubTransport(() => json({ id: 2, name: "bob" })),
 });
 
-const valibotUser: ValibotUser = await valibotClient.get("/u/2", valibotParser(ValibotUser)).run();
+const valibotUser: ValibotUser = await valibotClient
+  .get("/u/2", valibotParser(ValibotUser))
+  .orDie()
+  .run();
 console.log(valibotUser); // → { id: 2, name: "bob" }
 ```
+
 <!-- @end -->
 
 ### arktype, custom validators

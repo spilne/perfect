@@ -15,6 +15,7 @@ the same fiber walk; choose by readability and tradeoff. The full bench is in
 The lowest-level surface — chained method calls.
 
 <!-- @embed packages/core/examples/01-hello.ts#hello-flatmap -->
+
 ```ts
 import { succeed } from "@spilne/perfect-core";
 
@@ -25,6 +26,7 @@ const composed = succeed(21)
 
 console.log(composed.runSync()); // → 42
 ```
+
 <!-- @end -->
 
 Pros: fastest, no magic. Cons: nests for long chains, reads bottom-up.
@@ -34,6 +36,7 @@ Pros: fastest, no magic. Cons: nests for long chains, reads bottom-up.
 The recommended default. Uses `yield*` to extract values from effects.
 
 <!-- @embed packages/core/examples/03-generator-syntax.ts#gen-basic -->
+
 ```ts
 import { eff, succeed, sync } from "@spilne/perfect-core";
 
@@ -47,11 +50,16 @@ const program = eff(function* () {
 
 console.log(program.runSync()); // → 60
 ```
+
 <!-- @end -->
 
-`try/catch` works too — typed failures get routed back through `gen.throw`:
+`try/catch` works at runtime — failures get routed back through `gen.throw`.
+TypeScript still includes the yielded failure in the generator's effect type;
+use `.catch(...)` or `.catchTag(...)` to discharge it statically. The example
+below uses `.orDie()` at the runner boundary for any remaining failure:
 
 <!-- @embed packages/core/examples/03-generator-syntax.ts#gen-trycatch -->
+
 ```ts
 import { eff, fail, type Eff, type Throws } from "@spilne/perfect-core";
 
@@ -65,8 +73,9 @@ const safe = eff(function* () {
   }
 });
 
-console.log(await (safe as any).run()); // → "caught: boom"
+console.log(await safe.orDie().run()); // → "caught: boom"
 ```
+
 <!-- @end -->
 
 Pros: looks like async/await, no build step, native `try/catch`. Cons: generator

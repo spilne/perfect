@@ -9,6 +9,7 @@ Virtual time. `sleep(ms)` doesn't actually wait — you `advance(ms)` to fire
 the sleep. Run with `provide(eff, Clock, testClock)`.
 
 <!-- @embed packages/core/examples/12-testing.ts#test-clock -->
+
 ```ts
 import { eff, sleep, provide, run, Clock, TestClock } from "@spilne/perfect-core";
 
@@ -26,13 +27,16 @@ clock.advance(1000); // fire the sleep
 // 1000ms elapsed in virtual time, ~0ms real
 console.log(await fiber); // → 1000
 ```
+
 <!-- @end -->
 
 The `tick()` helper (`Promise<void>` resolving on the next macrotask) lets
-the fiber register its sleep before you advance — necessary because
-`run()` returns synchronously while the fiber is still booting.
+the fiber reach its next suspension before you advance. `run()` starts work
+immediately, but earlier asynchronous operations may delay sleep registration.
+Check `pendingCount` or use a synchronous test scheduler when you need an exact
+registration boundary.
 
-| | |
+| API / concept | Behavior |
 |---|---|
 | `new TestClock(start = 0)` | construct with optional start time |
 | `.now()` | current virtual time |
@@ -46,8 +50,9 @@ the fiber register its sleep before you advance — necessary because
 Seeded PRNG for reproducibility:
 
 <!-- @embed packages/core/examples/12-testing.ts#test-random -->
+
 ```ts
-import { eff, provide, Random, TestRandom } from "@spilne/perfect-core";
+import { eff, provide, run, Random, TestRandom } from "@spilne/perfect-core";
 
 // TestRandom — seeded for reproducibility.
 const seeded = new TestRandom(42);
@@ -70,18 +75,21 @@ const second = await provide(
 ).run();
 console.log(guess); // → second
 ```
+
 <!-- @end -->
 
-You can also queue specific values for fully scripted tests — see
-`packages/core/src/random.ts` for the full API.
+Use `random.setNextValues([0.1, 0.9])` to supply the next two floats in `[0, 1)`.
+After that queue is consumed, generation resumes from the seeded PRNG.
+`reseed(seed)` resets the generator and clears queued values.
 
 ## TestConsole
 
 Captures `log` / `warn` / `error` calls instead of writing to stdout:
 
 <!-- @embed packages/core/examples/12-testing.ts#test-console -->
+
 ```ts
-import { eff, provide, Console, TestConsole } from "@spilne/perfect-core";
+import { eff, provide, run, Console, TestConsole } from "@spilne/perfect-core";
 
 // TestConsole captures log output instead of writing to stdout.
 const captured = new TestConsole();
@@ -97,9 +105,10 @@ await provide(
 ).run();
 console.log(captured.logs()); // → ["hello", "world"]
 ```
+
 <!-- @end -->
 
-| | |
+| API / concept | Behavior |
 |---|---|
 | `.logs()` | array of `log()` messages |
 | `.warns()` | array of `warn()` messages |

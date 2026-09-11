@@ -17,8 +17,8 @@ import Redis from "ioredis";
 import { RedisRef, type RedisClient } from "@spilne/perfect-redis";
 
 const redis = new Redis("redis://localhost:6379") as unknown as RedisClient;
-const counter = await RedisRef.make({ redis, key: "counter", initial: 0 }).run();
-const value = await counter.updateAndGet((n) => n + 1).run();
+const counter = await RedisRef.make({ redis, key: "counter", initial: 0 }).orDie().run();
+const value = await counter.updateAndGet((n) => n + 1).orDie().run();
 ```
 
 All driver failures surface as `Throws<RedisError>` and can be handled with
@@ -90,9 +90,9 @@ const jobs = await PgmqQueue.create<{ userId: string; sequence: number }>(
   { fifo: true, defaultPollIntervalMs: 100 },
 );
 
-await jobs.publish({ userId: "u-1", sequence: 1 }, { group: "u-1" }).run();
+await jobs.publish({ userId: "u-1", sequence: 1 }, { group: "u-1" }).orDie().run();
 const [job] = await jobs.subscribeAck().take(1).toArray().orDie().run();
-await job!.ack().run();
+await job!.ack().orDie().run();
 ```
 
 With `fifo: true`, the recommended partial index is created and the `group`

@@ -10,8 +10,8 @@ about 12%; on a loaded one the noisier benchmarks widen their own band and stay
 quiet rather than guessing.
 
 **The absolute thresholds are a catastrophic floor.** Deliberately generous
-(~20× the median measured on a dev machine), they exist to catch "something went
-badly wrong" without ever false-positiving on a slow runner.
+(the original cases used ~20× local medians; scaling cases use broader ceilings),
+they aim to catch large regressions while leaving room for runner noise.
 
 ```bash
 bun run perf:collect      # measure, write .perf/current.json

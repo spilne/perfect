@@ -14,6 +14,7 @@ There's also `Cause.Interrupt` for cooperative cancellation.
 `.catch(handler)` removes `Throws<E>` from the type:
 
 <!-- @embed packages/core/examples/06-error-handling.ts#catch-typed -->
+
 ```ts
 import { succeed, fail, type Eff, type Throws } from "@spilne/perfect-core";
 
@@ -24,6 +25,7 @@ const program: Eff<string, never> = (fail("nope") as Eff<never, Throws<string>>)
 
 console.log(program.runSync()); // → "recovered: nope"
 ```
+
 <!-- @end -->
 
 ## Tagged errors with `.catchTag`
@@ -31,6 +33,7 @@ console.log(program.runSync()); // → "recovered: nope"
 When your error is a discriminated union, handle one variant at a time:
 
 <!-- @embed packages/core/examples/06-error-handling.ts#catch-tag -->
+
 ```ts
 import { succeed, fail, type Eff, type Throws } from "@spilne/perfect-core";
 
@@ -46,16 +49,19 @@ const safe = lookup(99)
 
 console.log(safe.runSync()); // → "(missing 99)"
 ```
+
 <!-- @end -->
 
-After all tags are handled, the type is `Throws<never>` — equivalent to no
-error.
+After all error tags are handled, the error requirement is removed. Other
+requirements, such as named services, remain. This does not rule out defects
+or interruption.
 
 ## Full causes with `.catchAllCause`
 
 If you need to see defects and interrupts too, use `.catchAllCause`:
 
 <!-- @embed packages/core/examples/06-error-handling.ts#catch-cause -->
+
 ```ts
 import { succeed, fail, type Eff, type Throws } from "@spilne/perfect-core";
 
@@ -66,11 +72,12 @@ const wild = (fail("boom") as Eff<never, Throws<string>>).catchAllCause((cause) 
 
 console.log(wild.runSync()); // → "cause: Fail"
 ```
+
 <!-- @end -->
 
 `Cause` is one of:
 
-| | |
+| API / concept | Behavior |
 |---|---|
 | `Cause.Fail` | typed failure (`fail(e)`) |
 | `Cause.Die` | defect (uncaught throw, `die(e)`) |
@@ -83,28 +90,30 @@ console.log(wild.runSync()); // → "cause: Fail"
 `.tapError(f)` runs a side-effect on failure but re-fails:
 
 <!-- @embed packages/core/examples/06-error-handling.ts#tap-error -->
+
 ```ts
 import { succeed, fail, sync, type Eff, type Throws } from "@spilne/perfect-core";
 
 // .tapError — observe a typed failure without handling it (re-fails).
 let observedError: string | null = null;
 const observed = (fail("bad") as Eff<never, Throws<string>>)
-  .tapError(
-    (e) =>
-      sync(() => {
-        observedError = e;
-      }) as any,
+  .tapError((e) =>
+    sync(() => {
+      observedError = e;
+    }),
   )
   .catch(() => succeed("ok"));
 
 console.log(observed.runSync()); // → "ok"
 console.log(observedError); // → "bad"
 ```
+
 <!-- @end -->
 
 ## Fallback with `.orElse`
 
 <!-- @embed packages/core/examples/06-error-handling.ts#orelse -->
+
 ```ts
 import { succeed, fail, type Eff, type Throws } from "@spilne/perfect-core";
 
@@ -112,6 +121,7 @@ import { succeed, fail, type Eff, type Throws } from "@spilne/perfect-core";
 const fallback = (fail("first") as Eff<never, Throws<string>>).orElse(() => succeed("second"));
 console.log(await fallback.run()); // → "second"
 ```
+
 <!-- @end -->
 
 ## Defects vs failures — when to use `fail` vs `throw`
@@ -123,11 +133,11 @@ console.log(await fallback.run()); // → "second"
 | You want `retry` to retry it | You don't want `retry` to retry it |
 
 `retry` only retries `Throws<E>` failures by default. Defects don't retry —
-use `retryAllCause` if you really want to.
+use `.retryAllBy(...)` or a `RetryPolicy.whenCause(...)` policy to opt in.
 
 ## API summary
 
-| | |
+| API / concept | Behavior |
 |---|---|
 | `.catch(f)` | handle any typed failure |
 | `.catchTag(tag, f)` | handle one discriminated variant |

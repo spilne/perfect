@@ -91,8 +91,8 @@ const orders = kafkaConfig<Order>()
   .consumer({ sessionTimeout: 30_000 })
   .build();
 
-await orders.publish({ id: "o-1", amount: 42 }, { key: "o-1" }).run();
-const first = await orders.subscribe().take(1).toArray().run();
+await orders.publish({ id: "o-1", amount: 42 }, { key: "o-1" }).orDie().run();
+const first = await orders.subscribe().take(1).toArray().orDie().run();
 ```
 
 `KafkaConfigBuilder` validates that client, topic, and group are present and
@@ -102,7 +102,12 @@ batches as native Stream chunks.
 For explicit batched commits, use
 `subscribeAckWithHandle({ autoCommit: false })`, pass the returned joined
 consumer to `commitBatchWithin`, and close the subscription in `finally`.
-This avoids committing through a different consumer-group member.
+Also supply `startingOffsets: Map<PartitionId, KafkaOffset>` with the next
+offset to process for each assigned partition, before parallel processing
+starts. Do not seed from the first completed message: completions may arrive
+out of order and skip unfinished records. Refresh the positions on reassignment.
+Using the subscription's consumer avoids committing through a different
+consumer-group member.
 
 ### Drivers
 

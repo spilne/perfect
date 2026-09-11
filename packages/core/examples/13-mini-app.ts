@@ -51,7 +51,7 @@ const Logger = service<Logger>()("Logger");
 // >>> example: app-program
 // The application is an effect that uses three services. Note: nothing in
 // this code references implementations — it's all interfaces + tags.
-function getUser(id: number): Eff<User, Throws<DbErr>> {
+function getUser(id: number) {
   return eff(function* () {
     const cache = yield* Cache.get;
     const log = yield* Logger.get;
@@ -72,7 +72,7 @@ function getUser(id: number): Eff<User, Throws<DbErr>> {
     );
     cache.set(`user:${id}`, user);
     return user;
-  }) as Eff<User, Throws<DbErr>>;
+  });
 }
 // <<< example
 
@@ -138,6 +138,7 @@ const AppLive = Layer.merge(DbLive, CacheLive, LoggerLive);
 const result = await getUser(7)
   .catchTag("NotFound", (e) => succeed({ id: e.id, name: "(missing)" } as User))
   .with(AppLive)
+  .orDie()
   .run();
 assertEq(result, { id: 7, name: "user-7-from-conn-1" });
 assertEq(dbCalls, 2); // 1st call failed transient, 2nd succeeded
@@ -147,6 +148,7 @@ assertContains(logLines.join("|"), "cache miss 7");
 const cached = await getUser(7)
   .catch(() => succeed({ id: -1, name: "" } as User))
   .with(AppLive)
+  .orDie()
   .run();
 assertEq(cached, { id: 7, name: "user-7-from-conn-1" });
 assertContains(logLines.join("|"), "cache hit 7");

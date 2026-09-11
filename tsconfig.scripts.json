@@ -20,5 +20,5 @@
     }
   },
   "references": [],
-  "include": ["scripts/**/*.ts"]
+  "include": ["scripts/**/*.ts", "documentation/build.ts", "documentation/embeds.ts"]
 }

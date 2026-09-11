@@ -33,21 +33,19 @@ const store = CacheStore.memory<string, number>({
   maxSize: 100,
 });
 
-await (
-  eff(function* () {
-    yield* store.set("hits", 0);
-    yield* store.set("hits", 1);
-    const v = yield* store.get("hits");
-    assertEq(v, 1);
+await eff(function* () {
+  yield* store.set("hits", 0);
+  yield* store.set("hits", 1);
+  const v = yield* store.get("hits");
+  assertEq(v, 1);
 
-    const present = yield* store.has("hits");
-    assertEq(present, true);
+  const present = yield* store.has("hits");
+  assertEq(present, true);
 
-    yield* store.delete("hits");
-    const after = yield* store.get("hits");
-    assertEq(after, undefined);
-  }) as any
-).run();
+  yield* store.delete("hits");
+  const after = yield* store.get("hits");
+  assertEq(after, undefined);
+}).run();
 // <<< example
 
 // >>> example: cache-store-ttl
