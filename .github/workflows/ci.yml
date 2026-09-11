@@ -46,6 +46,8 @@ jobs:
 
       - run: bun run typecheck
 
+      - run: bun run test:release
+
       - run: bun test --recursive packages/
       - run: bun run test:coverage
 
@@ -189,6 +191,11 @@ jobs:
             ref=$(git rev-parse HEAD~1 2>/dev/null || true)
           fi
           if [ -z "$ref" ] || [ "$ref" = "$(git rev-parse HEAD)" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          elif git diff --quiet "$ref" HEAD -- . ':(exclude).github/**' ':(exclude)crates/**'; then
+            # These suites measure JavaScript directly, not workflow actions or
+            # the Rust compiler. Identical inputs only measure runner noise.
+            echo "Only workflow or Rust files changed; skipping baseline comparison."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
