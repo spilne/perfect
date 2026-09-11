@@ -15,6 +15,9 @@ the private integration test package is excluded from versioning. Neither publis
   [npm's token guidance](https://docs.npmjs.com/creating-and-viewing-access-tokens/).
 - Set GitHub Pages' source to **GitHub Actions** for documentation deployment.
 
+The workflow passes the existing `NPM_TOKEN` secret as `NPM_CONFIG_TOKEN`,
+the authentication variable read by Bun.
+
 `NPM_RELEASE_ENABLED` is no longer used. The workflow does not create version PRs
 and does not publish on branch pushes. Pushing a release tag is the publishing trigger.
 
