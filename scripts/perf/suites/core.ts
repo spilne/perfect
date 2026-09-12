@@ -145,6 +145,42 @@ export const coreSuite: Suite = {
             ),
           ),
       },
+      ...[256, 10_000].flatMap((n): BenchCase[] => {
+        const values = Array.from({ length: n }, (_, i) => i);
+        return [
+          {
+            name: `stream evalMap single chunk x${n}`,
+            unit: "ns/item",
+            divisor: n,
+            threshold: 5_000,
+            run: async () =>
+              do_not_optimize(
+                await run(
+                  Stream.fromArray(values)
+                    .evalMap((value) => succeed(value + 1))
+                    .fold(0, (sum, value) => sum + value),
+                ),
+              ),
+          },
+          {
+            name: `stream forEach single chunk x${n}`,
+            unit: "ns/item",
+            divisor: n,
+            threshold: 5_000,
+            run: async () => {
+              let sum = 0;
+              await run(
+                Stream.fromArray(values).forEach((value) =>
+                  sync(() => {
+                    sum += value;
+                  }),
+                ),
+              );
+              do_not_optimize(sum);
+            },
+          },
+        ];
+      }),
       ...[10_000, 1_000_000].flatMap((n): BenchCase[] => [
         {
           name: `range construction x${n}`,

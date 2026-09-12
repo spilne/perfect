@@ -2931,25 +2931,20 @@ function trapDefects<E>(cause: Cause<E>, classes: readonly DefectClass[]): Cause
 
 function evalMapChunk<A, B, S>(chunk: Chunk<A>, f: (a: A) => Eff<B, S>): Eff<Chunk<B>, S> {
   if (chunk.isEmpty) return succeed(Chunk.empty()) as any;
-  const items = Array.from(chunk);
-  return items
-    .reduce<Eff<B[], S>>(
-      (acc, item) =>
-        (acc as any).flatMap((arr: B[]) =>
-          (f(item) as any).map((b: B) => {
-            arr.push(b);
-            return arr;
-          }),
-        ),
-      succeed([]) as any,
+  return chunk
+    .reduce<Eff<B[], S>>(succeed([]) as any, (acc, item) =>
+      (acc as any).flatMap((arr: B[]) =>
+        (f(item) as any).map((b: B) => {
+          arr.push(b);
+          return arr;
+        }),
+      ),
     )
     .map((arr) => Chunk.fromArray(arr)) as any;
 }
 
 function runChunkForEach<A, S>(chunk: Chunk<A>, f: (a: A) => Eff<void, S>): Eff<void, S> {
-  const items = Array.from(chunk);
-  return items.reduce<Eff<void, S>>(
-    (acc, item) => (acc as any).flatMap(() => f(item)),
-    succeed(undefined) as any,
+  return chunk.reduce<Eff<void, S>>(succeed(undefined) as any, (acc, item) =>
+    (acc as any).flatMap(() => f(item)),
   );
 }
