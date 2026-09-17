@@ -431,6 +431,84 @@ describe("cleanup of an interrupted fiber", () => {
   });
 });
 
+describe("interrupt() edge cases", () => {
+  test("a fiber whose queued run was dropped by scheduler.shutdown() still completes", () => {
+    const scheduler = new StepScheduler();
+    let finalized = 0;
+    const body = gate();
+    const fiber = runFiber(
+      ensuring(
+        body.wait,
+        sync(() => void finalized++),
+      ),
+      scheduler,
+    );
+    scheduler.flush();
+    body.open();
+    scheduler.shutdown();
+    fiber.interrupt();
+    scheduler.flush();
+
+    expect(finalized).toBe(1);
+    expect(fiber.result).toEqual(interrupted);
+  });
+
+  test("a defect raised right after a self-interrupt stays in the cause", () => {
+    const scheduler = new StepScheduler();
+    const error = new Error("bug");
+    const fiber: Fiber<void> = runFiber(
+      sync(() => {
+        fiber.interrupt();
+        throw error;
+      }),
+      scheduler,
+    );
+    scheduler.flush();
+
+    expect(fiber.result).toEqual({
+      ok: false,
+      cause: { _tag: "Then", left: { _tag: "Die", defect: error }, right: { _tag: "Interrupt" } },
+    });
+  });
+
+  test("a canceler that interrupts its fiber again runs once", () => {
+    const scheduler = new StepScheduler();
+    let cancels = 0;
+    const fiber: Fiber<void> = runFiber(
+      ensuring(
+        async<void>(() => () => {
+          cancels++;
+          fiber.interrupt();
+        }),
+        sync(() => {}),
+      ),
+      scheduler,
+    );
+    scheduler.flush();
+    fiber.interrupt();
+    scheduler.flush();
+
+    expect(cancels).toBe(1);
+    expect(fiber.result).toEqual(interrupted);
+  });
+
+  test("an interrupt during the final scope close leaves a successful fiber not interrupted", () => {
+    const scheduler = new StepScheduler();
+    const release = gate();
+    const fiber = runFiber(
+      acquireRelease(succeed(1), () => release.wait).flatMap(() => succeed("value")),
+      scheduler,
+    );
+    scheduler.flush();
+    fiber.interrupt();
+    release.open();
+    scheduler.flush();
+
+    expect(fiber.result).toEqual({ ok: true, value: "value" });
+    expect(fiber.snapshot().interrupted).toBe(false);
+  });
+});
+
 describe("interrupting a fiber whose loop is queued or running", () => {
   test("an interrupt during an op-budget pause runs the async finalizer once", () => {
     const scheduler = new StepScheduler();

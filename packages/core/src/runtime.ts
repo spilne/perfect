@@ -112,8 +112,12 @@ function exitFinalizer(finalizer: unknown, exit: Exit<unknown, unknown>): Suspen
 // interruption, and yields through the scheduler for cooperative fairness.
 // Keep opcode handling aligned with stepInline, whose finalization contract
 // deliberately excludes normal fiber scheduling and completion.
+//
+// Every run starts from a Ready fiber and consumes that state. A run that
+// finds the fiber in any other state is a duplicate (see Fiber.interrupt) and
+// does nothing.
 function runFiberLoop(fiber: Fiber<any>): void {
-  if (fiber.state === FiberState.Done) return;
+  if (fiber.state !== FiberState.Ready) return;
   fiber.state = FiberState.Running;
   fiber.opCount = 0;
 
@@ -152,11 +156,15 @@ function runFiberLoop(fiber: Fiber<any>): void {
       return;
     }
 
-    // honour any pending interrupt the moment we're in interruptible mode
+    // honour any pending interrupt the moment we're in interruptible mode;
+    // a failure already on its way keeps its cause
     if (fiber.interruptible && fiber.interruptPending) {
       fiber.interruptPending = false;
       fiber.interrupting = true;
-      cur = new Suspend(Op.Fail, Cause.interrupt(), null);
+      cur =
+        cur instanceof Suspend && cur.op === Op.Fail
+          ? new Suspend(Op.Fail, withInterrupt(cur.a as Cause), null)
+          : new Suspend(Op.Fail, Cause.interrupt(), null);
     }
 
     // op budget — yield to scheduler

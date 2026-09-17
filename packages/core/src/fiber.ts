@@ -130,9 +130,13 @@ export class Fiber<A = unknown> {
     }
     this.asyncToken++;
     this.interrupting = true;
-    if (this.interruptHandle) {
-      this.interruptHandle();
+    // Cleared before the call, so a canceler that interrupts again does not
+    // run itself a second time.
+    const cancel = this.interruptHandle;
+    if (cancel !== null) {
       this.interruptHandle = null;
+      cancel();
+      if ((this.state as FiberState) === FiberState.Done) return;
     }
     // If the fiber has a non-empty continuation stack, inject a Fail(Interrupt)
     // and re-schedule — the interpreter loop walks the stack and fires any
@@ -142,11 +146,11 @@ export class Fiber<A = unknown> {
     // directly.
     if (this.stack !== null || (this.scope !== null && !this.scope.isClosed)) {
       this.current = new Suspend(Op.Fail, { _tag: "Interrupt" } as Cause, null);
-      // Ready means a loop run is already queued (a resume, a yield, an
-      // op-budget pause or an earlier interrupt) and starts from the new
-      // current. A second run over the same saved state would re-raise the
-      // interrupt inside the finalizers the first run starts.
-      if (this.state === FiberState.Ready) return;
+      // A Ready fiber already has a loop run queued (a resume, a yield, an
+      // op-budget pause or an earlier interrupt) that starts from the new
+      // current. Queue another anyway in case that one was dropped by
+      // scheduler.shutdown(); runFiberLoop ignores a run that finds the fiber
+      // no longer Ready, so the extra run cannot replay saved state.
       this.state = FiberState.Ready;
       // Avoid a circular import on runtime.ts by going through the scheduler;
       // bootstrapFiber installs a `_resume` callback that wraps runFiberLoop.
@@ -179,9 +183,11 @@ export class Fiber<A = unknown> {
     }
   }
 
+  // Once done, whether the result carries an interrupt: an interrupt that
+  // arrives during the final scope close does not change the result.
   get interrupted(): boolean {
-    if (this.interruptPending || this.interrupting) return true;
-    return this.result?.ok === false ? Cause.hasInterrupt(this.result.cause) : false;
+    if (this.result !== null) return !this.result.ok && Cause.hasInterrupt(this.result.cause);
+    return this.interruptPending || this.interrupting;
   }
 
   get childCount(): number {

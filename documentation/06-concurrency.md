@@ -180,7 +180,7 @@ Available fiber diagnostics:
 | API / concept | Behavior |
 |---|---|
 | `fiber.status` | `"ready"`, `"running"`, `"suspended"`, or `"done"` |
-| `fiber.interrupted` | true when interrupted or pending interruption |
+| `fiber.interrupted` | while running: an interrupt is pending or delivered; once done: the result is an interruption |
 | `fiber.childCount` | number of structured children currently owned |
 | `fiber.snapshot()` | stable `{ status, interrupted, childCount }` object |
 | `fiber.childrenSnapshot()` | copy of currently owned child fibers |
