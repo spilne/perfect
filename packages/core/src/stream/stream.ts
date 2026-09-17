@@ -17,7 +17,6 @@ import {
   async,
   sleep,
   forkDaemon,
-  interrupt,
   race,
   timeoutOption,
   fromPromise,
@@ -63,7 +62,13 @@ function exitOf<B>(e: Eff<B, any>): Eff<Exit<unknown, B>, never> {
     .catchAllCause((cause: Cause) => succeed({ _tag: "Failure", cause }));
 }
 
-import { combineFinalizers, driverStream, type DriverRun, type Pull } from "./driver-lifecycle";
+import {
+  combineFinalizers,
+  driverStream,
+  withPullAttempts,
+  type DriverRun,
+  type Pull,
+} from "./driver-lifecycle";
 import { mergeStreams } from "./merge";
 import { Chunk } from "./chunk";
 import { type FusibleOp, compileFused, hasFilterOps, SKIP } from "./fusion";
@@ -144,7 +149,11 @@ export class Stream<A, S = never> {
     this._finalizer = finalizer;
   }
 
-  /** The stream's step effect. Flushes any pending fused ops before returning. */
+  /**
+   * The stream's step effect. Flushes any pending fused ops before returning.
+   * Pulling it by hand does not run the stream's finalizer, so background
+   * fibers of concurrent operators keep running until `_finalizer` runs.
+   */
   get step(): Eff<Step<A>, S> {
     if (this._pending.length === 0) return this._rawStep;
     const ops = this._pending;
@@ -1010,40 +1019,63 @@ export class Stream<A, S = never> {
                 : events.offer({ _tag: "innerFail", generation: innerGeneration, cause }),
             );
 
-        const launch = (value: A): Eff<void, any> =>
+        // A launch outlives the pull that starts it. Waiting for the previous
+        // inner stream to finalize stays interruptible, so a pull cut by
+        // `timeout` resumes the same launch when retried.
+        let launching: {
+          readonly value: A;
+          readonly ready: Deferred<void>;
+          readonly previous: Fiber<any> | null;
+          readonly generation: number;
+        } | null = null;
+
+        const launch = (): Eff<void, any> =>
           suspend(() => {
-            const previous = current;
-            const innerGeneration = ++generation;
-            active = true;
-            current = null;
-
-            const start = suspend(() => run.fork(runInner(f(value), innerGeneration)))
-              .map((fiber) => {
-                current = fiber;
-              })
+            const pending = launching!;
+            const settled =
+              pending.previous === null ? succeed(undefined) : awaitFiber(pending.previous);
+            return (settled as any)
+              .flatMap(() =>
+                // Forking the inner stream and releasing the outer driver
+                // happen together or not at all.
+                uninterruptible(
+                  suspend(() => {
+                    if (launching !== pending) return succeed(undefined);
+                    launching = null;
+                    return run
+                      .fork(runInner(f(pending.value), pending.generation))
+                      .flatMap((fiber) => {
+                        current = fiber;
+                        return pending.ready.succeed(undefined);
+                      });
+                  }),
+                ),
+              )
               .flatMap(() => yieldNow);
-
-            if (mode === "switch" && previous !== null) {
-              return interrupt(previous)
-                .flatMap(() => awaitFiber(previous))
-                .flatMap(() => start);
-            }
-            return start;
           });
 
         const pull = (): Eff<Step<B>, any> =>
+          launching !== null ? launch().flatMap(() => pull()) : takeEvent();
+
+        const takeEvent = (): Eff<Step<B>, any> =>
           (events.take() as any).flatMap((event: Event): any => {
             switch (event._tag) {
-              case "outerItem":
-                // Uninterruptible so an interrupted pull (e.g. under
-                // `timeout`) never leaves the outer driver waiting on `ready`
-                // or the generation bookkeeping half-updated.
+              case "outerItem": {
                 if (mode === "exhaust" && active) {
                   return uninterruptible(event.ready.succeed(undefined)).flatMap(() => pull());
                 }
-                return uninterruptible(
-                  launch(event.value).flatMap(() => event.ready.succeed(undefined)),
-                ).flatMap(() => pull());
+                const previous = mode === "switch" ? current : null;
+                previous?.interrupt();
+                active = true;
+                current = null;
+                launching = {
+                  value: event.value,
+                  ready: event.ready,
+                  previous,
+                  generation: ++generation,
+                };
+                return launch().flatMap(() => pull());
+              }
               case "outerEnd":
                 outerDone = true;
                 return active ? pull() : succeed(DONE);
@@ -2723,16 +2755,23 @@ export class Stream<A, S = never> {
    * up to the policy's limit. Once a chunk emits, retry resets — failures in
    * the next pull are retried independently.
    *
+   * Operators with background fibers (merge, parEvalMap, switchMap, …)
+   * resume a retried pull that was interrupted, and fail a retried pull again
+   * once one of their failures has been delivered, since that work ran in a
+   * background fiber.
+   *
    * Use {@link Stream.retryFrom} when failure must reacquire and restart the
    * whole source rather than retrying only its current pull.
    */
   retry(policy: RetryPolicy | RetryConfig): Stream<A, S> {
     const wrap = (s: Stream<A, S>): Stream<A, S> =>
       new Stream(
-        (effRetry(s.step as any, policy as any) as any).map((step: Step<A>) => {
-          if (step._tag === "Done") return DONE;
-          return emit(step.chunk, wrap(step.next as any));
-        }),
+        (withPullAttempts((attempt) => effRetry(attempt(s.step as any), policy as any)) as any).map(
+          (step: Step<A>) => {
+            if (step._tag === "Done") return DONE;
+            return emit(step.chunk, wrap(step.next as any));
+          },
+        ),
         s._finalizer,
       );
     return wrap(this);

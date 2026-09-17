@@ -16,6 +16,8 @@ import {
   TaggedError,
   ensuring,
   fail,
+  succeed,
+  uninterruptible,
   type Eff,
   type Fiber,
 } from "../src";
@@ -491,7 +493,12 @@ describe("run teardown", () => {
       effect: collect(
         Stream.of(1, 2)
           .parEvalMap(2, (n) =>
-            n === 1 ? sleep(1).map(() => n) : ensuring(sleep(100), fail(new TeardownError({}))),
+            n === 1
+              ? sleep(1).map(() => n)
+              : ensuring(
+                  sleep(100).map(() => n),
+                  fail(new TeardownError({})),
+                ),
           )
           .take(1),
       ),
@@ -527,7 +534,7 @@ describe("retry and reuse", () => {
     expectAllFinalized(probe);
   });
 
-  test("a failed first pull stops its fibers before retry starts over", () => {
+  test("a failed first pull fails again under retry without reacquiring sources", () => {
     const probe = makeProbe();
     let attempts = 0;
     const flaky = Stream.suspend(() =>
@@ -536,13 +543,158 @@ describe("retry and reuse", () => {
         : Stream.fromEffect(sleep(3).map(() => "x")),
     );
     const run = runVirtual({
-      effect: collect(flaky.merge(ticks(probe, "a", 10, 2)).retry({ times: 1 })),
+      effect: collect(flaky.merge(ticks(probe, "a", 10, 2)).retry({ times: 3 })),
     });
 
-    expect(run.result).toEqual({ ok: true, value: ["x", "a1", "a2"] });
-    // the first attempt's driver for "a" would have emitted at 10
-    expect([...probe.arrivals]).toEqual([13, 23]);
+    expect(run.result?.ok).toBe(false);
+    if (run.result?.ok === false) {
+      expect(Cause.firstFail(run.result.cause)?.value).toBeInstanceOf(SourceError);
+    }
+    expect(run.now).toBe(3);
+    expect(attempts).toBe(1);
+    expect(probe.acquired.get("a")).toBe(1);
+    expect(run.leaked).toEqual([]);
+    expectAllFinalized(probe);
+  });
+
+  // Linear operators run a failed pull again. A concurrent operator's failure
+  // happened in a background fiber, so retrying delivers it again rather than
+  // skipping the failed element.
+  test.each([
+    {
+      name: "parEvalMap",
+      build: () =>
+        Stream.of(1, 2, 3)
+          .rechunk(1)
+          .parEvalMap(2, (n) => (n === 2 ? fail(new SourceError({})) : succeed(n))),
+    },
+    {
+      name: "parEvalMapUnordered",
+      build: () =>
+        Stream.of(1, 2, 3)
+          .rechunk(1)
+          .parEvalMapUnordered(1, (n) => (n === 2 ? fail(new SourceError({})) : succeed(n))),
+    },
+    {
+      name: "switchMap",
+      build: () =>
+        Stream.of(1, 2)
+          .rechunk(1)
+          .switchMap((n) =>
+            n === 1 ? Stream.of(10).concat(Stream.fail(new SourceError({}))) : Stream.of(20),
+          ),
+    },
+  ])("$name: retrying a delivered element failure fails again", ({ build }) => {
+    const run = runVirtual({ effect: collect(build().retry({ times: 2 })) });
+
+    expect(run.result?.ok).toBe(false);
+    if (run.result?.ok === false) {
+      expect(Cause.firstFail(run.result.cause)?.value).toBeInstanceOf(SourceError);
+    }
+    expect(run.leaked).toEqual([]);
+  });
+
+  test("a stream run again after an interrupted run starts fresh", () => {
+    const build = (probe: Probe) => ticks(probe, "a", 10, 3).merge(ticks(probe, "b", 16, 2));
+    const probe = makeProbe();
+    const shared = build(probe);
+    const run = runVirtual({ effect: collect(shared.interruptAfter(12).concat(shared)) });
+    const separate = runVirtual({
+      effect: collect(build(makeProbe()).interruptAfter(12).concat(build(makeProbe()))),
+    });
+
+    expect(separate.result).toEqual({
+      ok: true,
+      value: ["a1", "a1", "b1", "a2", "a3", "b2"],
+    });
+    expect(run.result).toEqual(separate.result);
     expect(probe.acquired.get("a")).toBe(2);
+    expect(run.leaked).toEqual([]);
+  });
+
+  test("a stream used as its own catch fallback starts fresh", () => {
+    let attempts = 0;
+    const flaky = Stream.suspend(() =>
+      attempts++ === 0
+        ? Stream.fromEffect(sleep(3).flatMap(() => fail(new SourceError({}))))
+        : Stream.fromEffect(sleep(3).map(() => "x")),
+    );
+    const merged = flaky.merge(Stream.of("y"));
+    const run = runVirtual({ effect: collect(merged.catch(() => merged)) });
+
+    expect(run.result?.ok).toBe(true);
+    if (run.result?.ok) expect([...run.result.value].sort()).toEqual(["x", "y", "y"]);
+    expect(attempts).toBe(2);
+    expect(run.leaked).toEqual([]);
+  });
+
+  test("a stop interrupted while starting over keeps the old run's fibers owned", () => {
+    const events: string[] = [];
+    const log = (event: string) => clockNow.map((now) => void events.push(`${now}:${event}`));
+    const slow = Stream.fromEffect(
+      uninterruptible(sleep(50).flatMap(() => log("old driver step done"))),
+    ).onFinalize(log("source released"));
+    const merged = slow.merge(Stream.empty<undefined>());
+    // the second run's first pull waits for the cut first run's driver, and
+    // interruptAfter(10) cuts that wait
+    const run = runVirtual({
+      effect: merged.interruptAfter(3).concat(merged).interruptAfter(10).drain(),
+    });
+
+    expect(run.result?.ok).toBe(true);
+    expect(events[0]).toBe("50:old driver step done");
+    expect(events.slice(1).every((event) => event === "50:source released")).toBe(true);
+    expect(run.leaked).toEqual([]);
+  });
+
+  test("switchMap resumes a launch cut while the previous inner stream finalizes", () => {
+    let outerAcquired = 0;
+    const outer = Stream.suspend(() => {
+      outerAcquired++;
+      return Stream.of(1, 2).rechunk(1);
+    });
+    const run = runVirtual({
+      effect: collect(
+        outer
+          .switchMap((n) =>
+            n === 1
+              ? Stream.fromEffect(sleep(1_000).map(() => "never"))
+                  .filter(() => false)
+                  .onFinalize(sleep(22))
+              : Stream.of(`inner${n}`),
+          )
+          .timeout(5)
+          .retry({ times: 10 }),
+      ),
+      maxMs: 200,
+    });
+
+    expect(run.result).toEqual({ ok: true, value: ["inner2"] });
+    expect(outerAcquired).toBe(1);
+    expect(run.leaked).toEqual([]);
+  });
+
+  test("a pull cut under nested retries resumes the same run", () => {
+    const probe = makeProbe();
+    const merged = ticks(probe, "a", 10, 2).merge(ticks(probe, "b", 15, 1));
+    const run = runVirtual({
+      effect: collect(merged.retry({ times: 1 }).timeout(4).retry({ times: 100 })),
+    });
+
+    expect(run.result).toEqual({ ok: true, value: ["a1", "b1", "a2"] });
+    for (const count of probe.acquired.values()) expect(count).toBe(1);
+    expect(run.leaked).toEqual([]);
+  });
+
+  test("pulling step by hand leaves fibers running until the finalizer runs", () => {
+    const merged = Stream.tick(1).merge(Stream.tick(1));
+    const run = runVirtual({
+      effect: merged.step.flatMap((step) =>
+        (merged._finalizer ?? succeed(undefined)).map(() => step._tag),
+      ),
+    });
+
+    expect(run.result).toEqual({ ok: true, value: "Emit" });
     expect(run.leaked).toEqual([]);
   });
 

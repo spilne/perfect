@@ -86,6 +86,12 @@ it releases the sources. A failure raised while they stop, such as an inner
 stream's finalizer failing, fails the stream instead of being dropped. No
 callback or timer escapes structured concurrency.
 
+Because the finalizer owns these fibers, consume the stream with a terminal
+operator such as `toArray`, `drain`, `forEach`, or `runSink`. Pulling `step` by
+hand without running the stream's finalizer leaves them running. One stream
+value also shares one finalizer, so do not consume it from two fibers at the
+same time: whichever consumer finishes first stops the other one's fibers.
+
 This matters when a pull runs on a short-lived fiber. `timeout`, `deadline`,
 `interruptAfter`, `interruptOn`, and `takeUntil` race every pull against a timer
 or signal. Composing them with these operators is safe:
@@ -378,13 +384,23 @@ reacquire a source that already emitted data.
 
 Operators with background fibers (see
 [Stateful, concurrent, and reactive operators](#stateful-concurrent-and-reactive-operators))
-keep those fibers running while a retried pull waits.
-`stream.merge(other).timeout(ms).retry(policy)` resumes the interrupted pull
-against the same fibers instead of starting a second set. Once a failure has
-reached the consumer, a later pull fails again with the same cause, because
-the failed input cannot be pulled again. Only a failed first pull starts over,
-after the previous fibers have stopped. To retry a failing input, retry it
-before combining: `input.retry(policy).merge(other)`.
+behave differently under `retry`, because the work that fails runs in one of
+their fibers, not in the pull:
+
+- **Interrupted pulls resume.** When `timeout` or `deadline` interrupts a pull
+  and `retry` runs it again, the pull resumes against the same fibers. No
+  second set starts and no source is acquired again. Resuming is not yet
+  lossless: a value that reaches the pull at the instant it is interrupted is
+  lost.
+- **Delivered failures stay.** Once a failure has reached the consumer, every
+  retried pull fails again with the same cause, whether or not it was the first
+  pull. A failed element is not skipped and a failed input is not restarted.
+  Linear operators such as `evalMap` run a failed pull again instead.
+- **Retry where the work runs.** To retry a failing input or mapper, retry it
+  before it reaches the operator: `input.retry(policy).merge(other)` or
+  `.parEvalMap(n, (a) => f(a).retry(policy))`. To restart the sources, use
+  `Stream.retryFrom` or run the stream again. A stream that is run again, for
+  example as a `catch` fallback or in `concat`, starts fresh.
 
 Use `Stream.retryFrom` when retry must finalize and reconstruct the whole
 source:
