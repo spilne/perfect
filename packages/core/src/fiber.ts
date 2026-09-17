@@ -81,6 +81,12 @@ export class Fiber<A = unknown> {
   interruptible = true;
   // Set when interrupt() arrives while !interruptible; processed on the next boundary.
   interruptPending = false;
+  // Identifies the wait the fiber is suspended in. Async, All and Race take a
+  // fresh value when they suspend and resume the fiber only while it is still
+  // current; interrupt() advances it. A callback that cannot be cancelled (a
+  // promise settling late, a child finishing after its parent moved on) is
+  // then ignored instead of resuming whatever the fiber waits on next.
+  asyncToken = 0;
   // True between scheduling an interrupt resume and that resume running. A
   // second interrupt() in that window would schedule another loop run over
   // the same saved state, which re-raises the interrupt inside the first
@@ -119,6 +125,7 @@ export class Fiber<A = unknown> {
       this.interruptPending = true;
       return;
     }
+    this.asyncToken++;
     if (this.interruptHandle) {
       this.interruptHandle();
       this.interruptHandle = null;

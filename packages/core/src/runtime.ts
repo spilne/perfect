@@ -319,20 +319,26 @@ function runFiberLoop(fiber: Fiber<any>): void {
         fiber.stack = k;
         fiber.context = context;
         fiber.state = FiberState.Suspended;
+        const token = ++fiber.asyncToken;
 
         let resumed = false;
         try {
           const cancel = register((value: any) => {
-            if (resumed || fiber.state === FiberState.Done) return;
+            if (resumed || fiber.asyncToken !== token || fiber.state === FiberState.Done) return;
             resumed = true;
             fiber.interruptHandle = null;
             fiber.current = value;
             fiber.state = FiberState.Ready;
             fiber.scheduler.schedule(() => runFiberLoop(fiber));
           });
-          if (cancel && !resumed) fiber.interruptHandle = cancel;
+          if (cancel && !resumed) {
+            // A mismatch means register() interrupted this fiber before the
+            // canceler could be installed.
+            if (fiber.asyncToken === token) fiber.interruptHandle = cancel;
+            else cancel();
+          }
         } catch (error) {
-          if (resumed) return;
+          if (resumed || fiber.asyncToken !== token) return;
           resumed = true;
           fiber.state = FiberState.Running;
           cur = new Suspend(Op.Fail, Cause.die(error), null);
@@ -402,6 +408,7 @@ function runFiberLoop(fiber: Fiber<any>): void {
         // Slow path: full fiber-per-element parallel.
         fiber.stack = k;
         fiber.context = context;
+        const token = ++fiber.asyncToken;
         const savedCtx = context;
         const results = new Array(len);
         let remaining = len;
@@ -416,7 +423,7 @@ function runFiberLoop(fiber: Fiber<any>): void {
             if (failed) return;
             if (result.ok) {
               results[i] = result.value;
-              if (--remaining === 0) {
+              if (--remaining === 0 && fiber.asyncToken === token) {
                 fiber.current = results;
                 fiber.state = FiberState.Ready;
                 fiber.scheduler.schedule(() => runFiberLoop(fiber));
@@ -424,6 +431,7 @@ function runFiberLoop(fiber: Fiber<any>): void {
             } else {
               failed = true;
               for (const c of children) if (c !== child) c.interrupt();
+              if (fiber.asyncToken !== token) return;
               fiber.current = new Suspend(Op.Fail, result.cause, null);
               fiber.state = FiberState.Ready;
               fiber.scheduler.schedule(() => runFiberLoop(fiber));
@@ -450,6 +458,7 @@ function runFiberLoop(fiber: Fiber<any>): void {
         }
         fiber.stack = k;
         fiber.context = context;
+        const token = ++fiber.asyncToken;
         const savedCtx = context;
         let settled = false;
         const children: Fiber[] = [];
@@ -462,6 +471,7 @@ function runFiberLoop(fiber: Fiber<any>): void {
             if (settled) return;
             settled = true;
             for (const c of children) if (c !== child) c.interrupt();
+            if (fiber.asyncToken !== token) return;
             if (result.ok) {
               fiber.current = result.value;
             } else {

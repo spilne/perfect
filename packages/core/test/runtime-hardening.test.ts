@@ -1,9 +1,12 @@
 import { describe, test, expect } from "bun:test";
 import {
   type Eff,
+  type Fiber,
   Clock,
+  Stream,
   TestClock,
   acquireRelease,
+  addFiberSupervisor,
   all,
   async,
   die,
@@ -13,6 +16,7 @@ import {
   interrupt,
   join,
   provide,
+  race,
   run,
   runFiber,
   scoped,
@@ -20,6 +24,7 @@ import {
   succeed,
   sync,
   timeoutOption,
+  tryPromise,
   uninterruptible,
   yieldNow,
 } from "../src";
@@ -58,6 +63,17 @@ function gate(): { wait: Eff<void, never>; open: () => void } {
 
 const waitForever = async<void>(() => () => {});
 const interrupted = { ok: false, cause: { _tag: "Interrupt" } };
+const macrotask = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+async function until(condition: () => boolean): Promise<void> {
+  for (let i = 0; i < 100 && !condition(); i++) await macrotask();
+  expect(condition()).toBe(true);
+}
+
+const combinators: Record<string, (effects: Eff<void, never>[]) => Eff<unknown, never>> = {
+  all: (effects) => all(effects),
+  race: (effects) => race(effects),
+};
 
 describe("interruption hardening", () => {
   test("async waiter unregisters once on interrupt and finalizer runs once", async () => {
@@ -136,6 +152,153 @@ describe("interruption hardening", () => {
 
     expect(exit).toEqual({ _tag: "Failure", cause: { _tag: "Interrupt" } });
     expect(finalized).toBe(1);
+  });
+});
+
+describe("callbacks from a wait the fiber has left", () => {
+  test("a promise settling during the interrupted fiber's async finalizer does not resume it", async () => {
+    const scheduler = new StepScheduler();
+    const log: string[] = [];
+    let settle!: (value: number) => void;
+    const release = gate();
+    const fiber = runFiber(
+      ensuring(
+        tryPromise(
+          () => new Promise<number>((resolve) => (settle = resolve)),
+          (e) => e,
+        ),
+        release.wait.flatMap(() => sync(() => void log.push("release done"))),
+      ),
+      scheduler,
+    );
+    scheduler.flush();
+    fiber.interrupt();
+    scheduler.flush();
+
+    settle(1);
+    await macrotask();
+    scheduler.flush();
+    expect(fiber.status).toBe("suspended");
+    expect(log).toEqual([]);
+
+    release.open();
+    scheduler.flush();
+    expect(log).toEqual(["release done"]);
+    expect(fiber.result).toEqual(interrupted);
+  });
+
+  test("a pull settling during async-iterable cleanup does not end the cleanup early", async () => {
+    const events: string[] = [];
+    let releaseSecond!: () => void;
+    let finishCleanup!: () => void;
+    const second = new Promise<void>((resolve) => (releaseSecond = resolve));
+    const cleanup = new Promise<void>((resolve) => (finishCleanup = resolve));
+    async function* source() {
+      try {
+        yield 1;
+        await second;
+        yield 2;
+      } finally {
+        await cleanup;
+        events.push("source cleanup done");
+      }
+    }
+    const fiber = runFiber(
+      Stream.fromAsyncIterable(source(), (e) => e)
+        .tap((n) => void events.push(`pulled ${n}`))
+        .drain(),
+    );
+    await until(() => events.length === 1 && fiber.status === "suspended");
+    fiber.interrupt();
+    await until(() => fiber.status === "suspended");
+
+    // The pending next() settles; the generator's return() still waits on cleanup.
+    releaseSecond();
+    for (let i = 0; i < 5; i++) await macrotask();
+    expect(fiber.status).toBe("suspended");
+
+    finishCleanup();
+    const exit = await fiber.await();
+    expect(events).toEqual(["pulled 1", "source cleanup done"]);
+    expect(exit).toEqual({ _tag: "Failure", cause: { _tag: "Interrupt" } });
+  });
+
+  for (const [name, combine] of Object.entries(combinators)) {
+    test(`${name}: a child finishing during the interrupted parent's async finalizer does not resume it`, () => {
+      const scheduler = new StepScheduler();
+      const log: string[] = [];
+      const children = [gate(), gate()];
+      const release = gate();
+      const fiber = runFiber(
+        ensuring(
+          combine(children.map((child) => child.wait)),
+          release.wait.flatMap(() => sync(() => void log.push("release done"))),
+        ),
+        scheduler,
+      );
+      scheduler.flush();
+      fiber.interrupt();
+      scheduler.flush();
+
+      for (const child of children) child.open();
+      scheduler.flush();
+      expect(fiber.status).toBe("suspended");
+      expect(log).toEqual([]);
+
+      release.open();
+      scheduler.flush();
+      expect(log).toEqual(["release done"]);
+      expect(fiber.result).toEqual(interrupted);
+    });
+
+    test(`${name}: interrupting the waiting parent finalizes and completes it once`, () => {
+      const scheduler = new StepScheduler();
+      let finalized = 0;
+      let ended = 0;
+      const fiber = runFiber(
+        ensuring(
+          combine([waitForever, waitForever]),
+          sync(() => void finalized++),
+        ),
+        scheduler,
+      );
+      const stop = addFiberSupervisor({
+        onEnd: (ending) => {
+          if (ending === fiber) ended++;
+        },
+      });
+      scheduler.flush();
+      fiber.interrupt();
+      scheduler.flush();
+      stop();
+
+      expect({ finalized, ended }).toEqual({ finalized: 1, ended: 1 });
+      expect(fiber.result).toEqual(interrupted);
+    });
+  }
+
+  test("an interrupt raised during async registration cancels that registration", () => {
+    const scheduler = new StepScheduler();
+    let cancelled = 0;
+    let resumeLate: (() => void) | undefined;
+    let ranAfter = false;
+    const fiber: Fiber<void> = runFiber(
+      async<void>((resume) => {
+        resumeLate = () => resume(succeed(undefined) as any);
+        fiber.interrupt();
+        return () => {
+          cancelled++;
+        };
+      }).flatMap(() => sync(() => void (ranAfter = true))),
+      scheduler,
+    );
+    scheduler.flush();
+    resumeLate?.();
+    scheduler.flush();
+
+    expect(cancelled).toBe(1);
+    expect(ranAfter).toBe(false);
+    expect(fiber.result).toEqual(interrupted);
   });
 });
 
