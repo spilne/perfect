@@ -69,6 +69,8 @@ stream whose effect type contains both errors.
 | `.parEvalMap(n, f)` | bounded parallel evaluation in input order |
 | `.parEvalMapUnordered(n, f)` | bounded parallel evaluation in completion order |
 | `.merge(other)` | concurrently emit from either stream |
+| `.parJoin(n)` | flatten a stream of streams, running at most `n` inner streams at once |
+| `.parJoinUnbounded()` | flatten a stream of streams, opening each inner stream as it arrives (no memory bound) |
 | `.broadcastThrough(...branches)` | pull once, fan out to every branch, and merge their outputs |
 | `.observe(branch)` | run a reliable side branch while retaining source values |
 | `.switchMap(f)` | latest inner stream wins; the previous inner is canceled and finalized |
@@ -76,7 +78,7 @@ stream whose effect type contains both errors.
 | `.combineLatest(other)` | emit when either initialized side changes |
 | `.withLatest(other)` | emit only for the main stream, paired with the latest side value |
 
-`merge`, `switchMap`, `exhaustMap`, `parEvalMap`, `combineLatest`,
+`merge`, `parJoin`, `switchMap`, `exhaustMap`, `parEvalMap`, `combineLatest`,
 `withLatest`, `broadcastThrough`, `observe`, and `takeUntil` run background
 fibers, as do `groupWithin`, `debounce`, `sample`, `audit`, and `buffer`. Those
 fibers belong to the stream, not to whichever fiber pulls it. They start on the
@@ -113,6 +115,66 @@ console.log(ticks.length); // → 5
 ```
 
 <!-- @end -->
+
+### Concurrent flattening
+
+`parJoin(n)` flattens a `Stream<Stream<A, S2>, S>` into `Stream<A, S | S2>`,
+running up to `n` inner streams concurrently. Map to streams first for a
+bounded concurrent `flatMap`:
+
+<!-- @embed packages/core/examples/10-streams.ts#stream-par-join -->
+
+```ts
+import { Stream } from "@spilne/perfect-core";
+
+// parJoin(n) — run up to n inner streams at once and interleave their output.
+const pages = await Stream.fromArray(["a", "b", "c"])
+  .map((shard) => Stream.range(1, 3).map((page) => `${shard}${page}`))
+  .parJoin(2)
+  .toArray()
+  .run();
+console.log([...pages].sort()); // → ["a1", "a2", "b1", "b2", "c1", "c2"]
+```
+
+<!-- @end -->
+
+Chunks are emitted in arrival order, so elements from different inner streams
+interleave while each inner stream keeps its own order. The outer stream is
+pulled only when a slot is free. `parJoinUnbounded()` never holds the outer
+stream back, which suits long-lived inner streams that arrive over time:
+
+```ts
+const runs = registrations
+  .map((job) => Stream.tick(job.everyMs).map(() => job.id))
+  .parJoinUnbounded();
+```
+
+The result completes once the outer stream and every opened inner stream have
+completed. Output passes through a bounded queue of 16 chunks, and each open
+inner stream holds at most one more pending chunk. With `parJoin(n)` a slow
+consumer therefore backpressures the inner streams and, through them, the
+outer stream, so memory stays bounded. `parJoinUnbounded()` never stops pulling
+the outer stream, even while the consumer is slow. Every inner stream it opens
+stays alive as a fiber until its output is consumed, so memory grows with the
+number of inner streams the outer stream emits. Use `parJoin(n)` unless that
+number is bounded.
+
+A failure in the outer stream or any inner stream, including an inner
+finalizer that fails, immediately interrupts all the others. The consumer first
+receives the chunks already queued (at most 16), then the failure, followed by
+any failures raised while the join tears down, such as another inner stream
+failing at the same time or a finalizer failing when its inner stream is
+interrupted. If downstream stops before it reaches the failure, the failure is
+dropped like any other element it did not pull, as with `merge`; finalizers
+that fail while the stream is being stopped still fail it. Every inner stream
+pulled from the outer stream is finalized, including one that was never
+started. The outer finalizer runs last, so inner streams may use resources the
+outer stream acquired.
+
+Under `retry`, `parJoin` follows the rules for operators with background fibers
+described in [Retry](#retry): an interrupted pull resumes the same join, a
+failure that reached the consumer fails again, and a stream that is run again
+starts a new join.
 
 ### Single-pass fan-out
 

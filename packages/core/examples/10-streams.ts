@@ -56,6 +56,16 @@ assertEq(firstThree, [1, 2, 3]);
 assertEq(finalized, 1);
 // <<< example
 
+// >>> example: stream-par-join
+// parJoin(n) — run up to n inner streams at once and interleave their output.
+const pages = await Stream.fromArray(["a", "b", "c"])
+  .map((shard) => Stream.range(1, 3).map((page) => `${shard}${page}`))
+  .parJoin(2)
+  .toArray()
+  .run();
+assertEq([...pages].sort(), ["a1", "a2", "b1", "b2", "c1", "c2"]);
+// <<< example
+
 // >>> example: stream-merge-interrupt-after
 // merge's background fibers belong to the stream, so pulls racing a timer
 // (interruptAfter, timeout, takeUntil, …) don't stop them.

@@ -75,6 +75,7 @@ import {
 } from "./driver-lifecycle";
 import { mergeStreams } from "./merge";
 import { streamToAsyncIterable } from "./async-iterable";
+import { parJoinStreams } from "./par-join";
 import { Chunk } from "./chunk";
 import { type FusibleOp, compileFused, hasFilterOps, SKIP } from "./fusion";
 
@@ -1801,6 +1802,42 @@ export class Stream<A, S = never> {
 
   merge<S2>(that: Stream<A, S2>): Stream<A, S | S2> {
     return mergeStreams({ left: this, right: that });
+  }
+
+  /**
+   * Flatten a stream of streams, running at most `maxOpen` inner streams
+   * concurrently and emitting their chunks in arrival order. The outer stream
+   * is pulled only when a slot is free, and the result completes once the
+   * outer stream and every opened inner stream have completed.
+   *
+   * A failure in the outer stream or any inner stream interrupts all the
+   * others. Once already-queued chunks (at most 16) are emitted, the result
+   * fails with that failure followed by any failures raised while the join
+   * tears down. Each inner finalizer runs when that inner stream ends; the
+   * outer finalizer runs last. Use `.map(f).parJoin(n)` for a bounded
+   * concurrent `flatMap`. `maxOpen` must be a positive integer or `Infinity`;
+   * anything else throws `RangeError`.
+   */
+  parJoin(
+    this: Stream<Stream<any, any>, S>,
+    maxOpen: number,
+  ): Stream<StreamValue<A>, S | StreamEffects<A>> {
+    const limit = requireCount({
+      operator: "parJoin",
+      name: "maxOpen",
+      value: maxOpen,
+      unbounded: true,
+    });
+    return parJoinStreams({ outer: this, maxOpen: limit }) as any;
+  }
+
+  /** {@link Stream.parJoin} without a limit: every inner stream is opened as
+   *  soon as the outer stream emits it, so memory grows with the number of
+   *  inner streams open at once. */
+  parJoinUnbounded(
+    this: Stream<Stream<any, any>, S>,
+  ): Stream<StreamValue<A>, S | StreamEffects<A>> {
+    return parJoinStreams({ outer: this, maxOpen: Infinity }) as any;
   }
 
   /**
