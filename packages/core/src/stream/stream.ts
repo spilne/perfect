@@ -2751,12 +2751,16 @@ export class Stream<A, S = never> {
   }
 
   head(): Eff<A | undefined, S> {
-    return this._finalize(
-      (this.step as any).map((s: Step<A>) => {
-        if (s._tag === "Done") return undefined;
-        return s.chunk.head();
-      }) as any,
-    ) as any;
+    // Chunk-level operators (filter, mapChunks, …) can emit empty chunks, so
+    // keep pulling until a chunk has an element or the stream ends.
+    function go(stream: Stream<A, any>): Eff<A | undefined, any> {
+      return (stream.step as any).flatMap((s: Step<A>) => {
+        if (s._tag === "Done") return succeed(undefined);
+        if (s.chunk.isEmpty) return go(s.next);
+        return succeed(s.chunk.head());
+      });
+    }
+    return this._finalize(go(this) as any) as any;
   }
 
   /** Consume through the first matching element and return it. */
@@ -2773,7 +2777,7 @@ export class Stream<A, S = never> {
     function go(lastSeen: A | undefined, stream: Stream<A, any>): Eff<A | undefined, any> {
       return (stream.step as any).flatMap((s: Step<A>) => {
         if (s._tag === "Done") return succeed(lastSeen);
-        return go(s.chunk.last() ?? lastSeen, s.next);
+        return go(s.chunk.isEmpty ? lastSeen : s.chunk.last(), s.next);
       });
     }
     return this._finalize(go(undefined, this) as any) as any;
