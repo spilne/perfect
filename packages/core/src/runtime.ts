@@ -29,13 +29,9 @@ type Reject = (cause: Cause) => void;
 
 function succeedAfterFinalizer(finalizer: Suspend, value: any): Suspend {
   return new Suspend(
-    Op.SetInterruptible,
-    new Suspend(
-      Op.CatchAll,
-      new Suspend(Op.FlatMap, finalizer, () => new Suspend(Op.Succeed, value, null)),
-      (cause: Cause) => new Suspend(Op.Fail, cause, null),
-    ),
-    false,
+    Op.CatchAll,
+    new Suspend(Op.FlatMap, finalizer, () => new Suspend(Op.Succeed, value, null)),
+    (cause: Cause) => new Suspend(Op.Fail, cause, null),
   );
 }
 
@@ -43,35 +39,6 @@ function succeedAfterFinalizer(finalizer: Suspend, value: any): Suspend {
 // rethrowing inside the finalizer's own CatchAll would re-catch it and
 // compose the cause with itself.
 function failAfterFinalizer(finalizer: Suspend, cause: Cause): Suspend {
-  return new Suspend(
-    Op.SetInterruptible,
-    new Suspend(
-      Op.FlatMap,
-      new Suspend(
-        Op.CatchAll,
-        new Suspend(Op.FlatMap, finalizer, () => new Suspend(Op.Succeed, null, null)),
-        (finalizerCause: Cause) => new Suspend(Op.Succeed, finalizerCause, null),
-      ),
-      (finalizerCause: Cause | null) =>
-        new Suspend(
-          Op.Fail,
-          finalizerCause === null ? cause : Cause.then(cause, finalizerCause),
-          null,
-        ),
-    ),
-    false,
-  );
-}
-
-function succeedAfterFinalizerInline(finalizer: Suspend, value: any): Suspend {
-  return new Suspend(
-    Op.CatchAll,
-    new Suspend(Op.FlatMap, finalizer, () => new Suspend(Op.Succeed, value, null)),
-    (cause: Cause) => new Suspend(Op.Fail, cause, null),
-  );
-}
-
-function failAfterFinalizerInline(finalizer: Suspend, cause: Cause): Suspend {
   return new Suspend(
     Op.FlatMap,
     new Suspend(
@@ -86,6 +53,44 @@ function failAfterFinalizerInline(finalizer: Suspend, cause: Cause): Suspend {
         null,
       ),
   );
+}
+
+// Masks interruption for a finalizer the walk is about to run. Flipping the
+// flag here, rather than through an Op.SetInterruptible node, leaves no step
+// between popping the finalizer's frame and masking: an interrupt pending at
+// the top of the loop, or delivered while an op-budget pause has the node
+// queued, would otherwise replace the node and drop the finalizer.
+function enterUninterruptible(fiber: Fiber<any>, k: Cont | null): Cont {
+  const frame = new Cont(Op.SetInterruptible, fiber.interruptible, k);
+  fiber.interruptible = false;
+  return frame;
+}
+
+// The cause a propagating failure carries once a pending interrupt is
+// delivered into it. Typed errors are dropped: a Catch frame further out would
+// recover from them and resume past the interrupt. Defects stay.
+function withInterrupt(cause: Cause): Cause {
+  if (Cause.hasInterrupt(cause)) return cause;
+  const defects = stripFailures(cause);
+  return defects === null ? Cause.interrupt() : Cause.then(defects, Cause.interrupt());
+}
+
+function stripFailures(cause: Cause): Cause | null {
+  switch (cause._tag) {
+    case "Fail":
+      return null;
+    case "Die":
+    case "Interrupt":
+      return cause;
+    case "Both":
+    case "Then": {
+      const left = stripFailures(cause.left);
+      const right = stripFailures(cause.right);
+      if (left === null) return right;
+      if (right === null) return left;
+      return { _tag: cause._tag, left, right };
+    }
+  }
 }
 
 // Owns resumable execution: saves the continuation on suspension, honors
@@ -184,6 +189,7 @@ function runFiberLoop(fiber: Fiber<any>): void {
           case Op.EnsuringFrame: {
             const value = cur;
             const finalizer = frame.fn as Suspend;
+            k = enterUninterruptible(fiber, k);
             cur = succeedAfterFinalizer(finalizer, value);
             continue loop;
           }
@@ -193,6 +199,7 @@ function runFiberLoop(fiber: Fiber<any>): void {
             const { scope, oldScope } = frame.fn as { scope: Scope; oldScope: Scope | null };
             const value = cur;
             fiber.scope = oldScope;
+            k = enterUninterruptible(fiber, k);
             cur = succeedAfterFinalizer(scope.close() as unknown as Suspend, value);
             continue loop;
           }
@@ -232,7 +239,7 @@ function runFiberLoop(fiber: Fiber<any>): void {
       }
 
       case Op.Fail: {
-        const cause = cur.a as Cause;
+        let cause = cur.a as Cause;
         while (k !== null) {
           const frame = k;
           k = frame.next;
@@ -261,16 +268,25 @@ function runFiberLoop(fiber: Fiber<any>): void {
           }
           if (frame.op === Op.SetInterruptible) {
             fiber.interruptible = frame.fn as unknown as boolean;
+            // Deliver an interrupt that arrived during the region into the
+            // propagating failure. Left pending, the top-of-loop check would
+            // replace the next finalizer this walk starts.
+            if (fiber.interruptible && fiber.interruptPending) {
+              fiber.interruptPending = false;
+              cause = withInterrupt(cause);
+            }
             continue;
           }
           if (frame.op === Op.EnsuringFrame) {
             const finalizer = frame.fn as Suspend;
+            k = enterUninterruptible(fiber, k);
             cur = failAfterFinalizer(finalizer, cause);
             continue loop;
           }
           if (frame.op === Op.ScopeFrame) {
             const { scope, oldScope } = frame.fn as { scope: Scope; oldScope: Scope | null };
             fiber.scope = oldScope;
+            k = enterUninterruptible(fiber, k);
             cur = failAfterFinalizer(scope.close() as unknown as Suspend, cause);
             continue loop;
           }
@@ -586,14 +602,14 @@ function stepInline(
           case Op.EnsuringFrame: {
             const value = cur;
             const finalizer = frame.fn as Suspend;
-            cur = succeedAfterFinalizerInline(finalizer, value);
+            cur = succeedAfterFinalizer(finalizer, value);
             continue loop;
           }
           case Op.ScopeFrame: {
             const { scope, oldScope } = frame.fn as { scope: Scope; oldScope: Scope | null };
             if (parentFiber) parentFiber.scope = oldScope;
             const value = cur;
-            cur = succeedAfterFinalizerInline(scope.close() as unknown as Suspend, value);
+            cur = succeedAfterFinalizer(scope.close() as unknown as Suspend, value);
             continue loop;
           }
         }
@@ -644,13 +660,13 @@ function stepInline(
             parentFiber.interruptible = frame.fn as unknown as boolean;
           }
           if (frame.op === Op.EnsuringFrame) {
-            cur = failAfterFinalizerInline(frame.fn as Suspend, cause);
+            cur = failAfterFinalizer(frame.fn as Suspend, cause);
             continue loop;
           }
           if (frame.op === Op.ScopeFrame) {
             const { scope, oldScope } = frame.fn as { scope: Scope; oldScope: Scope | null };
             if (parentFiber) parentFiber.scope = oldScope;
-            cur = failAfterFinalizerInline(scope.close() as unknown as Suspend, cause);
+            cur = failAfterFinalizer(scope.close() as unknown as Suspend, cause);
             continue loop;
           }
         }
