@@ -465,12 +465,15 @@ rather than silently ending the stream.
   operator or `runSink`.
 - **`forEach` doesn't collect.** If you need both side effects AND a result,
   use `tap` + `toArray`, or write a custom `Sink`.
-- **Counts and windows are validated when the operator is built.**
-  `parEvalMap`, `parEvalMapUnordered`, `buffer`, and `groupWithin` take a
-  positive integer or `Infinity`. `grouped` and `sliding` take a positive
-  integer. `sample`, `audit`, and `pauseWhen` take a finite, non-negative
-  number of milliseconds, and anything under 1 ms waits 1 ms. Any other value
-  throws `RangeError` instead of being rounded to 1.
+- **Counts and durations are validated when the operator is built.**
+  `parEvalMap`, `parEvalMapUnordered`, `buffer`, and `groupWithin`'s `maxSize`
+  take a positive integer or `Infinity`. `grouped` and `sliding` take a positive
+  integer. Durations (`Stream.tick`, `debounce`, `groupWithin`'s `timeoutMs`,
+  `sample`, `audit`, `throttle`/`metered`, `spaced`, `timeout`, `deadline`,
+  `interruptAfter`, and `pauseWhen`) take a finite, non-negative number of
+  milliseconds; `sample`, `audit`, and `pauseWhen` wait at least 1 ms. Any
+  other value throws `RangeError` instead of being rounded or firing
+  immediately.
 - **Fusion stops at non-fusible ops.** `mapEffect`, `flatMap`, and `take`
   break a fused chain; benchmark the actual pipeline if throughput matters.
 

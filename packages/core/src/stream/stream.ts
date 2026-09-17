@@ -448,7 +448,10 @@ export class Stream<A, S = never> {
     return new Stream(initial as Eff<Step<A>, S>, suspend(releaseActive) as any);
   }
 
+  /** Emit `undefined` every `intervalMs`. The interval must be a finite,
+   *  non-negative number; anything else throws `RangeError`. */
   static tick(intervalMs: number): Stream<void, never> {
+    requireFiniteMs({ operator: "Stream.tick", name: "intervalMs", value: intervalMs });
     function go(): Stream<void, never> {
       return new Stream(
         (sleep(intervalMs) as any).map(() => emit(Chunk.single(undefined as void), go())),
@@ -2084,8 +2087,10 @@ export class Stream<A, S = never> {
 
   /** Emit groups of up to `maxSize` elements, closing a group early once
    *  `timeoutMs` has passed since its first element. `maxSize` must be a
-   *  positive integer or `Infinity`; anything else throws `RangeError`. */
+   *  positive integer or `Infinity` and `timeoutMs` a finite, non-negative
+   *  number; anything else throws `RangeError`. */
   groupWithin(maxSize: number, timeoutMs: number): Stream<Chunk<A>, S> {
+    requireFiniteMs({ operator: "groupWithin", name: "timeoutMs", value: timeoutMs });
     const self = this;
     const cap = requireCount({
       operator: "groupWithin",
@@ -2165,9 +2170,12 @@ export class Stream<A, S = never> {
     return driverStream<Chunk<A>>({ start, finalizer: self._finalizer }) as Stream<Chunk<A>, S>;
   }
 
+  /** Emit a value once `ms` passes without a newer one. `ms` must be a
+   *  finite, non-negative number; anything else throws `RangeError`. */
   debounce(ms: number): Stream<A, S> {
     // emit the latest value once `ms` elapses with no newer one; the driver
     // free-runs (unbounded queue) and the consumer conflates to the latest
+    requireFiniteMs({ operator: "debounce", name: "ms", value: ms });
     const self = this;
     type Slot = { _tag: "item"; value: A } | { _tag: "end" } | { _tag: "fail"; cause: Cause };
 
@@ -2427,7 +2435,10 @@ export class Stream<A, S = never> {
     return driverStream<A>({ start, finalizer: self._finalizer }) as Stream<A, S>;
   }
 
+  /** Pace delivery to at most one element per `ms`. `ms` must be a finite,
+   *  non-negative number; anything else throws `RangeError`. */
   throttle(ms: number): Stream<A, S> {
+    requireFiniteMs({ operator: "throttle", name: "ms", value: ms });
     let nextAt: number | undefined;
     return this.rechunk(1).evalMap(
       (a) =>
@@ -2448,8 +2459,10 @@ export class Stream<A, S = never> {
     return this.throttle(ms);
   }
 
-  /** Delay every element, including the first, by the given interval. */
+  /** Delay every element, including the first, by the given interval, which
+   *  must be a finite, non-negative number; anything else throws `RangeError`. */
   spaced(ms: number): Stream<A, S> {
+    requireFiniteMs({ operator: "spaced", name: "ms", value: ms });
     return this.rechunk(1).evalMap((a) => sleep(ms).map(() => a));
   }
 
@@ -2460,9 +2473,11 @@ export class Stream<A, S = never> {
    *
    * Consumer-side and Clock-routed (`timeoutOption`), so a TestClock drives
    * it deterministically; the in-flight pull is interrupted when the timer
-   * fires.
+   * fires. `ms` must be a finite, non-negative number; anything else throws
+   * `RangeError`.
    */
   timeout(ms: number): Stream<A, S | Throws<StreamTimeoutError>> {
+    requireFiniteMs({ operator: "timeout", name: "ms", value: ms });
     const wrap = (s: Stream<A, any>): Stream<A, any> =>
       new Stream(
         (timeoutOption(s.step as any, ms) as any).flatMap((step: Step<A> | undefined) => {
@@ -2477,8 +2492,10 @@ export class Stream<A, S = never> {
 
   /** Fail if the whole stream is still active `ms` after its first pull.
    *  Unlike {@link Stream.timeout}, successful intermediate pulls do not reset
-   *  this deadline. */
+   *  this deadline. `ms` must be a finite, non-negative number; anything else
+   *  throws `RangeError`. */
   deadline(ms: number): Stream<A, S | Throws<StreamDeadlineError>> {
+    requireFiniteMs({ operator: "deadline", name: "ms", value: ms });
     const self = this;
     const wrap = (expiresAt: number, source: Stream<A, any>): Stream<A, any> =>
       new Stream(
@@ -2545,9 +2562,11 @@ export class Stream<A, S = never> {
    * End the stream gracefully once `ms` milliseconds (Clock time, anchored
    * at the first pull) have elapsed. A pull still blocked when the deadline
    * hits is interrupted and the stream completes with Done rather than
-   * failing. Clock-routed — a TestClock drives it deterministically.
+   * failing. Clock-routed — a TestClock drives it deterministically. `ms`
+   * must be a finite, non-negative number; anything else throws `RangeError`.
    */
   interruptAfter(ms: number): Stream<A, S> {
+    requireFiniteMs({ operator: "interruptAfter", name: "ms", value: ms });
     const self = this;
     const wrap = (deadline: number, s: Stream<A, any>): Stream<A, any> =>
       new Stream(

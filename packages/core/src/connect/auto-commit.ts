@@ -28,6 +28,16 @@ export function autoCommitBatchWithin<T, AckS = never>(
   maxBatchSize: number,
   maxWaitMs: number,
 ): Pipe<Envelope<T, AckS>, T, AckS> {
+  if (!(Number.isInteger(maxBatchSize) && maxBatchSize >= 1) && maxBatchSize !== Infinity) {
+    throw new RangeError(
+      `autoCommitBatchWithin: maxBatchSize must be a positive integer or Infinity, got ${String(maxBatchSize)}`,
+    );
+  }
+  if (!Number.isFinite(maxWaitMs) || maxWaitMs < 0) {
+    throw new RangeError(
+      `autoCommitBatchWithin: maxWaitMs must be a finite, non-negative number of milliseconds, got ${String(maxWaitMs)}`,
+    );
+  }
   return <S>(stream: Stream<Envelope<T, AckS>, S>) =>
     stream
       .groupWithin(maxBatchSize, maxWaitMs)

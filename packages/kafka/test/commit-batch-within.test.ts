@@ -53,6 +53,40 @@ function envelope<T>(value: T, partition: number, offset: number): Envelope<T> {
 }
 
 describe("commitBatchWithin", () => {
+  it.each([0, -1, 1.5, Number.NaN])("rejects maxBatchSize %p when the pipe is built", (size) => {
+    const { consumer } = makeFakeConsumer();
+    expect(() =>
+      commitBatchWithin({
+        startingOffsets,
+        maxBatchSize: size,
+        maxWaitMs: 1000,
+        consumer,
+        topic: TopicName("t"),
+      }),
+    ).toThrow(
+      new RangeError(
+        `commitBatchWithin: maxBatchSize must be a positive integer or Infinity, got ${String(size)}`,
+      ),
+    );
+  });
+
+  it.each([-1, Number.NaN, Infinity])("rejects maxWaitMs %p when the pipe is built", (ms) => {
+    const { consumer } = makeFakeConsumer();
+    expect(() =>
+      commitBatchWithin({
+        startingOffsets,
+        maxBatchSize: 10,
+        maxWaitMs: ms,
+        consumer,
+        topic: TopicName("t"),
+      }),
+    ).toThrow(
+      new RangeError(
+        `commitBatchWithin: maxWaitMs must be a finite, non-negative number of milliseconds, got ${String(ms)}`,
+      ),
+    );
+  });
+
   it("holds reordered completions across batches until earlier offsets finish", async () => {
     const { consumer, committed } = makeFakeConsumer();
     const snapshots: KafkaOffsetCommit[][][] = [];

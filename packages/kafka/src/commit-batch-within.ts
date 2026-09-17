@@ -54,6 +54,17 @@ export interface CommitBatchWithinConfig {
 export function commitBatchWithin<T, AckS = Throws<KafkaError>>(
   config: CommitBatchWithinConfig,
 ): Pipe<Envelope<T, AckS>, T, Throws<KafkaCommitError>> {
+  const { maxBatchSize, maxWaitMs } = config;
+  if (!(Number.isInteger(maxBatchSize) && maxBatchSize >= 1) && maxBatchSize !== Infinity) {
+    throw new RangeError(
+      `commitBatchWithin: maxBatchSize must be a positive integer or Infinity, got ${String(maxBatchSize)}`,
+    );
+  }
+  if (!Number.isFinite(maxWaitMs) || maxWaitMs < 0) {
+    throw new RangeError(
+      `commitBatchWithin: maxWaitMs must be a finite, non-negative number of milliseconds, got ${String(maxWaitMs)}`,
+    );
+  }
   return <S>(stream: Stream<Envelope<T, AckS>, S>) => {
     const tracker = new OffsetTracker();
     const starts = new Map<PartitionId, number>();

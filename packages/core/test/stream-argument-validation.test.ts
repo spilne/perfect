@@ -160,3 +160,46 @@ describe.each([
     expect(runVirtual(build(0).take(1).toArray())).toEqual({ ok: true, value: [1] });
   });
 });
+
+describe.each([
+  { operator: "debounce", name: "ms", build: (ms: number) => Stream.of(1).debounce(ms) },
+  {
+    operator: "groupWithin",
+    name: "timeoutMs",
+    build: (ms: number) =>
+      Stream.of(1)
+        .groupWithin(10, ms)
+        .map((group) => group.length),
+  },
+  { operator: "throttle", name: "ms", build: (ms: number) => Stream.of(1).throttle(ms) },
+  { operator: "throttle", name: "ms", build: (ms: number) => Stream.of(1).metered(ms) },
+  { operator: "spaced", name: "ms", build: (ms: number) => Stream.of(1).spaced(ms) },
+  {
+    operator: "Stream.tick",
+    name: "intervalMs",
+    build: (ms: number) =>
+      Stream.tick(ms)
+        .take(1)
+        .map(() => 1),
+  },
+  { operator: "timeout", name: "ms", build: (ms: number) => Stream.of(1).timeout(ms) },
+  { operator: "deadline", name: "ms", build: (ms: number) => Stream.of(1).deadline(ms) },
+  { operator: "deadline", name: "ms", build: (ms: number) => Stream.of(1).timeoutTotal(ms) },
+  {
+    operator: "interruptAfter",
+    name: "ms",
+    build: (ms: number) => Stream.of(1).interruptAfter(ms),
+  },
+])("$operator duration", ({ operator, name, build }) => {
+  test.each(NOT_DURATIONS)("rejects %p", (ms) => {
+    expect(() => build(ms)).toThrow(
+      new RangeError(
+        `${operator}: ${name} must be a finite, non-negative number of milliseconds, got ${String(ms)}`,
+      ),
+    );
+  });
+
+  test("accepts a finite duration", () => {
+    expect(runVirtual(build(5).toArray())).toEqual({ ok: true, value: [1] });
+  });
+});

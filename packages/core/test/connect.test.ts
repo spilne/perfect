@@ -218,6 +218,22 @@ function makeEnvelope<T>(value: T, acked: T[]): Envelope<T> {
 }
 
 describe("autoCommitBatchWithin", () => {
+  test.each([0, -1, 1.5, Number.NaN])("rejects maxBatchSize %p", (size) => {
+    expect(() => autoCommitBatchWithin<number>(size, 1000)).toThrow(
+      new RangeError(
+        `autoCommitBatchWithin: maxBatchSize must be a positive integer or Infinity, got ${String(size)}`,
+      ),
+    );
+  });
+
+  test.each([-1, Number.NaN, Infinity])("rejects maxWaitMs %p", (ms) => {
+    expect(() => autoCommitBatchWithin<number>(10, ms)).toThrow(
+      new RangeError(
+        `autoCommitBatchWithin: maxWaitMs must be a finite, non-negative number of milliseconds, got ${String(ms)}`,
+      ),
+    );
+  });
+
   test("acks every envelope and unwraps values", async () => {
     const acked: number[] = [];
     const envelopes = [1, 2, 3, 4, 5].map((n) => makeEnvelope(n, acked));
