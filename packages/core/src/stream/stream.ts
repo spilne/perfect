@@ -7,11 +7,20 @@
 // Consumer drives: upstream only runs when downstream pulls.
 // Backpressure is structural — no buffering, no highWaterMark.
 
-import { type Eff, type Throws, type ErrorsOf, type ExcludeTags, Suspend, Op } from "../eff";
+import {
+  type Eff,
+  type EffectCheck,
+  type Throws,
+  type ErrorsOf,
+  type ExcludeTags,
+  Suspend,
+  Op,
+} from "../eff";
 import {
   succeed,
   fail,
   failCause,
+  die,
   sync,
   suspend,
   async,
@@ -65,6 +74,7 @@ import {
   type Pull,
 } from "./driver-lifecycle";
 import { mergeStreams } from "./merge";
+import { streamToAsyncIterable } from "./async-iterable";
 import { Chunk } from "./chunk";
 import { type FusibleOp, compileFused, hasFilterOps, SKIP } from "./fusion";
 
@@ -2758,6 +2768,16 @@ export class Stream<A, S = never> {
     return this.catch((error) => Stream.fail(f(error))) as any;
   }
 
+  /** Turn typed failures into defects, like `Eff.orDie`, before a runner boundary. */
+  orDie(): Stream<A, Exclude<S, Throws<unknown>>> {
+    const recovered = this.catchAllCause((cause) => {
+      const failure = Cause.firstFail(cause);
+      return Stream.fromEffect(failure === null ? failCause(cause) : die(failure.value));
+    });
+    const finalizer = recovered._finalizer;
+    return new Stream(recovered.step, finalizer === null ? null : finalizer.orDie()) as any;
+  }
+
   tapError<S2>(f: (error: ErrorsOf<S>) => Eff<unknown, S2>): Stream<A, S | S2> {
     return this.catch((error) =>
       Stream.fromEffect(f(error)).flatMap(() => Stream.fail(error)),
@@ -2937,6 +2957,21 @@ export class Stream<A, S = never> {
 
   count(): Eff<number, S> {
     return this.fold(0, (n, _) => n + 1);
+  }
+
+  /**
+   * Consume the stream with `for await`. Each iterator runs the stream on its
+   * own fiber and pulls a chunk only after the previous one has been consumed.
+   * Leaving the loop early stops the stream and runs its finalizers, which
+   * also stop its operators' fibers. Failures reject `next()` with
+   * `Cause.squash`, as in `run()`.
+   *
+   * Stream does not implement `Symbol.asyncIterator` because TypeScript ignores
+   * `this` constraints in `for await` and `AsyncIterable` assignability, which
+   * would bypass the service and error checks.
+   */
+  toAsyncIterable(this: Stream<A, S> & EffectCheck<S>): AsyncIterable<A> {
+    return streamToAsyncIterable(this as Stream<A, unknown>);
   }
 }
 

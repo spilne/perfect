@@ -376,6 +376,29 @@ const Logger = service<Logger>()("Logger");
   ];
 }
 
+// ── Stream async-iteration boundary ─────────────────────────────
+
+{
+  const failing = null as unknown as Stream<number, Throws<NotFound>>;
+  const needing = null as unknown as Stream<number, Needs<Logger> | Throws<NotFound>>;
+
+  const _plain: AsyncIterable<number> = Stream.of(1, 2, 3).toAsyncIterable();
+  const _orDied: Stream<number, never> = failing.orDie();
+  const _iterable: AsyncIterable<number> = failing.orDie().toAsyncIterable();
+  const _keepsNeeds: Stream<number, Needs<Logger>> = needing.orDie();
+
+  // @ts-expect-error unhandled typed errors must be caught or orDie'd before iterating
+  failing.toAsyncIterable();
+  // @ts-expect-error missing services cannot be iterated
+  needing.orDie().toAsyncIterable();
+  // @ts-expect-error orDie removes typed errors but not service requirements
+  const _unsafeOrDie: Stream<number, never> = needing.orDie();
+  // @ts-expect-error a Stream is not itself an AsyncIterable
+  const _notIterable: AsyncIterable<number> = Stream.of(1);
+
+  void [_plain, _orDied, _iterable, _keepsNeeds, _unsafeOrDie, _notIterable];
+}
+
 // ── These should compile fine ──────────────────────────────────────
 
 // Fully handled: no effects remaining
