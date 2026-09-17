@@ -1446,10 +1446,11 @@ export class Stream<A, S = never> {
    * Sliding windows of `size` elements, advancing by `step` (default 1)
    * between windows. Only full windows are emitted — a stream shorter than
    * `size` emits nothing — and `step > size` skips elements between windows.
+   * Both must be positive integers; anything else throws `RangeError`.
    */
   sliding(size: number, step = 1): Stream<Chunk<A>, S> {
-    const sz = Math.max(1, Math.floor(size));
-    const st = Math.max(1, Math.floor(step));
+    const sz = requireCount({ operator: "sliding", name: "size", value: size });
+    const st = requireCount({ operator: "sliding", name: "step", value: step });
     function go(buffer: A[], skip: number, stream: Stream<A, any>): Stream<Chunk<A>, any> {
       return new Stream(
         (stream.step as any)
@@ -1891,12 +1892,21 @@ export class Stream<A, S = never> {
   // stream run, whose finalizer interrupts and awaits them, so no work
   // outlives the stream even when its pulls run on short-lived fibers.
 
+  /** Run `f` on up to `concurrency` elements at once and emit results in input
+   *  order. `concurrency` must be a positive integer or `Infinity`; anything
+   *  else throws `RangeError`. */
   parEvalMap<B, S2>(concurrency: number, f: (a: A) => Eff<B, S2>): Stream<B, S | S2> {
     // ordered: each input claims a queue slot holding a Deferred; workers
     // resolve their Deferred whenever they finish, the consumer awaits slots
     // in input order.
     const self = this;
-    const n = Math.max(1, Math.floor(concurrency));
+    const n = requireCount({
+      operator: "parEvalMap",
+      name: "concurrency",
+      value: concurrency,
+      unbounded: true,
+    });
+    const permits = semaphorePermits(n);
     type Slot =
       | { _tag: "item"; deferred: Deferred<Exit<unknown, B>> }
       | { _tag: "end" }
@@ -1904,7 +1914,7 @@ export class Stream<A, S = never> {
 
     const start = (run: DriverRun<B>): Eff<Pull<B>, any> =>
       (QueueNS.bounded<Slot>(n) as any).flatMap((slots: Queue<Slot>) =>
-        (Semaphore.make(n) as any).flatMap((sem: Semaphore) => {
+        (Semaphore.make(permits) as any).flatMap((sem: Semaphore) => {
           const enqueue = (item: A): Eff<void, any> =>
             (sem.acquire() as any).flatMap(() =>
               (DeferredNS.make<Exit<unknown, B>>() as any).flatMap(
@@ -1927,7 +1937,7 @@ export class Stream<A, S = never> {
           const drain = (s: Stream<A, any>): Eff<void, any> =>
             (s.step as any).flatMap((step: Step<A>) =>
               step._tag === "Done"
-                ? (sem.withPermits(n, succeed(undefined)) as any).flatMap(() =>
+                ? (sem.withPermits(permits, succeed(undefined)) as any).flatMap(() =>
                     slots.offer({ _tag: "end" }),
                   )
                 : drainChunk(Array.from(step.chunk), 0, step.next),
@@ -1969,12 +1979,21 @@ export class Stream<A, S = never> {
     return driverStream<B>({ start, finalizer: self._finalizer }) as Stream<B, S | S2>;
   }
 
+  /** Run `f` on up to `concurrency` elements at once and emit results as they
+   *  complete. `concurrency` must be a positive integer or `Infinity`; anything
+   *  else throws `RangeError`. */
   parEvalMapUnordered<B, S2>(concurrency: number, f: (a: A) => Eff<B, S2>): Stream<B, S | S2> {
     // unordered: workers offer results directly as they complete. A worker
     // blocked on offer still holds its permit, so at most `concurrency`
     // results are buffered.
     const self = this;
-    const n = Math.max(1, Math.floor(concurrency));
+    const n = requireCount({
+      operator: "parEvalMapUnordered",
+      name: "concurrency",
+      value: concurrency,
+      unbounded: true,
+    });
+    const permits = semaphorePermits(n);
     type Slot =
       | { _tag: "item"; exit: Exit<unknown, B> }
       | { _tag: "end" }
@@ -1982,7 +2001,7 @@ export class Stream<A, S = never> {
 
     const start = (run: DriverRun<B>): Eff<Pull<B>, any> =>
       (QueueNS.bounded<Slot>(n) as any).flatMap((slots: Queue<Slot>) =>
-        (Semaphore.make(n) as any).flatMap((sem: Semaphore) => {
+        (Semaphore.make(permits) as any).flatMap((sem: Semaphore) => {
           const enqueue = (item: A): Eff<void, any> =>
             (sem.acquire() as any).flatMap(() =>
               run.fork(
@@ -2000,7 +2019,7 @@ export class Stream<A, S = never> {
           const drain = (s: Stream<A, any>): Eff<void, any> =>
             (s.step as any).flatMap((step: Step<A>) =>
               step._tag === "Done"
-                ? (sem.withPermits(n, succeed(undefined)) as any).flatMap(() =>
+                ? (sem.withPermits(permits, succeed(undefined)) as any).flatMap(() =>
                     slots.offer({ _tag: "end" }),
                   )
                 : drainChunk(Array.from(step.chunk), 0, step.next),
@@ -2035,9 +2054,17 @@ export class Stream<A, S = never> {
   // clockNow), so a TestClock drives these deterministically. A driver
   // fiber pumps the source into a queue; sentinel slots carry end/failure.
 
+  /** Emit groups of up to `maxSize` elements, closing a group early once
+   *  `timeoutMs` has passed since its first element. `maxSize` must be a
+   *  positive integer or `Infinity`; anything else throws `RangeError`. */
   groupWithin(maxSize: number, timeoutMs: number): Stream<Chunk<A>, S> {
     const self = this;
-    const cap = Math.max(1, maxSize);
+    const cap = requireCount({
+      operator: "groupWithin",
+      name: "maxSize",
+      value: maxSize,
+      unbounded: true,
+    });
     type Slot = { _tag: "item"; value: A } | { _tag: "end" } | { _tag: "fail"; cause: Cause };
 
     const start = (run: DriverRun<Chunk<A>>): Eff<Pull<Chunk<A>>, any> =>
@@ -2173,9 +2200,12 @@ export class Stream<A, S = never> {
     return driverStream<A>({ start, finalizer: self._finalizer }) as Stream<A, S>;
   }
 
+  /** Emit the latest new value once per `intervalMs`. The interval must be a
+   *  finite, non-negative number (shorter than 1 ms rounds up to 1 ms);
+   *  anything else throws `RangeError`. */
   sample(intervalMs: number): Stream<A, S> {
     const self = this;
-    const interval = Math.max(1, Math.floor(intervalMs));
+    const interval = requireWindowMs({ operator: "sample", name: "intervalMs", value: intervalMs });
     type Event = { readonly _tag: "end" } | { readonly _tag: "fail"; readonly cause: Cause };
 
     const start = (run: DriverRun<A>): Eff<Pull<A>, any> =>
@@ -2219,9 +2249,12 @@ export class Stream<A, S = never> {
     return driverStream<A>({ start, finalizer: self._finalizer }) as Stream<A, S>;
   }
 
+  /** Emit the latest value when a window of `ms` opened by the first value
+   *  closes. `ms` must be a finite, non-negative number (shorter than 1 ms
+   *  rounds up to 1 ms); anything else throws `RangeError`. */
   audit(ms: number): Stream<A, S> {
     const self = this;
-    const duration = Math.max(1, Math.floor(ms));
+    const duration = requireWindowMs({ operator: "audit", name: "ms", value: ms });
     type Event =
       | { readonly _tag: "start" }
       | { readonly _tag: "end" }
@@ -2301,11 +2334,17 @@ export class Stream<A, S = never> {
    * `capacity` elements ahead into a bounded queue while the consumer is
    * busy. Same driver/sentinel machinery as merge; the consumer drains
    * whatever is buffered per pull, so chunking downstream reflects
-   * consumption timing.
+   * consumption timing. `capacity` must be a positive integer or `Infinity`;
+   * anything else throws `RangeError`.
    */
   buffer(capacity: number): Stream<A, S> {
     const self = this;
-    const cap = Math.max(1, Math.floor(capacity));
+    const cap = requireCount({
+      operator: "buffer",
+      name: "capacity",
+      value: capacity,
+      unbounded: true,
+    });
     type Slot = { _tag: "item"; value: A } | { _tag: "end" } | { _tag: "fail"; cause: Cause };
 
     const start = (run: DriverRun<A>): Eff<Pull<A>, any> =>
@@ -2503,9 +2542,14 @@ export class Stream<A, S = never> {
   }
 
   /** Pause delivery while `state.get` is true, polling through the Clock
-   *  service so local and distributed Ref implementations share the API. */
+   *  service so local and distributed Ref implementations share the API.
+   *  `pollMs` must be a finite, non-negative number (shorter than 1 ms rounds
+   *  up to 1 ms); anything else throws `RangeError`. */
   pauseWhen<S2>(state: { readonly get: Eff<boolean, S2> }, pollMs = 50): Stream<A, S | S2> {
-    const interval = Math.max(1, pollMs);
+    const interval = Math.max(
+      1,
+      requireFiniteMs({ operator: "pauseWhen", name: "pollMs", value: pollMs }),
+    );
     const awaitResumed = (): Eff<void, S2> =>
       suspend(() =>
         (state.get as any).flatMap((paused: boolean) =>
@@ -2839,6 +2883,48 @@ export const Pipe = {
 
 const SENTINEL = Symbol("sentinel");
 const FILTER_SENTINEL = Symbol("filter-sentinel");
+
+/** A count argument: a positive integer, or `Infinity` where `unbounded`. */
+function requireCount(params: {
+  readonly operator: string;
+  readonly name: string;
+  readonly value: number;
+  readonly unbounded?: boolean;
+}): number {
+  const { operator, name, value, unbounded = false } = params;
+  if ((Number.isInteger(value) && value >= 1) || (unbounded && value === Infinity)) return value;
+  throw new RangeError(
+    `${operator}: ${name} must be a positive integer${unbounded ? " or Infinity" : ""}, got ${String(value)}`,
+  );
+}
+
+/** A duration argument: a finite, non-negative number of milliseconds. */
+function requireFiniteMs(params: {
+  readonly operator: string;
+  readonly name: string;
+  readonly value: number;
+}): number {
+  const { operator, name, value } = params;
+  if (Number.isFinite(value) && value >= 0) return value;
+  throw new RangeError(
+    `${operator}: ${name} must be a finite, non-negative number of milliseconds, got ${String(value)}`,
+  );
+}
+
+/** A timer window: a valid duration, whole milliseconds, at least 1 ms. */
+function requireWindowMs(params: {
+  readonly operator: string;
+  readonly name: string;
+  readonly value: number;
+}): number {
+  return Math.max(1, Math.floor(requireFiniteMs(params)));
+}
+
+// A semaphore with Infinity permits (or any count past 2^53) never drains, so
+// a barrier that re-acquires every permit would not wait for in-flight work.
+function semaphorePermits(count: number): number {
+  return Math.min(count, Number.MAX_SAFE_INTEGER);
+}
 
 function trapDefects<E>(cause: Cause<E>, classes: readonly DefectClass[]): Cause<E | unknown> {
   switch (cause._tag) {
