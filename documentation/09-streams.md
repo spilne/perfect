@@ -82,7 +82,9 @@ fibers, as do `groupWithin`, `debounce`, `sample`, `audit`, and `buffer`. Those
 fibers belong to the stream, not to whichever fiber pulls it. They start on the
 first pull. When the stream completes, fails, stops early, or its consumer is
 interrupted, its finalizer interrupts them and waits for them to finish before
-it releases the sources. No callback or timer escapes structured concurrency.
+it releases the sources. A failure raised while they stop, such as an inner
+stream's finalizer failing, fails the stream instead of being dropped. No
+callback or timer escapes structured concurrency.
 
 This matters when a pull runs on a short-lived fiber. `timeout`, `deadline`,
 `interruptAfter`, `interruptOn`, and `takeUntil` race every pull against a timer

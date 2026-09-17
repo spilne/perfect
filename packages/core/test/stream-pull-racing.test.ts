@@ -14,6 +14,7 @@ import {
   sleep,
   sync,
   TaggedError,
+  ensuring,
   fail,
   type Eff,
   type Fiber,
@@ -85,9 +86,9 @@ interface Scenario {
     readonly build?: (probe: Probe) => Stream<unknown, never>;
   };
   /**
-   * The consumer always waits inside `race`. The runtime re-runs the
-   * finalizers of a fiber interrupted there once its race children finish,
-   * independently of the stream operators.
+   * The consumer pull waits inside `race` (sample's interval, takeUntil's
+   * signal). The runtime re-runs the finalizers of a fiber interrupted there
+   * once its race children finish, independently of the stream operators.
    */
   readonly consumerWaitsInRace?: boolean;
 }
@@ -182,6 +183,7 @@ const scenarios: Record<string, Scenario> = {
   takeUntil: {
     build: (p) => ticks(p, "a", 10, 3).takeUntil(p.source("signal", Stream.fromEffect(sleep(25)))),
     expected: ["a1", "a2"],
+    consumerWaitsInRace: true,
     // takeUntil re-pulls its source, and a tick pull restarts its sleep; a
     // buffered source keeps the retried pull resumable.
     resume: {
@@ -435,6 +437,73 @@ describe.each(Object.entries(scenarios))("%s", (_name, scenario) => {
 });
 
 class SourceError extends TaggedError("SourceError")<{}>() {}
+class TeardownError extends TaggedError("TeardownError")<{}>() {}
+
+describe("run teardown", () => {
+  test("a fiber forked by a pull that outlives the stop is interrupted before it starts", () => {
+    const acquired: string[] = [];
+    const released: string[] = [];
+    // inner1's slow finalizer keeps the losing pull inside switchMap's launch
+    // until after interruptAfter has stopped the run
+    const outer = Stream.fromEffect(sync(() => 1)).concat(
+      Stream.fromEffect(sleep(10).map(() => 2)),
+    );
+    const stream = outer
+      .switchMap((value) =>
+        Stream.suspend(() => {
+          acquired.push(`inner${value}`);
+          return Stream.tick(1);
+        }).onFinalize(
+          (value === 1 ? sleep(20) : sync(() => undefined)).flatMap(() =>
+            sync(() => void released.push(`inner${value}`)),
+          ),
+        ),
+      )
+      .interruptAfter(15);
+    const run = runVirtual({ effect: stream.drain(), maxMs: 200 });
+
+    expect(run.result?.ok).toBe(true);
+    expect(acquired).toEqual(released);
+    expect(run.leaked).toEqual([]);
+  });
+
+  test("a finalizer failing while its fiber is stopped fails the stream", () => {
+    const inner = Stream.of("a")
+      .concat(Stream.fromEffect(sleep(100).map(() => "b")))
+      .onFinalize(fail(new TeardownError({})));
+    const run = runVirtual({
+      effect: collect(
+        Stream.of(1)
+          .switchMap(() => inner)
+          .take(1),
+      ),
+    });
+
+    expect(run.result?.ok).toBe(false);
+    if (run.result?.ok === false) {
+      expect(Cause.failures(run.result.cause)).toEqual([new TeardownError({})]);
+    }
+    expect(run.leaked).toEqual([]);
+  });
+
+  test("a worker failing during teardown fails the stream", () => {
+    const run = runVirtual({
+      effect: collect(
+        Stream.of(1, 2)
+          .parEvalMap(2, (n) =>
+            n === 1 ? sleep(1).map(() => n) : ensuring(sleep(100), fail(new TeardownError({}))),
+          )
+          .take(1),
+      ),
+    });
+
+    expect(run.result?.ok).toBe(false);
+    if (run.result?.ok === false) {
+      expect(Cause.failures(run.result.cause)).toEqual([new TeardownError({})]);
+    }
+    expect(run.leaked).toEqual([]);
+  });
+});
 
 describe("retry and reuse", () => {
   test("a later failed pull fails again under retry instead of hanging", () => {

@@ -7,12 +7,25 @@ import { Stream, type Step } from "./stream";
 const UNIT: Eff<void, never> = succeed(undefined);
 const DONE: Step<never> = { _tag: "Done" };
 
-function stopFibers(fibers: readonly Fiber<any>[]): Eff<void, never> {
-  if (fibers.length === 0) return UNIT;
+const NO_CAUSE: Eff<Cause | null, never> = succeed(null);
+
+const sequential = (first: Cause | null, second: Cause | null): Cause | null =>
+  first === null ? second : second === null ? first : Cause.then(first, second);
+
+/** Interrupt the fibers, await them all, and return their teardown failures. */
+function stopFibers(fibers: readonly Fiber<any>[]): Eff<Cause | null, never> {
+  if (fibers.length === 0) return NO_CAUSE;
   for (const fiber of fibers) fiber.interrupt();
-  return fibers.reduce<Eff<void, never>>(
-    (acc, fiber) => acc.flatMap(() => awaitFiber(fiber)).map(() => undefined),
-    UNIT,
+  return fibers.reduce<Eff<Cause | null, never>>(
+    (acc, fiber) =>
+      acc.flatMap((failure) =>
+        awaitFiber(fiber).map((exit) =>
+          exit._tag === "Failure"
+            ? sequential(failure, Cause.stripInterrupts(exit.cause))
+            : failure,
+        ),
+      ),
+    NO_CAUSE,
   );
 }
 
@@ -34,6 +47,15 @@ export interface DriverRun<A> {
    * forks it and is interrupted and awaited when the run stops.
    */
   fork<B>(eff: Eff<B, unknown>): Eff<Fiber<B>, never>;
+  /**
+   * Whether a background fiber should fail with `cause` instead of reporting
+   * it to the consumer: the cause is an interruption, or the run is stopping.
+   * Failing lets the stop collect teardown failures, such as a finalizer that
+   * fails while its fiber is interrupted, into the stream's exit.
+   */
+  isTeardown(cause: Cause): boolean;
+  /** True once the run has started stopping its fibers. */
+  readonly stopping: boolean;
   /** A continuation whose pull belongs to this run. */
   continueWith(pull: Pull<A>): Stream<A, unknown>;
   /** A continuation that completes this run. */
@@ -60,7 +82,36 @@ class Run<A> implements DriverRun<A> {
     }),
   );
 
-  readonly stop: Eff<void, never> = suspend(() => stopFibers(Array.from(this.fibers)));
+  private stopRequested = false;
+
+  get stopping(): boolean {
+    return this.stopRequested;
+  }
+
+  isTeardown(cause: Cause): boolean {
+    return this.stopRequested || Cause.isInterruptedOnly(cause);
+  }
+
+  /**
+   * Interrupt and await every fiber, returning their teardown failures. A
+   * fiber registered once stopping has begun (forked by a pull that outlived
+   * the stop, or registered after the stop took its snapshot) is interrupted
+   * on registration, and the stop waits until none is left.
+   */
+  readonly stop: Eff<Cause | null, never> = suspend(() => {
+    this.stopRequested = true;
+    let failure: Cause | null = null;
+    const drain = (): Eff<Cause | null, never> =>
+      suspend(() =>
+        this.fibers.size === 0
+          ? succeed(failure)
+          : stopFibers(Array.from(this.fibers)).flatMap((cause) => {
+              failure = sequential(failure, cause);
+              return drain();
+            }),
+      );
+    return drain();
+  });
 
   /** Started, then every pull so far was interrupted before delivering a step. */
   get resumable(): boolean {
@@ -74,6 +125,7 @@ class Run<A> implements DriverRun<A> {
   private readonly register = (fiber: Fiber<any>): Eff<Fiber<any>, never> => {
     this.fibers.add(fiber);
     fiber.onComplete(() => this.fibers.delete(fiber));
+    if (this.stopRequested) fiber.interrupt();
     return succeed(fiber);
   };
 
@@ -139,8 +191,18 @@ export function driverStream<A>(params: {
   const { start, finalizer } = params;
   const runs = new Set<Run<A>>();
 
-  const stopRuns = (stopped: readonly Run<A>[]): Eff<void, never> =>
-    stopped.reduce<Eff<void, never>>((acc, run) => acc.flatMap(() => run.stop), UNIT);
+  // Runs stay registered until their fibers have stopped, so an interrupted
+  // stop leaves them to the next attempt or the stream finalizer.
+  const stopRuns = (stopped: readonly Run<A>[]): Eff<void, unknown> =>
+    stopped
+      .reduce<Eff<Cause | null, never>>(
+        (acc, run) => acc.flatMap((failure) => run.stop.map((cause) => sequential(failure, cause))),
+        NO_CAUSE,
+      )
+      .flatMap((failure) => {
+        for (const run of stopped) runs.delete(run);
+        return failure === null ? UNIT : failCause(failure);
+      });
 
   const begin = (): Eff<Step<A>, unknown> => {
     const run = new Run<A>();
@@ -157,16 +219,10 @@ export function driverStream<A>(params: {
   const firstPull: Eff<Step<A>, unknown> = suspend(() => {
     for (const run of runs) if (run.resumable) return run.pull(run.first!);
     const ended = Array.from(runs).filter((run) => run.ended);
-    if (ended.length === 0) return begin();
-    for (const run of ended) runs.delete(run);
-    return stopRuns(ended).flatMap(begin);
+    return ended.length === 0 ? begin() : stopRuns(ended).flatMap(begin);
   });
 
-  const stop: Eff<void, never> = suspend(() => {
-    const all = Array.from(runs);
-    runs.clear();
-    return stopRuns(all);
-  });
+  const stop: Eff<void, unknown> = suspend(() => stopRuns(Array.from(runs)));
 
   return new Stream(firstPull, combineFinalizers(stop, finalizer));
 }

@@ -4,7 +4,7 @@ import { Cause } from "../cause";
 import { Queue } from "../queue";
 import type { Chunk } from "./chunk";
 import type { Stream, Step } from "./stream";
-import { combineFinalizers, driverStream } from "./driver-lifecycle";
+import { combineFinalizers, driverStream, type DriverRun } from "./driver-lifecycle";
 
 type MergeEvent<A> =
   | { _tag: "chunk"; chunk: Chunk<A> }
@@ -12,20 +12,21 @@ type MergeEvent<A> =
   | { _tag: "fail"; cause: Cause };
 
 function publishSource<A>(params: {
+  run: DriverRun<A>;
   events: Queue<MergeEvent<A>>;
   source: Stream<A, unknown>;
 }): Eff<unknown, unknown> {
-  const { events, source } = params;
+  const { run, events, source } = params;
   return source.step
     .flatMap((step): Eff<unknown, unknown> =>
       step._tag === "Done"
         ? events.offer({ _tag: "end" })
         : events
             .offer({ _tag: "chunk", chunk: step.chunk })
-            .flatMap(() => publishSource({ events, source: step.next })),
+            .flatMap(() => publishSource({ run, events, source: step.next })),
     )
     .catchAllCause((cause) =>
-      Cause.isInterruptedOnly(cause) ? failCause(cause) : events.offer({ _tag: "fail", cause }),
+      run.isTeardown(cause) ? failCause(cause) : events.offer({ _tag: "fail", cause }),
     );
 }
 
@@ -54,8 +55,8 @@ export function mergeStreams<A, S, S2>(params: {
           });
         const next = run.continueWith(pull);
         return run
-          .fork(publishSource({ events, source: left }))
-          .flatMap(() => run.fork(publishSource({ events, source: right })))
+          .fork(publishSource({ run, events, source: left }))
+          .flatMap(() => run.fork(publishSource({ run, events, source: right })))
           .map(() => pull);
       }),
     // Step continuations erase source requirements. Only this boundary
