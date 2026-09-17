@@ -1,4 +1,4 @@
-import { Cause, ensuring, fail, succeed } from "@spilne/perfect-core";
+import { Cause, ensuring, fail, onExit, succeed, uninterruptibleMask } from "@spilne/perfect-core";
 import type { Eff, Singleflight, Throws } from "@spilne/perfect-core";
 import type { Codec } from "@spilne/perfect-core/connect";
 import { JsonCodec } from "@spilne/perfect-core/connect";
@@ -50,39 +50,44 @@ export class RedisSingleflight implements Singleflight<Throws<RedisError>> {
   do<A, E>(key: string, eff: Eff<A, Throws<E>>): Eff<A, Throws<RedisError> | Throws<E>> {
     const lockKey = `${this.prefix}${key}:lock`;
 
+    // Taking the lock and installing the leader's finalizer happen in one
+    // uninterruptible step: an interrupt that lands once SET NX has succeeded
+    // still publishes the leader's outcome and releases the lock.
     const attempt = (): Eff<A, Throws<RedisError> | Throws<E>> => {
       const requestId = crypto.randomUUID();
-      return redisEff("singleflight.acquire", () =>
-        this.redis.set(lockKey, requestId, "NX", "PX", this.timeoutMs),
-      ).flatMap((acquired) =>
-        acquired
-          ? this.runLeader(lockKey, requestId, eff)
-          : redisEff("singleflight.owner", () => this.redis.get(lockKey)).flatMap((owner) =>
-              owner === null ? attempt() : this.runFollower(`${lockKey}:result:${owner}`, attempt),
-            ),
+      return uninterruptibleMask((restore) =>
+        redisEff("singleflight.acquire", () =>
+          this.redis.set(lockKey, requestId, "NX", "PX", this.timeoutMs),
+        ).flatMap((acquired) =>
+          acquired
+            ? this.runLeader({ lockKey, requestId, eff, restore })
+            : restore(
+                redisEff("singleflight.owner", () => this.redis.get(lockKey)).flatMap((owner) =>
+                  owner === null
+                    ? attempt()
+                    : this.runFollower(`${lockKey}:result:${owner}`, attempt),
+                ),
+              ),
+        ),
       );
     };
 
     return attempt();
   }
 
-  private runLeader<A, E>(
-    lockKey: string,
-    requestId: string,
-    eff: Eff<A, Throws<E>>,
-  ): Eff<A, Throws<RedisError> | Throws<E>> {
+  private runLeader<A, E>(params: {
+    lockKey: string;
+    requestId: string;
+    eff: Eff<A, Throws<E>>;
+    restore: <B, S>(eff: Eff<B, S>) => Eff<B, S>;
+  }): Eff<A, Throws<RedisError> | Throws<E>> {
+    const { lockKey, requestId, eff, restore } = params;
     const resultKey = `${lockKey}:result:${requestId}`;
-    const captured: Eff<Outcome<A, E>, never> = eff
-      .map((value): Outcome<A, E> => ({ ok: true, value }))
-      .catchAllCause((cause) => {
-        const typed = Cause.firstFail(cause);
-        return succeed({
-          ok: false,
-          error: (typed === null ? Cause.squash(cause) : typed.value) as E,
-        } as Outcome<A, E>);
-      });
-
-    return captured.flatMap((outcome) =>
+    const toOutcome = (cause: Cause): Outcome<A, E> => {
+      const typed = Cause.firstFail(cause);
+      return { ok: false, error: (typed === null ? Cause.squash(cause) : typed.value) as E };
+    };
+    const publish = (outcome: Outcome<A, E>): Eff<void, Throws<RedisError>> =>
       ensuring(
         redisEff("singleflight.publish", async () => {
           const encoded: EncodedOutcome = {
@@ -95,7 +100,19 @@ export class RedisSingleflight implements Singleflight<Throws<RedisError>> {
         redisEff("singleflight.release", async () => {
           await this.redis.eval(RELEASE_SCRIPT, 1, lockKey, requestId);
         }),
-      ).flatMap(() => (outcome.ok ? succeed(outcome.value) : fail(outcome.error))),
+      );
+    const captured: Eff<Outcome<A, E>, never> = eff
+      .map((value): Outcome<A, E> => ({ ok: true, value }))
+      .catchAllCause((cause) => succeed(toOutcome(cause)));
+
+    // An interrupted leader skips the handler above, so publish its failure
+    // and release the lock from a finalizer instead; followers would
+    // otherwise wait out the lock timeout. Only the leader's own work is
+    // interruptible; publishing its outcome is not.
+    return onExit(restore(captured), (exit) =>
+      exit._tag === "Failure" ? publish(toOutcome(exit.cause)) : succeed(undefined),
+    ).flatMap((outcome) =>
+      publish(outcome).flatMap(() => (outcome.ok ? succeed(outcome.value) : fail(outcome.error))),
     );
   }
 

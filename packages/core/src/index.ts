@@ -19,6 +19,7 @@ export {
   interrupt,
   awaitFiber,
   uninterruptible,
+  uninterruptibleMask,
   interruptible,
   yieldNow,
   sleep,
