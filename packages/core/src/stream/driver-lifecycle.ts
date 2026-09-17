@@ -96,16 +96,20 @@ export interface DriverRun<A> {
   fork<B>(eff: Eff<B, unknown>): Eff<Fiber<B>, never>;
   /**
    * Run a background fiber's `body`, handing a failure to `report` (which
-   * typically offers it to the consumer). During teardown, when the cause is an
-   * interruption or the run is stopping, the full cause is re-raised instead,
-   * so the stop can collect failures such as a finalizer that failed while its
-   * fiber was interrupted.
+   * typically offers it to the consumer). Once the run is stopping, the full
+   * cause is re-raised instead, so the stop can collect failures such as a
+   * finalizer that failed while its fiber was interrupted.
+   *
+   * Only the stop interrupts these fibers, so before it an interruption is
+   * one the body raised itself, and it is reported like any other failure
+   * rather than passing for teardown with nobody left to see it.
    *
    * An interrupted fiber skips interruptible error handlers and drops the
    * typed failures they would have seen, so the handler is installed in an
    * uninterruptible region. `body` and `report` run interruptibly, so a
    * blocked offer can still be interrupted. Use it only at the top of a fiber
-   * forked with `fork`, which starts interruptible.
+   * forked with `fork`, which starts interruptible. An operator that
+   * interrupts its own fibers outside the stop needs its own bookkeeping.
    */
   reportFailure<B>(
     body: Eff<B, unknown>,
@@ -155,9 +159,7 @@ class Run<A> implements DriverRun<A> {
     // Background fibers start interruptible, so "restore" is interruptible.
     return uninterruptible(
       new Suspend(Op.CatchAll, interruptible(body), (cause: Cause) =>
-        this.stopRequested || Cause.isInterruptedOnly(cause)
-          ? failCause(cause)
-          : interruptible(report(cause)),
+        this.stopRequested ? failCause(cause) : interruptible(report(cause)),
       ) as Eff<B, unknown>,
     );
   }
@@ -226,7 +228,7 @@ class Run<A> implements DriverRun<A> {
       this.interrupted = false;
       // An Exit finalizer, not an error handler: an interrupted pull skips
       // error handlers, but its bookkeeping must still run.
-      const settle = (exit: Exit<unknown, Step<A>>): null => {
+      const settle = (exit: Exit<unknown, Step<A>>, fiber: Fiber<any> | undefined): null => {
         if (this.pending !== id) return null;
         this.pending = 0;
         if (exit._tag === "Success") {
@@ -234,7 +236,16 @@ class Run<A> implements DriverRun<A> {
           if (exit.value._tag === "Done") this.finished = true;
         } else {
           if (this.first === null) this.abandoned = true;
-          if (Cause.hasInterrupt(exit.cause)) this.interrupted = true;
+          // A pull was cut when the fiber running it was interrupted (and
+          // could be), not when its cause holds an interruption: a failure the
+          // operator delivers can hold one too (a source that interrupted
+          // itself, a cleanup that failed while its fiber was interrupted),
+          // and it must fail retried pulls again rather than resume the run.
+          const cut =
+            fiber === undefined
+              ? Cause.hasInterrupt(exit.cause)
+              : fiber.interrupting && fiber.interruptible;
+          if (cut) this.interrupted = true;
           else this.failure = exit.cause;
         }
         return null;
@@ -261,7 +272,9 @@ class Run<A> implements DriverRun<A> {
  *   resumes the same run when retried, without a second set of fibers;
  * - a failure that reached the consumer fails every retried pull of that run
  *   again, the first pull included, because the work that failed ran in a
- *   background fiber and cannot be run again from the consumer.
+ *   background fiber and cannot be run again from the consumer. A pull counts
+ *   as interrupted only when its own fiber was, so a delivered cause that
+ *   holds an interruption fails again too.
  * Any other first pull, such as running the stream again after `catch` or in
  * `concat`, starts a fresh run and stops the fibers of runs that completed,
  * failed, or were interrupted outside a retry.

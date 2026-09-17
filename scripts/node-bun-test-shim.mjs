@@ -4,7 +4,8 @@ import { Worker as NodeWorker } from "node:worker_threads";
 import { Readable } from "node:stream";
 import { createReadStream } from "node:fs";
 import { ReadableStream } from "node:stream/web";
-import { expect } from "expect";
+import { expect as jestExpect } from "expect";
+import { formatEachTitle } from "./node-bun-test-titles.mjs";
 
 const { describe, it, test, before, beforeEach, after, afterEach } = nodeTest;
 
@@ -13,8 +14,99 @@ export { describe, it, test, before, beforeEach, after, afterEach };
 export const beforeAll = nodeTest.beforeAll ?? before;
 export const afterAll = nodeTest.afterAll ?? after;
 
-export { expect };
 export { spyOn } from "jest-mock";
+
+// ── expect(value, message) ─────────────────────────────────────────
+// Bun accepts a custom failure message as expect's second argument; the
+// `expect` package rejects a second argument outright. The message leads the
+// matcher's own message, as it does in Bun.
+
+const withFailureMessage = (error, message) => {
+  if (error instanceof Error) error.message = `${message}\n\n${error.message}`;
+  return error;
+};
+
+const withMessage = (target, message) =>
+  new Proxy(target, {
+    get(object, key) {
+      const value = Reflect.get(object, key);
+      if (typeof value === "function") {
+        return (...args) => {
+          let result;
+          try {
+            result = value.apply(object, args);
+          } catch (error) {
+            throw withFailureMessage(error, message);
+          }
+          return result instanceof Promise
+            ? result.catch((error) => {
+                throw withFailureMessage(error, message);
+              })
+            : result;
+        };
+      }
+      return value !== null && typeof value === "object" ? withMessage(value, message) : value;
+    },
+  });
+
+export const expect = new Proxy(jestExpect, {
+  apply(target, thisArg, args) {
+    const matchers = Reflect.apply(target, thisArg, args.slice(0, 1));
+    return args.length > 1 && args[1] !== undefined
+      ? withMessage(matchers, String(args[1]))
+      : matchers;
+  },
+});
+
+// ── test.each / describe.each ──────────────────────────────────────
+// Bun semantics: an array row is spread into the callback's arguments, any
+// other row is passed as the only argument, and titles are formatted by
+// node-bun-test-titles.mjs.
+
+const rowArguments = (row) => (Array.isArray(row) ? row : [row]);
+
+// A callback declaring more parameters than the row supplies receives a
+// `done` callback, as in Bun and Jest.
+const callWithRow = (fn, args) => {
+  if (fn.length <= args.length) return fn(...args);
+  return new Promise((resolve, reject) => {
+    fn(...args, (error) => (error ? reject(error) : resolve()));
+  });
+};
+
+const testOptions = (options) => (typeof options === "number" ? { timeout: options } : options);
+
+const eachTest = (register) => (table) => (title, fn, options) => {
+  Array.from(table).forEach((row, index) => {
+    const args = rowArguments(row);
+    register(formatEachTitle(title, args, index), testOptions(options) ?? {}, () =>
+      callWithRow(fn, args),
+    );
+  });
+};
+
+const eachDescribe = (register) => (table) => (title, fn) => {
+  Array.from(table).forEach((row, index) => {
+    const args = rowArguments(row);
+    register(formatEachTitle(title, args, index), () => fn(...args));
+  });
+};
+
+for (const register of [test, it]) {
+  register.each = eachTest(register);
+  for (const variant of ["skip", "only", "todo"]) {
+    if (typeof register[variant] === "function") {
+      register[variant].each = eachTest(register[variant]);
+    }
+  }
+}
+
+describe.each = eachDescribe(describe);
+for (const variant of ["skip", "only", "todo"]) {
+  if (typeof describe[variant] === "function") {
+    describe[variant].each = eachDescribe(describe[variant]);
+  }
+}
 
 if (!globalThis.Worker) {
   globalThis.Worker = NodeWorker;

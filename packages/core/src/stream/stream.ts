@@ -35,6 +35,7 @@ import {
   awaitFiber,
   yieldNow,
   uninterruptible,
+  uninterruptibleMask,
   interruptible,
   retry as effRetry,
   type RetryConfig,
@@ -102,6 +103,8 @@ export type Step<A> =
   | { readonly _tag: "Done" };
 
 const DONE: Step<any> = { _tag: "Done" };
+// Waits until interrupted.
+const NEVER: Eff<never, never> = async<never>(() => {}) as Eff<never, never>;
 
 function emit<A>(chunk: Chunk<A>, next: Stream<A, unknown>): Step<A> {
   return { _tag: "Emit", chunk, next };
@@ -1011,7 +1014,17 @@ export class Stream<A, S = never> {
 
     const start = (run: DriverRun<B>): Eff<Pull<B>, any> =>
       (QueueNS.bounded<Event>(16) as any).flatMap((events: Queue<Event>) => {
-        let current: Fiber<any> | null = null;
+        interface Inner {
+          fiber: Fiber<any> | null;
+          readonly generation: number;
+          // Set before a switch interrupts the fiber.
+          switchedOut: boolean;
+          // What failed, beyond the interrupt, while a switch tore it down.
+          teardown: Cause | null;
+          // Set once a launch fails its pull with `teardown`.
+          delivered: boolean;
+        }
+        let current: Inner | null = null;
         let generation = 0;
         let active = false;
         let outerDone = false;
@@ -1052,16 +1065,32 @@ export class Stream<A, S = never> {
                 ).flatMap(() => drainInner(step.next, innerGeneration)),
           );
 
-        const runInner = (inner: Stream<B, any>, innerGeneration: number): Eff<unknown, any> =>
-          run.reportFailure(
+        // As in `run.reportFailure`, the handler sits in an uninterruptible
+        // region so it sees the whole cause of an interrupted inner. A switch
+        // interrupts the inner outside the run's stop. The interrupted fiber
+        // cannot run an interruptible report, so its teardown failure is noted
+        // synchronously for the launch that waits for it.
+        const runInner = (inner: Stream<B, any>, handle: Inner): Eff<unknown, any> =>
+          uninterruptibleMask((restore) =>
             (
-              ensuring(
-                drainInner(inner, innerGeneration),
-                inner._finalizer ?? succeed(undefined),
+              restore(
+                (
+                  ensuring(
+                    drainInner(inner, handle.generation),
+                    inner._finalizer ?? succeed(undefined),
+                  ) as any
+                ).flatMap(() => events.offer({ _tag: "innerEnd", generation: handle.generation })),
               ) as any
-            ).flatMap(() => events.offer({ _tag: "innerEnd", generation: innerGeneration })),
-            (cause: Cause) =>
-              events.offer({ _tag: "innerFail", generation: innerGeneration, cause }),
+            ).catchAllCause((cause: Cause) => {
+              if (run.stopping) return failCause(cause);
+              if (handle.switchedOut) {
+                handle.teardown = Cause.stripInterrupts(cause);
+                return succeed(undefined);
+              }
+              return restore(
+                events.offer({ _tag: "innerFail", generation: handle.generation, cause }),
+              );
+            }),
           );
 
         // A launch outlives the pull that starts it. Waiting for the previous
@@ -1070,15 +1099,24 @@ export class Stream<A, S = never> {
         let launching: {
           readonly value: A;
           readonly ready: Deferred<void>;
-          readonly previous: Fiber<any> | null;
+          readonly previous: Inner | null;
           readonly generation: number;
         } | null = null;
 
         const launch = (): Eff<void, any> =>
           suspend(() => {
             const pending = launching!;
+            const previous = pending.previous;
+            // A failure while the switch tore the previous inner down fails
+            // the stream, as a failing finalizer fails `ensuring`.
             const settled =
-              pending.previous === null ? succeed(undefined) : awaitFiber(pending.previous);
+              previous === null
+                ? succeed(undefined)
+                : (awaitFiber(previous.fiber!) as any).flatMap(() => {
+                    if (previous.teardown === null) return succeed(undefined);
+                    previous.delivered = true;
+                    return failCause(previous.teardown);
+                  });
             return (settled as any)
               .flatMap(() =>
                 // Forking the inner stream and releasing the outer driver
@@ -1087,12 +1125,18 @@ export class Stream<A, S = never> {
                   suspend(() => {
                     if (launching !== pending) return succeed(undefined);
                     launching = null;
-                    return run
-                      .fork(runInner(f(pending.value), pending.generation))
-                      .flatMap((fiber) => {
-                        current = fiber;
-                        return pending.ready.succeed(undefined);
-                      });
+                    const handle: Inner = {
+                      fiber: null,
+                      generation: pending.generation,
+                      switchedOut: false,
+                      teardown: null,
+                      delivered: false,
+                    };
+                    return run.fork(runInner(f(pending.value), handle)).flatMap((fiber) => {
+                      handle.fiber = fiber;
+                      current = handle;
+                      return pending.ready.succeed(undefined);
+                    });
                   }),
                 ),
               )
@@ -1110,7 +1154,10 @@ export class Stream<A, S = never> {
                   return uninterruptible(event.ready.succeed(undefined)).flatMap(() => pull());
                 }
                 const previous = mode === "switch" ? current : null;
-                previous?.interrupt();
+                if (previous !== null) {
+                  previous.switchedOut = true;
+                  previous.fiber!.interrupt();
+                }
                 active = true;
                 current = null;
                 launching = {
@@ -1140,8 +1187,19 @@ export class Stream<A, S = never> {
           });
         const next = run.continueWith(pull);
 
-        const outerDriver = run.reportFailure(drainOuter(self) as any, (cause: Cause) =>
-          events.offer({ _tag: "outerFail", cause }),
+        // A teardown failure no launch delivered, because the pull waiting for
+        // it was cut before it ran, fails the stop instead of being dropped.
+        // The outer driver waits for every launch, so it is still running.
+        const undelivered: Eff<void, any> = suspend(() => {
+          const previous = launching?.previous ?? null;
+          return run.stopping && previous?.teardown && !previous.delivered
+            ? failCause(previous.teardown)
+            : succeed(undefined);
+        });
+
+        const outerDriver = run.reportFailure(
+          ensuring(drainOuter(self), undelivered) as any,
+          (cause: Cause) => events.offer({ _tag: "outerFail", cause }),
         );
 
         return run.fork(outerDriver).map(() => pull);
@@ -1223,7 +1281,7 @@ export class Stream<A, S = never> {
       | { readonly _tag: "failure"; readonly cause: Cause };
     type RaceEvent =
       | { readonly _tag: "source"; readonly step: Step<A> }
-      | { readonly _tag: "signal"; readonly event: SignalEvent };
+      | { readonly _tag: "stop" };
 
     const self = this;
 
@@ -1251,7 +1309,11 @@ export class Stream<A, S = never> {
             ) as any,
             (cause: Cause) => succeed<SignalEvent>({ _tag: "failure", cause }),
           ) as any
-        ).flatMap((event: SignalEvent) => control.succeed(event).map(() => undefined));
+        ).flatMap((event: SignalEvent) =>
+          sync(() => {
+            if (event._tag === "empty") signalFinished = true;
+          }).flatMap(() => control.succeed(event).map(() => undefined)),
+        );
 
         const pullSource = (
           source: Stream<A, any>,
@@ -1273,25 +1335,26 @@ export class Stream<A, S = never> {
           return (
             race([
               pullSource(source),
-              (control.await as any).map((event: SignalEvent): RaceEvent => ({
-                _tag: "signal",
-                event,
-              })),
+              // A failed signal fails its side of the race rather than winning
+              // with a marker, so a failure while the cut pull cleans up joins
+              // the signal's failure instead of replacing it. A signal that
+              // ends empty never wins, so the pull in flight keeps running.
+              (control.await as any).flatMap((event: SignalEvent): Eff<RaceEvent, any> =>
+                event._tag === "failure"
+                  ? failCause(event.cause)
+                  : event._tag === "empty"
+                    ? NEVER
+                    : succeed<RaceEvent>({ _tag: "stop" }),
+              ),
             ]) as any
           ).flatMap((winner: RaceEvent): Eff<Step<A>, any> => {
-            if (winner._tag === "source") {
-              const step = winner.step;
-              return succeed(
-                step._tag === "Done"
-                  ? DONE
-                  : emit(step.chunk, new Stream(suspend(() => pull(step.next)))),
-              );
-            }
-
-            if (winner.event._tag === "stop") return succeed(DONE);
-            if (winner.event._tag === "failure") return failCause(winner.event.cause);
-            signalFinished = true;
-            return pull(source);
+            if (winner._tag === "stop") return succeed(DONE);
+            const step = winner.step;
+            return succeed(
+              step._tag === "Done"
+                ? DONE
+                : emit(step.chunk, new Stream(suspend(() => pull(step.next)))),
+            );
           });
         };
 
@@ -2574,7 +2637,7 @@ export class Stream<A, S = never> {
    * than `ms` to produce a step — i.e. the gap between emitted chunks (or
    * between subscription and the first chunk) exceeds the limit.
    *
-   * Consumer-side and Clock-routed (`timeoutOption`), so a TestClock drives
+   * Consumer-side and Clock-routed (`timeoutFail`), so a TestClock drives
    * it deterministically; the in-flight pull is interrupted when the timer
    * fires. `ms` must be a finite, non-negative number; anything else throws
    * `RangeError`.
@@ -2630,7 +2693,8 @@ export class Stream<A, S = never> {
    * aborts — even while a pull is blocked mid-wait. Each pull races the
    * upstream step against an async that resolves on abort; whichever side
    * loses is interrupted, which also removes the abort listener, so nothing
-   * leaks after the stream terminates.
+   * leaks after the stream terminates. The race waits for the cut pull's
+   * cleanup, and a failure there fails the stream instead.
    */
   interruptOn(signal: AbortSignal): Stream<A, S> {
     const abortStep: Eff<Step<A>, never> = async<Step<A>>((resume) => {
@@ -2663,8 +2727,9 @@ export class Stream<A, S = never> {
    * End the stream gracefully once `ms` milliseconds (Clock time, anchored
    * at the first pull) have elapsed. A pull still blocked when the deadline
    * hits is interrupted and the stream completes with Done rather than
-   * failing. Clock-routed — a TestClock drives it deterministically. `ms`
-   * must be a finite, non-negative number; anything else throws `RangeError`.
+   * failing, unless that pull's cleanup fails. Clock-routed — a TestClock
+   * drives it deterministically. `ms` must be a finite, non-negative number;
+   * anything else throws `RangeError`.
    */
   interruptAfter(ms: number): Stream<A, S> {
     requireFiniteMs({ operator: "interruptAfter", name: "ms", value: ms });

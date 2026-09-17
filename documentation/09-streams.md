@@ -73,7 +73,7 @@ stream whose effect type contains both errors.
 | `.parJoinUnbounded()` | flatten a stream of streams, opening each inner stream as it arrives (no memory bound) |
 | `.broadcastThrough(...branches)` | pull once, fan out to every branch, and merge their outputs |
 | `.observe(branch)` | run a reliable side branch while retaining source values |
-| `.switchMap(f)` | latest inner stream wins; the previous inner is canceled and finalized |
+| `.switchMap(f)` | latest inner stream wins; the previous inner is canceled and finalized before the next one starts |
 | `.exhaustMap(f)` | ignore new outer values while an inner stream is active |
 | `.combineLatest(other)` | emit when either initialized side changes |
 | `.withLatest(other)` | emit only for the main stream, paired with the latest side value |
@@ -85,8 +85,12 @@ fibers belong to the stream, not to whichever fiber pulls it. They start on the
 first pull. When the stream completes, fails, stops early, or its consumer is
 interrupted, its finalizer interrupts them and waits for them to finish before
 it releases the sources. A failure raised while they stop, such as an inner
-stream's finalizer failing, fails the stream instead of being dropped. No
-callback or timer escapes structured concurrency.
+stream's finalizer failing, fails the stream instead of being dropped. So does
+a failure while `switchMap` finalizes the inner stream it switches away from;
+the next inner stream then does not start. A source that fails with an
+interruption of its own, rather than being stopped, fails the stream with that
+interruption instead of leaving the consumer waiting. No callback or timer
+escapes structured concurrency.
 
 Because the finalizer owns these fibers, consume the stream with a terminal
 operator such as `toArray`, `drain`, `forEach`, or `runSink`. Pulling `step` by
@@ -245,6 +249,7 @@ finish its cleanup before they fail or end the stream (see
 that cleanup is not swallowed:
 
 - `timeout` and `deadline` fail with their error joined to the cleanup failure.
+  So does `takeUntil` when its signal stream fails.
 - `interruptAfter`, `interruptOn` and `takeUntil` fail with the cleanup failure
   instead of ending normally.
 
@@ -543,7 +548,10 @@ their fibers, not in the pull:
 - **Delivered failures stay.** Once a failure has reached the consumer, every
   retried pull fails again with the same cause, whether or not it was the first
   pull. A failed element is not skipped and a failed input is not restarted.
-  Linear operators such as `evalMap` run a failed pull again instead.
+  This holds for a cause that contains an interruption too, such as a source
+  that interrupted itself: only a pull whose own fiber was interrupted counts
+  as cut and resumes. Linear operators such as `evalMap` run a failed pull
+  again instead.
 - **Retry where the work runs.** To retry a failing input or mapper, retry it
   before it reaches the operator: `input.retry(policy).merge(other)` or
   `.parEvalMap(n, (a) => f(a).retry(policy))`. To restart the sources, use
@@ -619,14 +627,14 @@ rather than silently ending the stream.
   neither exhausted nor closed with `return()` keeps its stream parked and its
   resources open. `for await` closes it for you.
 - **Counts and durations are validated when the operator is built.**
-  `parEvalMap`, `parEvalMapUnordered`, `buffer`, and `groupWithin`'s `maxSize`
-  take a positive integer or `Infinity`. `grouped` and `sliding` take a positive
-  integer. Durations (`Stream.tick`, `debounce`, `groupWithin`'s `timeoutMs`,
-  `sample`, `audit`, `throttle`/`metered`, `spaced`, `timeout`, `deadline`,
-  `interruptAfter`, and `pauseWhen`) take a finite, non-negative number of
-  milliseconds; `sample`, `audit`, and `pauseWhen` wait at least 1 ms. Any
-  other value throws `RangeError` instead of being rounded or firing
-  immediately.
+  `parEvalMap`, `parEvalMapUnordered`, `buffer`, `groupWithin`'s `maxSize`,
+  and `parJoin`'s `maxOpen` take a positive integer or `Infinity`. `grouped`
+  and `sliding` take a positive integer. Durations (`Stream.tick`,
+  `debounce`, `groupWithin`'s `timeoutMs`, `sample`, `audit`,
+  `throttle`/`metered`, `spaced`, `timeout`, `deadline`, `interruptAfter`, and
+  `pauseWhen`) take a finite, non-negative number of milliseconds; `sample`,
+  `audit`, and `pauseWhen` wait at least 1 ms. Any other value throws
+  `RangeError` instead of being rounded or firing immediately.
 - **Fusion stops at non-fusible ops.** `mapEffect`, `flatMap`, and `take`
   break a fused chain; benchmark the actual pipeline if throughput matters.
 

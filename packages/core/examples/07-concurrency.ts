@@ -16,7 +16,7 @@ assertEq(await forkExample.orDie().run(), 42);
 // <<< example
 
 // >>> example: race-method
-// .race(other) — fluent two-way race. First to succeed wins.
+// .race(other) — fluent two-way race. The first to settle wins.
 const fast = sleep(10).flatMap(() => succeed("fast"));
 const slow = sleep(50).flatMap(() => succeed("slow"));
 

@@ -16,6 +16,7 @@ import {
   TaggedError,
   ensuring,
   fail,
+  failCause,
   succeed,
   uninterruptible,
   type Eff,
@@ -605,6 +606,337 @@ describe("run teardown", () => {
   });
 });
 
+describe("switchMap: the inner stream a switch tears down", () => {
+  // Emits 1 at once and 2 at t=5, so the inner stream for 1 is switched away
+  // from at t=5.
+  const switchAt5 = (): Stream<number> =>
+    Stream.of(1).concat(Stream.fromEffect(sleep(5).map(() => 2)));
+  const teardownFailures = (run: VirtualRun): unknown[] =>
+    run.result?.ok === false ? Cause.failures(run.result.cause) : [];
+
+  test.each<[string, () => Stream<number, unknown>]>([
+    [
+      "its effect's cleanup",
+      () =>
+        Stream.fromEffect(
+          ensuring(
+            sleep(100).map(() => 0),
+            fail(new TeardownError({})),
+          ),
+        ),
+    ],
+    [
+      "its stream finalizer",
+      () => Stream.fromEffect(sleep(100).map(() => 0)).onFinalize(fail(new TeardownError({}))),
+    ],
+  ])("a failure in %s fails the stream", (_name, first) => {
+    let launched = 0;
+    const run = runVirtual({
+      effect: collect(
+        switchAt5().switchMap((n) => {
+          if (n === 1) return first();
+          launched++;
+          return Stream.of(n);
+        }),
+      ),
+    });
+
+    expect(run.result?.ok).toBe(false);
+    expect(teardownFailures(run)).toEqual([new TeardownError({})]);
+    expect(launched).toBe(0);
+    expect(run.now).toBe(5);
+    expect(run.leaked).toEqual([]);
+  });
+
+  const slowFailingCleanup = (): Stream<number> =>
+    Stream.fromEffect(
+      ensuring(
+        sleep(100).map(() => 0),
+        sleep(10).flatMap(() => fail(new TeardownError({}))),
+      ),
+    ) as unknown as Stream<number>;
+
+  test("the next inner stream waits for the cleanup and fails when it fails", () => {
+    const run = runVirtual({
+      effect: collect(
+        switchAt5().switchMap((n) => (n === 1 ? slowFailingCleanup() : Stream.of(n))),
+      ),
+    });
+
+    expect(teardownFailures(run)).toEqual([new TeardownError({})]);
+    expect(run.now).toBe(15);
+    expect(run.leaked).toEqual([]);
+  });
+
+  test("a launch cut while the cleanup runs fails once retried", () => {
+    let outerAcquired = 0;
+    const outer = Stream.suspend(() => {
+      outerAcquired++;
+      return switchAt5();
+    });
+    const run = runVirtual({
+      effect: collect(
+        outer
+          .switchMap((n) => (n === 1 ? slowFailingCleanup() : Stream.of(n)))
+          .timeout(3)
+          .retry({ times: 10 }),
+      ),
+    });
+
+    expect(teardownFailures(run)).toEqual([new TeardownError({})]);
+    expect(outerAcquired).toBe(1);
+    expect(run.leaked).toEqual([]);
+  });
+
+  test("a cleanup still running when the stream stops fails the stream", () => {
+    const run = runVirtual({
+      effect: collect(
+        switchAt5()
+          .switchMap((n) => (n === 1 ? slowFailingCleanup() : Stream.of(n)))
+          .interruptAfter(7),
+      ),
+    });
+
+    expect(teardownFailures(run)).toEqual([new TeardownError({})]);
+    expect(run.now).toBe(15);
+    expect(run.leaked).toEqual([]);
+  });
+
+  // The pull waiting for the cleanup is cut at the instant the cleanup fails,
+  // so no launch delivers the failure; the stream's stop raises it instead.
+  test.each<[string, (stream: Stream<number, unknown>) => Stream<number, unknown>, string[]]>([
+    ["interruptAfter", (stream) => stream.interruptAfter(15), ["TeardownError"]],
+    ["timeout", (stream) => stream.timeout(15), ["StreamTimeoutError", "TeardownError"]],
+    ["takeUntil", (stream) => stream.takeUntil(Stream.fromEffect(sleep(15))), ["TeardownError"]],
+  ])("a cleanup failing as %s cuts the launch still fails the stream", (_name, wrap, tags) => {
+    const run = runVirtual({
+      effect: collect(
+        wrap(switchAt5().switchMap((n) => (n === 1 ? slowFailingCleanup() : Stream.of(n)))),
+      ),
+    });
+
+    expect(run.result?.ok).toBe(false);
+    expect(teardownFailures(run).map((e) => (e as { _tag: string })._tag)).toEqual(tags);
+    expect(run.now).toBe(15);
+    expect(run.leaked).toEqual([]);
+  });
+
+  test("a cleanup that succeeds switches as before", () => {
+    const run = runVirtual({
+      effect: collect(
+        switchAt5().switchMap((n) =>
+          n === 1
+            ? Stream.fromEffect(
+                ensuring(
+                  sleep(100).map(() => 0),
+                  sleep(10),
+                ),
+              )
+            : Stream.of(n),
+        ),
+      ),
+    });
+
+    expect(run.result).toEqual({ ok: true, value: ["2"] });
+    expect(run.now).toBe(15);
+    expect(run.leaked).toEqual([]);
+  });
+});
+
+describe("takeUntil: a signal that ends without emitting", () => {
+  // An empty signal leaves the source unchanged: the pull in flight when the
+  // signal ends keeps running instead of being cut and started again.
+  test("does not cut the source pull in flight", () => {
+    let pulls = 0;
+    let cleanups = 0;
+    const source = Stream.fromEffect(
+      ensuring(
+        sync(() => void pulls++)
+          .flatMap(() => sleep(5))
+          .map(() => 1),
+        sync(() => void cleanups++),
+      ),
+    ).concat(Stream.fromEffect(sleep(3).map(() => 2)));
+    const emptySignal = Stream.fromEffect(sleep(2)).drop(1);
+
+    const run = runVirtual({ effect: timeline(source.takeUntil(emptySignal)) });
+
+    expect(run.result).toEqual({
+      ok: true,
+      value: [
+        ["1", 5],
+        ["2", 8],
+      ],
+    });
+    expect({ pulls, cleanups }).toEqual({ pulls: 1, cleanups: 1 });
+    expect(run.leaked).toEqual([]);
+  });
+
+  test("releases the signal once and lets later pulls run without a race", () => {
+    let signalReleased = 0;
+    const emptySignal = Stream.fromEffect(sleep(1))
+      .drop(1)
+      .onFinalize(sync(() => void signalReleased++));
+
+    const run = runVirtual({
+      effect: timeline(
+        Stream.range(0, 3)
+          .rechunk(1)
+          .evalMap((n) => sleep(2).map(() => n))
+          .takeUntil(emptySignal),
+      ),
+    });
+
+    expect(run.result).toEqual({
+      ok: true,
+      value: [
+        ["0", 2],
+        ["1", 4],
+        ["2", 6],
+      ],
+    });
+    expect(signalReleased).toBe(1);
+    expect(run.leaked).toEqual([]);
+  });
+});
+
+describe("a source that interrupts itself", () => {
+  // A stream whose own effect fails with an interruption, with no interrupt
+  // from outside, fails the operator with that cause as parJoin does, instead
+  // of passing for teardown and leaving the consumer waiting.
+  interface SelfInterrupt {
+    stream: () => Stream<number>;
+    effect: () => Eff<number, never>;
+  }
+  const never = (): Stream<number> => Stream.fromEffect(sleep(NEVER_MS).map(() => 0));
+
+  const operators: [string, (source: SelfInterrupt) => Stream<unknown, unknown>][] = [
+    ["merge", ({ stream }) => stream().merge(never())],
+    ["mergeAll", ({ stream }) => Stream.mergeAll(never(), stream(), never())],
+    ["combineLatest", ({ stream }) => stream().combineLatest(never())],
+    ["withLatest main", ({ stream }) => stream().withLatest(never())],
+    ["withLatest side", ({ stream }) => never().withLatest(stream())],
+    ["switchMap outer", ({ stream }) => stream().switchMap((n) => Stream.of(n))],
+    ["switchMap inner", ({ stream }) => Stream.of(1).switchMap(() => stream())],
+    ["exhaustMap outer", ({ stream }) => stream().exhaustMap((n) => Stream.of(n))],
+    ["exhaustMap inner", ({ stream }) => Stream.of(1).exhaustMap(() => stream())],
+    ["parEvalMap source", ({ stream }) => stream().parEvalMap(2, (n) => succeed(n))],
+    ["parEvalMap worker", ({ effect }) => Stream.of(1).parEvalMap(2, () => effect())],
+    [
+      "parEvalMapUnordered source",
+      ({ stream }) => stream().parEvalMapUnordered(2, (n) => succeed(n)),
+    ],
+    ["parEvalMapUnordered worker", ({ effect }) => Stream.of(1).parEvalMapUnordered(2, effect)],
+    ["buffer", ({ stream }) => stream().buffer(2)],
+    ["groupWithin", ({ stream }) => stream().groupWithin(2, 10)],
+    ["debounce", ({ stream }) => stream().debounce(5)],
+    ["sample", ({ stream }) => stream().sample(5)],
+    ["audit", ({ stream }) => stream().audit(5)],
+    ["broadcastThrough upstream", ({ stream }) => stream().broadcastThrough((s) => s)],
+    ["broadcastThrough branch", ({ stream }) => never().broadcastThrough((s) => s, stream)],
+    ["observe", ({ stream }) => never().observe(stream)],
+    ["takeUntil signal", ({ stream }) => never().takeUntil(stream())],
+    ["parJoin inner", ({ stream }) => Stream.of(stream()).parJoin(2)],
+    [
+      "parJoin outer",
+      ({ stream }) =>
+        stream()
+          .map((n) => Stream.of(n))
+          .parJoin(2),
+    ],
+  ];
+
+  const selfInterrupt = (cleanup: Eff<void, unknown>): SelfInterrupt => {
+    const effect = () =>
+      ensuring(
+        sleep(1).flatMap(() => failCause(Cause.interrupt())),
+        cleanup,
+      ) as unknown as Eff<number, never>;
+    return { effect, stream: () => Stream.fromEffect(effect()) };
+  };
+
+  test.each(operators)("%s: fails the stream with the interruption", (_name, build) => {
+    const run = runVirtual({ effect: collect(build(selfInterrupt(succeed(undefined)))) });
+
+    expect(run.result?.ok).toBe(false);
+    if (run.result?.ok === false) expect(Cause.isInterruptedOnly(run.result.cause)).toBe(true);
+    expect(run.now).toBe(1);
+    expect(run.leaked).toEqual([]);
+  });
+
+  test.each(operators)("%s: fails the stream with a failing cleanup", (_name, build) => {
+    const run = runVirtual({
+      effect: collect(build(selfInterrupt(fail(new TeardownError({}))))),
+    });
+
+    expect(run.result?.ok).toBe(false);
+    if (run.result?.ok === false) {
+      expect(Cause.failures(run.result.cause)).toEqual([new TeardownError({})]);
+    }
+    expect(run.now).toBe(1);
+    expect(run.leaked).toEqual([]);
+  });
+
+  // The failure reached the consumer, so a retried pull fails again with it
+  // rather than resuming the run as if the pull had been cut: a cause holding
+  // an interruption does not make the pull an interrupted one.
+  test.each(operators)("%s: under retry, fails again instead of resuming", (_name, build) => {
+    const cleanups: [Eff<void, unknown>, unknown[]][] = [
+      [succeed(undefined), []],
+      [fail(new TeardownError({})), [new TeardownError({})]],
+    ];
+    for (const [cleanup, failures] of cleanups) {
+      let started = 0;
+      const source = selfInterrupt(cleanup);
+      const counted: SelfInterrupt = {
+        effect: () => sync(() => void started++).flatMap(source.effect),
+        stream: () =>
+          Stream.suspend(() => {
+            started++;
+            return source.stream();
+          }),
+      };
+      const run = runVirtual({ effect: collect(build(counted).retry({ times: 3 })) });
+
+      expect(run.result?.ok).toBe(false);
+      if (run.result?.ok === false) {
+        expect(Cause.failures(run.result.cause)).toEqual(failures);
+        if (failures.length === 0) expect(Cause.isInterruptedOnly(run.result.cause)).toBe(true);
+      }
+      expect(started).toBe(1);
+      expect(run.now).toBe(1);
+      expect(run.leaked).toEqual([]);
+    }
+  });
+
+  test.each<[string, (source: () => Stream<number>) => Stream<unknown, unknown>]>([
+    ["merge", (source) => source().merge(Stream.fromEffect(sleep(50).map(() => 7)))],
+    [
+      "switchMap inner",
+      (source) =>
+        Stream.of(1)
+          .concat(Stream.fromEffect(sleep(50).map(() => 2)))
+          .switchMap((n) => (n === 1 ? source() : Stream.of(n))),
+    ],
+  ])(
+    "%s: under retry, does not skip the failure and carry on with later elements",
+    (_name, build) => {
+      const run = runVirtual({
+        effect: collect(
+          build(() => selfInterrupt(fail(new TeardownError({}))).stream()).retry({ times: 3 }),
+        ),
+      });
+
+      expect(run.result?.ok).toBe(false);
+      if (run.result?.ok === false) {
+        expect(Cause.failures(run.result.cause)).toEqual([new TeardownError({})]);
+      }
+      expect(run.now).toBe(1);
+      expect(run.leaked).toEqual([]);
+    },
+  );
+});
+
 describe("cleanup of a cut pull", () => {
   // A racing wrapper waits for the pull it cut to finish its cleanup. A linear
   // source cleans up inside that pull; an operator with background fibers only
@@ -674,6 +1006,26 @@ describe("cleanup of a cut pull", () => {
       },
     );
   });
+
+  // The failing signal cuts the pull like a timer that fails, so its failure
+  // stays in the outcome next to the cleanup failure instead of being replaced.
+  test.each(Object.keys(sources))(
+    "takeUntil: %s source: a failing signal joins a failing cleanup of the cut pull",
+    (source) => {
+      const signal = Stream.fromEffect(sleep(5).flatMap(() => fail(new SourceError({}))));
+      const run = runVirtual({
+        effect: sources[source]!(failingCleanup).takeUntil(signal).toArray(),
+      });
+
+      expect(run.result?.ok).toBe(false);
+      if (run.result?.ok === false) {
+        const tags = Cause.failures(run.result.cause).map((e) => (e as { _tag: string })._tag);
+        expect(tags).toEqual(["SourceError", "TeardownError"]);
+      }
+      expect(run.now).toBe(5);
+      expect(run.leaked).toEqual([]);
+    },
+  );
 
   test("interruptOn: a failing cleanup of the cut pull fails the stream", () => {
     const controller = new AbortController();

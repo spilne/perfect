@@ -171,7 +171,9 @@ if (exit._tag === "Failure") {
 }
 ```
 
-`scoped(acquireRelease(...))` follows the same rule when a scope closes.
+`scoped(acquireRelease(...))` follows the same rule when a scope closes, and so
+does a release registered without `scoped`, which runs when the fiber
+completes.
 
 Parallel children release first. `all`, `race`, `forEachPar`, `timeoutOption`
 and the other combinators built on them wait for their children's finalizers before they
@@ -182,7 +184,9 @@ finished. A child's finalizer failure joins the combinator's outcome with
 
 An interrupt adds `Interrupt` to the outcome. An interrupt that arrives while
 a finalizer runs waits for it: interrupting `succeed(1).ensuring(release)`
-while `release` fails with `e` ends as `(Fail(e) ; Interrupt)`. Error handlers
+while `release` fails with `e` ends as `(Fail(e) ; Interrupt)`, and while
+`release` succeeds as `Interrupt`. A release in `scoped` or in the fiber's own
+scope ends the same way. Error handlers
 around an interrupted effect don't run (see
 [Interruption and error handlers](./05-error-handling.md#interruption-and-error-handlers)),
 so they can neither swallow the interrupt nor hide the finalizer failure.
@@ -213,9 +217,13 @@ program built with `.with(layer)` ends. See
   once when the acquire runs from cleanup of an interrupted fiber.
 - **Release runs are uninterruptible.** If your release effect is slow, it
   will block scope exit. Make releases fast.
-- **Release failures are visible.** Handle them with `runExit`,
-  `.catchAllCause`, or `onExit` when cleanup failure is operationally
-  meaningful.
+- **Release failures are visible.** Inspect them with `runExit` or `onExit`
+  when cleanup failure is operationally meaningful. An interrupted fiber skips
+  error handlers, so a plain `.catchAllCause` never sees the release failure of
+  an interrupted fiber. `onExit` does, and so does a handler inside an
+  uninterruptible region:
+  `uninterruptibleMask((restore) => restore(eff).catchAllCause(handler))`. See
+  [Interruption and error handlers](./05-error-handling.md#interruption-and-error-handlers).
 - **`ensuring` doesn't acquire — just finalizes.** Use `acquireRelease` if
   you need acquire-then-release semantics.
 - **Permits and pooled resources come back on interrupt.** `Semaphore.withPermit`
