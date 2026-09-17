@@ -331,6 +331,19 @@ const Logger = service<Logger>()("Logger");
   const _forkTapped: Stream<number, Throws<NotFound>> = numbers.tapEffectFork(() =>
     fail(new Forbidden()),
   );
+  const nested = null as unknown as Stream<
+    Stream<number, Throws<NotFound>> | Stream<string, Needs<Logger>>,
+    Throws<Forbidden>
+  >;
+  const _joined: Stream<number | string, Throws<Forbidden> | Throws<NotFound> | Needs<Logger>> =
+    nested.parJoin(4);
+  const _joinedUnbounded: Stream<
+    number | string,
+    Throws<Forbidden> | Throws<NotFound> | Needs<Logger>
+  > = nested.parJoinUnbounded();
+  const _concurrentFlatMap: Stream<string, Throws<NotFound> | Throws<Forbidden>> = numbers
+    .map(() => strings)
+    .parJoin(2);
 
   // @ts-expect-error either source may fail
   const _unsafeCombined: Stream<[number, string], never> = numbers.combineLatest(strings);
@@ -344,6 +357,10 @@ const Logger = service<Logger>()("Logger");
   const _unsafeUntil: Stream<number, Throws<NotFound>> = _until;
   // @ts-expect-error the observer may fail
   const _unsafeObserved: Stream<number, Throws<NotFound>> = _observed;
+  // @ts-expect-error parJoin flattens only a stream of streams
+  const _joinedFlat = numbers.parJoin(2);
+  // @ts-expect-error inner stream effects cannot be dropped
+  const _unsafeJoined: Stream<number | string, Throws<Forbidden>> = nested.parJoinUnbounded();
 
   void [
     _combined,
@@ -366,12 +383,17 @@ const Logger = service<Logger>()("Logger");
     _mergedAll,
     _repeated,
     _forkTapped,
+    _joined,
+    _joinedUnbounded,
+    _concurrentFlatMap,
     _unsafeCombined,
     _unsafeAsync,
     _unsafeBroadcast,
     _unsafeCaught,
     _unsafeUntil,
     _unsafeObserved,
+    _joinedFlat,
+    _unsafeJoined,
   ];
 }
 

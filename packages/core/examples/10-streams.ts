@@ -37,3 +37,13 @@ const first3 = await Stream.iterate(0, (n) => n + 1)
   .run();
 assertEq(first3, [0, 1, 2]);
 // <<< example
+
+// >>> example: stream-par-join
+// parJoin(n) — run up to n inner streams at once and interleave their output.
+const pages = await Stream.fromArray(["a", "b", "c"])
+  .map((shard) => Stream.range(1, 3).map((page) => `${shard}${page}`))
+  .parJoin(2)
+  .toArray()
+  .run();
+assertEq([...pages].sort(), ["a1", "a2", "b1", "b2", "c1", "c2"]);
+// <<< example

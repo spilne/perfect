@@ -69,6 +69,8 @@ stream whose effect type contains both errors.
 | `.parEvalMap(n, f)` | bounded parallel evaluation in input order |
 | `.parEvalMapUnordered(n, f)` | bounded parallel evaluation in completion order |
 | `.merge(other)` | concurrently emit from either stream |
+| `.parJoin(n)` | flatten a stream of streams, running at most `n` inner streams at once |
+| `.parJoinUnbounded()` | flatten a stream of streams, opening each inner stream as it arrives |
 | `.broadcastThrough(...branches)` | pull once, fan out to every branch, and merge their outputs |
 | `.observe(branch)` | run a reliable side branch while retaining source values |
 | `.switchMap(f)` | latest inner stream wins; the previous inner is canceled and finalized |
@@ -76,9 +78,52 @@ stream whose effect type contains both errors.
 | `.combineLatest(other)` | emit when either initialized side changes |
 | `.withLatest(other)` | emit only for the main stream, paired with the latest side value |
 
-`switchMap`, `exhaustMap`, `combineLatest`, and `withLatest` run on Perfect
-fibers. Downstream cancellation interrupts their driver fibers and runs all
-source/inner finalizers; no callback or timer escapes structured concurrency.
+`switchMap`, `exhaustMap`, `parJoin`, `combineLatest`, and `withLatest` run on
+Perfect fibers. Downstream cancellation interrupts their driver fibers and runs
+all source/inner finalizers; no callback or timer escapes structured
+concurrency.
+
+### Concurrent flattening
+
+`parJoin(n)` flattens a `Stream<Stream<A, S2>, S>` into `Stream<A, S | S2>`,
+running up to `n` inner streams concurrently. Map to streams first for a
+bounded concurrent `flatMap`:
+
+<!-- @embed packages/core/examples/10-streams.ts#stream-par-join -->
+
+```ts
+import { Stream } from "@spilne/perfect-core";
+
+// parJoin(n) — run up to n inner streams at once and interleave their output.
+const pages = await Stream.fromArray(["a", "b", "c"])
+  .map((shard) => Stream.range(1, 3).map((page) => `${shard}${page}`))
+  .parJoin(2)
+  .toArray()
+  .run();
+console.log([...pages].sort()); // → ["a1", "a2", "b1", "b2", "c1", "c2"]
+```
+
+<!-- @end -->
+
+Chunks are emitted in arrival order, so elements from different inner streams
+interleave while each inner stream keeps its own order. The outer stream is
+pulled only when a slot is free. `parJoinUnbounded()` never holds the outer
+stream back, which suits long-lived inner streams that arrive over time:
+
+```ts
+const runs = registrations
+  .map((job) => Stream.tick(job.everyMs).map(() => job.id))
+  .parJoinUnbounded();
+```
+
+The result completes once the outer stream and every opened inner stream have
+completed. Output passes through a small bounded queue, so a slow consumer
+backpressures the inner streams instead of growing memory. A failure in the
+outer stream or any inner stream immediately interrupts all the others, and the
+result fails once the chunks already queued have been emitted. Every inner
+stream the join opened is finalized, including one interrupted before its first
+pull. The outer finalizer runs last, so inner streams may use resources the
+outer stream acquired.
 
 ### Single-pass fan-out
 

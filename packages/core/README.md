@@ -104,9 +104,10 @@ Each is also a fluent method: `program.run()`, `.runSync()`, `.runExit()`, `.run
 - **Streams** — `Stream` / `Chunk` / `Sink` / `Pipes`: fused, lazy,
   effect-typed; lazy `fromAsyncIterable`, `mapAccumulate`, backend-powered
   `statefulMap`, ordered/unordered `parEvalMap`, `switchMap`, `exhaustMap`,
-  `combineLatest`, `withLatest`, single-pass `broadcastThrough`, reliable
-  `observe`/`takeUntil`, typed stream recovery, source-reacquiring `retryFrom`,
-  Clock-driven time operators, and CSV/base64/binary pipes
+  bounded/unbounded `parJoin`, `combineLatest`, `withLatest`, single-pass
+  `broadcastThrough`, reliable `observe`/`takeUntil`, typed stream recovery,
+  source-reacquiring `retryFrom`, Clock-driven time operators, and
+  CSV/base64/binary pipes
 - **Coordination** — `Ref`, `Deferred`, `Queue`, `Semaphore`, `Latch`,
   `Barrier`, `PubSub`, `SubscriptionRef`, `Pool`, `WorkerPool`
 - **Resilience** — `CircuitBreaker`, `RateLimiter`, `Throttle`,
