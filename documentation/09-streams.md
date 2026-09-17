@@ -142,6 +142,18 @@ work and reserve the forked form for best-effort telemetry.
 All timing goes through the `Clock` service, so these operators are
 deterministic under `TestClock`.
 
+`timeout`, `deadline`, `interruptAfter`, `interruptOn` and `takeUntil` race
+each pull against a timer or signal. When the pull is cut, they wait for it to
+finish its cleanup before they fail or end the stream (see
+[Structured teardown](./06-concurrency.md#structured-teardown)).
+
+A value that arrives at the same instant as a timer is not lost. That covers
+a `debounce` window closing, a `groupWithin` deadline and a `sample` or
+`audit` boundary, which wait on internal queues, and a `Stream.fromQueue` pull
+cut by `timeout` and pulled again by `retry`. A queue take that loses its race
+against the timer gives its value back (see
+[Handoff to waiting fibers](./06-concurrency.md#handoff-to-waiting-fibers)).
+
 ## Error handling
 
 Stream error operators mirror the `Eff` error algebra and preserve non-error
@@ -392,6 +404,8 @@ their waiter/listeners when the consumer short-circuits with `take`, `head`,
 `runSink(Sinks.head())`, or any other terminal operation that stops before
 natural source completion. `asyncChunks` retains every emitted `Chunk` as one
 stream step, which lets batch-oriented drivers avoid per-element scheduling.
+A value emitted to a pull that is interrupted before it runs goes back to the
+head of the buffer for the next pull.
 
 `Stream.fromAsyncIterable` acquires its iterator lazily, maps both synchronous
 iterator acquisition failures and rejected pulls through `onError`, pulls one

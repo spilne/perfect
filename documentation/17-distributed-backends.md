@@ -33,6 +33,16 @@ partitioned topology state.
 
 Atomic transitions use Lua or compare-and-set. Blocking list operations use
 duplicated connections so fiber interruption can close a blocked command.
+When a waiter is interrupted just as its `BRPOP` returns, the popped queue item
+or wake-up token (`Queue`, `Latch`, `Barrier`, `Deferred`, `Singleflight`) is
+pushed back for other consumers. A pushed-back item is not duplicated, but it
+goes back to the end `BRPOP` takes from after another consumer may already
+have taken a newer item, so order is not preserved across a give-back. This
+narrows the window but is not a guarantee: if the connection closes after
+Redis popped the value and before its reply arrives, the value is gone, so
+`RedisQueue` delivery is at-most-once under interruption. `RedisQueue.take`
+decodes an item in the same step that receives it, so no further wait follows
+the pop.
 Multi-key primitives derive related keys with a shared Redis Cluster hash tag.
 
 ### Messaging
