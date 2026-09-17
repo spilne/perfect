@@ -9,6 +9,7 @@
 import { type Eff, Suspend, Op } from "./eff";
 import { service, type ServiceTag } from "./service";
 import { Cause } from "./cause";
+import type { Exit } from "./exit";
 
 export type SpanStatus =
   | { readonly ok: true }
@@ -79,39 +80,23 @@ export function withSpan<A, S>(
               eff,
               new Map<symbol, unknown>([[CURRENT_SPAN_KEY, span]]),
             );
-            // reify the outcome, end the span with its status, re-raise
-            const reified = new Suspend(
-              Op.CatchAll,
-              new Suspend(
-                Op.FlatMap,
-                scoped,
-                (value: any) => new Suspend(Op.Succeed, { ok: true as const, value }, null),
-              ),
-              (cause: Cause) => new Suspend(Op.Succeed, { ok: false as const, cause }, null),
-            );
+            // End the span as a finalizer so an interrupted effect still ends it.
             return new Suspend(
-              Op.FlatMap,
-              reified,
-              (outcome: any) =>
+              Op.Ensuring,
+              scoped,
+              (exit: Exit<unknown, unknown>) =>
                 new Suspend(
-                  Op.FlatMap,
-                  new Suspend(
-                    Op.Sync,
-                    () => {
-                      if (outcome.ok) span.end({ ok: true });
-                      else
-                        span.end({
-                          ok: false,
-                          error: Cause.squash(outcome.cause),
-                          interrupted: Cause.isInterruptedOnly(outcome.cause),
-                        });
-                    },
-                    null,
-                  ),
-                  () =>
-                    outcome.ok
-                      ? new Suspend(Op.Succeed, outcome.value, null)
-                      : new Suspend(Op.Fail, outcome.cause, null),
+                  Op.Sync,
+                  () => {
+                    if (exit._tag === "Success") span.end({ ok: true });
+                    else
+                      span.end({
+                        ok: false,
+                        error: Cause.squash(exit.cause),
+                        interrupted: Cause.isInterruptedOnly(exit.cause),
+                      });
+                  },
+                  null,
                 ),
             );
           },

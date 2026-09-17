@@ -148,7 +148,9 @@ const safe = uninterruptible(criticalCleanup);
 Interruption is cooperative. A fiber observes it when it is running in an
 interruptible region, resumes from an async boundary, or walks its
 continuation stack. Finalizers registered by `ensuring` / `scoped` still run
-during interruption, and async waiters unregister their interrupt handles.
+during interruption, error handlers do not (an interrupted fiber cannot
+recover; see [Interruption and error handlers](./05-error-handling.md#interruption-and-error-handlers)),
+and async waiters unregister their interrupt handles.
 A callback that could not be unregistered — a promise that settles late, a
 child that finishes after its parent was interrupted — is ignored, so it
 cannot resume a cancelled fiber or cut its finalizers short.

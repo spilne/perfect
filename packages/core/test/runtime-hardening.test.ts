@@ -2,21 +2,30 @@ import { describe, test, expect } from "bun:test";
 import {
   type Eff,
   type Fiber,
+  Cause,
   Clock,
+  Singleflight,
   Stream,
   TestClock,
+  TestTracer,
+  Tracer,
   acquireRelease,
   addFiberSupervisor,
   all,
   async,
   die,
+  eff,
   ensuring,
   fail,
+  failCause,
   forkDaemon,
   interrupt,
+  interruptible,
   join,
+  onExit,
   provide,
   race,
+  retry,
   run,
   runFiber,
   scoped,
@@ -26,6 +35,7 @@ import {
   timeoutOption,
   tryPromise,
   uninterruptible,
+  withSpan,
   yieldNow,
 } from "../src";
 import { DEFAULT_BUDGET, type Scheduler } from "../src/scheduler";
@@ -152,6 +162,272 @@ describe("interruption hardening", () => {
 
     expect(exit).toEqual({ _tag: "Failure", cause: { _tag: "Interrupt" } });
     expect(finalized).toBe(1);
+  });
+});
+
+describe("an interrupted fiber does not recover", () => {
+  test("a typed finalizer failure after an interrupt is not caught", () => {
+    const scheduler = new StepScheduler();
+    const fiber = runFiber(
+      ensuring(waitForever, fail("close failed")).catch(() => succeed("recovered")),
+      scheduler,
+    );
+    scheduler.flush();
+    fiber.interrupt();
+    scheduler.flush();
+
+    expect(fiber.result).toEqual(interrupted);
+  });
+
+  test("a second interrupt during a typed-failing async finalizer is not caught", () => {
+    const scheduler = new StepScheduler();
+    const release = gate();
+    const fiber = runFiber(
+      ensuring(
+        waitForever,
+        release.wait.flatMap(() => fail("close failed")),
+      ).catch(() => succeed("recovered")),
+      scheduler,
+    );
+    scheduler.flush();
+    fiber.interrupt();
+    scheduler.flush();
+    fiber.interrupt();
+    release.open();
+    scheduler.flush();
+
+    expect(fiber.result).toEqual(interrupted);
+  });
+
+  test("an interrupt pending when a region fails with an interrupt and a typed error is not caught", () => {
+    const scheduler = new StepScheduler();
+    const region = gate();
+    const fiber = runFiber(
+      uninterruptible(
+        region.wait.flatMap(() => failCause(Cause.both(Cause.fail("E"), Cause.interrupt()))),
+      ).catch(() => succeed("recovered")),
+      scheduler,
+    );
+    scheduler.flush();
+    fiber.interrupt();
+    region.open();
+    scheduler.flush();
+
+    expect(fiber.result).toEqual(interrupted);
+  });
+
+  test("an interrupt pending while a finalizer's all() fails with an interrupt is not caught", () => {
+    const scheduler = new StepScheduler();
+    const children: Fiber<any>[] = [];
+    const stop = addFiberSupervisor({ onFork: (_parent, child) => void children.push(child) });
+    const fiber = runFiber(
+      ensuring(fail("E"), all([waitForever, waitForever])).catch(() => succeed("recovered")),
+      scheduler,
+    );
+    scheduler.flush();
+    stop();
+    fiber.interrupt();
+    children[0]!.interrupt();
+    scheduler.flush();
+
+    expect(fiber.result).toEqual(interrupted);
+  });
+
+  const deliveries: Record<string, () => { body: Eff<unknown, unknown>; open?: () => void }> = {
+    "at a suspension": () => ({ body: waitForever }),
+    "when a failing uninterruptible region ends": () => {
+      const region = gate();
+      return {
+        body: uninterruptible(region.wait.flatMap(() => fail("E"))),
+        open: region.open,
+      };
+    },
+    "when a succeeding uninterruptible region ends": () => {
+      const region = gate();
+      return { body: uninterruptible(region.wait), open: region.open };
+    },
+  };
+  const recoveries: Record<string, (body: Eff<unknown, unknown>) => Eff<unknown, unknown>> = {
+    exit: (body) => body.exit(),
+    catchAllCause: (body) => body.catchAllCause(() => succeed("recovered")),
+  };
+  for (const [recovery, recover] of Object.entries(recoveries)) {
+    for (const [delivery, setup] of Object.entries(deliveries)) {
+      test(`${recovery} does not resume a fiber interrupted ${delivery}`, () => {
+        const scheduler = new StepScheduler();
+        let handled = false;
+        let resumed = false;
+        const { body, open } = setup();
+        const fiber = runFiber(
+          recover(body.tapErrorCause(() => sync(() => void (handled = true)))).flatMap(() =>
+            sync(() => void (resumed = true)),
+          ),
+          scheduler,
+        );
+        scheduler.flush();
+        fiber.interrupt();
+        open?.();
+        scheduler.flush();
+
+        expect({ handled, resumed }).toEqual({ handled: false, resumed: false });
+        expect(fiber.result).toEqual(interrupted);
+      });
+    }
+  }
+
+  test("handlers inside an uninterruptible region run, and the interrupt resurfaces at its end", () => {
+    const scheduler = new StepScheduler();
+    const log: string[] = [];
+    const fiber = runFiber(
+      uninterruptible(
+        interruptible(waitForever).catchAllCause((cause) =>
+          sync(() => void log.push(`handled ${Cause.pretty(cause)}`)),
+        ),
+      ).flatMap(() => sync(() => void log.push("after region"))),
+      scheduler,
+    );
+    scheduler.flush();
+    fiber.interrupt();
+    scheduler.flush();
+
+    expect(log).toEqual(["handled Interrupt"]);
+    expect(fiber.result).toEqual(interrupted);
+  });
+
+  test("an interruptible region a finalizer enters after an interrupt is interrupted at once", () => {
+    const scheduler = new StepScheduler();
+    const log: string[] = [];
+    const inner = gate();
+    const fiber = runFiber(
+      ensuring(
+        waitForever,
+        interruptible(inner.wait).flatMap(() => sync(() => void log.push("after wait"))),
+      ),
+      scheduler,
+    );
+    scheduler.flush();
+    fiber.interrupt();
+    scheduler.flush();
+
+    expect(fiber.status).toBe("done");
+    expect(log).toEqual([]);
+    expect(fiber.interrupted).toBe(true);
+  });
+
+  test("retry does not run an interrupted effect again", () => {
+    const scheduler = new StepScheduler();
+    let attempts = 0;
+    const fiber = runFiber(
+      retry(
+        ensuring(
+          sync(() => void attempts++).flatMap(() => waitForever),
+          fail("close failed"),
+        ),
+        { times: 3 },
+      ),
+      scheduler,
+    );
+    scheduler.flush();
+    fiber.interrupt();
+    scheduler.flush();
+
+    expect(attempts).toBe(1);
+    expect(fiber.result).toEqual(interrupted);
+  });
+
+  test("a typed failure stays in the cause when no handler was bypassed", () => {
+    const scheduler = new StepScheduler();
+    const release = gate();
+    const fiber = runFiber(
+      ensuring(
+        succeed(1),
+        release.wait.flatMap(() => fail("close failed")),
+      ),
+      scheduler,
+    );
+    scheduler.flush();
+    fiber.interrupt();
+    release.open();
+    scheduler.flush();
+
+    const cause = {
+      _tag: "Then",
+      left: { _tag: "Fail", error: "close failed" },
+      right: { _tag: "Interrupt" },
+    };
+    expect(fiber.result).toEqual({ ok: false, cause });
+    expect(Cause.squash(cause as Cause)).toBe("close failed");
+  });
+});
+
+describe("cleanup of an interrupted fiber", () => {
+  test("onExit runs its handler with the interrupted exit", () => {
+    const scheduler = new StepScheduler();
+    const exits: unknown[] = [];
+    const fiber = runFiber(
+      onExit(waitForever, (exit) => sync(() => void exits.push(exit))),
+      scheduler,
+    );
+    scheduler.flush();
+    fiber.interrupt();
+    scheduler.flush();
+
+    expect(exits).toEqual([{ _tag: "Failure", cause: { _tag: "Interrupt" } }]);
+    expect(fiber.result).toEqual(interrupted);
+  });
+
+  test("withSpan ends the span", () => {
+    const scheduler = new StepScheduler();
+    const tracer = new TestTracer();
+    const fiber = runFiber(provide(withSpan(waitForever, "work"), Tracer, tracer), scheduler);
+    scheduler.flush();
+    fiber.interrupt();
+    scheduler.flush();
+
+    expect(tracer.find("work")?.status).toMatchObject({ ok: false, interrupted: true });
+  });
+
+  test("singleflight releases the followers and the key", () => {
+    const scheduler = new StepScheduler();
+    const flights = Singleflight.make();
+    const leader = runFiber(flights.do("key", waitForever), scheduler);
+    scheduler.flush();
+    const follower = runFiber(flights.do("key", succeed("unused")), scheduler);
+    scheduler.flush();
+    leader.interrupt();
+    scheduler.flush();
+    const next = runFiber(flights.do("key", succeed("fresh")), scheduler);
+    scheduler.flush();
+
+    expect(leader.result).toEqual(interrupted);
+    expect(follower.status).toBe("done");
+    expect(follower.result?.ok).toBe(false);
+    expect(next.result).toEqual({ ok: true, value: "fresh" });
+  });
+
+  test("a generator's finally blocks run, and its catch blocks cannot swallow the interrupt", () => {
+    const scheduler = new StepScheduler();
+    const log: string[] = [];
+    const fiber = runFiber(
+      eff(function* () {
+        try {
+          yield* waitForever;
+        } catch {
+          log.push("caught");
+        } finally {
+          yield* sync(() => void log.push("finally effect"));
+          log.push("finally done");
+        }
+        log.push("after try");
+      }),
+      scheduler,
+    );
+    scheduler.flush();
+    fiber.interrupt();
+    scheduler.flush();
+
+    expect(log).toEqual(["finally effect", "finally done"]);
+    expect(fiber.result).toEqual(interrupted);
   });
 });
 

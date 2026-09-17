@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { run, type Eff } from "@spilne/perfect-core";
+import { async, run, runFiber, sync, type Eff } from "@spilne/perfect-core";
 import { RedisPubSub } from "../src/redis-pubsub";
+import { RedisSingleflight } from "../src/redis-singleflight";
 import { RedisStream } from "../src/redis-stream";
 import { redisKeyFamily } from "../src/internal";
 import type { RedisClient } from "../src/redis-client";
@@ -111,5 +112,39 @@ describe("Redis production hardening", () => {
     ]);
     expect(acknowledgements).toEqual([["7-0"]]);
     expect(deletions).toEqual([["7-0"]]);
+  });
+
+  test("an interrupted singleflight leader publishes its failure and releases the lock", async () => {
+    const published: string[] = [];
+    let releases = 0;
+    const redis: Partial<RedisClient> = {
+      set: async () => "OK",
+      rpush: async (_key, ...values) => {
+        published.push(...values);
+        return published.length;
+      },
+      pexpire: async () => 1,
+      eval: async () => {
+        releases++;
+        return 1;
+      },
+    };
+    let started = false;
+    const flights = RedisSingleflight.make({ redis: redis as RedisClient });
+    const leader = runFiber(
+      flights.do(
+        "key",
+        sync(() => void (started = true)).flatMap(() => async<void>(() => () => {})),
+      ) as any,
+    );
+    for (let i = 0; i < 100 && !started; i++) await new Promise((r) => setTimeout(r, 0));
+    expect(started).toBe(true);
+
+    leader.interrupt();
+    const exit = await leader.await();
+
+    expect(exit).toEqual({ _tag: "Failure", cause: { _tag: "Interrupt" } });
+    expect(published.map((value) => JSON.parse(value).ok)).toEqual([false]);
+    expect(releases).toBe(1);
   });
 });

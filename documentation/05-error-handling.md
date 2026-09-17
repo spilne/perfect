@@ -124,6 +124,35 @@ console.log(await fallback.run()); // → "second"
 
 <!-- @end -->
 
+## Interruption and error handlers
+
+Once a fiber is interrupted it cannot recover. Every error handler above the
+interruption point is bypassed — `.catch`, `.catchTag`, `.orElse`, `.either`,
+`.option`, `.mapError`, `.tapError`, `.catchAllCause`, `.tapErrorCause`,
+`.exit()`, `.orDie()` and `retry` alike — so no handler can swallow the
+interrupt and resume normal work. Finalizers still run: `ensuring`,
+`acquireRelease` releases and `onExit` handlers. Handlers inside an
+uninterruptible region, which includes code running inside a finalizer, work
+as usual, but the interrupt is raised again when the region ends.
+
+What the final `Cause` keeps:
+
+| situation | cause |
+|---|---|
+| interrupted while running | `Interrupt` |
+| a typed failure or defect is raised before the interrupt lands, and no handler above it is bypassed | the failure, then the interrupt, e.g. `(Fail(e) ; Interrupt)` |
+| a handler that would have received a typed failure is bypassed | the typed failure is dropped; defects stay |
+
+A typed failure is dropped only when a bypassed handler would have consumed or
+mapped it, so an interrupted effect never surfaces an error its type says was
+handled. When it stays, `run()` rejects with it (`Cause.squash` prefers typed
+failures, then defects, then interruption) and `runSafe` returns it as
+`error`; `Exit.isInterrupted` is `false` for a cause that holds more than
+interrupts.
+
+Put cleanup that must also run on interruption in `ensuring`, `acquireRelease`
+or `onExit`, not in `.catchAllCause`.
+
 ## Defects vs failures — when to use `fail` vs `throw`
 
 | Use `fail(e)` when… | Use `throw` (defect) when… |

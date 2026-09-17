@@ -1,4 +1,4 @@
-import { Cause, ensuring, fail, succeed } from "@spilne/perfect-core";
+import { Cause, ensuring, fail, onExit, succeed } from "@spilne/perfect-core";
 import type { Eff, Singleflight, Throws } from "@spilne/perfect-core";
 import type { Codec } from "@spilne/perfect-core/connect";
 import { JsonCodec } from "@spilne/perfect-core/connect";
@@ -72,17 +72,11 @@ export class RedisSingleflight implements Singleflight<Throws<RedisError>> {
     eff: Eff<A, Throws<E>>,
   ): Eff<A, Throws<RedisError> | Throws<E>> {
     const resultKey = `${lockKey}:result:${requestId}`;
-    const captured: Eff<Outcome<A, E>, never> = eff
-      .map((value): Outcome<A, E> => ({ ok: true, value }))
-      .catchAllCause((cause) => {
-        const typed = Cause.firstFail(cause);
-        return succeed({
-          ok: false,
-          error: (typed === null ? Cause.squash(cause) : typed.value) as E,
-        } as Outcome<A, E>);
-      });
-
-    return captured.flatMap((outcome) =>
+    const toOutcome = (cause: Cause): Outcome<A, E> => {
+      const typed = Cause.firstFail(cause);
+      return { ok: false, error: (typed === null ? Cause.squash(cause) : typed.value) as E };
+    };
+    const publish = (outcome: Outcome<A, E>): Eff<void, Throws<RedisError>> =>
       ensuring(
         redisEff("singleflight.publish", async () => {
           const encoded: EncodedOutcome = {
@@ -95,7 +89,18 @@ export class RedisSingleflight implements Singleflight<Throws<RedisError>> {
         redisEff("singleflight.release", async () => {
           await this.redis.eval(RELEASE_SCRIPT, 1, lockKey, requestId);
         }),
-      ).flatMap(() => (outcome.ok ? succeed(outcome.value) : fail(outcome.error))),
+      );
+    const captured: Eff<Outcome<A, E>, never> = eff
+      .map((value): Outcome<A, E> => ({ ok: true, value }))
+      .catchAllCause((cause) => succeed(toOutcome(cause)));
+
+    // An interrupted leader skips the handler above, so publish its failure
+    // and release the lock from a finalizer instead; followers would
+    // otherwise wait out the lock timeout.
+    return onExit(captured, (exit) =>
+      exit._tag === "Failure" ? publish(toOutcome(exit.cause)) : succeed(undefined),
+    ).flatMap((outcome) =>
+      publish(outcome).flatMap(() => (outcome.ok ? succeed(outcome.value) : fail(outcome.error))),
     );
   }
 

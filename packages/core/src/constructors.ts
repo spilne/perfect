@@ -215,25 +215,13 @@ export function ensuring<A, S, S2>(eff: Eff<A, S>, finalizer: Eff<void, S2>): Ef
 }
 
 // Run handler with the Exit of eff, then propagate eff's original outcome.
+// The handler is a finalizer: it runs uninterruptibly, also when eff is
+// interrupted, and its failure is added to the outcome like any finalizer's.
 export function onExit<A, S, S2>(
   eff: Eff<A, S>,
   handler: (exit: Exit<unknown, A>) => Eff<void, S2>,
 ): Eff<A, S | S2> {
-  const success = new Suspend(
-    Op.FlatMap,
-    eff,
-    (a: any) => new Suspend(Op.FlatMap, handler(ExitNS.succeed(a)) as any, () => succeed(a)),
-  );
-  return new Suspend(
-    Op.CatchAll,
-    success,
-    (cause: any) =>
-      new Suspend(
-        Op.FlatMap,
-        handler(ExitNS.failure(cause)) as any,
-        () => new Suspend(Op.Fail, cause, null),
-      ),
-  ) as any;
+  return new Suspend(Op.Ensuring, eff, handler) as any;
 }
 
 export function acquireRelease<A, S, S2>(

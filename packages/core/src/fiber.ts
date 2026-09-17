@@ -88,6 +88,11 @@ export class Fiber<A = unknown> {
   // promise settling late, a child finishing after its parent moved on) is
   // then ignored instead of resuming whatever the fiber waits on next.
   asyncToken = 0;
+  // Set once an interrupt is delivered while the fiber is interruptible, and
+  // never cleared. From then on, whenever the fiber is interruptible, error
+  // handlers are bypassed and the interrupt is raised again on leaving an
+  // uninterruptible region, so the fiber can only run finalizers and fail.
+  interrupting = false;
 
   complete(result: FiberResult<A>): void {
     if (this.state === FiberState.Done) return;
@@ -124,6 +129,7 @@ export class Fiber<A = unknown> {
       return;
     }
     this.asyncToken++;
+    this.interrupting = true;
     if (this.interruptHandle) {
       this.interruptHandle();
       this.interruptHandle = null;
@@ -174,7 +180,7 @@ export class Fiber<A = unknown> {
   }
 
   get interrupted(): boolean {
-    if (this.interruptPending) return true;
+    if (this.interruptPending || this.interrupting) return true;
     return this.result?.ok === false ? Cause.hasInterrupt(this.result.cause) : false;
   }
 

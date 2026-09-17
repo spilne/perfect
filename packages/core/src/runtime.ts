@@ -66,13 +66,17 @@ function enterUninterruptible(fiber: Fiber<any>, k: Cont | null): Cont {
   return frame;
 }
 
-// The cause a propagating failure carries once a pending interrupt is
-// delivered into it. Typed errors are dropped: a Catch frame further out would
-// recover from them and resume past the interrupt. Defects stay.
 function withInterrupt(cause: Cause): Cause {
-  if (Cause.hasInterrupt(cause)) return cause;
-  const defects = stripFailures(cause);
-  return defects === null ? Cause.interrupt() : Cause.then(defects, Cause.interrupt());
+  return Cause.hasInterrupt(cause) ? cause : Cause.then(cause, Cause.interrupt());
+}
+
+// The cause that continues past an error handler an interrupting fiber
+// bypassed. Its typed failures are dropped: the handler would have consumed or
+// mapped them, so keeping them would surface errors the effect's type says
+// were handled. Defects and the interrupt stay.
+function bypassHandler(cause: Cause): Cause {
+  const kept = stripFailures(cause);
+  return kept === null ? Cause.interrupt() : withInterrupt(kept);
 }
 
 function stripFailures(cause: Cause): Cause | null {
@@ -88,8 +92,19 @@ function stripFailures(cause: Cause): Cause | null {
       const right = stripFailures(cause.right);
       if (left === null) return right;
       if (right === null) return left;
+      if (left === cause.left && right === cause.right) return cause;
       return { _tag: cause._tag, left, right };
     }
+  }
+}
+
+// An Op.Ensuring finalizer is an effect, or a function of the body's Exit
+// (onExit) that returns null when it has nothing to run.
+function exitFinalizer(finalizer: unknown, exit: Exit<unknown, unknown>): Suspend | null {
+  try {
+    return (finalizer as (exit: Exit<unknown, unknown>) => Suspend | null)(exit);
+  } catch (e) {
+    return new Suspend(Op.Fail, Cause.die(e), null);
   }
 }
 
@@ -140,6 +155,7 @@ function runFiberLoop(fiber: Fiber<any>): void {
     // honour any pending interrupt the moment we're in interruptible mode
     if (fiber.interruptible && fiber.interruptPending) {
       fiber.interruptPending = false;
+      fiber.interrupting = true;
       cur = new Suspend(Op.Fail, Cause.interrupt(), null);
     }
 
@@ -179,8 +195,11 @@ function runFiberLoop(fiber: Fiber<any>): void {
           }
           case Op.SetInterruptible: {
             fiber.interruptible = frame.fn as unknown as boolean;
-            if (fiber.interruptible && fiber.interruptPending) {
+            // An uninterruptible region that handled an earlier interrupt
+            // cannot resume normal execution past its end.
+            if (fiber.interruptible && (fiber.interruptPending || fiber.interrupting)) {
               fiber.interruptPending = false;
+              fiber.interrupting = true;
               cur = new Suspend(Op.Fail, Cause.interrupt(), null);
               continue loop;
             }
@@ -188,7 +207,11 @@ function runFiberLoop(fiber: Fiber<any>): void {
           }
           case Op.EnsuringFrame: {
             const value = cur;
-            const finalizer = frame.fn as Suspend;
+            const finalizer =
+              typeof frame.fn === "function"
+                ? exitFinalizer(frame.fn, { _tag: "Success", value })
+                : (frame.fn as Suspend);
+            if (finalizer === null) continue;
             k = enterUninterruptible(fiber, k);
             cur = succeedAfterFinalizer(finalizer, value);
             continue loop;
@@ -243,9 +266,16 @@ function runFiberLoop(fiber: Fiber<any>): void {
         while (k !== null) {
           const frame = k;
           k = frame.next;
+          // An interrupting fiber runs no error handler while interruptible:
+          // recovering would resume normal execution after the interrupt.
+          // Handlers inside uninterruptible regions (finalizers) still run.
           if (frame.op === Op.Catch) {
             const f = Cause.firstFail(cause);
             if (f) {
+              if (fiber.interrupting && fiber.interruptible) {
+                cause = bypassHandler(cause);
+                continue;
+              }
               try {
                 cur = (frame.fn as any)(f.value);
               } catch (e) {
@@ -255,6 +285,10 @@ function runFiberLoop(fiber: Fiber<any>): void {
             }
           }
           if (frame.op === Op.CatchAll) {
+            if (fiber.interrupting && fiber.interruptible) {
+              cause = bypassHandler(cause);
+              continue;
+            }
             try {
               cur = (frame.fn as any)(cause);
             } catch (e) {
@@ -269,16 +303,22 @@ function runFiberLoop(fiber: Fiber<any>): void {
           if (frame.op === Op.SetInterruptible) {
             fiber.interruptible = frame.fn as unknown as boolean;
             // Deliver an interrupt that arrived during the region into the
-            // propagating failure. Left pending, the top-of-loop check would
-            // replace the next finalizer this walk starts.
-            if (fiber.interruptible && fiber.interruptPending) {
+            // propagating failure, keeping its typed errors and defects. Left
+            // pending, the top-of-loop check would replace the next finalizer
+            // this walk starts.
+            if (fiber.interruptible && (fiber.interruptPending || fiber.interrupting)) {
               fiber.interruptPending = false;
+              fiber.interrupting = true;
               cause = withInterrupt(cause);
             }
             continue;
           }
           if (frame.op === Op.EnsuringFrame) {
-            const finalizer = frame.fn as Suspend;
+            const finalizer =
+              typeof frame.fn === "function"
+                ? exitFinalizer(frame.fn, { _tag: "Failure", cause })
+                : (frame.fn as Suspend);
+            if (finalizer === null) continue;
             k = enterUninterruptible(fiber, k);
             cur = failAfterFinalizer(finalizer, cause);
             continue loop;
@@ -542,6 +582,9 @@ function runFiberLoop(fiber: Fiber<any>): void {
         const prev = fiber.interruptible;
         k = new Cont(Op.SetInterruptible, prev, k);
         fiber.interruptible = newValue;
+        // An interruptible region entered after an interrupt (inside a
+        // finalizer, say) is interrupted at once.
+        if (newValue && !prev && fiber.interrupting) fiber.interruptPending = true;
         cur = cur.a;
         continue loop;
       }
@@ -613,7 +656,11 @@ function stepInline(
           }
           case Op.EnsuringFrame: {
             const value = cur;
-            const finalizer = frame.fn as Suspend;
+            const finalizer =
+              typeof frame.fn === "function"
+                ? exitFinalizer(frame.fn, { _tag: "Success", value })
+                : (frame.fn as Suspend);
+            if (finalizer === null) continue;
             cur = succeedAfterFinalizer(finalizer, value);
             continue loop;
           }
@@ -672,7 +719,12 @@ function stepInline(
             parentFiber.interruptible = frame.fn as unknown as boolean;
           }
           if (frame.op === Op.EnsuringFrame) {
-            cur = failAfterFinalizer(frame.fn as Suspend, cause);
+            const finalizer =
+              typeof frame.fn === "function"
+                ? exitFinalizer(frame.fn, { _tag: "Failure", cause })
+                : (frame.fn as Suspend);
+            if (finalizer === null) continue;
+            cur = failAfterFinalizer(finalizer, cause);
             continue loop;
           }
           if (frame.op === Op.ScopeFrame) {
@@ -702,14 +754,18 @@ function stepInline(
       }
       case Op.Ensuring: {
         const body = cur.a as Suspend;
-        const finalizer = cur.b as Suspend;
+        const finalizer = cur.b;
+        const finalizerFor = (exit: Exit<unknown, unknown>): Suspend =>
+          typeof finalizer === "function"
+            ? (exitFinalizer(finalizer, exit) ?? new Suspend(Op.Succeed, undefined, null))
+            : (finalizer as Suspend);
         stepInline(
           body,
           context,
           null,
           (val) => {
             stepInline(
-              finalizer,
+              finalizerFor({ _tag: "Success", value: val }),
               context,
               null,
               () => {
@@ -737,7 +793,7 @@ function stepInline(
           },
           (cause) => {
             stepInline(
-              finalizer,
+              finalizerFor({ _tag: "Failure", cause }),
               context,
               null,
               () => {

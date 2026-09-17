@@ -173,6 +173,13 @@ if (exit._tag === "Failure") {
 
 `scoped(acquireRelease(...))` follows the same rule when a scope closes.
 
+An interrupt adds `Interrupt` to the outcome. An interrupt that arrives while
+a finalizer runs waits for it: interrupting `succeed(1).ensuring(release)`
+while `release` fails with `e` ends as `(Fail(e) ; Interrupt)`. Error handlers
+around an interrupted effect don't run (see
+[Interruption and error handlers](./05-error-handling.md#interruption-and-error-handlers)),
+so they can neither swallow the interrupt nor hide the finalizer failure.
+
 ## Scoped layers
 
 Layers can register finalizers via `acquireRelease` — they fire when the
@@ -186,7 +193,7 @@ program built with `.with(layer)` ends. See
 | `acquireRelease(acquire, release)` | pair acquire effect + release function |
 | `scoped(eff)` | define scope boundary; finalizers fire on exit |
 | `ensuring(eff, finalizer)` | always-run finalizer (no acquire pair) |
-| `onExit(eff, handler)` | inspect Exit, then propagate original outcome |
+| `onExit(eff, handler)` | finalizer that receives the Exit; the original outcome propagates |
 
 ## Pitfalls
 
@@ -200,6 +207,9 @@ program built with `.with(layer)` ends. See
   meaningful.
 - **`ensuring` doesn't acquire — just finalizes.** Use `acquireRelease` if
   you need acquire-then-release semantics.
+- **Cleanup belongs in finalizers, not error handlers.** An interrupted fiber
+  skips `.catchAllCause`, `.tapErrorCause` and every other handler; `ensuring`,
+  `acquireRelease` and `onExit` still run.
 
 ## Next
 
