@@ -40,7 +40,8 @@ export type { RetryConfig } from "./constructors";
 export { RetryAttempt } from "./retry-attempt";
 export { RetryPolicy, runRetry } from "./retry-policy";
 export type { RetryDetails } from "./retry-policy";
-export { all } from "./combinators";
+export { all, forEachPar } from "./combinators";
+export type { ForEachParOptions } from "./combinators";
 export {
   trapError,
   validate,

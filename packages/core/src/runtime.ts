@@ -419,6 +419,77 @@ function runFiberLoop(fiber: Fiber<any>): void {
         return;
       }
 
+      case Op.ForEachPar: {
+        const items = cur.a as readonly unknown[];
+        const { f, limit } = cur.b as {
+          f: (item: unknown, index: number) => Suspend;
+          limit: number;
+        };
+        const len = items.length;
+        if (len === 0) {
+          cur = [];
+          continue loop;
+        }
+
+        fiber.stack = k;
+        fiber.context = context;
+        fiber.state = FiberState.Suspended;
+        const savedCtx = context;
+        const results = new Array(len);
+        const running = new Set<Fiber<any>>();
+        let next = 0;
+        let failure: Cause | null = null;
+        let settled = false;
+
+        const resumeParent = (value: unknown): void => {
+          if (settled) return;
+          settled = true;
+          fiber.interruptHandle = null;
+          if (fiber.state === FiberState.Done) return;
+          fiber.current = value;
+          fiber.state = FiberState.Ready;
+          fiber.scheduler.schedule(() => runFiberLoop(fiber));
+        };
+
+        const launch = (): void => {
+          const index = next++;
+          let eff: Suspend;
+          try {
+            eff = f(items[index], index);
+          } catch (e) {
+            eff = new Suspend(Op.Fail, Cause.die(e), null);
+          }
+          const child = makeChild(fiber, eff, savedCtx);
+          running.add(child);
+          child.onComplete((result) => {
+            running.delete(child);
+            if (settled) return;
+            if (failure === null) {
+              if (result.ok) {
+                results[index] = result.value;
+                if (next < len) launch();
+                else if (running.size === 0) resumeParent(results);
+                return;
+              }
+              failure = result.cause;
+              for (const c of running) c.interrupt();
+            }
+            // Fail only once interrupted siblings have settled, so their
+            // finalizers finish inside the combined effect's lifetime.
+            if (running.size === 0) resumeParent(new Suspend(Op.Fail, failure, null));
+          });
+          runChild(child);
+        };
+
+        fiber.interruptHandle = () => {
+          settled = true;
+          if (failure === null) for (const c of running) c.interrupt();
+        };
+        const initial = Math.min(limit, len);
+        for (let i = 0; i < initial; i++) launch();
+        return;
+      }
+
       case Op.Fork: {
         const child = makeChild(fiber, cur.a, context);
         runChild(child);

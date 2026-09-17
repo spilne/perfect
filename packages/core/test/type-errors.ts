@@ -27,6 +27,7 @@ import {
   run,
   runSync,
   all,
+  forEachPar,
   race,
   fork,
   forkDaemon,
@@ -387,6 +388,22 @@ const _ok4: Eff<string | number, never> = race([
 ]);
 const _ok5: Eff<readonly [number, string], never> = all([succeed(1), succeed("two")] as const);
 const _ok6: Eff<{ a: number; b: string }, never> = all({ a: succeed(1), b: succeed("two") });
+const _okForEachPar1: Eff<string[], never> = forEachPar(
+  [1, 2],
+  (n, index) => succeed(`${n}:${index}`),
+  { concurrency: 2 },
+);
+const _okForEachPar2: Eff<(number | string)[], Throws<NotFound> | Throws<Forbidden>> = forEachPar(
+  new Set(["a", "b", "c"]),
+  (s) =>
+    s === "a"
+      ? succeed(1)
+      : s === "b"
+        ? succeed("two")
+        : s === "c"
+          ? fail(new NotFound())
+          : fail(new Forbidden()),
+);
 const _ok7: Eff<number[], never> = Stream.of(1, 2, 3).runSink(Sinks.collectAll());
 const _ok8: Eff<number | undefined, never> = Stream.of(1, 2, 3).runSink(Sinks.head());
 const _okSink1: Eff<number[], never> = Stream.of(1, 2, 3).runSink(Sinks.collectN(2));
@@ -451,6 +468,20 @@ const _err4 = run(
 // all() preserves unhandled failures
 // @ts-expect-error
 const _err5 = run(all([succeed(1), fail(new Forbidden())] as const));
+
+// forEachPar() preserves unhandled failures from the mapper
+const _errForEachPar1 = run(
+  // @ts-expect-error
+  forEachPar([1, 2], (n) => (n > 1 ? fail(new Forbidden()) : succeed(n))),
+);
+
+// forEachPar() collects exactly the mapper's value type
+// @ts-expect-error
+const _errForEachPar2: Eff<number[], never> = forEachPar(["a"], (s) => succeed(s));
+
+// forEachPar() only accepts a count or "unbounded"
+// @ts-expect-error
+const _errForEachPar3 = forEachPar([1], succeed, { concurrency: "all" });
 
 // race() preserves unhandled failures from either branch
 // @ts-expect-error

@@ -1,8 +1,8 @@
-// Concurrency primitives: fork, race, all.
+// Concurrency primitives: fork, race, all, forEachPar.
 //
 // Run: bun packages/core/examples/07-concurrency.ts
 
-import { succeed, sleep, join, race, all } from "../src";
+import { succeed, sleep, join, race, all, forEachPar } from "../src";
 import { assertEq } from "./_assert";
 
 // >>> example: fork-join
@@ -61,4 +61,16 @@ const { user, posts, friends } = await all({
 assertEq(user, { id: 7, name: "alice" });
 assertEq(posts, [{ id: 1 }, { id: 2 }]);
 assertEq(friends, ["bob", "carol"]);
+// <<< example
+
+// >>> example: for-each-par
+// forEachPar() maps items to effects with at most `concurrency` in flight.
+const fetchUser = (id: number) => sleep(10).flatMap(() => succeed({ id, name: `user-${id}` }));
+
+const users = await forEachPar([1, 2, 3, 4, 5], (id) => fetchUser(id), { concurrency: 2 })
+  .orDie()
+  .run();
+
+const names = users.map((u) => u.name);
+assertEq(names, ["user-1", "user-2", "user-3", "user-4", "user-5"]);
 // <<< example

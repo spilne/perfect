@@ -118,6 +118,43 @@ console.log(friends); // → ["bob", "carol"]
 
 <!-- @end -->
 
+## Bounded parallel traversal — `forEachPar`
+
+`forEachPar(items, f, { concurrency })` maps each item to an effect and runs
+them with at most `concurrency` in flight, collecting results in input order.
+`f` receives `(item, index)` and is called as slots free up, so traversing
+100k items with `concurrency: 8` holds only 8 fibers at a time.
+
+<!-- @embed packages/core/examples/07-concurrency.ts#for-each-par -->
+
+```ts
+import { succeed, sleep, forEachPar } from "@spilne/perfect-core";
+
+// forEachPar() maps items to effects with at most `concurrency` in flight.
+const fetchUser = (id: number) => sleep(10).flatMap(() => succeed({ id, name: `user-${id}` }));
+
+const users = await forEachPar([1, 2, 3, 4, 5], (id) => fetchUser(id), { concurrency: 2 })
+  .orDie()
+  .run();
+
+const names = users.map((u) => u.name);
+console.log(names); // → ["user-1", "user-2", "user-3", "user-4", "user-5"]
+```
+
+<!-- @end -->
+
+- `concurrency: 1` runs the items one after another. Omit it, or pass
+  `"unbounded"`, to start every item at once like `all`.
+- The first failure (typed error or defect) interrupts the in-flight effects
+  and starts no new ones. The combined effect fails with that first cause once
+  the interrupted effects have run their finalizers.
+- Interrupting the combined effect — directly or through `timeout` / `race` —
+  interrupts every in-flight effect.
+- Any iterable works; an empty one succeeds with `[]`.
+
+To cap a list of effects you already have, map with the identity function:
+`forEachPar(effects, (e) => e, { concurrency: 4 })`.
+
 ## Daemons
 
 `fork(eff)` ties the fiber to the parent scope — when the parent ends, the
@@ -196,6 +233,7 @@ Available fiber diagnostics:
 | `raceEither([a, b])` / `a.raceEither(b)` | returns `Either<A, B>` |
 | `all(effects[])` | parallel + collect tuple |
 | `all({ a, b })` | parallel + collect record |
+| `forEachPar(items, f, { concurrency })` | map items to effects, at most N in flight, results in order |
 | `uninterruptible(eff)` | block interruption |
 | `interruptible(eff)` | restore interruptibility |
 | `yieldNow` | give other fibers a turn |
@@ -205,6 +243,8 @@ Available fiber diagnostics:
 
 - **`fork` doesn't auto-`join`.** If you want the value, you have to join.
 - **`race` takes an array** — `race([a, b])`, not `race(a, b)`.
+- **`forEachPar` is unbounded by default.** Pass `concurrency` when the
+  mapper hits a shared resource (a database pool, a rate-limited API).
 - **Daemons leak if you don't track them.** Hold onto the `Fiber` if you
   might need to cancel it.
 - **Supervisors are diagnostic hooks.** They should not contain application

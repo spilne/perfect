@@ -56,7 +56,7 @@ Promises are great until you need:
 | Dependency injection | constructor injection or globals | `service<T>` + `provide` / `Layer` |
 | Retry | application code or a library | `RetryPolicy.exponential({ initial: 100 }).withFullJitter()` |
 | Resource cleanup | `try/finally` | `acquireRelease` + `scoped` |
-| Concurrency limit | `Promise.all` chunked manually | `Semaphore`, `WorkerPool` |
+| Concurrency limit | `Promise.all` chunked manually | `forEachPar(items, f, { concurrency })`, `Semaphore`, `WorkerPool` |
 | Race | `Promise.race` (winner only, others orphaned) | `race` (interrupts losers) |
 | Testing time | mock `setTimeout` | `TestClock` |
 
