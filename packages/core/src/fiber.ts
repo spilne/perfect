@@ -79,7 +79,8 @@ export class Fiber<A = unknown> {
   // interruption masking — true when the fiber will honor interrupts immediately.
   // Starts true. Flipped by Op.SetInterruptible frames on the continuation stack.
   interruptible = true;
-  // Set when interrupt() arrives while !interruptible; processed on the next boundary.
+  // Set when interrupt() arrives while !interruptible or while the loop is
+  // running; processed on the next boundary.
   interruptPending = false;
   // Identifies the wait the fiber is suspended in. Async, All and Race take a
   // fresh value when they suspend and resume the fiber only while it is still
@@ -87,11 +88,6 @@ export class Fiber<A = unknown> {
   // promise settling late, a child finishing after its parent moved on) is
   // then ignored instead of resuming whatever the fiber waits on next.
   asyncToken = 0;
-  // True between scheduling an interrupt resume and that resume running. A
-  // second interrupt() in that window would schedule another loop run over
-  // the same saved state, which re-raises the interrupt inside the first
-  // run's (possibly async) finalizers and skips them.
-  private interruptQueued = false;
 
   complete(result: FiberResult<A>): void {
     if (this.state === FiberState.Done) return;
@@ -119,9 +115,11 @@ export class Fiber<A = unknown> {
   }
 
   interrupt(): void {
-    if (this.state === FiberState.Done || this.interruptQueued) return;
+    if (this.state === FiberState.Done) return;
     notify((supervisor) => supervisor.onInterrupt?.(this));
-    if (!this.interruptible) {
+    // A running loop checks interruptPending before its next op; acting here
+    // would read a continuation stack the loop has not saved.
+    if (!this.interruptible || this.state === FiberState.Running) {
       this.interruptPending = true;
       return;
     }
@@ -138,14 +136,15 @@ export class Fiber<A = unknown> {
     // directly.
     if (this.stack !== null || (this.scope !== null && !this.scope.isClosed)) {
       this.current = new Suspend(Op.Fail, { _tag: "Interrupt" } as Cause, null);
+      // Ready means a loop run is already queued (a resume, a yield, an
+      // op-budget pause or an earlier interrupt) and starts from the new
+      // current. A second run over the same saved state would re-raise the
+      // interrupt inside the finalizers the first run starts.
+      if (this.state === FiberState.Ready) return;
       this.state = FiberState.Ready;
-      this.interruptQueued = true;
       // Avoid a circular import on runtime.ts by going through the scheduler;
       // bootstrapFiber installs a `_resume` callback that wraps runFiberLoop.
-      this.scheduler.schedule(() => {
-        this.interruptQueued = false;
-        this._resume?.();
-      });
+      this.scheduler.schedule(() => this._resume?.());
       return;
     }
     this.complete({ ok: false, cause: { _tag: "Interrupt" } });

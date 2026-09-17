@@ -155,6 +155,118 @@ describe("interruption hardening", () => {
   });
 });
 
+describe("interrupting a fiber whose loop is queued or running", () => {
+  test("an interrupt during an op-budget pause runs the async finalizer once", () => {
+    const scheduler = new StepScheduler();
+    const clock = new TestClock();
+    const log: string[] = [];
+    let body: any = succeed(0);
+    for (let i = 0; i < 10_000; i++) body = body.flatMap((x: number) => succeed(x));
+    const fiber = runFiber(
+      provide(
+        ensuring(
+          body as Eff<number, never>,
+          sync(() => void log.push("release started"))
+            .flatMap(() => sleep(10))
+            .flatMap(() => sync(() => void log.push("release done"))),
+        ),
+        Clock,
+        clock,
+      ),
+      scheduler,
+    );
+    scheduler.step();
+    expect(fiber.status).toBe("ready");
+
+    fiber.interrupt();
+    scheduler.flush();
+    clock.advance(10);
+    scheduler.flush();
+
+    expect(log).toEqual(["release started", "release done"]);
+    expect(fiber.result).toEqual(interrupted);
+  });
+
+  test("an interrupt right after an async resume was queued runs the async finalizer", () => {
+    const scheduler = new StepScheduler();
+    const log: string[] = [];
+    const body = gate();
+    const release = gate();
+    const fiber = runFiber(
+      ensuring(
+        body.wait.flatMap(() => waitForever),
+        release.wait.flatMap(() => sync(() => void log.push("release done"))),
+      ),
+      scheduler,
+    );
+    scheduler.flush();
+    body.open();
+    expect(fiber.status).toBe("ready");
+
+    fiber.interrupt();
+    scheduler.flush();
+    release.open();
+    scheduler.flush();
+
+    expect(log).toEqual(["release done"]);
+    expect(fiber.result).toEqual(interrupted);
+  });
+
+  test("every interrupt of a queued fiber reaches supervisors and is delivered once", async () => {
+    const scheduler = new StepScheduler();
+    let settle!: (value: number) => void;
+    let ranAfter = false;
+    let finalized = 0;
+    const fiber = runFiber(
+      ensuring(
+        tryPromise(
+          () => new Promise<number>((resolve) => (settle = resolve)),
+          (e) => e,
+        ).flatMap(() => sync(() => void (ranAfter = true))),
+        sync(() => void finalized++),
+      ),
+      scheduler,
+    );
+    let notified = 0;
+    const stop = addFiberSupervisor({
+      onInterrupt: (target) => {
+        if (target === fiber) notified++;
+      },
+    });
+    scheduler.flush();
+
+    fiber.interrupt();
+    settle(1);
+    await macrotask();
+    fiber.interrupt();
+    scheduler.flush();
+    stop();
+
+    expect({ notified, ranAfter, finalized }).toEqual({
+      notified: 2,
+      ranAfter: false,
+      finalized: 1,
+    });
+    expect(fiber.result).toEqual(interrupted);
+  });
+
+  test("a fiber interrupting itself still runs the finalizer around it", () => {
+    const scheduler = new StepScheduler();
+    const log: string[] = [];
+    const fiber: Fiber<void> = runFiber(
+      ensuring(
+        sync(() => fiber.interrupt()).flatMap(() => sync(() => void log.push("after interrupt"))),
+        sync(() => void log.push("finalizer")),
+      ),
+      scheduler,
+    );
+    scheduler.flush();
+
+    expect(log).toEqual(["finalizer"]);
+    expect(fiber.result).toEqual(interrupted);
+  });
+});
+
 describe("callbacks from a wait the fiber has left", () => {
   test("a promise settling during the interrupted fiber's async finalizer does not resume it", async () => {
     const scheduler = new StepScheduler();

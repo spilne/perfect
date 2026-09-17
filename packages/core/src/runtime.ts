@@ -408,6 +408,7 @@ function runFiberLoop(fiber: Fiber<any>): void {
         // Slow path: full fiber-per-element parallel.
         fiber.stack = k;
         fiber.context = context;
+        fiber.state = FiberState.Suspended;
         const token = ++fiber.asyncToken;
         const savedCtx = context;
         const results = new Array(len);
@@ -458,6 +459,7 @@ function runFiberLoop(fiber: Fiber<any>): void {
         }
         fiber.stack = k;
         fiber.context = context;
+        fiber.state = FiberState.Suspended;
         const token = ++fiber.asyncToken;
         const savedCtx = context;
         let settled = false;
