@@ -55,6 +55,30 @@ describe("interruption hardening", () => {
       expect(fiber.status).toBe("done");
     }
   });
+
+  test("repeated interrupt before delivery still runs async finalizers once", async () => {
+    let finalized = 0;
+    const never = async<void>(() => () => {});
+    const asyncCleanup = async<void>((resume) => {
+      queueMicrotask(() => resume(succeed(undefined) as any));
+    }).flatMap(() =>
+      sync(() => {
+        finalized++;
+      }),
+    );
+
+    const fiber = await run(forkDaemon(ensuring(never, asyncCleanup)));
+    while (fiber.status !== "suspended") {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    fiber.interrupt();
+    fiber.interrupt();
+    const exit = await fiber.await();
+
+    expect(exit).toEqual({ _tag: "Failure", cause: { _tag: "Interrupt" } });
+    expect(finalized).toBe(1);
+  });
 });
 
 describe("scheduler fairness", () => {

@@ -81,6 +81,11 @@ export class Fiber<A = unknown> {
   interruptible = true;
   // Set when interrupt() arrives while !interruptible; processed on the next boundary.
   interruptPending = false;
+  // True between scheduling an interrupt resume and that resume running. A
+  // second interrupt() in that window would schedule another loop run over
+  // the same saved state, which re-raises the interrupt inside the first
+  // run's (possibly async) finalizers and skips them.
+  private interruptQueued = false;
 
   complete(result: FiberResult<A>): void {
     if (this.state === FiberState.Done) return;
@@ -108,7 +113,7 @@ export class Fiber<A = unknown> {
   }
 
   interrupt(): void {
-    if (this.state === FiberState.Done) return;
+    if (this.state === FiberState.Done || this.interruptQueued) return;
     notify((supervisor) => supervisor.onInterrupt?.(this));
     if (!this.interruptible) {
       this.interruptPending = true;
@@ -127,9 +132,13 @@ export class Fiber<A = unknown> {
     if (this.stack !== null || (this.scope !== null && !this.scope.isClosed)) {
       this.current = new Suspend(Op.Fail, { _tag: "Interrupt" } as Cause, null);
       this.state = FiberState.Ready;
+      this.interruptQueued = true;
       // Avoid a circular import on runtime.ts by going through the scheduler;
       // bootstrapFiber installs a `_resume` callback that wraps runFiberLoop.
-      this.scheduler.schedule(() => this._resume?.());
+      this.scheduler.schedule(() => {
+        this.interruptQueued = false;
+        this._resume?.();
+      });
       return;
     }
     this.complete({ ok: false, cause: { _tag: "Interrupt" } });
