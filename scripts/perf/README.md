@@ -98,6 +98,28 @@ What still gates: `all x100 run`, `flatMap chain x10k runSync` and `run(sync)` �
 the rows amortized over enough operations to hold steady. Absolute thresholds
 still apply to every row, so a catastrophic change is caught regardless.
 
+**A bimodal row is measuring its own settle, not the runtime.** Before reaching
+for `gating: false`, check whether the case is still speeding up when the window
+opens. `warmup` on a case overrides the run-wide `--warmup` for exactly that.
+
+`stream map/filter full traversal` is the case in point. One traversal costs
+~160 µs, so mitata takes a single iteration per sample and ten warmup samples
+are ten iterations. At that warmup almost every process reported 7.6–9.3
+ns/item and a few caught the same build already settled and reported 5.1–5.4 —
+with nothing in between. Which side of that split each tree landed on then
+decided the comparison: over 15 interleaved rounds of two _identical_ trees one
+round read −34%, and against the real baseline another read +55%. Both are the
+split, not a code change.
+
+Priming harder does not reach it — unchanged at 800 prime iterations — because
+priming never enters mitata's measurement loop, which is where the settle
+happens. A 200-sample warmup does: across fresh processes the row reads
+5.13–5.34 ns/item, a 4% spread with no second mode, and the within-window IQR
+stays at 2–5%. Widening the window instead (500 samples) also moves the median,
+but it buries the transient rather than excluding it — the IQR and p99 carry it
+for the rest of the run. The row keeps its gate and now reports the steady state
+it was always meant to.
+
 The general rule: if a benchmark's per-operation cost is near the runner's
 timing floor, measure it and watch the trend, but do not let it fail a build.
 

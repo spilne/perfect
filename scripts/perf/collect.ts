@@ -99,10 +99,12 @@ for (const suite of suites) {
         continue;
       }
 
+      // A case that settles inside mitata's own loop asks for a longer warmup
+      // than the run-wide default; see `BenchCase.warmup`.
       const stats = await measure(c.run, {
         min_samples: SAMPLES,
         max_samples: SAMPLES,
-        warmup_samples: WARMUP,
+        warmup_samples: c.warmup ?? WARMUP,
       });
       results.push({
         suite: suite.name,
