@@ -159,6 +159,7 @@ requirements such as `Needs<Service>`:
 | `.trapError(...classes)` | move matching defects into the typed error channel |
 | `.either()` / `.attempt()` | emit `Right` values and a terminal `Left` typed error |
 | `.exit()` / `.attemptCause()` | emit `Exit.Success` values or a terminal full `Cause` |
+| `.orDie()` | turn typed errors into defects before a runner boundary |
 
 Recovery retains values emitted before failure and finalizes both the failed
 source and the recovery stream.
@@ -176,6 +177,55 @@ source and the recovery stream.
 | `.last()`        | last element, or `undefined`          |
 | `.count()`       | count emitted elements                |
 | `.runSink(sink)` | run a reusable terminal postprocessor |
+| `.toAsyncIterable()` | consume with `for await` from Promise-based code |
+
+### Consume with `for await`
+
+`toAsyncIterable()` hands a stream to Promise-based code, such as an SDK
+contract that returns `AsyncIterable<Chunk>` or a subscriber loop:
+
+<!-- @embed packages/core/examples/10-streams.ts#stream-async-iterable -->
+
+```ts
+import { Stream, sync } from "@spilne/perfect-core";
+
+// toAsyncIterable — consume with `for await`; leaving the loop finalizes the stream.
+let finalized = 0;
+const numbers = Stream.range(1, 1_000_000).onFinalize(
+  sync(() => {
+    finalized++;
+  }),
+);
+
+const firstThree: number[] = [];
+for await (const n of numbers.toAsyncIterable()) {
+  firstThree.push(n);
+  if (firstThree.length === 3) break;
+}
+console.log(firstThree); // → [1, 2, 3]
+console.log(finalized); // → 1
+```
+
+<!-- @end -->
+
+- **Pull-based.** Nothing runs until the first `next()`. Each iterator runs the
+  stream on one fiber and pulls the next chunk only after the consumer has taken
+  every element of the current one.
+- **Early exit is safe.** `break`, `return()`, or a throw in the loop body stops
+  the stream. The loop continues only after the stream's finalizers have run,
+  and fibers the stream started, such as `merge` drivers or `parEvalMap`
+  workers, are interrupted. Calling `return()` while a `next()` is pending
+  interrupts that pull.
+- **Failures reject.** Like `run()`, the method type-checks only when every
+  error and service requirement is handled. Use `.orDie()` to let typed errors
+  surface in the loop. A failure rejects `next()` with `Cause.squash(cause)`
+  after finalizers have run.
+- **Each iterator starts over.** Every `[Symbol.asyncIterator]()` call runs the
+  stream from the beginning, so single-pass sources cannot be iterated twice.
+
+`Stream` does not implement `Symbol.asyncIterator` itself. TypeScript ignores a
+method's `this` constraint in `for await` and `AsyncIterable` assignments, so
+streams with missing services or unhandled errors would get past the check.
 
 ## Pipes vs sinks
 
@@ -411,6 +461,9 @@ rather than silently ending the stream.
   operator or `runSink`.
 - **`forEach` doesn't collect.** If you need both side effects AND a result,
   use `tap` + `toArray`, or write a custom `Sink`.
+- **Close manual iterators.** An iterator from `toAsyncIterable()` that is
+  neither exhausted nor closed with `return()` keeps its stream parked and its
+  resources open. `for await` closes it for you.
 - **Fusion stops at non-fusible ops.** `mapEffect`, `flatMap`, and `take`
   break a fused chain; benchmark the actual pipeline if throughput matters.
 

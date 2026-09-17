@@ -113,4 +113,29 @@ describe("Stream error algebra", () => {
     );
     expect(exit._tag).toBe("Failure");
   });
+
+  test("orDie turns typed failures into defects and keeps prior values and defects", async () => {
+    const error = new SourceError({ message: "fatal" });
+    let finalized = 0;
+    const emitted: number[] = [];
+    const exit = await runExit(
+      Stream.of(1)
+        .concat(Stream.fail(error))
+        .onFinalize(sync(() => finalized++))
+        .orDie()
+        .tap((value) => emitted.push(value))
+        .drain(),
+    );
+
+    expect(emitted).toEqual([1]);
+    expect(finalized).toBe(1);
+    expect(exit._tag).toBe("Failure");
+    if (exit._tag === "Failure") {
+      expect(Cause.failures(exit.cause)).toEqual([]);
+      expect(Cause.firstDie(exit.cause)?.value).toBe(error);
+    }
+
+    const defect = await runExit(Stream.fromEffect(die("boom")).orDie().drain());
+    expect(defect._tag === "Failure" && Cause.firstDie(defect.cause)?.value).toBe("boom");
+  });
 });
