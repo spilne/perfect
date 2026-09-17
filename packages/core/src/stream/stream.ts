@@ -16,7 +16,6 @@ import {
   suspend,
   async,
   sleep,
-  fork,
   forkDaemon,
   interrupt,
   race,
@@ -25,6 +24,7 @@ import {
   ensuring,
   awaitFiber,
   yieldNow,
+  uninterruptible,
   retry as effRetry,
   type RetryConfig,
 } from "../constructors";
@@ -63,7 +63,7 @@ function exitOf<B>(e: Eff<B, any>): Eff<Exit<unknown, B>, never> {
     .catchAllCause((cause: Cause) => succeed({ _tag: "Failure", cause }));
 }
 
-import { interruptAllEff, combineFinalizers } from "./driver-lifecycle";
+import { combineFinalizers, driverStream, type DriverRun, type Pull } from "./driver-lifecycle";
 import { mergeStreams } from "./merge";
 import { Chunk } from "./chunk";
 import { type FusibleOp, compileFused, hasFilterOps, SKIP } from "./fusion";
@@ -953,10 +953,8 @@ export class Stream<A, S = never> {
       | { readonly _tag: "innerEnd"; readonly generation: number }
       | { readonly _tag: "innerFail"; readonly generation: number; readonly cause: Cause };
 
-    const drivers: Fiber<any>[] = [];
-
-    const setup: Eff<Step<B>, any> = (QueueNS.bounded<Event>(16) as any).flatMap(
-      (events: Queue<Event>) => {
+    const start = (run: DriverRun<B>): Eff<Pull<B>, any> =>
+      (QueueNS.bounded<Event>(16) as any).flatMap((events: Queue<Event>) => {
         let current: Fiber<any> | null = null;
         let generation = 0;
         let active = false;
@@ -1019,10 +1017,9 @@ export class Stream<A, S = never> {
             active = true;
             current = null;
 
-            const start = suspend(() => fork(runInner(f(value), innerGeneration)))
-              .map((fiber: Fiber<any>) => {
+            const start = suspend(() => run.fork(runInner(f(value), innerGeneration)))
+              .map((fiber) => {
                 current = fiber;
-                drivers.push(fiber);
               })
               .flatMap(() => yieldNow);
 
@@ -1038,12 +1035,15 @@ export class Stream<A, S = never> {
           (events.take() as any).flatMap((event: Event): any => {
             switch (event._tag) {
               case "outerItem":
+                // Uninterruptible so an interrupted pull (e.g. under
+                // `timeout`) never leaves the outer driver waiting on `ready`
+                // or the generation bookkeeping half-updated.
                 if (mode === "exhaust" && active) {
-                  return event.ready.succeed(undefined).flatMap(() => pull());
+                  return uninterruptible(event.ready.succeed(undefined)).flatMap(() => pull());
                 }
-                return launch(event.value)
-                  .flatMap(() => event.ready.succeed(undefined))
-                  .flatMap(() => pull());
+                return uninterruptible(
+                  launch(event.value).flatMap(() => event.ready.succeed(undefined)),
+                ).flatMap(() => pull());
               case "outerEnd":
                 outerDone = true;
                 return active ? pull() : succeed(DONE);
@@ -1051,7 +1051,7 @@ export class Stream<A, S = never> {
                 return failCause(event.cause);
               case "innerChunk":
                 if (!active || event.generation !== generation) return pull();
-                return succeed(emit(event.chunk, new Stream(suspend(() => pull()) as any)));
+                return succeed(emit(event.chunk, next));
               case "innerEnd":
                 if (event.generation !== generation) return pull();
                 active = false;
@@ -1061,6 +1061,7 @@ export class Stream<A, S = never> {
                 return event.generation === generation ? failCause(event.cause) : pull();
             }
           });
+        const next = run.continueWith(pull);
 
         const outerDriver = (drainOuter(self) as any).catchAllCause((cause: Cause) =>
           Cause.isInterruptedOnly(cause)
@@ -1068,17 +1069,10 @@ export class Stream<A, S = never> {
             : events.offer({ _tag: "outerFail", cause }),
         );
 
-        return (fork(outerDriver) as any).flatMap((fiber: Fiber<any>) => {
-          drivers.push(fiber);
-          return pull();
-        });
-      },
-    );
+        return run.fork(outerDriver).map(() => pull);
+      });
 
-    return new Stream<B, any>(
-      suspend(() => setup) as any,
-      combineFinalizers(interruptAllEff(drivers), self._finalizer),
-    ) as any;
+    return driverStream<B>({ start, finalizer: self._finalizer }) as Stream<B, S | S2>;
   }
 
   evalMap<B, S2>(f: (a: A) => Eff<B, S2>): Stream<B, S | S2> {
@@ -1157,19 +1151,18 @@ export class Stream<A, S = never> {
       | { readonly _tag: "signal"; readonly event: SignalEvent };
 
     const self = this;
-    const drivers: Fiber<any>[] = [];
-    let signalFinalizer = signal._finalizer;
 
-    const releaseSignal = (): Eff<void, unknown> =>
-      suspend(() => {
-        const finalizer = signalFinalizer;
-        signalFinalizer = null;
-        return finalizer ?? succeed(undefined);
-      });
-
-    const setup: Eff<Step<A>, any> = (DeferredNS.make<SignalEvent>() as any).flatMap(
-      (control: Deferred<SignalEvent>) => {
+    const start = (run: DriverRun<A>): Eff<Pull<A>, any> =>
+      (DeferredNS.make<SignalEvent>() as any).flatMap((control: Deferred<SignalEvent>) => {
         let signalFinished = false;
+        let signalFinalizer = signal._finalizer;
+
+        const releaseSignal = (): Eff<void, unknown> =>
+          suspend(() => {
+            const finalizer = signalFinalizer;
+            signalFinalizer = null;
+            return finalizer ?? succeed(undefined);
+          });
 
         const watchSignal = (
           ensuring(
@@ -1189,6 +1182,8 @@ export class Stream<A, S = never> {
         ): Eff<Extract<RaceEvent, { readonly _tag: "source" }>, any> =>
           (source.step as any).map((step: Step<A>) => ({ _tag: "source" as const, step }));
 
+        // Source pulls stay individually retryable, so continuations are
+        // plain streams rather than `run.continueWith`.
         const pull = (source: Stream<A, any>): Eff<Step<A>, any> => {
           if (signalFinished) {
             return pullSource(source).map((event) => {
@@ -1224,17 +1219,10 @@ export class Stream<A, S = never> {
           });
         };
 
-        return (fork(watchSignal) as any).flatMap((fiber: Fiber<any>) => {
-          drivers.push(fiber);
-          return pull(self);
-        });
-      },
-    );
+        return run.fork(watchSignal).map(() => () => pull(self));
+      });
 
-    return new Stream(
-      suspend(() => setup) as any,
-      combineFinalizers(interruptAllEff(drivers), self._finalizer),
-    ) as any;
+    return driverStream<A>({ start, finalizer: self._finalizer }) as Stream<A, S | S2>;
   }
 
   dropWhile(p: (a: A) => boolean): Stream<A, S> {
@@ -1574,10 +1562,8 @@ export class Stream<A, S = never> {
       | { readonly _tag: "rightEnd" }
       | { readonly _tag: "fail"; readonly cause: Cause };
 
-    const drivers: Fiber<any>[] = [];
-
-    const setup: Eff<Step<[A, B]>, any> = (QueueNS.bounded<Event>(2) as any).flatMap(
-      (events: Queue<Event>) => {
+    const start = (run: DriverRun<[A, B]>): Eff<Pull<[A, B]>, any> =>
+      (QueueNS.bounded<Event>(2) as any).flatMap((events: Queue<Event>) => {
         let hasLeft = false;
         let hasRight = false;
         let latestLeft!: A;
@@ -1619,11 +1605,7 @@ export class Stream<A, S = never> {
                   hasLeft = true;
                   if (hasRight) output.push([value, latestRight]);
                 }
-                return output.length === 0
-                  ? pull()
-                  : succeed(
-                      emit(Chunk.fromArray(output), new Stream(suspend(() => pull()) as any)),
-                    );
+                return output.length === 0 ? pull() : succeed(emit(Chunk.fromArray(output), next));
               }
               case "right": {
                 const output: [A, B][] = [];
@@ -1632,11 +1614,7 @@ export class Stream<A, S = never> {
                   hasRight = true;
                   if (hasLeft) output.push([latestLeft, value]);
                 }
-                return output.length === 0
-                  ? pull()
-                  : succeed(
-                      emit(Chunk.fromArray(output), new Stream(suspend(() => pull()) as any)),
-                    );
+                return output.length === 0 ? pull() : succeed(emit(Chunk.fromArray(output), next));
               }
               case "leftEnd":
                 leftDone = true;
@@ -1648,30 +1626,22 @@ export class Stream<A, S = never> {
                 return failCause(event.cause);
             }
           });
+        const next = run.continueWith(pull);
 
-        return (
-          fork(guardedDrain(self, (chunk) => ({ _tag: "left", chunk }), { _tag: "leftEnd" })) as any
-        ).flatMap((left: Fiber<any>) => {
-          drivers.push(left);
-          return (
-            fork(
+        return run
+          .fork(guardedDrain(self, (chunk) => ({ _tag: "left", chunk }), { _tag: "leftEnd" }))
+          .flatMap(() =>
+            run.fork(
               guardedDrain(that, (chunk) => ({ _tag: "right", chunk }), { _tag: "rightEnd" }),
-            ) as any
-          ).flatMap((right: Fiber<any>) => {
-            drivers.push(right);
-            return pull();
-          });
-        });
-      },
-    );
+            ),
+          )
+          .map(() => pull);
+      });
 
-    return new Stream<[A, B], any>(
-      suspend(() => setup) as any,
-      combineFinalizers(
-        interruptAllEff(drivers),
-        combineFinalizers(self._finalizer, that._finalizer),
-      ),
-    ) as any;
+    return driverStream<[A, B]>({
+      start,
+      finalizer: combineFinalizers(self._finalizer, that._finalizer),
+    }) as Stream<[A, B], S | S2>;
   }
 
   withLatest<B, S2>(that: Stream<B, S2>): Stream<[A, B], S | S2> {
@@ -1683,10 +1653,8 @@ export class Stream<A, S = never> {
       | { readonly _tag: "sideEnd" }
       | { readonly _tag: "fail"; readonly cause: Cause };
 
-    const drivers: Fiber<any>[] = [];
-
-    const setup: Eff<Step<[A, B]>, any> = (QueueNS.bounded<Event>(2) as any).flatMap(
-      (events: Queue<Event>) => {
+    const start = (run: DriverRun<[A, B]>): Eff<Pull<[A, B]>, any> =>
+      (QueueNS.bounded<Event>(2) as any).flatMap((events: Queue<Event>) => {
         let hasLatest = false;
         let latest!: B;
 
@@ -1728,7 +1696,7 @@ export class Stream<A, S = never> {
                 return succeed(
                   emit(
                     event.chunk.map((value) => [value, latest] as [A, B]),
-                    new Stream(suspend(() => pull()) as any),
+                    next,
                   ),
                 );
               case "mainEnd":
@@ -1739,30 +1707,20 @@ export class Stream<A, S = never> {
                 return failCause(event.cause);
             }
           });
+        const next = run.continueWith(pull);
 
-        return (
-          fork(guardedDrain(that, (chunk) => ({ _tag: "side", chunk }), { _tag: "sideEnd" })) as any
-        ).flatMap((side: Fiber<any>) => {
-          drivers.push(side);
-          return (
-            fork(
-              guardedDrain(self, (chunk) => ({ _tag: "main", chunk }), { _tag: "mainEnd" }),
-            ) as any
-          ).flatMap((main: Fiber<any>) => {
-            drivers.push(main);
-            return pull();
-          });
-        });
-      },
-    );
+        return run
+          .fork(guardedDrain(that, (chunk) => ({ _tag: "side", chunk }), { _tag: "sideEnd" }))
+          .flatMap(() =>
+            run.fork(guardedDrain(self, (chunk) => ({ _tag: "main", chunk }), { _tag: "mainEnd" })),
+          )
+          .map(() => pull);
+      });
 
-    return new Stream<[A, B], any>(
-      suspend(() => setup) as any,
-      combineFinalizers(
-        interruptAllEff(drivers),
-        combineFinalizers(self._finalizer, that._finalizer),
-      ),
-    ) as any;
+    return driverStream<[A, B]>({
+      start,
+      finalizer: combineFinalizers(self._finalizer, that._finalizer),
+    }) as Stream<[A, B], S | S2>;
   }
 
   interleave<S2>(that: Stream<A, S2>): Stream<A, S | S2> {
@@ -1800,119 +1758,108 @@ export class Stream<A, S = never> {
       | { readonly _tag: "end" }
       | { readonly _tag: "fail"; readonly cause: Cause };
 
-    const drivers: Fiber<any>[] = [];
+    const start = (run: DriverRun<unknown>): Eff<Pull<unknown>, any> =>
+      (
+        branches.reduce<Eff<Queue<InputSlot>[], never>>(
+          (acc) =>
+            (acc as any).flatMap((queues: Queue<InputSlot>[]) =>
+              QueueNS.bounded<InputSlot>(1).map((queue) => {
+                queues.push(queue);
+                return queues;
+              }),
+            ),
+          succeed([]) as Eff<Queue<InputSlot>[], never>,
+        ) as any
+      ).flatMap((inputs: Queue<InputSlot>[]) =>
+        (QueueNS.bounded<OutputSlot>(branches.length) as any).flatMap(
+          (outputs: Queue<OutputSlot>) => {
+            const active = branches.map(() => true);
+            let open = branches.length;
 
-    const setup: Eff<Step<unknown>, any> = (
-      branches.reduce<Eff<Queue<InputSlot>[], never>>(
-        (acc) =>
-          (acc as any).flatMap((queues: Queue<InputSlot>[]) =>
-            QueueNS.bounded<InputSlot>(1).map((queue) => {
-              queues.push(queue);
-              return queues;
-            }),
-          ),
-        succeed([]) as Eff<Queue<InputSlot>[], never>,
-      ) as any
-    ).flatMap((inputs: Queue<InputSlot>[]) =>
-      (QueueNS.bounded<OutputSlot>(branches.length) as any).flatMap(
-        (outputs: Queue<OutputSlot>) => {
-          const active = branches.map(() => true);
-
-          const inputStream = (queue: Queue<InputSlot>): Stream<A, S> => {
-            const pull = (): Eff<Step<A>, any> =>
-              (queue.take() as any)
-                .flatMap((slot: InputSlot): any => {
-                  if (slot._tag === "fail") return failCause(slot.cause);
-                  if (slot._tag === "end") return succeed(DONE);
-                  return succeed(
-                    emit(slot.chunk, new Stream<A, any>(suspend(() => pull()) as any)),
+            const inputStream = (queue: Queue<InputSlot>): Stream<A, S> => {
+              const pull = (): Eff<Step<A>, any> =>
+                (queue.take() as any)
+                  .flatMap((slot: InputSlot): any => {
+                    if (slot._tag === "fail") return failCause(slot.cause);
+                    if (slot._tag === "end") return succeed(DONE);
+                    return succeed(
+                      emit(slot.chunk, new Stream<A, any>(suspend(() => pull()) as any)),
+                    );
+                  })
+                  .catch((error: unknown) =>
+                    error instanceof QueueClosed ? succeed(DONE) : fail(error),
                   );
-                })
+              return new Stream(suspend(() => pull()) as any) as Stream<A, S>;
+            };
+
+            const closeInput = (index: number): Eff<void, never> =>
+              sync(() => {
+                active[index] = false;
+              }).flatMap(() => inputs[index]!.close());
+
+            const branchDriver = (index: number): Eff<void, any> => {
+              const branch = branches[index]!(inputStream(inputs[index]!));
+              const drain = branch.forEach((value) =>
+                (outputs.offer({ _tag: "item", value }) as any).map(() => undefined),
+              );
+              return (exitOf(ensuring(drain, closeInput(index))) as any).flatMap(
+                (exit: Exit<unknown, void>) => {
+                  if (exit._tag === "Success") return outputs.offer({ _tag: "end" });
+                  return Cause.isInterruptedOnly(exit.cause)
+                    ? failCause(exit.cause)
+                    : outputs.offer({ _tag: "fail", cause: exit.cause });
+                },
+              );
+            };
+
+            const startBranches = (index: number): Eff<void, never> =>
+              index >= branches.length
+                ? succeed(undefined)
+                : run.fork(branchDriver(index)).flatMap(() => startBranches(index + 1));
+
+            const offerInput = (slot: InputSlot, index = 0): Eff<void, any> => {
+              if (index >= inputs.length) return succeed(undefined);
+              if (!active[index]) return offerInput(slot, index + 1);
+              return (inputs[index]!.offer(slot) as any)
                 .catch((error: unknown) =>
-                  error instanceof QueueClosed ? succeed(DONE) : fail(error),
+                  error instanceof QueueClosed ? succeed(false) : fail(error),
+                )
+                .flatMap(() => offerInput(slot, index + 1));
+            };
+
+            const drainUpstream = (stream: Stream<A, any>): Eff<void, any> =>
+              (stream.step as any).flatMap((step: Step<A>) => {
+                if (step._tag === "Done") return offerInput({ _tag: "end" });
+                return (offerInput({ _tag: "chunk", chunk: step.chunk }) as any).flatMap(() =>
+                  active.some(Boolean) ? drainUpstream(step.next) : succeed(undefined),
                 );
-            return new Stream(suspend(() => pull()) as any) as Stream<A, S>;
-          };
+              });
 
-          const closeInput = (index: number): Eff<void, never> =>
-            sync(() => {
-              active[index] = false;
-            }).flatMap(() => inputs[index]!.close());
-
-          const branchDriver = (index: number): Eff<void, any> => {
-            const branch = branches[index]!(inputStream(inputs[index]!));
-            const drain = branch.forEach((value) =>
-              (outputs.offer({ _tag: "item", value }) as any).map(() => undefined),
+            const upstreamDriver = (drainUpstream(self) as any).catchAllCause((cause: Cause) =>
+              Cause.isInterruptedOnly(cause)
+                ? failCause(cause)
+                : offerInput({ _tag: "fail", cause }),
             );
-            return (exitOf(ensuring(drain, closeInput(index))) as any).flatMap(
-              (exit: Exit<unknown, void>) => {
-                if (exit._tag === "Success") return outputs.offer({ _tag: "end" });
-                return Cause.isInterruptedOnly(exit.cause)
-                  ? failCause(exit.cause)
-                  : outputs.offer({ _tag: "fail", cause: exit.cause });
-              },
-            );
-          };
 
-          const startBranches = (index: number): Eff<void, never> =>
-            index >= branches.length
-              ? succeed(undefined)
-              : (fork(branchDriver(index)) as any).flatMap((fiber: Fiber<any>) => {
-                  drivers.push(fiber);
-                  return startBranches(index + 1);
-                });
+            const pullOutput = (): Eff<Step<unknown>, any> =>
+              (outputs.take() as any).flatMap((slot: OutputSlot): any => {
+                if (slot._tag === "fail") return failCause(slot.cause);
+                if (slot._tag === "end") {
+                  open--;
+                  return open === 0 ? succeed(DONE) : pullOutput();
+                }
+                return succeed(emit(Chunk.single(slot.value), next));
+              });
+            const next = run.continueWith(pullOutput);
 
-          const offerInput = (slot: InputSlot, index = 0): Eff<void, any> => {
-            if (index >= inputs.length) return succeed(undefined);
-            if (!active[index]) return offerInput(slot, index + 1);
-            return (inputs[index]!.offer(slot) as any)
-              .catch((error: unknown) =>
-                error instanceof QueueClosed ? succeed(false) : fail(error),
-              )
-              .flatMap(() => offerInput(slot, index + 1));
-          };
+            return startBranches(0)
+              .flatMap(() => run.fork(upstreamDriver))
+              .map(() => pullOutput);
+          },
+        ),
+      );
 
-          const drainUpstream = (stream: Stream<A, any>): Eff<void, any> =>
-            (stream.step as any).flatMap((step: Step<A>) => {
-              if (step._tag === "Done") return offerInput({ _tag: "end" });
-              return (offerInput({ _tag: "chunk", chunk: step.chunk }) as any).flatMap(() =>
-                active.some(Boolean) ? drainUpstream(step.next) : succeed(undefined),
-              );
-            });
-
-          const upstreamDriver = (drainUpstream(self) as any).catchAllCause((cause: Cause) =>
-            Cause.isInterruptedOnly(cause) ? failCause(cause) : offerInput({ _tag: "fail", cause }),
-          );
-
-          const pullOutput = (open: { count: number }): Eff<Step<unknown>, any> =>
-            (outputs.take() as any).flatMap((slot: OutputSlot): any => {
-              if (slot._tag === "fail") return failCause(slot.cause);
-              if (slot._tag === "end") {
-                open.count--;
-                return open.count === 0 ? succeed(DONE) : pullOutput(open);
-              }
-              return succeed(
-                emit(
-                  Chunk.single(slot.value),
-                  new Stream<unknown, any>(suspend(() => pullOutput(open)) as any),
-                ),
-              );
-            });
-
-          return (startBranches(0) as any).flatMap(() =>
-            (fork(upstreamDriver) as any).flatMap((fiber: Fiber<any>) => {
-              drivers.push(fiber);
-              return pullOutput({ count: branches.length });
-            }),
-          );
-        },
-      ),
-    );
-
-    return new Stream<unknown, any>(
-      suspend(() => setup) as any,
-      combineFinalizers(interruptAllEff(drivers), self._finalizer),
-    );
+    return driverStream<unknown>({ start, finalizer: self._finalizer });
   }
 
   /**
@@ -1940,9 +1887,9 @@ export class Stream<A, S = never> {
   // and forks one worker per item, bounded by a semaphore; results reach the
   // consumer through a bounded queue (backpressure). After the source ends
   // the driver atomically re-acquires every permit — a barrier for in-flight
-  // workers — before signalling end. Everything runs on the fiber runtime,
-  // so interrupting the consumer propagates to driver and workers, and no
-  // work escapes structured concurrency.
+  // workers — before signalling end. The driver and workers belong to the
+  // stream run, whose finalizer interrupts and awaits them, so no work
+  // outlives the stream even when its pulls run on short-lived fibers.
 
   parEvalMap<B, S2>(concurrency: number, f: (a: A) => Eff<B, S2>): Stream<B, S | S2> {
     // ordered: each input claims a queue slot holding a Deferred; workers
@@ -1955,17 +1902,15 @@ export class Stream<A, S = never> {
       | { _tag: "end" }
       | { _tag: "fail"; cause: Cause };
 
-    const drivers: Fiber<any>[] = [];
-
-    const setup: Eff<Step<B>, any> = (QueueNS.bounded<Slot>(n) as any).flatMap(
-      (slots: Queue<Slot>) =>
+    const start = (run: DriverRun<B>): Eff<Pull<B>, any> =>
+      (QueueNS.bounded<Slot>(n) as any).flatMap((slots: Queue<Slot>) =>
         (Semaphore.make(n) as any).flatMap((sem: Semaphore) => {
           const enqueue = (item: A): Eff<void, any> =>
             (sem.acquire() as any).flatMap(() =>
               (DeferredNS.make<Exit<unknown, B>>() as any).flatMap(
                 (d: Deferred<Exit<unknown, B>>) =>
                   (slots.offer({ _tag: "item", deferred: d }) as any).flatMap(() =>
-                    fork(
+                    run.fork(
                       (exitOf(suspend(() => f(item))) as any).flatMap((exit: Exit<unknown, B>) =>
                         (d.succeed(exit) as any).flatMap(() => sem.release()),
                       ),
@@ -1994,30 +1939,34 @@ export class Stream<A, S = never> {
               : slots.offer({ _tag: "fail", cause }),
           );
 
-          const pull = (): Eff<Step<B>, any> =>
-            (slots.take() as any).flatMap((slot: Slot): any => {
-              if (slot._tag === "fail") return failCause(slot.cause);
-              if (slot._tag === "end") return succeed(DONE);
-              return (slot.deferred.await as any).flatMap((exit: Exit<unknown, B>) =>
-                exit._tag === "Success"
-                  ? succeed(
-                      emit(Chunk.single(exit.value), new Stream(suspend(() => pull()) as any)),
-                    )
-                  : failCause(exit.cause),
-              );
+          // A slot stays claimed until its value is delivered, so a pull
+          // interrupted while awaiting it resumes with the same slot.
+          let claimed: Deferred<Exit<unknown, B>> | null = null;
+
+          const deliver = (deferred: Deferred<Exit<unknown, B>>): Eff<Step<B>, any> =>
+            (deferred.await as any).flatMap((exit: Exit<unknown, B>) => {
+              claimed = null;
+              return exit._tag === "Success"
+                ? succeed(emit(Chunk.single(exit.value), next))
+                : failCause(exit.cause);
             });
 
-          return (fork(driver) as any).flatMap((fb: Fiber<any>) => {
-            drivers.push(fb);
-            return pull();
-          });
-        }),
-    );
+          const pull = (): Eff<Step<B>, any> =>
+            claimed !== null
+              ? deliver(claimed)
+              : (slots.take() as any).flatMap((slot: Slot): any => {
+                  if (slot._tag === "fail") return failCause(slot.cause);
+                  if (slot._tag === "end") return succeed(DONE);
+                  claimed = slot.deferred;
+                  return deliver(slot.deferred);
+                });
+          const next = run.continueWith(pull);
 
-    return new Stream<B, any>(
-      suspend(() => setup) as any,
-      combineFinalizers(interruptAllEff(drivers), self._finalizer),
-    ) as any;
+          return run.fork(driver).map(() => pull);
+        }),
+      );
+
+    return driverStream<B>({ start, finalizer: self._finalizer }) as Stream<B, S | S2>;
   }
 
   parEvalMapUnordered<B, S2>(concurrency: number, f: (a: A) => Eff<B, S2>): Stream<B, S | S2> {
@@ -2031,14 +1980,12 @@ export class Stream<A, S = never> {
       | { _tag: "end" }
       | { _tag: "fail"; cause: Cause };
 
-    const drivers: Fiber<any>[] = [];
-
-    const setup: Eff<Step<B>, any> = (QueueNS.bounded<Slot>(n) as any).flatMap(
-      (slots: Queue<Slot>) =>
+    const start = (run: DriverRun<B>): Eff<Pull<B>, any> =>
+      (QueueNS.bounded<Slot>(n) as any).flatMap((slots: Queue<Slot>) =>
         (Semaphore.make(n) as any).flatMap((sem: Semaphore) => {
           const enqueue = (item: A): Eff<void, any> =>
             (sem.acquire() as any).flatMap(() =>
-              fork(
+              run.fork(
                 (exitOf(suspend(() => f(item))) as any).flatMap((exit: Exit<unknown, B>) =>
                   (slots.offer({ _tag: "item", exit }) as any).flatMap(() => sem.release()),
                 ),
@@ -2070,23 +2017,16 @@ export class Stream<A, S = never> {
               if (slot._tag === "fail") return failCause(slot.cause);
               if (slot._tag === "end") return succeed(DONE);
               return slot.exit._tag === "Success"
-                ? succeed(
-                    emit(Chunk.single(slot.exit.value), new Stream(suspend(() => pull()) as any)),
-                  )
+                ? succeed(emit(Chunk.single(slot.exit.value), next))
                 : failCause(slot.exit.cause);
             });
+          const next = run.continueWith(pull);
 
-          return (fork(driver) as any).flatMap((fb: Fiber<any>) => {
-            drivers.push(fb);
-            return pull();
-          });
+          return run.fork(driver).map(() => pull);
         }),
-    );
+      );
 
-    return new Stream<B, any>(
-      suspend(() => setup) as any,
-      combineFinalizers(interruptAllEff(drivers), self._finalizer),
-    ) as any;
+    return driverStream<B>({ start, finalizer: self._finalizer }) as Stream<B, S | S2>;
   }
 
   // ── Time-based operators ─────────────────────────────────────────
@@ -2100,10 +2040,8 @@ export class Stream<A, S = never> {
     const cap = Math.max(1, maxSize);
     type Slot = { _tag: "item"; value: A } | { _tag: "end" } | { _tag: "fail"; cause: Cause };
 
-    const drivers: Fiber<any>[] = [];
-
-    const setup: Eff<Step<Chunk<A>>, any> = (QueueNS.bounded<Slot>(cap) as any).flatMap(
-      (slots: Queue<Slot>) => {
+    const start = (run: DriverRun<Chunk<A>>): Eff<Pull<Chunk<A>>, any> =>
+      (QueueNS.bounded<Slot>(cap) as any).flatMap((slots: Queue<Slot>) => {
         const offerChunk = (items: A[], i: number, next: Stream<A, any>): Eff<void, any> =>
           i >= items.length
             ? drain(next)
@@ -2123,50 +2061,53 @@ export class Stream<A, S = never> {
         );
 
         // the window opens when the first item of a batch arrives; the batch
-        // flushes at maxSize items, window expiry, or end of input
-        const collect = (buf: A[], deadline: number): Eff<Step<Chunk<A>>, any> => {
-          if (buf.length >= maxSize) return emitBuf(buf);
+        // flushes at maxSize items, window expiry, or end of input. The open
+        // batch outlives a pull, so an interrupted pull resumes it.
+        let batch: { readonly items: A[]; readonly deadline: number } | null = null;
+
+        const flush = (continuation: Stream<Chunk<A>, unknown>): Eff<Step<Chunk<A>>, any> =>
+          sync(() => {
+            const items = batch!.items;
+            batch = null;
+            return emit(Chunk.single(Chunk.fromArray(items)), continuation);
+          });
+
+        const collect = (): Eff<Step<Chunk<A>>, any> => {
+          const open = batch!;
+          if (open.items.length >= maxSize) return flush(next);
           return (clockNow as any).flatMap((now: number) => {
-            const remaining = deadline - now;
-            if (remaining <= 0) return emitBuf(buf);
+            const remaining = open.deadline - now;
+            if (remaining <= 0) return flush(next);
             return (timeoutOption(slots.take() as any, remaining) as any).flatMap(
               (slot: Slot | undefined): any => {
-                if (slot === undefined) return emitBuf(buf);
+                if (slot === undefined) return flush(next);
                 if (slot._tag === "fail") return failCause(slot.cause);
-                if (slot._tag === "end")
-                  return succeed(emit(Chunk.single(Chunk.fromArray(buf)), Stream.empty()));
-                buf.push(slot.value);
-                return collect(buf, deadline);
+                if (slot._tag === "end") return flush(run.end);
+                open.items.push(slot.value);
+                return collect();
               },
             );
           });
         };
 
-        const emitBuf = (buf: A[]): Eff<Step<Chunk<A>>, any> =>
-          succeed(
-            emit(Chunk.single(Chunk.fromArray(buf)), new Stream(suspend(() => firstPull()) as any)),
-          );
+        const pull = (): Eff<Step<Chunk<A>>, any> =>
+          batch !== null
+            ? collect()
+            : (slots.take() as any).flatMap((slot: Slot): any => {
+                if (slot._tag === "fail") return failCause(slot.cause);
+                if (slot._tag === "end") return succeed(DONE);
+                return uninterruptible(
+                  (clockNow as any).map((now: number) => {
+                    batch = { items: [slot.value], deadline: now + timeoutMs };
+                  }),
+                ).flatMap(collect);
+              });
+        const next = run.continueWith(pull);
 
-        const firstPull = (): Eff<Step<Chunk<A>>, any> =>
-          (slots.take() as any).flatMap((slot: Slot): any => {
-            if (slot._tag === "fail") return failCause(slot.cause);
-            if (slot._tag === "end") return succeed(DONE);
-            return (clockNow as any).flatMap((now: number) =>
-              collect([slot.value], now + timeoutMs),
-            );
-          });
+        return run.fork(driver).map(() => pull);
+      });
 
-        return (fork(driver) as any).flatMap((fb: Fiber<any>) => {
-          drivers.push(fb);
-          return firstPull();
-        });
-      },
-    );
-
-    return new Stream<Chunk<A>, any>(
-      suspend(() => setup) as any,
-      combineFinalizers(interruptAllEff(drivers), self._finalizer),
-    ) as any;
+    return driverStream<Chunk<A>>({ start, finalizer: self._finalizer }) as Stream<Chunk<A>, S>;
   }
 
   debounce(ms: number): Stream<A, S> {
@@ -2175,10 +2116,8 @@ export class Stream<A, S = never> {
     const self = this;
     type Slot = { _tag: "item"; value: A } | { _tag: "end" } | { _tag: "fail"; cause: Cause };
 
-    const drivers: Fiber<any>[] = [];
-
-    const setup: Eff<Step<A>, any> = (QueueNS.unbounded<Slot>() as any).flatMap(
-      (slots: Queue<Slot>) => {
+    const start = (run: DriverRun<A>): Eff<Pull<A>, any> =>
+      (QueueNS.unbounded<Slot>() as any).flatMap((slots: Queue<Slot>) => {
         const offerChunk = (items: A[], i: number, next: Stream<A, any>): Eff<void, any> =>
           i >= items.length
             ? drain(next)
@@ -2197,33 +2136,41 @@ export class Stream<A, S = never> {
           Cause.isInterruptedOnly(cause) ? failCause(cause) : slots.offer({ _tag: "fail", cause }),
         );
 
-        const idle = (): Eff<Step<A>, any> =>
-          (slots.take() as any).flatMap((slot: Slot): any => {
-            if (slot._tag === "fail") return failCause(slot.cause);
-            if (slot._tag === "end") return succeed(DONE);
-            return settle(slot.value);
+        // The value waiting for quiet outlives a pull, so an interrupted
+        // pull resumes waiting for it.
+        let pending: { readonly value: A } | null = null;
+
+        const emitPending = (continuation: Stream<A, unknown>): Eff<Step<A>, any> =>
+          sync(() => {
+            const value = pending!.value;
+            pending = null;
+            return emit(Chunk.single(value), continuation);
           });
 
-        const settle = (latest: A): Eff<Step<A>, any> =>
+        const settle = (): Eff<Step<A>, any> =>
           (timeoutOption(slots.take() as any, ms) as any).flatMap((slot: Slot | undefined): any => {
-            if (slot === undefined)
-              return succeed(emit(Chunk.single(latest), new Stream(suspend(() => idle()) as any)));
+            if (slot === undefined) return emitPending(next);
             if (slot._tag === "fail") return failCause(slot.cause);
-            if (slot._tag === "end") return succeed(emit(Chunk.single(latest), Stream.empty()));
-            return settle(slot.value);
+            if (slot._tag === "end") return emitPending(run.end);
+            pending = { value: slot.value };
+            return settle();
           });
 
-        return (fork(driver) as any).flatMap((fb: Fiber<any>) => {
-          drivers.push(fb);
-          return idle();
-        });
-      },
-    );
+        const pull = (): Eff<Step<A>, any> =>
+          pending !== null
+            ? settle()
+            : (slots.take() as any).flatMap((slot: Slot): any => {
+                if (slot._tag === "fail") return failCause(slot.cause);
+                if (slot._tag === "end") return succeed(DONE);
+                pending = { value: slot.value };
+                return settle();
+              });
+        const next = run.continueWith(pull);
 
-    return new Stream<A, any>(
-      suspend(() => setup) as any,
-      combineFinalizers(interruptAllEff(drivers), self._finalizer),
-    ) as any;
+        return run.fork(driver).map(() => pull);
+      });
+
+    return driverStream<A>({ start, finalizer: self._finalizer }) as Stream<A, S>;
   }
 
   sample(intervalMs: number): Stream<A, S> {
@@ -2231,10 +2178,8 @@ export class Stream<A, S = never> {
     const interval = Math.max(1, Math.floor(intervalMs));
     type Event = { readonly _tag: "end" } | { readonly _tag: "fail"; readonly cause: Cause };
 
-    const drivers: Fiber<any>[] = [];
-
-    const setup: Eff<Step<A>, any> = (QueueNS.bounded<Event>(1) as any).flatMap(
-      (events: Queue<Event>) => {
+    const start = (run: DriverRun<A>): Eff<Pull<A>, any> =>
+      (QueueNS.bounded<Event>(1) as any).flatMap((events: Queue<Event>) => {
         let dirty = false;
         let latest!: A;
 
@@ -2262,22 +2207,16 @@ export class Stream<A, S = never> {
               return sync(() => {
                 const value = latest;
                 dirty = false;
-                return emit(Chunk.single(value), new Stream(suspend(() => pull()) as any));
+                return emit(Chunk.single(value), next);
               });
             },
           );
+        const next = run.continueWith(pull);
 
-        return (fork(driver) as any).flatMap((fiber: Fiber<any>) => {
-          drivers.push(fiber);
-          return pull();
-        });
-      },
-    );
+        return run.fork(driver).map(() => pull);
+      });
 
-    return new Stream<A, any>(
-      suspend(() => setup) as any,
-      combineFinalizers(interruptAllEff(drivers), self._finalizer),
-    ) as any;
+    return driverStream<A>({ start, finalizer: self._finalizer }) as Stream<A, S>;
   }
 
   audit(ms: number): Stream<A, S> {
@@ -2288,10 +2227,8 @@ export class Stream<A, S = never> {
       | { readonly _tag: "end" }
       | { readonly _tag: "fail"; readonly cause: Cause };
 
-    const drivers: Fiber<any>[] = [];
-
-    const setup: Eff<Step<A>, any> = (QueueNS.unbounded<Event>() as any).flatMap(
-      (events: Queue<Event>) => {
+    const start = (run: DriverRun<A>): Eff<Pull<A>, any> =>
+      (QueueNS.unbounded<Event>() as any).flatMap((events: Queue<Event>) => {
         let windowOpen = false;
         let dirty = false;
         let latest!: A;
@@ -2321,23 +2258,21 @@ export class Stream<A, S = never> {
           Cause.isInterruptedOnly(cause) ? failCause(cause) : events.offer({ _tag: "fail", cause }),
         );
 
-        const emitLatest = (next: Stream<A, any>): Eff<Step<A>, any> =>
+        const emitLatest = (continuation: Stream<A, unknown>): Eff<Step<A>, any> =>
           sync(() => {
             const value = latest;
             dirty = false;
             windowOpen = false;
-            return emit(Chunk.single(value), next);
+            return emit(Chunk.single(value), continuation);
           });
 
         const waitForWindow = (): Eff<Step<A>, any> =>
           (timeoutOption(events.take() as any, duration) as any).flatMap(
             (event: Event | undefined): any => {
-              if (event === undefined) {
-                return emitLatest(new Stream(suspend(() => idle()) as any));
-              }
+              if (event === undefined) return emitLatest(next);
               if (event._tag === "fail") return failCause(event.cause);
               if (event._tag === "end") {
-                return dirty ? emitLatest(Stream.empty()) : succeed(DONE);
+                return dirty ? emitLatest(run.end) : succeed(DONE);
               }
               return waitForWindow();
             },
@@ -2350,17 +2285,15 @@ export class Stream<A, S = never> {
             return waitForWindow();
           });
 
-        return (fork(driver) as any).flatMap((fiber: Fiber<any>) => {
-          drivers.push(fiber);
-          return idle();
-        });
-      },
-    );
+        // An open window outlives a pull: a pull interrupted after taking
+        // its `start` event resumes by waiting for the window to close.
+        const pull = (): Eff<Step<A>, any> => (windowOpen ? waitForWindow() : idle());
+        const next = run.continueWith(pull);
 
-    return new Stream<A, any>(
-      suspend(() => setup) as any,
-      combineFinalizers(interruptAllEff(drivers), self._finalizer),
-    ) as any;
+        return run.fork(driver).map(() => pull);
+      });
+
+    return driverStream<A>({ start, finalizer: self._finalizer }) as Stream<A, S>;
   }
 
   /**
@@ -2375,10 +2308,8 @@ export class Stream<A, S = never> {
     const cap = Math.max(1, Math.floor(capacity));
     type Slot = { _tag: "item"; value: A } | { _tag: "end" } | { _tag: "fail"; cause: Cause };
 
-    const drivers: Fiber<any>[] = [];
-
-    const setup: Eff<Step<A>, any> = (QueueNS.bounded<Slot>(cap) as any).flatMap(
-      (slots: Queue<Slot>) => {
+    const start = (run: DriverRun<A>): Eff<Pull<A>, any> =>
+      (QueueNS.bounded<Slot>(cap) as any).flatMap((slots: Queue<Slot>) => {
         const offerChunk = (items: A[], i: number, next: Stream<A, any>): Eff<void, any> =>
           i >= items.length
             ? drain(next)
@@ -2417,24 +2348,16 @@ export class Stream<A, S = never> {
                 if (slot._tag === "item") values.push(slot.value);
                 else terminal = slot;
               }
-              return succeed(
-                emit(Chunk.fromArray(values), new Stream(suspend(() => pull()) as any)),
-              );
+              return succeed(emit(Chunk.fromArray(values), next));
             });
           });
         };
+        const next = run.continueWith(pull);
 
-        return (fork(driver) as any).flatMap((fb: Fiber<any>) => {
-          drivers.push(fb);
-          return pull();
-        });
-      },
-    );
+        return run.fork(driver).map(() => pull);
+      });
 
-    return new Stream<A, any>(
-      suspend(() => setup) as any,
-      combineFinalizers(interruptAllEff(drivers), self._finalizer),
-    ) as any;
+    return driverStream<A>({ start, finalizer: self._finalizer }) as Stream<A, S>;
   }
 
   throttle(ms: number): Stream<A, S> {

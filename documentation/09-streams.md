@@ -76,9 +76,35 @@ stream whose effect type contains both errors.
 | `.combineLatest(other)` | emit when either initialized side changes |
 | `.withLatest(other)` | emit only for the main stream, paired with the latest side value |
 
-`switchMap`, `exhaustMap`, `combineLatest`, and `withLatest` run on Perfect
-fibers. Downstream cancellation interrupts their driver fibers and runs all
-source/inner finalizers; no callback or timer escapes structured concurrency.
+`merge`, `switchMap`, `exhaustMap`, `parEvalMap`, `combineLatest`,
+`withLatest`, `broadcastThrough`, `observe`, and `takeUntil` run background
+fibers, as do `groupWithin`, `debounce`, `sample`, `audit`, and `buffer`. Those
+fibers belong to the stream, not to whichever fiber pulls it. They start on the
+first pull. When the stream completes, fails, stops early, or its consumer is
+interrupted, its finalizer interrupts them and waits for them to finish before
+it releases the sources. No callback or timer escapes structured concurrency.
+
+This matters when a pull runs on a short-lived fiber. `timeout`, `deadline`,
+`interruptAfter`, `interruptOn`, and `takeUntil` race every pull against a timer
+or signal. Composing them with these operators is safe:
+
+<!-- @embed packages/core/examples/10-streams.ts#stream-merge-interrupt-after -->
+
+```ts
+import { Stream } from "@spilne/perfect-core";
+
+// merge's background fibers belong to the stream, so pulls racing a timer
+// (interruptAfter, timeout, takeUntil, …) don't stop them.
+const ticks = await Stream.tick(10)
+  .take(3)
+  .merge(Stream.tick(15).take(2))
+  .interruptAfter(1_000)
+  .toArray()
+  .run();
+console.log(ticks.length); // → 5
+```
+
+<!-- @end -->
 
 ### Single-pass fan-out
 
@@ -347,6 +373,16 @@ console.log(top3RunningTotals); // → [0, 37_000_000, 69_000_000, 97_000_000]
 `stream.retry(policy)` retries a failed pull. The retry budget resets after a
 chunk is emitted, so a later failed pull receives a fresh budget. It does not
 reacquire a source that already emitted data.
+
+Operators with background fibers (see
+[Stateful, concurrent, and reactive operators](#stateful-concurrent-and-reactive-operators))
+keep those fibers running while a retried pull waits.
+`stream.merge(other).timeout(ms).retry(policy)` resumes the interrupted pull
+against the same fibers instead of starting a second set. Once a failure has
+reached the consumer, a later pull fails again with the same cause, because
+the failed input cannot be pulled again. Only a failed first pull starts over,
+after the previous fibers have stopped. To retry a failing input, retry it
+before combining: `input.retry(policy).merge(other)`.
 
 Use `Stream.retryFrom` when retry must finalize and reconstruct the whole
 source:
