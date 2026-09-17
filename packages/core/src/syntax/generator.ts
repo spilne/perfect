@@ -45,53 +45,50 @@ export function eff<Y extends Eff<any, any>, A>(
 export function eff<A, S = never>(fn: EffGenFn<A, S>): Eff<A, S>;
 export function eff(fn: EffGenFn<any, any>): Eff<any, any> {
   // Lazy: build the generator inside a Sync so the fn runs on each execution.
-  return (new Suspend(Op.Sync, () => fn(), null) as any).flatMap((gen: any) => {
-    const run: GeneratorRun = { gen, finished: false };
-    return new Suspend(Op.Ensuring, drive(run, undefined, null), () =>
-      run.finished ? null : closeGenerator(run),
-    );
-  });
+  return (new Suspend(Op.Sync, () => fn(), null) as any).flatMap(
+    (gen: Generator<Eff<any, any>, any, any>) =>
+      new Suspend(Op.Ensuring, drive(gen, undefined, null), () => closeGenerator(gen)),
+  );
 }
 
-interface GeneratorRun {
-  readonly gen: Generator<Eff<any, any>, any, any>;
-  finished: boolean;
-}
-
-// An interrupted fiber skips the handler that would pass the interrupt into
-// the generator, leaving it suspended at a `yield*`. Returning it runs its
-// `finally` blocks (effects they yield run as part of this finalizer); its
-// `catch` blocks cannot swallow the interrupt.
-function closeGenerator(run: GeneratorRun): Eff<any, any> {
+// An interrupted fiber bypasses the handler below that would throw the
+// interrupt into the generator, leaving it suspended at a `yield*`. Returning
+// it runs its `finally` blocks (effects they yield run within this finalizer)
+// and skips its `catch` blocks. A generator that already finished is left as is.
+function closeGenerator(gen: Generator<Eff<any, any>, any, any>): Eff<any, any> | null {
   let step: IteratorResult<Eff<any, any>, any>;
   try {
-    step = run.gen.return(undefined);
+    step = gen.return(undefined);
   } catch (e) {
-    run.finished = true;
     return die(e);
   }
-  return proceed(run, step);
+  return step.done ? null : proceed(gen, step);
 }
 
-function drive<A, S>(run: GeneratorRun, input: any, errorCause: Cause | null): Eff<A, S> {
+function drive<A, S>(
+  gen: Generator<Eff<any, S>, A, any>,
+  input: any,
+  errorCause: Cause | null,
+): Eff<A, S> {
   let step: IteratorResult<Eff<any, S>, A>;
   const thrown = errorCause !== null ? Cause.squash(errorCause) : undefined;
   try {
-    step = errorCause !== null ? run.gen.throw(thrown) : run.gen.next(input);
+    step = errorCause !== null ? gen.throw(thrown) : gen.next(input);
   } catch (e) {
-    run.finished = true;
     // The generator let our own throw propagate uncaught — restore the full
     // original Cause so defects stay defects and interrupts stay interrupts.
     // A different thrown value is a new typed failure from the body.
     if (errorCause !== null && e === thrown) return failCause(errorCause) as any;
     return fail(e) as any;
   }
-  return proceed(run, step);
+  return proceed(gen, step);
 }
 
-function proceed<A, S>(run: GeneratorRun, step: IteratorResult<Eff<any, S>, A>): Eff<A, S> {
+function proceed<A, S>(
+  gen: Generator<Eff<any, S>, A, any>,
+  step: IteratorResult<Eff<any, S>, A>,
+): Eff<A, S> {
   if (step.done) {
-    run.finished = true;
     const v = step.value;
     return (v != null && v instanceof Suspend ? v : succeed(v)) as any;
   }
@@ -105,6 +102,6 @@ function proceed<A, S>(run: GeneratorRun, step: IteratorResult<Eff<any, S>, A>):
     (cause: Cause) => succeed({ ok: false, cause }),
   );
   return new Suspend(Op.FlatMap, reified, (r: any) =>
-    r.ok ? drive(run, r.val, null) : drive(run, undefined, r.cause),
+    r.ok ? drive(gen, r.val, null) : drive(gen, undefined, r.cause),
   ) as any;
 }
