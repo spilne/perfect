@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { fail, fromPromise, run, sleep, succeed, type Eff } from "@spilne/perfect-core";
+import { fail, fromPromise, run, succeed, type Eff } from "@spilne/perfect-core";
 import {
   CheckpointName,
   Partition,
@@ -55,7 +55,9 @@ describe.skipIf(!dockerAvailable)("integration — redis:7-alpine", () => {
   beforeAll(async () => {
     container = await new GenericContainer("redis:7-alpine")
       .withExposedPorts(6379)
-      .withWaitStrategy(Wait.forLogMessage("Ready to accept connections"))
+      .withWaitStrategy(
+        Wait.forAll([Wait.forLogMessage("Ready to accept connections"), Wait.forListeningPorts()]),
+      )
       .withStartupTimeout(120_000)
       .start();
     driver = new Redis({
@@ -381,12 +383,9 @@ describe.skipIf(!dockerAvailable)("integration — redis:7-alpine", () => {
 
   test("circuit breaker state is shared and admits one half-open probe", async () => {
     type Boom = { readonly _tag: "Boom" };
-    // resetTimeoutMs has to comfortably exceed the time the assertions
-    // themselves take. At 80ms the two failing round-trips to Redis could
-    // outlast it on a loaded runner, so the breaker had already moved to
-    // half-open before `first.state` was read — the test failed with
-    // "expected open, received half-open" roughly one run in three.
-    const RESET_MS = 750;
+    // Exceed the test deadline, then age openedAt explicitly: Redis uses its
+    // own clock, and round-trips on CI can outlast a short reset timeout.
+    const RESET_MS = 60_000;
     const first = RedisCircuitBreaker.make<Boom>({
       redis,
       key: "breaker",
@@ -412,8 +411,33 @@ describe.skipIf(!dockerAvailable)("integration — redis:7-alpine", () => {
       .catchTag("CircuitOpen", () => succeed("blocked"));
     expect(await unsafeRun(blocked)).toBe("blocked");
 
-    await unsafeRun(sleep(RESET_MS + 100));
-    expect(await unsafeRun(first.protect(succeed("probe")))).toBe("probe");
+    await driver.hincrby("breaker", "openedAt", -RESET_MS);
+    expect(await unsafeRun(first.state)).toBe("half-open");
+    let releaseProbe!: () => void;
+    let probeStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      probeStarted = resolve;
+    });
+    const release = new Promise<void>((resolve) => {
+      releaseProbe = resolve;
+    });
+    const probe = unsafeRun(
+      first.protect(
+        fromPromise(async () => {
+          probeStarted();
+          await release;
+          return "probe";
+        }),
+      ),
+    );
+    try {
+      await started;
+      expect(await unsafeRun(blocked)).toBe("blocked");
+    } finally {
+      releaseProbe();
+      await probe;
+    }
+    expect(await probe).toBe("probe");
     expect(await unsafeRun(second.state)).toBe("closed");
 
     type Filtered = { readonly _tag: "Counted" } | { readonly _tag: "Ignored" };
@@ -421,15 +445,13 @@ describe.skipIf(!dockerAvailable)("integration — redis:7-alpine", () => {
       redis,
       key: "filtered-breaker",
       failureThreshold: 1,
-      // Same reasoning as RESET_MS above — 30ms was shorter than a Redis
-      // round-trip under load.
-      resetTimeoutMs: 300,
+      resetTimeoutMs: RESET_MS,
       isFailure: (error) => error._tag === "Counted",
     });
     await expect(unsafeRun(filtered.protect(fail<Filtered>({ _tag: "Counted" })))).rejects.toEqual({
       _tag: "Counted",
     });
-    await unsafeRun(sleep(400));
+    await driver.hincrby("filtered-breaker", "openedAt", -RESET_MS);
     await expect(unsafeRun(filtered.protect(fail<Filtered>({ _tag: "Ignored" })))).rejects.toEqual({
       _tag: "Ignored",
     });

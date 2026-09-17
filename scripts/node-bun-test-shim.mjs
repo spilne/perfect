@@ -14,6 +14,7 @@ export const beforeAll = nodeTest.beforeAll ?? before;
 export const afterAll = nodeTest.afterAll ?? after;
 
 export { expect };
+export { spyOn } from "jest-mock";
 
 if (!globalThis.Worker) {
   globalThis.Worker = NodeWorker;
