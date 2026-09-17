@@ -70,7 +70,7 @@ stream whose effect type contains both errors.
 | `.parEvalMapUnordered(n, f)` | bounded parallel evaluation in completion order |
 | `.merge(other)` | concurrently emit from either stream |
 | `.parJoin(n)` | flatten a stream of streams, running at most `n` inner streams at once |
-| `.parJoinUnbounded()` | flatten a stream of streams, opening each inner stream as it arrives |
+| `.parJoinUnbounded()` | flatten a stream of streams, opening each inner stream as it arrives (no memory bound) |
 | `.broadcastThrough(...branches)` | pull once, fan out to every branch, and merge their outputs |
 | `.observe(branch)` | run a reliable side branch while retaining source values |
 | `.switchMap(f)` | latest inner stream wins; the previous inner is canceled and finalized |
@@ -81,7 +81,11 @@ stream whose effect type contains both errors.
 `switchMap`, `exhaustMap`, `parJoin`, `combineLatest`, and `withLatest` run on
 Perfect fibers. Downstream cancellation interrupts their driver fibers and runs
 all source/inner finalizers; no callback or timer escapes structured
-concurrency.
+concurrency. The exception is `parJoin`: its driver is a daemon fiber owned by
+the stream's finalizer rather than by the pulling fiber, so it keeps running
+under operators that race each pull, such as `timeout` or `takeUntil`. Every
+terminal operator runs that finalizer; code that pulls `stream.step` by hand
+without it leaves the join running.
 
 ### Concurrent flattening
 
@@ -117,13 +121,24 @@ const runs = registrations
 ```
 
 The result completes once the outer stream and every opened inner stream have
-completed. Output passes through a small bounded queue, so a slow consumer
-backpressures the inner streams instead of growing memory. A failure in the
-outer stream or any inner stream immediately interrupts all the others, and the
-result fails once the chunks already queued have been emitted. Every inner
-stream the join opened is finalized, including one interrupted before its first
-pull. The outer finalizer runs last, so inner streams may use resources the
-outer stream acquired.
+completed. Output passes through a bounded queue of 16 chunks, and each open
+inner stream holds at most one more pending chunk. With `parJoin(n)` a slow
+consumer therefore backpressures the inner streams and, through them, the
+outer stream, so memory stays bounded. `parJoinUnbounded()` never stops pulling
+the outer stream, even while the consumer is slow. Every inner stream it opens
+stays alive as a fiber until its output is consumed, so memory grows with the
+number of inner streams the outer stream emits. Use `parJoin(n)` unless that
+number is bounded.
+
+A failure in the outer stream or any inner stream immediately interrupts all
+the others. The result fails after the consumer receives the chunks already
+queued, at most 16. When several streams fail at once, the first failure wins,
+as with `merge`. Finalizer failures are never dropped: an inner finalizer that
+fails while the join is running fails it, and one that fails during teardown is
+added after the original failure, or raised on its own when downstream stopped
+early. Every inner stream pulled from the outer stream is finalized, including
+one that was never started. The outer finalizer runs last, so inner streams may
+use resources the outer stream acquired.
 
 ### Single-pass fan-out
 

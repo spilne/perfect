@@ -8,11 +8,14 @@ import {
   TaggedError,
   TestClock,
   die,
+  fail,
+  failCause,
   provide,
   run,
   runExit,
   runFiber,
   runSync,
+  sleep,
   sync,
   yieldNow,
   type Eff,
@@ -22,12 +25,14 @@ import {
 
 class InnerFailure extends TaggedError("InnerFailure")<{}>() {}
 class OuterFailure extends TaggedError("OuterFailure")<{}>() {}
+class FinalizerFailure extends TaggedError("FinalizerFailure")<{ readonly stream: string }>() {}
 
 const virtualTime = () => {
   const scheduler = new SyncScheduler();
   const clock = new TestClock();
   return {
-    start: <A>(effect: Eff<A, never>) => runFiber(provide(effect, Clock, clock), scheduler),
+    start: <A, S>(effect: Eff<A, S>) =>
+      runFiber(provide(effect, Clock, clock) as Eff<A, never>, scheduler),
     advance: (ms: number, step = 5) => {
       scheduler.flush();
       for (let elapsed = 0; elapsed < ms; elapsed += step) {
@@ -367,22 +372,257 @@ describe("Stream.parJoin", () => {
     await fiber.await();
   });
 
-  test("keeps working under operators that race each pull on a separate fiber", () => {
-    const { start, advance } = virtualTime();
-    const fiber = start(
+  test("rejects a maxOpen that is not a positive integer or Infinity", async () => {
+    const nested = Stream.of(Stream.of(1));
+
+    for (const maxOpen of [0, -1, 1.5, NaN, -Infinity]) {
+      expect(() => nested.parJoin(maxOpen)).toThrow(RangeError);
+    }
+    expect(await run(nested.parJoin(Infinity).toArray())).toEqual([1]);
+  });
+
+  test("never emits empty chunks from inner streams", async () => {
+    const sizes: number[] = [];
+    const result = await run(
       Stream.of(
-        ticks({ label: "a", everyMs: 10, count: 2 }),
-        ticks({ label: "b", everyMs: 15, count: 2 }),
+        Stream.of(1, 2).filter((n) => n > 5),
+        Stream.of(3),
       )
-        .parJoin(2)
-        .timeout(1_000)
+        .parJoin(1)
+        .mapChunks((chunk) => {
+          sizes.push(chunk.length);
+          return chunk;
+        })
         .toArray(),
     );
 
-    advance(30);
-
-    expect(fiber.result).toEqual({ ok: true, value: ["a1", "b1", "a2", "b2"] });
+    expect(result).toEqual([3]);
+    expect(sizes).toEqual([1]);
   });
+
+  test("finalizes outer elements that were pulled but never launched", async () => {
+    const events: string[] = [];
+    const tracked = (params: { name: string; stream: Stream<number, Throws<InnerFailure>> }) =>
+      params.stream.onFinalize(sync(() => events.push(params.name)));
+
+    const exit = await runExit(
+      Stream.of(
+        tracked({
+          name: "failing",
+          stream: Stream.fromEffect(yieldNow).flatMap(() => Stream.fail(new InnerFailure({}))),
+        }),
+        tracked({ name: "second", stream: Stream.of(2) }),
+        tracked({ name: "third", stream: Stream.of(3) }),
+      )
+        .parJoin(1)
+        .toArray(),
+    );
+
+    expect(exit._tag).toBe("Failure");
+    expect([...events].sort()).toEqual(["failing", "second", "third"]);
+  });
+
+  test("an interruption raised by an inner or outer stream fails the join", async () => {
+    const interrupted = Stream.fromEffect(failCause(Cause.interrupt()));
+    const exits = [
+      await runExit(Stream.of(Stream.of(1), interrupted).parJoin(2).toArray()),
+      await runExit(Stream.of(Stream.of(1)).concat(interrupted).parJoinUnbounded().toArray()),
+    ];
+
+    for (const exit of exits) {
+      expect(exit._tag).toBe("Failure");
+      if (exit._tag === "Failure") expect(Cause.isInterruptedOnly(exit.cause)).toBe(true);
+    }
+  });
+
+  test("a retried first pull resumes the running join instead of opening another", () => {
+    const { start, advance } = virtualTime();
+    let open = 0;
+    let maxOpen = 0;
+    const slow = (id: number) =>
+      Stream.suspend(() => {
+        open++;
+        maxOpen = Math.max(maxOpen, open);
+        return Stream.fromEffect(sleep(70).map(() => id));
+      }).onFinalize(
+        sync(() => {
+          open--;
+        }),
+      );
+
+    const fiber = start(
+      Stream.iterate(1, (id) => id + 1)
+        .map(slow)
+        .parJoin(2)
+        .timeout(50)
+        .retry({ times: 3 })
+        .take(3)
+        .toArray(),
+    );
+    advance(300);
+
+    expect(fiber.result).toEqual({ ok: true, value: [1, 2, 3] });
+    expect({ open, maxOpen }).toEqual({ open: 0, maxOpen: 2 });
+  });
+
+  test("a retried first pull neither loses nor re-pulls outer elements", () => {
+    const { start, advance } = virtualTime();
+    let pulled = 0;
+
+    const fiber = start(
+      Stream.repeat(sync(() => ++pulled))
+        .take(6)
+        .map((id) =>
+          id === 1
+            ? Stream.fromEffect(sleep(70).map(() => id))
+            : Stream.tick(10)
+                .map(() => id)
+                .take(20),
+        )
+        .parJoin(1)
+        .timeout(50)
+        .retry({ times: 1 })
+        .take(3)
+        .toArray(),
+    );
+    advance(400);
+
+    expect(fiber.result).toEqual({ ok: true, value: [1, 2, 2] });
+    expect(pulled).toBe(2);
+  });
+});
+
+describe("Stream.parJoin finalizer failures", () => {
+  test("an inner finalizer failure during teardown follows the outer failure", async () => {
+    const never = runSync(Deferred.make<void>());
+    const outerFailure = new OuterFailure({});
+    const finalizerFailure = new FinalizerFailure({ stream: "inner" });
+
+    const exit = await runExit(
+      Stream.of(Stream.fromEffect(never.await.map(() => 1)).onFinalize(fail(finalizerFailure)))
+        .concat(Stream.fromEffect(yieldNow).flatMap(() => Stream.fail(outerFailure)))
+        .parJoin(2)
+        .toArray(),
+    );
+
+    expect(exit._tag).toBe("Failure");
+    if (exit._tag === "Failure") {
+      expect(Cause.failures(exit.cause)).toEqual([outerFailure, finalizerFailure]);
+    }
+  });
+
+  test("a sibling finalizer failure follows the inner failure", async () => {
+    const never = runSync(Deferred.make<void>());
+    const innerFailure = new InnerFailure({});
+    const finalizerFailure = new FinalizerFailure({ stream: "sibling" });
+
+    const exit = await runExit(
+      Stream.of<Stream<number, Throws<InnerFailure> | Throws<FinalizerFailure>>>(
+        Stream.fromEffect(never.await.map(() => 1)).onFinalize(fail(finalizerFailure)),
+        Stream.fromEffect(yieldNow).flatMap(() => Stream.fail(innerFailure)),
+      )
+        .parJoinUnbounded()
+        .toArray(),
+    );
+
+    expect(exit._tag).toBe("Failure");
+    if (exit._tag === "Failure") {
+      expect(Cause.failures(exit.cause)).toEqual([innerFailure, finalizerFailure]);
+    }
+  });
+
+  test("an inner finalizer failure surfaces when downstream stops early", async () => {
+    const finalizerFailure = new FinalizerFailure({ stream: "inner" });
+    const nested = () =>
+      Stream.of(Stream.repeat(yieldNow.map(() => 1)).onFinalize(fail(finalizerFailure)));
+
+    for (const joined of [nested().parJoin(1), nested().parJoinUnbounded()]) {
+      const exit = await runExit(joined.take(1).toArray());
+
+      expect(exit._tag).toBe("Failure");
+      if (exit._tag === "Failure") expect(Cause.failures(exit.cause)).toEqual([finalizerFailure]);
+    }
+  });
+});
+
+describe("Stream.parJoin under operators that race each pull", () => {
+  const variants = [
+    ["parJoin(2)", (stream: Stream<Stream<string>>) => stream.parJoin(2)],
+    ["parJoinUnbounded()", (stream: Stream<Stream<string>>) => stream.parJoinUnbounded()],
+  ] as const;
+
+  const passThrough: ReadonlyArray<
+    readonly [string, (stream: Stream<string>) => Stream<string, unknown>]
+  > = [
+    ["timeout", (stream) => stream.timeout(1_000)],
+    ["timeout.timeout", (stream) => stream.timeout(1_000).timeout(900)],
+    ["deadline", (stream) => stream.deadline(1_000)],
+    ["interruptAfter", (stream) => stream.interruptAfter(1_000)],
+    ["interruptOn", (stream) => stream.interruptOn(new AbortController().signal)],
+    ["takeUntil", (stream) => stream.takeUntil(Stream.tick(1_000))],
+  ];
+
+  for (const [variant, join] of variants) {
+    for (const [operator, apply] of passThrough) {
+      test(`${variant} completes through ${operator} and finalizes the outer last`, () => {
+        const { start, advance } = virtualTime();
+        const events: string[] = [];
+        const outer = Stream.of(
+          ticks({ label: "a", everyMs: 10, count: 2 }),
+          ticks({ label: "b", everyMs: 15, count: 2 }),
+        )
+          .map((inner) => inner.onFinalize(sync(() => events.push("inner"))))
+          .onFinalize(sync(() => events.push("outer")));
+
+        const fiber = start(apply(join(outer)).toArray());
+        advance(60);
+
+        expect(fiber.result).toEqual({ ok: true, value: ["a1", "b1", "a2", "b2"] });
+        expect(events).toEqual(["inner", "inner", "outer"]);
+      });
+    }
+  }
+
+  const cutting: ReadonlyArray<
+    readonly [
+      string,
+      (params: { stream: Stream<string>; signal: AbortSignal }) => Stream<string, unknown>,
+      boolean,
+    ]
+  > = [
+    ["timeout", ({ stream }) => stream.timeout(25), false],
+    ["deadline", ({ stream }) => stream.deadline(55), false],
+    ["interruptAfter", ({ stream }) => stream.interruptAfter(55), true],
+    ["interruptOn", ({ stream, signal }) => stream.interruptOn(signal), true],
+    ["takeUntil", ({ stream }) => stream.takeUntil(Stream.tick(55)), true],
+  ];
+
+  for (const [variant, join] of variants) {
+    for (const [operator, apply, completes] of cutting) {
+      test(`${variant} is torn down by ${operator} with the outer finalized last`, () => {
+        const { start, advance } = virtualTime();
+        const never = runSync(Deferred.make<string>());
+        const controller = new AbortController();
+        const events: string[] = [];
+        const outer = Stream.of("a", "b")
+          .map((label) =>
+            ticks({ label, everyMs: 10, count: 5 })
+              .concat(Stream.fromEffect(never.await))
+              .onFinalize(sync(() => events.push(label))),
+          )
+          .onFinalize(sync(() => events.push("outer")));
+
+        const fiber = start(apply({ stream: join(outer), signal: controller.signal }).drain());
+        advance(55);
+        controller.abort();
+        advance(50);
+
+        expect(fiber.result?.ok).toBe(completes);
+        expect([...events].sort()).toEqual(["a", "b", "outer"]);
+        expect(events.at(-1)).toBe("outer");
+      });
+    }
+  }
 });
 
 describe("Stream.parJoinUnbounded", () => {

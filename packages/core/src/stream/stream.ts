@@ -1781,19 +1781,26 @@ export class Stream<A, S = never> {
    * outer stream and every opened inner stream have completed.
    *
    * A failure in the outer stream or any inner stream interrupts all the
-   * others and fails the result once already-queued chunks are emitted. Each
-   * inner finalizer runs when that inner stream ends; the outer finalizer runs
-   * last. Use `.map(f).parJoin(n)` for a bounded concurrent `flatMap`.
+   * others and fails the result once already-queued chunks (at most 16) are
+   * emitted. Each inner finalizer runs when that inner stream ends, and its
+   * failures are never dropped; the outer finalizer runs last. Use
+   * `.map(f).parJoin(n)` for a bounded concurrent `flatMap`.
+   *
+   * @throws RangeError unless `maxOpen` is a positive integer or `Infinity`.
    */
   parJoin(
     this: Stream<Stream<any, any>, S>,
     maxOpen: number,
   ): Stream<StreamValue<A>, S | StreamEffects<A>> {
-    return parJoinStreams({ outer: this, maxOpen: Math.max(1, Math.floor(maxOpen)) }) as any;
+    if (maxOpen !== Infinity && (!Number.isInteger(maxOpen) || maxOpen < 1)) {
+      throw new RangeError("parJoin: maxOpen must be a positive integer or Infinity");
+    }
+    return parJoinStreams({ outer: this, maxOpen }) as any;
   }
 
   /** {@link Stream.parJoin} without a limit: every inner stream is opened as
-   *  soon as the outer stream emits it. */
+   *  soon as the outer stream emits it, so memory grows with the number of
+   *  inner streams open at once. */
   parJoinUnbounded(
     this: Stream<Stream<any, any>, S>,
   ): Stream<StreamValue<A>, S | StreamEffects<A>> {
