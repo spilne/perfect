@@ -2702,10 +2702,12 @@ export class Stream<A, S = never> {
 
   /** Turn typed failures into defects, like `Eff.orDie`, before a runner boundary. */
   orDie(): Stream<A, Exclude<S, Throws<unknown>>> {
-    return this.catchAllCause((cause) => {
+    const recovered = this.catchAllCause((cause) => {
       const failure = Cause.firstFail(cause);
       return Stream.fromEffect(failure === null ? failCause(cause) : die(failure.value));
-    }) as any;
+    });
+    const finalizer = recovered._finalizer;
+    return new Stream(recovered.step, finalizer === null ? null : finalizer.orDie()) as any;
   }
 
   tapError<S2>(f: (error: ErrorsOf<S>) => Eff<unknown, S2>): Stream<A, S | S2> {

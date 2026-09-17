@@ -210,18 +210,27 @@ console.log(finalized); // → 1
 
 - **Pull-based.** Nothing runs until the first `next()`. Each iterator runs the
   stream on one fiber and pulls the next chunk only after the consumer has taken
-  every element of the current one.
-- **Early exit is safe.** `break`, `return()`, or a throw in the loop body stops
-  the stream. The loop continues only after the stream's finalizers have run,
-  and fibers the stream started, such as `merge` drivers or `parEvalMap`
-  workers, are interrupted. Calling `return()` while a `next()` is pending
-  interrupts that pull.
+  every element of the current one. Concurrent `next()` calls are served in call
+  order.
+- **Early exit is safe.** Once `next()` has been called, `break`, `return()`, or
+  a throw in the loop body stops the stream and runs its finalizers. The loop
+  continues only after the finalizers have run, and fibers the stream started,
+  such as `merge` drivers or `parEvalMap` workers, are interrupted. Calling
+  `return()` while a `next()` is pending interrupts that pull.
+- **Close it yourself.** The iterator runs on its own root fiber, so
+  interrupting an enclosing fiber does not stop it. End it with `for await` or
+  `return()`.
 - **Failures reject.** Like `run()`, the method type-checks only when every
   error and service requirement is handled. Use `.orDie()` to let typed errors
   surface in the loop. A failure rejects `next()` with `Cause.squash(cause)`
   after finalizers have run.
-- **Each iterator starts over.** Every `[Symbol.asyncIterator]()` call runs the
-  stream from the beginning, so single-pass sources cannot be iterated twice.
+- **Reuse sequentially, not concurrently.** Every `[Symbol.asyncIterator]()`
+  call runs the stream again. Start another iterator only after the previous
+  one has finished: operators such as `Stream.bracket`, `Stream.suspend`, and
+  `catch` keep per-run state on the stream value, so overlapping iterators can
+  leak resources. A single-pass source, such as `fromAsyncIterable` over a
+  generator, yields only what is left the second time, often nothing, without
+  an error.
 
 `Stream` does not implement `Symbol.asyncIterator` itself. TypeScript ignores a
 method's `this` constraint in `for await` and `AsyncIterable` assignments, so
