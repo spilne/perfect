@@ -32,9 +32,10 @@ export const enum Op {
   SetInterruptible = 16,
   YieldNow = 17,
   ForkDaemon = 18,
+  ForEachPar = 19,
   // Continuation frames (only ever appear on the Cont stack, not as Suspend nodes):
-  EnsuringFrame = 19,
-  ScopeFrame = 20,
+  EnsuringFrame = 20,
+  ScopeFrame = 21,
 }
 
 // ── Continuation cell (singly-linked stack) ────────────────────────

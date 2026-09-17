@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { type Eff, runFiber, succeed, suspend, sync, yieldNow } from "../src";
+import { type Eff, forEachPar, runFiber, succeed, suspend, sync, yieldNow } from "../src";
 import { DEFAULT_BUDGET, type Scheduler } from "../src/scheduler";
 
 // Runs every queued slice in order, like the default scheduler without timers.
@@ -50,6 +50,23 @@ function maxCallbacksBetweenTurns(build: (note: () => void) => Eff<unknown, neve
   return max;
 }
 
+// The most callbacks `build`'s effect runs within one scheduler task.
+function maxCallbacksPerTask(build: (note: () => void) => Eff<unknown, never>): number {
+  let run = 0;
+  let max = 0;
+  const note = () => {
+    run++;
+    if (run > max) max = run;
+  };
+  const scheduler = new FifoScheduler();
+  runFiber(build(note), scheduler);
+  while (scheduler.queue.length > 0) {
+    run = 0;
+    scheduler.queue.shift()!();
+  }
+  return max;
+}
+
 const N = 100_000;
 
 describe("op budget fairness", () => {
@@ -78,5 +95,55 @@ describe("op budget fairness", () => {
     expect(maxCallbacksBetweenTurns((note) => recurse(N, note))).toBeLessThanOrEqual(
       2 * DEFAULT_BUDGET,
     );
+  });
+
+  // forEachPar starts children inline, so its fill runs child slices inside
+  // its own scheduler task. Measured per task: the fill spends one budget, and
+  // the child it started last may use up one more.
+  describe("forEachPar", () => {
+    const items = (n: number) => Array.from({ length: n }, (_, i) => i);
+
+    for (const concurrency of [1, 8, "unbounded"] as const) {
+      test(`100k synchronous children yield (concurrency ${concurrency})`, () => {
+        const max = maxCallbacksPerTask((note) =>
+          forEachPar(items(N), (i) => sync(() => (note(), i)), { concurrency }),
+        );
+        expect(max).toBeLessThanOrEqual(2 * DEFAULT_BUDGET);
+      });
+
+      test(`100k already-successful items yield (concurrency ${concurrency})`, () => {
+        const max = maxCallbacksPerTask((note) =>
+          forEachPar(
+            items(N),
+            (i) => {
+              note();
+              return succeed(i);
+            },
+            { concurrency },
+          ),
+        );
+        expect(max).toBeLessThanOrEqual(2 * DEFAULT_BUDGET);
+      });
+
+      test(`children unwinding long .map chains yield (concurrency ${concurrency})`, () => {
+        const max = maxCallbacksPerTask((note) =>
+          forEachPar(
+            items(100),
+            (i) => {
+              let effect: Eff<number, never> = sync(() => i);
+              for (let step = 0; step < 1000; step++) {
+                effect = effect.map((x) => {
+                  note();
+                  return x;
+                });
+              }
+              return effect;
+            },
+            { concurrency },
+          ),
+        );
+        expect(max).toBeLessThanOrEqual(2 * DEFAULT_BUDGET);
+      });
+    }
   });
 });

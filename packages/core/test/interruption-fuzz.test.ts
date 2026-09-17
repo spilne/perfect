@@ -20,6 +20,7 @@ import {
   acquireRelease,
   addFiberSupervisor,
   all,
+  forEachPar,
   async,
   die,
   eff,
@@ -269,6 +270,7 @@ async function runIteration(params: {
   // driver and worker fibers are only ever interrupted through the stream.
   const childEffects = new WeakSet<object>();
   const interruptibleChildren = new Set<Fiber<any>>();
+  const generatorRuns: Array<{ started: number; finished: number }> = [];
   const child = (effect: Eff<any, any>): Eff<any, any> => {
     childEffects.add(effect);
     return effect;
@@ -644,10 +646,56 @@ async function runIteration(params: {
     return stage.drain();
   };
 
+  // forEachPar over child programs, from an array, from a generator that may
+  // throw, or with an f that may throw or fail. Children are awaited like
+  // all()'s. Every generator it starts must finish: run out, throw, or be
+  // closed when the traversal stops early.
+  const forEachParNode = (ctx: Ctx, depth: number): Eff<any, any> => {
+    const count = 1 + ri(4);
+    const bodies = Array.from({ length: count }, () =>
+      child(generate(depth - 1, childCtx(ctx, { awaited: true }))),
+    );
+    const choice = ri(4);
+    const concurrency = choice === 3 ? ("unbounded" as const) : choice + 1;
+    const stopAt = ri(count + 2);
+    switch (ri(3)) {
+      case 0:
+        return forEachPar(bodies, (body) => body, { concurrency });
+      case 1: {
+        const iteration = { started: 0, finished: 0 };
+        generatorRuns.push(iteration);
+        const items = {
+          *[Symbol.iterator]() {
+            iteration.started++;
+            try {
+              for (let i = 0; i < count; i++) {
+                if (i === stopAt) throw new Error("iterator failed");
+                yield bodies[i]!;
+              }
+            } finally {
+              iteration.finished++;
+            }
+          },
+        };
+        return forEachPar(items, (body) => body, { concurrency });
+      }
+      default:
+        return forEachPar(
+          bodies,
+          (body, index) => {
+            if (index !== stopAt) return body;
+            if (ri(2) === 0) throw new Error("f failed");
+            return fail("F");
+          },
+          { concurrency },
+        );
+    }
+  };
+
   const generate = (depth: number, ctx: Ctx): Eff<any, any> => {
     if (depth <= 0 || nodeBudget <= 0 || ri(5) === 0) return leaf(ctx);
     nodeBudget--;
-    switch (ri(24)) {
+    switch (ri(26)) {
       case 0:
       case 1:
         return generate(depth - 1, ctx).flatMap(() => generate(depth - 1, ctx));
@@ -725,6 +773,9 @@ async function runIteration(params: {
         return generatorNode(ctx, depth);
       case 18:
         return streamNode(ctx, depth);
+      case 24:
+      case 25:
+        return forEachParNode(ctx, depth);
       default:
         return finalizerNode({ ctx, depth, attach: (body, fin) => ensuring(body, fin) });
     }
@@ -930,6 +981,11 @@ async function runIteration(params: {
   for (let resource = 1; resource <= createdResources; resource++) {
     const count = releasedResources.get(resource) ?? 0;
     if (count !== 1) violate(`a pool resource was released ${count} times`);
+  }
+  for (const iteration of generatorRuns) {
+    if (iteration.finished !== iteration.started) {
+      violate("a forEachPar iterator was left open");
+    }
   }
   if (runSync(validatingPool.inUse) !== 0) {
     violate("validating pool resources still in use after the program ended");
