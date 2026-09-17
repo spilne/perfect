@@ -54,11 +54,19 @@ export interface ForEachParOptions {
  * Map each item to an effect and run them in parallel, at most
  * `concurrency` at a time, collecting results in input order.
  *
- * `f` is called as slots free up, so only `concurrency` fibers exist at once
- * regardless of input size. The first failure (typed error or defect)
- * interrupts the in-flight effects and starts no new ones; the combined effect
- * fails with that cause once the interrupted effects have finished their
- * finalizers. Interrupting the combined effect interrupts every in-flight one.
+ * `items` is read when the effect runs, and the next item is pulled and passed
+ * to `f` only when a slot frees up — memory for pending work stays bounded by
+ * `concurrency`, and an infinite iterable is fine under a timeout or interrupt.
+ * A one-shot iterable (a generator object) is used up by the first run; pass
+ * an array or a re-iterable object to run the effect more than once.
+ *
+ * The first failure — a typed error, a defect, `f` throwing, or the iterator
+ * throwing — interrupts the in-flight effects, closes the iterator, and starts
+ * nothing new. The combined effect fails once every in-flight effect has
+ * settled, with that first cause plus (via `Cause.both`) any non-interrupt
+ * failures raised while the others were torn down. Interrupting the combined
+ * effect also waits for the in-flight effects to settle, so their finalizers
+ * finish before any finalizer around the traversal runs.
  *
  * @example
  *   forEachPar(userIds, (id) => fetchUser(id), { concurrency: 8 })
@@ -79,6 +87,5 @@ export function forEachPar<A, R extends Eff<unknown, unknown>>(
     );
   }
   const limit = concurrency === "unbounded" ? Infinity : concurrency;
-  const array = Array.isArray(items) ? items : Array.from(items);
-  return new Suspend(Op.ForEachPar, array, { f, limit }) as any;
+  return new Suspend(Op.ForEachPar, items, { f, limit }) as any;
 }

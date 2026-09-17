@@ -420,74 +420,10 @@ function runFiberLoop(fiber: Fiber<any>): void {
       }
 
       case Op.ForEachPar: {
-        const items = cur.a as readonly unknown[];
-        const { f, limit } = cur.b as {
-          f: (item: unknown, index: number) => Suspend;
-          limit: number;
-        };
-        const len = items.length;
-        if (len === 0) {
-          cur = [];
-          continue loop;
-        }
-
-        fiber.stack = k;
-        fiber.context = context;
-        fiber.state = FiberState.Suspended;
-        const savedCtx = context;
-        const results = new Array(len);
-        const running = new Set<Fiber<any>>();
-        let next = 0;
-        let failure: Cause | null = null;
-        let settled = false;
-
-        const resumeParent = (value: unknown): void => {
-          if (settled) return;
-          settled = true;
-          fiber.interruptHandle = null;
-          if (fiber.state === FiberState.Done) return;
-          fiber.current = value;
-          fiber.state = FiberState.Ready;
-          fiber.scheduler.schedule(() => runFiberLoop(fiber));
-        };
-
-        const launch = (): void => {
-          const index = next++;
-          let eff: Suspend;
-          try {
-            eff = f(items[index], index);
-          } catch (e) {
-            eff = new Suspend(Op.Fail, Cause.die(e), null);
-          }
-          const child = makeChild(fiber, eff, savedCtx);
-          running.add(child);
-          child.onComplete((result) => {
-            running.delete(child);
-            if (settled) return;
-            if (failure === null) {
-              if (result.ok) {
-                results[index] = result.value;
-                if (next < len) launch();
-                else if (running.size === 0) resumeParent(results);
-                return;
-              }
-              failure = result.cause;
-              for (const c of running) c.interrupt();
-            }
-            // Fail only once interrupted siblings have settled, so their
-            // finalizers finish inside the combined effect's lifetime.
-            if (running.size === 0) resumeParent(new Suspend(Op.Fail, failure, null));
-          });
-          runChild(child);
-        };
-
-        fiber.interruptHandle = () => {
-          settled = true;
-          if (failure === null) for (const c of running) c.interrupt();
-        };
-        const initial = Math.min(limit, len);
-        for (let i = 0; i < initial; i++) launch();
-        return;
+        const outcome = startForEachPar(fiber, cur, k, context);
+        if (outcome === PARKED) return;
+        cur = outcome;
+        continue loop;
       }
 
       case Op.Fork: {
@@ -606,6 +542,231 @@ function runFiberLoop(fiber: Fiber<any>): void {
       }
     }
   }
+}
+
+const PARKED: unique symbol = Symbol("spilne/for-each-par-parked");
+
+// Op.ForEachPar. Returns the outcome when the traversal settles before this
+// call returns (no scheduler hop), or PARKED once the fiber is suspended and
+// will be resumed by a child completion or an interrupt.
+//
+// Children start inline, so a slot freed by a completion is refilled in the
+// same turn and synchronous children cost no scheduling. Once a turn has spent
+// the op budget, the rest of the fill moves to the next scheduler turn. A
+// CatchAll frame under the fiber's continuation holds an interrupt until every
+// running child has settled, so children's finalizers finish before the
+// parent's own run.
+function startForEachPar(
+  fiber: Fiber<any>,
+  node: Suspend,
+  k: Cont | null,
+  context: Context,
+): unknown {
+  const source = node.a as Iterable<unknown>;
+  const { f, limit } = node.b as { f: (item: unknown, index: number) => Suspend; limit: number };
+  const array = Array.isArray(source) ? (source as readonly unknown[]) : null;
+  const length = array === null ? 0 : array.length;
+  if (array !== null && length === 0) return [];
+  let iterator: Iterator<unknown> | null = null;
+  if (array === null) {
+    try {
+      iterator = source[Symbol.iterator]();
+    } catch (e) {
+      return new Suspend(Op.Fail, Cause.die(e), null);
+    }
+  }
+
+  const results: unknown[] = array === null ? [] : new Array(length);
+  // Slot table instead of a Set: slots are recycled, so it stays as small as
+  // the peak number of running children and add/remove are array ops.
+  const slots: Array<Fiber<any> | null> = [];
+  const freeSlots: number[] = [];
+  let running = 0;
+  let next = 0;
+  let sourceDone = false;
+  let stopped = false;
+  let interrupted = false;
+  let failure: Cause | null = null;
+  let teardown: Cause | null = null;
+  let busy = false;
+  let budget = 0;
+  let refillScheduled = false;
+  let inline = true;
+  let finished = false;
+  let outcome: unknown;
+  let delivered: Cause | null = null;
+  let drained: (() => void) | null = null;
+
+  const fail = (cause: Cause): void => {
+    if (!stopped) {
+      failure = cause;
+      stop();
+      return;
+    }
+    const extra = Cause.stripInterrupts(cause);
+    if (extra !== null) teardown = teardown === null ? extra : Cause.both(teardown, extra);
+  };
+
+  const stop = (): void => {
+    if (stopped) return;
+    stopped = true;
+    for (let i = 0; i < slots.length; i++) slots[i]?.interrupt();
+    if (iterator !== null && !sourceDone) {
+      sourceDone = true;
+      try {
+        iterator.return?.();
+      } catch (e) {
+        fail(Cause.die(e));
+      }
+    }
+  };
+
+  const spawn = (eff: Suspend, index: number): void => {
+    const child = makeChild(fiber, eff, context);
+    const slot = freeSlots.length > 0 ? freeSlots.pop()! : slots.length;
+    slots[slot] = child;
+    running++;
+    child.onComplete((result) => {
+      slots[slot] = null;
+      freeSlots.push(slot);
+      running--;
+      if (!result.ok) fail(result.cause);
+      else if (!stopped) results[index] = result.value;
+      advance();
+    });
+    child.state = FiberState.Ready;
+    notifyFiberStart(child);
+    runFiberLoop(child);
+    budget -= child.opCount + 1;
+  };
+
+  const scheduleRefill = (): void => {
+    if (refillScheduled) return;
+    refillScheduled = true;
+    fiber.scheduler.schedule(() => {
+      refillScheduled = false;
+      advance();
+    });
+  };
+
+  const fill = (): void => {
+    while (!stopped && !sourceDone && running < limit) {
+      if (budget <= 0) {
+        scheduleRefill();
+        return;
+      }
+      let item: unknown;
+      if (array !== null) {
+        if (next >= length) {
+          sourceDone = true;
+          return;
+        }
+        item = array[next];
+      } else {
+        let step: IteratorResult<unknown>;
+        try {
+          step = iterator!.next();
+        } catch (e) {
+          sourceDone = true;
+          fail(Cause.die(e));
+          return;
+        }
+        if (step.done) {
+          sourceDone = true;
+          return;
+        }
+        item = step.value;
+      }
+      const index = next++;
+      let eff: Suspend;
+      try {
+        eff = f(item, index);
+      } catch (e) {
+        fail(Cause.die(e));
+        return;
+      }
+      if (eff instanceof Suspend && eff.op === Op.Succeed) {
+        results[index] = eff.a;
+      } else if (eff instanceof Suspend && eff.op === Op.Fail) {
+        fail(eff.a as Cause);
+      } else {
+        spawn(eff, index);
+      }
+    }
+  };
+
+  const settledCause = (cause: Cause): Suspend => {
+    let combined = cause;
+    if (failure !== null) combined = Cause.both(combined, failure);
+    if (teardown !== null) combined = Cause.both(combined, teardown);
+    return new Suspend(Op.Fail, combined, null);
+  };
+
+  // Nested calls (a child completing inside spawn) fall through to the
+  // outermost call, which re-checks every slot before settling.
+  const advance = (): void => {
+    if (busy) return;
+    busy = true;
+    budget = DEFAULT_BUDGET;
+    fill();
+    busy = false;
+    if (running > 0) return;
+    if (drained !== null) {
+      const resume = drained;
+      drained = null;
+      resume();
+      return;
+    }
+    if (interrupted || finished || (failure === null && !sourceDone)) return;
+    finished = true;
+    const cause: Cause | null =
+      failure === null ? null : teardown === null ? failure : Cause.both(failure, teardown);
+    const value = cause === null ? results : new Suspend(Op.Fail, cause, null);
+    if (inline) {
+      outcome = value;
+      return;
+    }
+    fiber.interruptHandle = null;
+    if (fiber.state === FiberState.Done) return;
+    delivered = cause;
+    fiber.current = value;
+    fiber.state = FiberState.Ready;
+    fiber.scheduler.schedule(() => runFiberLoop(fiber));
+  };
+
+  const onCause = (cause: Cause): Suspend => {
+    if (cause === delivered) return new Suspend(Op.Fail, cause, null);
+    interrupted = true;
+    stop();
+    if (running === 0) return settledCause(cause);
+    return new Suspend(
+      Op.SetInterruptible,
+      new Suspend(
+        Op.Async,
+        (resume: (value: Suspend) => void) => {
+          drained = () => resume(settledCause(cause));
+        },
+        null,
+      ),
+      false,
+    );
+  };
+
+  fiber.stack = new Cont(Op.CatchAll, onCause, k);
+  fiber.context = context;
+  fiber.state = FiberState.Suspended;
+  fiber.interruptHandle = () => {
+    interrupted = true;
+    stop();
+  };
+
+  advance();
+  inline = false;
+  if (interrupted) return PARKED;
+  if (!finished) return PARKED;
+  fiber.interruptHandle = null;
+  fiber.state = FiberState.Running;
+  return outcome;
 }
 
 // Drives cleanup through resolve/reject callbacks without completing the

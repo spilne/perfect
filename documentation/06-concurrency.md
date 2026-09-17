@@ -133,9 +133,7 @@ import { succeed, sleep, forEachPar } from "@spilne/perfect-core";
 // forEachPar() maps items to effects with at most `concurrency` in flight.
 const fetchUser = (id: number) => sleep(10).flatMap(() => succeed({ id, name: `user-${id}` }));
 
-const users = await forEachPar([1, 2, 3, 4, 5], (id) => fetchUser(id), { concurrency: 2 })
-  .orDie()
-  .run();
+const users = await forEachPar([1, 2, 3, 4, 5], (id) => fetchUser(id), { concurrency: 2 }).run();
 
 const names = users.map((u) => u.name);
 console.log(names); // → ["user-1", "user-2", "user-3", "user-4", "user-5"]
@@ -145,12 +143,25 @@ console.log(names); // → ["user-1", "user-2", "user-3", "user-4", "user-5"]
 
 - `concurrency: 1` runs the items one after another. Omit it, or pass
   `"unbounded"`, to start every item at once like `all`.
-- The first failure (typed error or defect) interrupts the in-flight effects
-  and starts no new ones. The combined effect fails with that first cause once
-  the interrupted effects have run their finalizers.
+- Any iterable works, and an empty one succeeds with `[]`. `items` is read
+  each time the effect runs, and the next item is pulled only when a slot
+  frees up, so an infinite iterable is fine under a `timeout`. A
+  generator object is one-shot: a second run sees it empty. Pass an array or an
+  object with a `[Symbol.iterator]` method to run the effect more than once.
+- The first failure — a typed error, a defect, `f` throwing, or the iterator
+  throwing — interrupts the in-flight effects, closes the iterator, and calls
+  `f` for nothing else. The combined effect fails once the interrupted effects
+  have run their finalizers, with that first cause; any non-interrupt failure
+  raised during their teardown (a finalizer that dies, say) is added with
+  `Cause.both`.
 - Interrupting the combined effect — directly or through `timeout` / `race` —
-  interrupts every in-flight effect.
-- Any iterable works; an empty one succeeds with `[]`.
+  interrupts every in-flight effect and likewise waits for their finalizers
+  before finalizers around the traversal run. `all` and `race` interrupt their
+  children without waiting.
+- `succeed(x)` results are collected without starting a fiber, and other
+  children start without a scheduler hop. Children that suspend still pay a
+  scheduler turn per refill round, so a small `concurrency` over many
+  suspending items costs more per item than `all`.
 
 To cap a list of effects you already have, map with the identity function:
 `forEachPar(effects, (e) => e, { concurrency: 4 })`.

@@ -67,9 +67,7 @@ assertEq(friends, ["bob", "carol"]);
 // forEachPar() maps items to effects with at most `concurrency` in flight.
 const fetchUser = (id: number) => sleep(10).flatMap(() => succeed({ id, name: `user-${id}` }));
 
-const users = await forEachPar([1, 2, 3, 4, 5], (id) => fetchUser(id), { concurrency: 2 })
-  .orDie()
-  .run();
+const users = await forEachPar([1, 2, 3, 4, 5], (id) => fetchUser(id), { concurrency: 2 }).run();
 
 const names = users.map((u) => u.name);
 assertEq(names, ["user-1", "user-2", "user-3", "user-4", "user-5"]);

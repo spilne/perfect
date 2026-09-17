@@ -8,6 +8,7 @@ import {
   Exit,
   TestClock,
   addFiberSupervisor,
+  all,
   async,
   die,
   ensuring,
@@ -39,6 +40,8 @@ const yields = (n: number): Eff<void, never> =>
 const microtask: Eff<void, never> = async<void>((resume) => {
   queueMicrotask(() => resume(succeed(undefined)));
 });
+
+const never: Eff<void, never> = async<void>(() => () => {});
 
 function inFlightTracker() {
   let current = 0;
@@ -238,6 +241,55 @@ describe("forEachPar — concurrency bound", () => {
   });
 });
 
+describe("forEachPar — scheduling", () => {
+  test("already-successful effects are collected without forking fibers", () => {
+    let forks = 0;
+    const stop = addFiberSupervisor({
+      onFork: () => {
+        forks++;
+      },
+    });
+    try {
+      const result = runSync(forEachPar(range(1_000), (i) => succeed(i * 2), { concurrency: 4 }));
+      expect(result).toEqual(range(1_000).map((i) => i * 2));
+    } finally {
+      stop();
+    }
+    expect(forks).toBe(0);
+  });
+
+  test("a long synchronous traversal still lets other fibers run", async () => {
+    let otherRan = false;
+    let sawOtherBeforeEnd = false;
+    const other = yieldNow.flatMap(() =>
+      sync(() => {
+        otherRan = true;
+      }),
+    );
+    const traversal = forEachPar(
+      range(50_000),
+      (i) =>
+        sync(() => {
+          if (otherRan) sawOtherBeforeEnd = true;
+          return i;
+        }),
+      { concurrency: 4 },
+    );
+
+    await run(all([traversal, other]));
+
+    expect(sawOtherBeforeEnd).toBe(true);
+  });
+
+  test("synchronous children stay stack-safe at scale", () => {
+    for (const concurrency of [1, 8, "unbounded" as const]) {
+      const result = runSync(forEachPar(range(100_000), (i) => sync(() => i), { concurrency }));
+      expect(result.length).toBe(100_000);
+      expect(result[99_999]).toBe(99_999);
+    }
+  });
+});
+
 describe("forEachPar — failure and interruption", () => {
   test("first typed failure interrupts in-flight siblings and starts no pending items", async () => {
     const clock = new TestClock();
@@ -293,23 +345,67 @@ describe("forEachPar — failure and interruption", () => {
     expect(finalized.sort()).toEqual([0, 1, 2, 3]);
   });
 
-  test("a throwing mapper is a defect and stops scheduling", async () => {
-    const boom = new Error("mapper threw");
-    const called: number[] = [];
+  test("stops calling f as soon as a failure is observed, even mid-batch", async () => {
+    const boom = new Error("boom");
+    const mappers: Array<[string, (i: number) => Eff<void, Throws<Error>>]> = [
+      [
+        "f throws",
+        (i) => {
+          if (i === 1) throw boom;
+          return sleep(60_000);
+        },
+      ],
+      ["f returns fail", (i) => (i === 1 ? fail(boom) : sleep(60_000))],
+      [
+        "f returns an effect that throws synchronously",
+        (i) =>
+          i === 1
+            ? sync(() => {
+                throw boom;
+              })
+            : sleep(60_000),
+      ],
+    ];
+    for (const [label, mapper] of mappers) {
+      const clock = new TestClock();
+      const called: number[] = [];
+      const program = forEachPar(
+        range(6),
+        (i) => {
+          called.push(i);
+          return mapper(i);
+        },
+        { concurrency: 4 },
+      );
+
+      const exit = await runExit(provide(program, Clock, clock));
+
+      expect(Exit.isFailure(exit), label).toBe(true);
+      expect(called, label).toEqual([0, 1]);
+      expect(clock.pendingCount, label).toBe(0);
+    }
+  });
+
+  test("failures raised while siblings are torn down join the cause", async () => {
+    const clock = new TestClock();
+    const finalizerDefect = new Error("finalizer blew up");
     const program = forEachPar(
-      range(5),
-      (i) => {
-        called.push(i);
-        if (i === 1) throw boom;
-        return succeed(i);
-      },
-      { concurrency: 1 },
+      [0, 1],
+      (i) =>
+        i === 0
+          ? yields(1).flatMap(() => fail("boom"))
+          : ensuring(
+              sleep(60_000),
+              sync(() => {
+                throw finalizerDefect;
+              }),
+            ),
+      { concurrency: 2 },
     );
 
-    const exit = await runExit(program);
+    const exit = await runExit(provide(program, Clock, clock));
 
-    expect(exit).toEqual(Exit.failure(Cause.die(boom)));
-    expect(called).toEqual([0, 1]);
+    expect(exit).toEqual(Exit.failure(Cause.both(Cause.fail("boom"), Cause.die(finalizerDefect))));
   });
 
   test("the failure type is catchable like any other typed error", async () => {
@@ -319,11 +415,10 @@ describe("forEachPar — failure and interruption", () => {
     expect(await run(program)).toEqual(["bad 2"]);
   });
 
-  test("interrupting the traversal interrupts in-flight items and runs their finalizers", async () => {
+  test("interrupting the traversal interrupts in-flight items and waits for their finalizers", async () => {
     const clock = new TestClock();
     const called: number[] = [];
     const finalized: number[] = [];
-    const allFinalized = deferredCount(3);
     const program = forEachPar(
       range(10),
       (i) => {
@@ -333,7 +428,6 @@ describe("forEachPar — failure and interruption", () => {
           microtask.flatMap(() =>
             sync(() => {
               finalized.push(i);
-              allFinalized.hit();
             }),
           ),
         );
@@ -345,11 +439,83 @@ describe("forEachPar — failure and interruption", () => {
     await untilSleeping(clock, 3);
     fiber.interrupt();
 
-    expect(Exit.isInterrupted(await fiber.await())).toBe(true);
-    await allFinalized.reached;
+    expect(await fiber.await()).toEqual(Exit.interrupt());
     expect(finalized.sort()).toEqual([0, 1, 2]);
     expect(called).toEqual([0, 1, 2]);
     expect(clock.pendingCount).toBe(0);
+  });
+
+  test("finalizers around the traversal run after the children's finalizers", async () => {
+    const log: string[] = [];
+    const program = ensuring(
+      forEachPar(
+        [0, 1],
+        (i) =>
+          ensuring(
+            never,
+            microtask.flatMap(() =>
+              sync(() => {
+                log.push(`child ${i}`);
+              }),
+            ),
+          ),
+        { concurrency: 2 },
+      ),
+      sync(() => {
+        log.push("parent");
+      }),
+    );
+
+    const fiber = runFiber(program);
+    for (let i = 0; i < 100 && fiber.childCount < 2; i++) await tick();
+    expect(fiber.childCount).toBe(2);
+    fiber.interrupt();
+
+    expect(await fiber.await()).toEqual(Exit.interrupt());
+    expect(log.slice(0, 2).sort()).toEqual(["child 0", "child 1"]);
+    expect(log[2]).toBe("parent");
+  });
+
+  test("an interrupt while siblings are being torn down still waits for them", async () => {
+    const log: string[] = [];
+    let release: (() => void) | undefined;
+    const slowCleanup = async<void>((resume) => {
+      release = () => resume(succeed(undefined));
+    });
+    const program = ensuring(
+      forEachPar(
+        [0, 1],
+        (i) =>
+          i === 0
+            ? yields(1).flatMap(() => fail("boom"))
+            : ensuring(
+                never,
+                slowCleanup.flatMap(() =>
+                  sync(() => {
+                    log.push("child cleanup");
+                  }),
+                ),
+              ),
+        { concurrency: 2 },
+      ),
+      sync(() => {
+        log.push("parent finalizer");
+      }),
+    );
+
+    const fiber = runFiber(program);
+    for (let i = 0; i < 100 && release === undefined; i++) await tick();
+    expect(release).toBeDefined();
+    fiber.interrupt();
+    for (let i = 0; i < 5; i++) await tick();
+    expect(log).toEqual([]);
+    expect(fiber.status).not.toBe("done");
+
+    release!();
+    const exit = await fiber.await();
+
+    expect(log).toEqual(["child cleanup", "parent finalizer"]);
+    expect(exit).toEqual(Exit.failure(Cause.both(Cause.interrupt(), Cause.fail("boom"))));
   });
 
   test("a timeout around the traversal interrupts in-flight items and runs their finalizers", async () => {
@@ -381,5 +547,154 @@ describe("forEachPar — failure and interruption", () => {
     expect(await promise).toBeUndefined();
     await allFinalized.reached;
     expect(finalized.sort()).toEqual([0, 1]);
+  });
+});
+
+describe("forEachPar — iterables", () => {
+  test("pulls the next item only when a slot frees up, starting at run time", async () => {
+    const clock = new TestClock();
+    const pulled: number[] = [];
+    function* numbers() {
+      for (let i = 0; i < 4; i++) {
+        pulled.push(i);
+        yield i;
+      }
+    }
+    const program = forEachPar(numbers(), (i) => sleep(100).map(() => i * 10), {
+      concurrency: 2,
+    });
+    expect(pulled).toEqual([]);
+
+    const promise = run(provide(program, Clock, clock));
+    await untilSleeping(clock, 2);
+    expect(pulled).toEqual([0, 1]);
+    clock.advance(100);
+    await untilSleeping(clock, 2);
+    expect(pulled).toEqual([0, 1, 2, 3]);
+    clock.advance(100);
+
+    expect(await promise).toEqual([0, 10, 20, 30]);
+  });
+
+  test("an infinite iterable works under a timeout and is closed on interrupt", async () => {
+    const clock = new TestClock();
+    let pulled = 0;
+    let closed = false;
+    function* naturals() {
+      try {
+        for (let i = 0; ; i++) {
+          pulled++;
+          yield i;
+        }
+      } finally {
+        closed = true;
+      }
+    }
+    const program = timeoutOption(
+      forEachPar(naturals(), (i) => sleep(300).map(() => i), { concurrency: 4 }),
+      1_000,
+    );
+
+    const promise = run(provide(program, Clock, clock));
+    for (const step of [300, 300, 300]) {
+      await untilSleeping(clock, 5);
+      clock.advance(step);
+    }
+    await untilSleeping(clock, 5);
+    clock.advance(100);
+
+    expect(await promise).toBeUndefined();
+    expect(pulled).toBe(16);
+    expect(closed).toBe(true);
+    expect(clock.pendingCount).toBe(0);
+  });
+
+  test("a throwing iterator is a defect that interrupts in-flight items", async () => {
+    const clock = new TestClock();
+    const boom = new Error("iterator threw");
+    const finalized: number[] = [];
+    function* flaky() {
+      yield 0;
+      yield 1;
+      throw boom;
+    }
+    const program = forEachPar(
+      flaky(),
+      (i) =>
+        ensuring(
+          sleep(60_000),
+          sync(() => {
+            finalized.push(i);
+          }),
+        ),
+      { concurrency: 3 },
+    );
+
+    const exit = await runExit(provide(program, Clock, clock));
+
+    expect(exit).toEqual(Exit.failure(Cause.die(boom)));
+    expect(finalized.sort()).toEqual([0, 1]);
+    expect(clock.pendingCount).toBe(0);
+  });
+
+  test("closes the iterator when the traversal stops early", async () => {
+    const boom = new Error("mapper threw");
+    let closed = false;
+    function* items() {
+      try {
+        yield 0;
+        yield 1;
+        yield 2;
+      } finally {
+        closed = true;
+      }
+    }
+    const program = forEachPar(
+      items(),
+      (i) => {
+        if (i === 1) throw boom;
+        return succeed(i);
+      },
+      { concurrency: 2 },
+    );
+
+    expect(await runExit(program)).toEqual(Exit.failure(Cause.die(boom)));
+    expect(closed).toBe(true);
+  });
+
+  test("an iterable whose iterator cannot be created fails at run time, not construction", async () => {
+    const boom = new Error("no iterator");
+    const hostile: Iterable<number> = {
+      [Symbol.iterator]() {
+        throw boom;
+      },
+    };
+    const program = forEachPar(hostile, (n) => succeed(n));
+    expect(await runExit(program)).toEqual(Exit.failure(Cause.die(boom)));
+  });
+
+  test("reads the input on every run: arrays and re-iterables repeat, a generator object is one-shot", () => {
+    const xs = [1];
+    const fromArray = forEachPar(xs, (n) => succeed(n));
+    xs.push(2);
+    expect(runSync(fromArray)).toEqual([1, 2]);
+
+    const reusable = {
+      *[Symbol.iterator]() {
+        yield 1;
+        yield 2;
+      },
+    };
+    const fromReusable = forEachPar(reusable, (n) => succeed(n * 10));
+    expect(runSync(fromReusable)).toEqual([10, 20]);
+    expect(runSync(fromReusable)).toEqual([10, 20]);
+
+    function* once() {
+      yield 1;
+      yield 2;
+    }
+    const fromGenerator = forEachPar(once(), (n) => succeed(n * 10));
+    expect(runSync(fromGenerator)).toEqual([10, 20]);
+    expect(runSync(fromGenerator)).toEqual([]);
   });
 });
