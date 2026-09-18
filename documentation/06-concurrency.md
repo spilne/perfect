@@ -217,6 +217,13 @@ A callback that could not be unregistered — a promise that settles late, a
 child that finishes after its parent was interrupted — is ignored, so it
 cannot resume a cancelled fiber or cut its finalizers short.
 
+A fiber that runs for long yields to others every `DEFAULT_BUDGET` (2048)
+interpreter steps, including steps that only pass a value to the next
+`.map` or `.flatMap`. An interrupt that arrives while a fiber is paused
+between a value and the continuation that receives it is delivered at the
+fiber's next effect, once the value has arrived. If that value is the fiber's
+result, the fiber completes normally: the interrupt came too late.
+
 ### Handoff to waiting fibers
 
 `Queue`, `Semaphore` and `Pool` give an item, a permit or a resource straight

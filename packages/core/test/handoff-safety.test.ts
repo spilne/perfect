@@ -228,6 +228,7 @@ describe("async resume with onDiscard", () => {
   test("an op-budget pause never separates a queue take's fast path from its continuation", () => {
     // The sweep moves the budget boundary across every step of the take and
     // the map that records its value.
+    let pausedOnValue = 0;
     for (const length of aroundBudget(12)) {
       for (let pad = 0; pad < 3; pad++) {
         const scheduler = new StepScheduler();
@@ -242,7 +243,10 @@ describe("async resume with onDiscard", () => {
           scheduler,
         );
         scheduler.step();
-        if (fiber.status === "ready") fiber.interrupt();
+        if (fiber.status === "ready") {
+          if (fiber.valueInFlight) pausedOnValue++;
+          fiber.interrupt();
+        }
         scheduler.flush();
 
         expect({ length, pad, conserved: taken.length + runSync(queue.size) }).toEqual({
@@ -252,6 +256,85 @@ describe("async resume with onDiscard", () => {
         });
       }
     }
+    expect(pausedOnValue).toBeGreaterThan(0);
+  });
+});
+
+describe("an interrupt during an op-budget pause on a value", () => {
+  // Starts `build(chain)` with chains of increasing length until the first
+  // slice ends paused on the chain's result, with only the `frames` frames
+  // `build` added after the chain left to run.
+  const pausedOnValue = (params: {
+    frames: number;
+    build: (chain: Eff<number, never>) => Eff<unknown, never>;
+  }): { fiber: Fiber<unknown>; scheduler: StepScheduler } => {
+    for (const length of aroundBudget(12)) {
+      for (let pad = 0; pad < 3; pad++) {
+        let chain: Eff<number, never> = succeed(0);
+        for (let i = 0; i < length; i++) chain = chain.flatMap((x) => succeed(x));
+        for (let i = 0; i < pad; i++)
+          chain = chain.flatMap((x) => succeed(succeed(x)).flatMap((y) => y));
+        const scheduler = new StepScheduler();
+        const fiber = runFiber(params.build(chain), scheduler);
+        scheduler.step();
+        let depth = 0;
+        for (let frame = fiber.stack; frame !== null; frame = frame.next) depth++;
+        if (fiber.status === "ready" && fiber.valueInFlight && depth === params.frames) {
+          return { fiber, scheduler };
+        }
+      }
+    }
+    throw new Error("no chain length paused on the chain's result");
+  };
+
+  test("lands at the next effect, after the value reached its continuation", () => {
+    const log: string[] = [];
+    const { fiber, scheduler } = pausedOnValue({
+      frames: 2,
+      build: (chain) =>
+        chain
+          .map((n) => {
+            log.push(`received ${n}`);
+          })
+          .flatMap(() => sync(() => void log.push("next effect"))),
+    });
+
+    // Shorter chains tried before this one ran to completion.
+    log.length = 0;
+    fiber.interrupt();
+    scheduler.flush();
+
+    expect(log).toEqual(["received 0"]);
+    expect(fiber.result).toEqual(interrupted);
+  });
+
+  test("lets a fiber whose value is its result complete normally", () => {
+    const { fiber, scheduler } = pausedOnValue({
+      frames: 1,
+      build: (chain) => chain.map((n) => n + 1),
+    });
+
+    fiber.interrupt();
+    scheduler.flush();
+
+    expect(fiber.result).toEqual({ ok: true, value: 1 });
+  });
+
+  test("still lands after scheduler.shutdown() dropped the paused run", () => {
+    const log: string[] = [];
+    const { fiber, scheduler } = pausedOnValue({
+      frames: 2,
+      build: (chain) =>
+        chain.map(() => void log.push("received")).flatMap(() => sync(() => void log.push("next"))),
+    });
+
+    log.length = 0;
+    scheduler.shutdown();
+    fiber.interrupt();
+    scheduler.flush();
+
+    expect(log).toEqual(["received"]);
+    expect(fiber.result).toEqual(interrupted);
   });
 });
 

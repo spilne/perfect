@@ -109,6 +109,11 @@ export class Fiber<A = unknown> {
   // interrupt() replaces that value first, it calls this so the value goes
   // back to where it came from.
   handoffDiscard: (() => void) | null = null;
+  // Set while the fiber is Ready after an op-budget pause that stopped on a
+  // value, or an Op.Succeed holding one, on its way to the next frame. An
+  // interrupt then waits for the next effect step, so the value is not
+  // dropped between a primitive handing it out and its continuation.
+  valueInFlight = false;
 
   complete(result: FiberResult<A>): void {
     if (this.state === FiberState.Done) return;
@@ -142,6 +147,14 @@ export class Fiber<A = unknown> {
     // would read a continuation stack the loop has not saved.
     if (!this.interruptible || this.state === FiberState.Running) {
       this.interruptPending = true;
+      return;
+    }
+    // The loop delivers the interrupt once the value has reached the next
+    // frame. A run is queued in case scheduler.shutdown() dropped the paused
+    // one; runFiberLoop ignores a duplicate.
+    if (this.state === FiberState.Ready && this.valueInFlight) {
+      this.interruptPending = true;
+      this.scheduler.schedule(() => this._resume?.());
       return;
     }
     // Only a Ready fiber's current is the effect it runs next; a suspended
