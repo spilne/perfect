@@ -843,6 +843,8 @@ class ChildGroup {
   running = 0;
   stopped = false;
   interrupted = false;
+  // Set while stop() interrupts the children and runs the stop hook.
+  private stopping = false;
   failure: Cause | null = null;
   teardown: Cause | null = null;
   // Called once, after the running children were interrupted.
@@ -904,9 +906,25 @@ class ChildGroup {
   stop(): void {
     if (this.stopped) return;
     this.stopped = true;
-    const slots = this.slots;
-    for (let i = 0; i < slots.length; i++) slots[i]?.interrupt();
-    this.onStop?.();
+    // A child can settle while it is interrupted, and its callback would
+    // deliver the group's outcome before the stop hook (forEachPar closing its
+    // iterator) has run. The group stays busy until the hook has finished, so
+    // a failure the hook raises still joins the cause.
+    this.stopping = true;
+    try {
+      const slots = this.slots;
+      for (let i = 0; i < slots.length; i++) slots[i]?.interrupt();
+      const onStop = this.onStop;
+      if (onStop !== null) {
+        try {
+          onStop();
+        } catch (e) {
+          this.addFailure(Cause.die(e));
+        }
+      }
+    } finally {
+      this.stopping = false;
+    }
   }
 
   // The first failure stops the group; a later one is teardown, where the
@@ -925,7 +943,7 @@ class ChildGroup {
   // True when no child is running and the group should deliver its outcome.
   // A wait for the children to drain after an interrupt is resumed instead.
   idle(): boolean {
-    if (this.running > 0) return false;
+    if (this.running > 0 || this.stopping) return false;
     const drained = this.drained;
     if (drained !== null) {
       this.drained = null;

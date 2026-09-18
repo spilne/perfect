@@ -44,6 +44,18 @@ const microtask: Eff<void, never> = async<void>((resume) => {
 
 const never: Eff<void, never> = async<void>(() => () => {});
 
+// An async the test opens by hand; the fiber waiting on it has nothing to
+// finalize, so interrupting it completes it on the spot.
+function manualGate() {
+  let resume: ((value: Eff<void, never>) => void) | undefined;
+  return {
+    wait: async<void>((r) => {
+      resume = r as typeof resume;
+    }),
+    open: () => resume?.(succeed(undefined)),
+  };
+}
+
 function inFlightTracker() {
   let current = 0;
   let max = 0;
@@ -805,6 +817,41 @@ describe("forEachPar — iterables", () => {
       },
     );
   }
+
+  test("a defect from the iterator's finally survives a sibling settling at once", async () => {
+    const boom = new Error("item failed");
+    const finallyBoom = new Error("iterator finally blew up");
+    const gate = manualGate();
+    function* items() {
+      try {
+        yield 0;
+        yield 1;
+      } finally {
+        // oxlint-disable-next-line no-unsafe-finally -- the point of the test
+        throw finallyBoom;
+      }
+    }
+    // Item 1 waits in an async with nothing to finalize, so interrupting it
+    // completes it while ChildGroup.stop() is still interrupting children.
+    const program = forEachPar(
+      items(),
+      (i) => (i === 0 ? gate.wait.flatMap(() => fail(boom)) : never),
+      {
+        concurrency: 2,
+      },
+    );
+
+    const fiber = runFiber(program as Eff<unknown, never>);
+    await tick();
+    gate.open();
+    const exit = await fiber.await();
+
+    expect(exit._tag).toBe("Failure");
+    if (exit._tag === "Failure") {
+      expect(Cause.failures(exit.cause)).toEqual([boom]);
+      expect(Cause.defects(exit.cause)).toEqual([finallyBoom]);
+    }
+  });
 
   test("closes the iterator when the traversal stops early", async () => {
     const boom = new Error("mapper threw");
