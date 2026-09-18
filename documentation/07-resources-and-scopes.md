@@ -217,9 +217,13 @@ program built with `.with(layer)` ends. See
   once when the acquire runs from cleanup of an interrupted fiber.
 - **Release runs are uninterruptible.** If your release effect is slow, it
   will block scope exit. Make releases fast.
-- **Release failures are visible.** Handle them with `runExit`,
-  `.catchAllCause`, or `onExit` when cleanup failure is operationally
-  meaningful.
+- **Release failures are visible.** Inspect them with `runExit` or `onExit`
+  when cleanup failure is operationally meaningful. An interrupted fiber skips
+  error handlers, so a plain `.catchAllCause` never sees the release failure of
+  an interrupted fiber. `onExit` does, and so does a handler inside an
+  uninterruptible region:
+  `uninterruptibleMask((restore) => restore(eff).catchAllCause(handler))`. See
+  [Interruption and error handlers](./05-error-handling.md#interruption-and-error-handlers).
 - **`ensuring` doesn't acquire — just finalizes.** Use `acquireRelease` if
   you need acquire-then-release semantics.
 - **Permits and pooled resources come back on interrupt.** `Semaphore.withPermit`

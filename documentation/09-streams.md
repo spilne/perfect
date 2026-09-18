@@ -624,14 +624,14 @@ rather than silently ending the stream.
   neither exhausted nor closed with `return()` keeps its stream parked and its
   resources open. `for await` closes it for you.
 - **Counts and durations are validated when the operator is built.**
-  `parEvalMap`, `parEvalMapUnordered`, `buffer`, and `groupWithin`'s `maxSize`
-  take a positive integer or `Infinity`. `grouped` and `sliding` take a positive
-  integer. Durations (`Stream.tick`, `debounce`, `groupWithin`'s `timeoutMs`,
-  `sample`, `audit`, `throttle`/`metered`, `spaced`, `timeout`, `deadline`,
-  `interruptAfter`, and `pauseWhen`) take a finite, non-negative number of
-  milliseconds; `sample`, `audit`, and `pauseWhen` wait at least 1 ms. Any
-  other value throws `RangeError` instead of being rounded or firing
-  immediately.
+  `parEvalMap`, `parEvalMapUnordered`, `buffer`, `groupWithin`'s `maxSize`,
+  and `parJoin`'s `maxOpen` take a positive integer or `Infinity`. `grouped`
+  and `sliding` take a positive integer. Durations (`Stream.tick`,
+  `debounce`, `groupWithin`'s `timeoutMs`, `sample`, `audit`,
+  `throttle`/`metered`, `spaced`, `timeout`, `deadline`, `interruptAfter`, and
+  `pauseWhen`) take a finite, non-negative number of milliseconds; `sample`,
+  `audit`, and `pauseWhen` wait at least 1 ms. Any other value throws
+  `RangeError` instead of being rounded or firing immediately.
 - **Fusion stops at non-fusible ops.** `mapEffect`, `flatMap`, and `take`
   break a fused chain; benchmark the actual pipeline if throughput matters.
 

@@ -2636,7 +2636,7 @@ export class Stream<A, S = never> {
    * than `ms` to produce a step — i.e. the gap between emitted chunks (or
    * between subscription and the first chunk) exceeds the limit.
    *
-   * Consumer-side and Clock-routed (`timeoutOption`), so a TestClock drives
+   * Consumer-side and Clock-routed (`timeoutFail`), so a TestClock drives
    * it deterministically; the in-flight pull is interrupted when the timer
    * fires. `ms` must be a finite, non-negative number; anything else throws
    * `RangeError`.
@@ -2692,7 +2692,8 @@ export class Stream<A, S = never> {
    * aborts — even while a pull is blocked mid-wait. Each pull races the
    * upstream step against an async that resolves on abort; whichever side
    * loses is interrupted, which also removes the abort listener, so nothing
-   * leaks after the stream terminates.
+   * leaks after the stream terminates. The race waits for the cut pull's
+   * cleanup, and a failure there fails the stream instead.
    */
   interruptOn(signal: AbortSignal): Stream<A, S> {
     const abortStep: Eff<Step<A>, never> = async<Step<A>>((resume) => {
@@ -2725,8 +2726,9 @@ export class Stream<A, S = never> {
    * End the stream gracefully once `ms` milliseconds (Clock time, anchored
    * at the first pull) have elapsed. A pull still blocked when the deadline
    * hits is interrupted and the stream completes with Done rather than
-   * failing. Clock-routed — a TestClock drives it deterministically. `ms`
-   * must be a finite, non-negative number; anything else throws `RangeError`.
+   * failing, unless that pull's cleanup fails. Clock-routed — a TestClock
+   * drives it deterministically. `ms` must be a finite, non-negative number;
+   * anything else throws `RangeError`.
    */
   interruptAfter(ms: number): Stream<A, S> {
     requireFiniteMs({ operator: "interruptAfter", name: "ms", value: ms });

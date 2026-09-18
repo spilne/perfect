@@ -30,15 +30,17 @@ without adding a typed failure.
 
 ## Race
 
-`a.race(b)` — fluent two-way race. First to **succeed** wins, the loser is
-interrupted:
+`a.race(b)` — fluent two-way race. The first effect to **settle** wins,
+whether it succeeds or fails: its value or its failure is the race's outcome.
+The losers are interrupted, and the race returns only once they have finished,
+finalizers included:
 
 <!-- @embed packages/core/examples/07-concurrency.ts#race-method -->
 
 ```ts
 import { succeed, sleep, race } from "@spilne/perfect-core";
 
-// .race(other) — fluent two-way race. First to succeed wins.
+// .race(other) — fluent two-way race. The first to settle wins.
 const fast = sleep(10).flatMap(() => succeed("fast"));
 const slow = sleep(50).flatMap(() => succeed("slow"));
 
@@ -67,7 +69,12 @@ console.log(winner); // → "b"
 
 <!-- @end -->
 
-`raceFirst([a, b])` — first to **finish** wins (success OR failure).
+A failure that settles first wins too:
+`race([sleep(1).flatMap(() => fail("E")), sleep(5).map(() => "ok")])` fails
+with `"E"`. A failure raised while a loser is torn down, such as a finalizer
+that fails, fails the race even when the winner succeeded (see
+[Structured teardown](#structured-teardown)). `raceFirst` is an alias of
+`race`.
 
 ## Parallel collection — `all`
 
@@ -298,7 +305,7 @@ drops it like any other result. Use the value in the same step, as in
 and `Pool.use` already register their release in the step that receives the
 permit or resource.
 
-Two details follow from giving values back:
+Three details follow from giving values back:
 
 - Values given back to a queue go ahead of values never handed out, in the
   order they were first handed out, so the queue stays FIFO whatever order
@@ -363,8 +370,8 @@ Available fiber diagnostics:
 | `join(fiber)` | await fiber result |
 | `interrupt(fiber)` | cancel a fiber |
 | `awaitFiber(fiber)` | await Exit (never throws) |
-| `race(effects[])` / `a.race(b)` | first success wins |
-| `raceFirst(effects[])` / `a.raceFirst(b)` | first finish wins |
+| `race(effects[])` / `a.race(b)` | first to settle wins, success or failure; losers are interrupted and awaited |
+| `raceFirst(effects[])` / `a.raceFirst(b)` | alias of `race` |
 | `raceEither([a, b])` / `a.raceEither(b)` | returns `Either<A, B>` |
 | `all(effects[])` | parallel + collect tuple |
 | `all({ a, b })` | parallel + collect record |
