@@ -56,6 +56,20 @@ class StepScheduler implements Scheduler {
 
 const interrupted = { ok: false, cause: { _tag: "Interrupt" } };
 
+// Lengths of a flatMap chain around the one that spends the op budget, so a
+// sweep puts the budget pause on every step just after the chain. Measured
+// rather than computed, so it does not depend on which loop steps count.
+function aroundBudget(radius: number): number[] {
+  const probe = 200;
+  let chain: Eff<unknown, never> = succeed(0);
+  for (let i = 0; i < probe; i++) chain = chain.flatMap((x) => succeed(x));
+  const scheduler = new SyncScheduler();
+  const fiber = runFiber(chain, scheduler);
+  scheduler.flush();
+  const center = Math.round((DEFAULT_BUDGET * probe) / fiber.opCount);
+  return Array.from({ length: 2 * radius + 1 }, (_, i) => center - radius + i);
+}
+
 // An async wait that exposes its resume, so a test decides when and with what
 // it resumes.
 function manualWait<A>(): {
@@ -212,10 +226,9 @@ describe("async resume with onDiscard", () => {
   });
 
   test("an op-budget pause never separates a queue take's fast path from its continuation", () => {
-    // A flatMap costs three loop steps, so this sweep moves the budget boundary
-    // across every step of the take and the map that records its value.
-    const center = Math.floor(DEFAULT_BUDGET / 3);
-    for (let length = center - 12; length <= center + 12; length++) {
+    // The sweep moves the budget boundary across every step of the take and
+    // the map that records its value.
+    for (const length of aroundBudget(12)) {
       for (let pad = 0; pad < 3; pad++) {
         const scheduler = new StepScheduler();
         const queue = runSync(Queue.unbounded<number>());
@@ -327,9 +340,8 @@ describe("interrupting a Ready fiber keeps the failure it was about to raise", (
   });
 
   test("an op-budget pause on a failure keeps it", () => {
-    const center = Math.floor(DEFAULT_BUDGET / 3);
     let pausedOnFailure = 0;
-    for (let length = center - 12; length <= center + 12; length++) {
+    for (const length of aroundBudget(12)) {
       for (let pad = 0; pad < 3; pad++) {
         const scheduler = new StepScheduler();
         let body: Eff<unknown, never> = succeed(0);

@@ -169,19 +169,6 @@ function runFiberLoop(fiber: Fiber<any>): void {
           : new Suspend(Op.Fail, Cause.interrupt(), null);
     }
 
-    // op budget — yield to scheduler. A value, or an Op.Succeed holding one,
-    // is never paused on: a pause is an interrupt point, and a primitive's
-    // fast path (a queue take, say) returns what it removed that way, so it
-    // reaches the next frame's continuation in the same step.
-    if (++fiber.opCount > budget && cur instanceof Suspend && cur.op !== Op.Succeed) {
-      fiber.current = cur;
-      fiber.stack = k;
-      fiber.context = context;
-      fiber.state = FiberState.Ready;
-      fiber.scheduler.schedule(() => runFiberLoop(fiber));
-      return;
-    }
-
     // pure value fast path
     if (!(cur instanceof Suspend)) {
       while (k !== null) {
@@ -259,12 +246,27 @@ function runFiberLoop(fiber: Fiber<any>): void {
       return;
     }
 
-    switch (cur.op) {
-      case Op.Succeed: {
-        cur = cur.a;
-        continue loop;
-      }
+    // A value, or an Op.Succeed holding one, is passed on without counting
+    // against the op budget, so a pause (an interrupt point) never lands
+    // between them and the next frame's continuation. A primitive's fast path
+    // (a queue take, say) returns what it removed this way. Every frame was
+    // pushed by a counted op, so fibers still yield.
+    if (cur.op === Op.Succeed) {
+      cur = cur.a;
+      continue loop;
+    }
 
+    // op budget — yield to scheduler
+    if (++fiber.opCount > budget) {
+      fiber.current = cur;
+      fiber.stack = k;
+      fiber.context = context;
+      fiber.state = FiberState.Ready;
+      fiber.scheduler.schedule(() => runFiberLoop(fiber));
+      return;
+    }
+
+    switch (cur.op) {
       case Op.Sync: {
         try {
           cur = (cur.a as any)();

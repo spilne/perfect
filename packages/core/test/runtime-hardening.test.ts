@@ -854,9 +854,10 @@ describe("pending interrupts at finalizer boundaries", () => {
   });
 
   test("an op-budget pause just before a finalizer starts cannot drop it", () => {
-    // Each flatMap costs three loop steps and each extra succeed() wrapper one,
-    // so this sweep puts the pause on every step around the finalizer's start.
-    const center = Math.floor(DEFAULT_BUDGET / 3);
+    // Each flatMap costs one counted op (values and succeed() wrappers cost
+    // none), so this sweep puts the pause on every op around the finalizer's
+    // start.
+    const center = DEFAULT_BUDGET;
     for (let length = center - 16; length <= center + 16; length++) {
       for (let pad = 0; pad < 3; pad++) {
         const scheduler = new StepScheduler();
