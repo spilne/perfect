@@ -35,6 +35,7 @@ import {
   awaitFiber,
   yieldNow,
   uninterruptible,
+  uninterruptibleMask,
   interruptible,
   retry as effRetry,
   type RetryConfig,
@@ -1011,7 +1012,17 @@ export class Stream<A, S = never> {
 
     const start = (run: DriverRun<B>): Eff<Pull<B>, any> =>
       (QueueNS.bounded<Event>(16) as any).flatMap((events: Queue<Event>) => {
-        let current: Fiber<any> | null = null;
+        interface Inner {
+          fiber: Fiber<any> | null;
+          readonly generation: number;
+          // Set before a switch interrupts the fiber.
+          switchedOut: boolean;
+          // What failed, beyond the interrupt, while a switch tore it down.
+          teardown: Cause | null;
+          // Set once a launch fails its pull with `teardown`.
+          delivered: boolean;
+        }
+        let current: Inner | null = null;
         let generation = 0;
         let active = false;
         let outerDone = false;
@@ -1052,16 +1063,33 @@ export class Stream<A, S = never> {
                 ).flatMap(() => drainInner(step.next, innerGeneration)),
           );
 
-        const runInner = (inner: Stream<B, any>, innerGeneration: number): Eff<unknown, any> =>
-          run.reportFailure(
+        // As in `run.reportFailure`, the handler sits in an uninterruptible
+        // region so it sees the whole cause of an interrupted inner. A switch
+        // interrupts the inner outside the run's stop. The interrupted fiber
+        // cannot run an interruptible report, so its teardown failure is noted
+        // synchronously for the launch that waits for it.
+        const runInner = (inner: Stream<B, any>, handle: Inner): Eff<unknown, any> =>
+          uninterruptibleMask((restore) =>
             (
-              ensuring(
-                drainInner(inner, innerGeneration),
-                inner._finalizer ?? succeed(undefined),
+              restore(
+                (
+                  ensuring(
+                    drainInner(inner, handle.generation),
+                    inner._finalizer ?? succeed(undefined),
+                  ) as any
+                ).flatMap(() => events.offer({ _tag: "innerEnd", generation: handle.generation })),
               ) as any
-            ).flatMap(() => events.offer({ _tag: "innerEnd", generation: innerGeneration })),
-            (cause: Cause) =>
-              events.offer({ _tag: "innerFail", generation: innerGeneration, cause }),
+            ).catchAllCause((cause: Cause) => {
+              if (run.stopping) return failCause(cause);
+              if (handle.switchedOut) {
+                handle.teardown = Cause.stripInterrupts(cause);
+                return succeed(undefined);
+              }
+              if (Cause.isInterruptedOnly(cause)) return failCause(cause);
+              return restore(
+                events.offer({ _tag: "innerFail", generation: handle.generation, cause }),
+              );
+            }),
           );
 
         // A launch outlives the pull that starts it. Waiting for the previous
@@ -1070,15 +1098,24 @@ export class Stream<A, S = never> {
         let launching: {
           readonly value: A;
           readonly ready: Deferred<void>;
-          readonly previous: Fiber<any> | null;
+          readonly previous: Inner | null;
           readonly generation: number;
         } | null = null;
 
         const launch = (): Eff<void, any> =>
           suspend(() => {
             const pending = launching!;
+            const previous = pending.previous;
+            // A failure while the switch tore the previous inner down fails
+            // the stream, as a failing finalizer fails `ensuring`.
             const settled =
-              pending.previous === null ? succeed(undefined) : awaitFiber(pending.previous);
+              previous === null
+                ? succeed(undefined)
+                : (awaitFiber(previous.fiber!) as any).flatMap(() => {
+                    if (previous.teardown === null) return succeed(undefined);
+                    previous.delivered = true;
+                    return failCause(previous.teardown);
+                  });
             return (settled as any)
               .flatMap(() =>
                 // Forking the inner stream and releasing the outer driver
@@ -1087,12 +1124,18 @@ export class Stream<A, S = never> {
                   suspend(() => {
                     if (launching !== pending) return succeed(undefined);
                     launching = null;
-                    return run
-                      .fork(runInner(f(pending.value), pending.generation))
-                      .flatMap((fiber) => {
-                        current = fiber;
-                        return pending.ready.succeed(undefined);
-                      });
+                    const handle: Inner = {
+                      fiber: null,
+                      generation: pending.generation,
+                      switchedOut: false,
+                      teardown: null,
+                      delivered: false,
+                    };
+                    return run.fork(runInner(f(pending.value), handle)).flatMap((fiber) => {
+                      handle.fiber = fiber;
+                      current = handle;
+                      return pending.ready.succeed(undefined);
+                    });
                   }),
                 ),
               )
@@ -1110,7 +1153,10 @@ export class Stream<A, S = never> {
                   return uninterruptible(event.ready.succeed(undefined)).flatMap(() => pull());
                 }
                 const previous = mode === "switch" ? current : null;
-                previous?.interrupt();
+                if (previous !== null) {
+                  previous.switchedOut = true;
+                  previous.fiber!.interrupt();
+                }
                 active = true;
                 current = null;
                 launching = {
@@ -1140,8 +1186,19 @@ export class Stream<A, S = never> {
           });
         const next = run.continueWith(pull);
 
-        const outerDriver = run.reportFailure(drainOuter(self) as any, (cause: Cause) =>
-          events.offer({ _tag: "outerFail", cause }),
+        // A teardown failure no launch delivered, because the pull waiting for
+        // it was cut before it ran, fails the stop instead of being dropped.
+        // The outer driver waits for every launch, so it is still running.
+        const undelivered: Eff<void, any> = suspend(() => {
+          const previous = launching?.previous ?? null;
+          return run.stopping && previous?.teardown && !previous.delivered
+            ? failCause(previous.teardown)
+            : succeed(undefined);
+        });
+
+        const outerDriver = run.reportFailure(
+          ensuring(drainOuter(self), undelivered) as any,
+          (cause: Cause) => events.offer({ _tag: "outerFail", cause }),
         );
 
         return run.fork(outerDriver).map(() => pull);

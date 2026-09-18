@@ -73,7 +73,7 @@ stream whose effect type contains both errors.
 | `.parJoinUnbounded()` | flatten a stream of streams, opening each inner stream as it arrives (no memory bound) |
 | `.broadcastThrough(...branches)` | pull once, fan out to every branch, and merge their outputs |
 | `.observe(branch)` | run a reliable side branch while retaining source values |
-| `.switchMap(f)` | latest inner stream wins; the previous inner is canceled and finalized |
+| `.switchMap(f)` | latest inner stream wins; the previous inner is canceled and finalized before the next one starts |
 | `.exhaustMap(f)` | ignore new outer values while an inner stream is active |
 | `.combineLatest(other)` | emit when either initialized side changes |
 | `.withLatest(other)` | emit only for the main stream, paired with the latest side value |
@@ -85,8 +85,10 @@ fibers belong to the stream, not to whichever fiber pulls it. They start on the
 first pull. When the stream completes, fails, stops early, or its consumer is
 interrupted, its finalizer interrupts them and waits for them to finish before
 it releases the sources. A failure raised while they stop, such as an inner
-stream's finalizer failing, fails the stream instead of being dropped. No
-callback or timer escapes structured concurrency.
+stream's finalizer failing, fails the stream instead of being dropped. So does
+a failure while `switchMap` finalizes the inner stream it switches away from;
+the next inner stream then does not start. No callback or timer escapes
+structured concurrency.
 
 Because the finalizer owns these fibers, consume the stream with a terminal
 operator such as `toArray`, `drain`, `forEach`, or `runSink`. Pulling `step` by
