@@ -35,6 +35,7 @@ import {
   timeoutOption,
   tryPromise,
   uninterruptible,
+  uninterruptibleMask,
   withSpan,
   yieldNow,
 } from "../src";
@@ -496,6 +497,73 @@ describe("cleanup registered in the same step as the work it guards", () => {
       }
     }
     expect(windows).toBeGreaterThan(0);
+  });
+});
+
+describe("uninterruptibleMask", () => {
+  test("restore brings back interruptibility for an ordinary caller", () => {
+    const scheduler = new StepScheduler();
+    const log: string[] = [];
+    const fiber = runFiber(
+      uninterruptibleMask((restore) =>
+        ensuring(
+          restore(waitForever),
+          sync(() => void log.push("registered release")),
+        ),
+      ),
+      scheduler,
+    );
+    scheduler.flush();
+    fiber.interrupt();
+    scheduler.flush();
+
+    expect(log).toEqual(["registered release"]);
+    expect(fiber.result).toEqual(interrupted);
+  });
+
+  test("restore stays uninterruptible when the mask runs inside a finalizer", () => {
+    const scheduler = new StepScheduler();
+    const log: string[] = [];
+    const wait = gate();
+    const fiber = runFiber(
+      ensuring(
+        waitForever,
+        uninterruptibleMask((restore) =>
+          restore(wait.wait).flatMap(() => sync(() => void log.push("waited in cleanup"))),
+        ),
+      ),
+      scheduler,
+    );
+    scheduler.flush();
+    fiber.interrupt();
+    scheduler.flush();
+    expect(fiber.status).toBe("suspended");
+
+    wait.open();
+    scheduler.flush();
+    expect(log).toEqual(["waited in cleanup"]);
+    expect(fiber.result).toEqual(interrupted);
+  });
+
+  test("a fiber-level scope release behaves like a scoped release of an interrupted fiber", () => {
+    const outcomes: string[][] = [];
+    for (const withScope of [true, false]) {
+      const scheduler = new StepScheduler();
+      const log: string[] = [];
+      const release = () =>
+        interruptible(sync(() => void log.push("interruptible part")))
+          .exit()
+          .flatMap((exit) => sync(() => void log.push(`release saw ${exit._tag}`)));
+      const acquired = acquireRelease(succeed(1), release).flatMap(() => waitForever);
+      const fiber = runFiber(withScope ? scoped(acquired) : acquired, scheduler);
+      scheduler.flush();
+      fiber.interrupt();
+      scheduler.flush();
+      outcomes.push(log);
+    }
+
+    expect(outcomes[0]).toEqual(["release saw Failure"]);
+    expect(outcomes[1]).toEqual(outcomes[0]!);
   });
 });
 
