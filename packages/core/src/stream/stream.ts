@@ -1223,7 +1223,10 @@ export class Stream<A, S = never> {
       | { readonly _tag: "failure"; readonly cause: Cause };
     type RaceEvent =
       | { readonly _tag: "source"; readonly step: Step<A> }
-      | { readonly _tag: "signal"; readonly event: SignalEvent };
+      | {
+          readonly _tag: "signal";
+          readonly event: Exclude<SignalEvent, { readonly _tag: "failure" }>;
+        };
 
     const self = this;
 
@@ -1273,10 +1276,14 @@ export class Stream<A, S = never> {
           return (
             race([
               pullSource(source),
-              (control.await as any).map((event: SignalEvent): RaceEvent => ({
-                _tag: "signal",
-                event,
-              })),
+              // A failed signal fails its side of the race rather than winning
+              // with a marker, so a failure while the cut pull cleans up joins
+              // the signal's failure instead of replacing it.
+              (control.await as any).flatMap((event: SignalEvent) =>
+                event._tag === "failure"
+                  ? failCause(event.cause)
+                  : succeed<RaceEvent>({ _tag: "signal", event }),
+              ),
             ]) as any
           ).flatMap((winner: RaceEvent): Eff<Step<A>, any> => {
             if (winner._tag === "source") {
@@ -1289,7 +1296,6 @@ export class Stream<A, S = never> {
             }
 
             if (winner.event._tag === "stop") return succeed(DONE);
-            if (winner.event._tag === "failure") return failCause(winner.event.cause);
             signalFinished = true;
             return pull(source);
           });

@@ -245,6 +245,7 @@ finish its cleanup before they fail or end the stream (see
 that cleanup is not swallowed:
 
 - `timeout` and `deadline` fail with their error joined to the cleanup failure.
+  So does `takeUntil` when its signal stream fails.
 - `interruptAfter`, `interruptOn` and `takeUntil` fail with the cleanup failure
   instead of ending normally.
 

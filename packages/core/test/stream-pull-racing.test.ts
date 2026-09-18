@@ -675,6 +675,26 @@ describe("cleanup of a cut pull", () => {
     );
   });
 
+  // The failing signal cuts the pull like a timer that fails, so its failure
+  // stays in the outcome next to the cleanup failure instead of being replaced.
+  test.each(Object.keys(sources))(
+    "takeUntil: %s source: a failing signal joins a failing cleanup of the cut pull",
+    (source) => {
+      const signal = Stream.fromEffect(sleep(5).flatMap(() => fail(new SourceError({}))));
+      const run = runVirtual({
+        effect: sources[source]!(failingCleanup).takeUntil(signal).toArray(),
+      });
+
+      expect(run.result?.ok).toBe(false);
+      if (run.result?.ok === false) {
+        const tags = Cause.failures(run.result.cause).map((e) => (e as { _tag: string })._tag);
+        expect(tags).toEqual(["SourceError", "TeardownError"]);
+      }
+      expect(run.now).toBe(5);
+      expect(run.leaked).toEqual([]);
+    },
+  );
+
   test("interruptOn: a failing cleanup of the cut pull fails the stream", () => {
     const controller = new AbortController();
     const run = runVirtual({
