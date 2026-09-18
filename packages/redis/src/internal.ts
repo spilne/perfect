@@ -11,11 +11,16 @@ export function redisEff<A>(
   return fromPromise(thunk, (cause) => toRedisError(operation, cause));
 }
 
+// Runs a blocking command on a dedicated connection. `giveBack` puts back what
+// the command took (a list item, a wake-up token) when nobody receives it: the
+// waiter was interrupted as the command completed, before it ran.
 export function redisBlocking<A>(
   redis: RedisClient,
   operation: string,
   run: (client: RedisClient) => Promise<A>,
+  options: { readonly giveBack?: (value: A) => void } = {},
 ): Eff<A, Throws<RedisError>> {
+  const { giveBack } = options;
   return async<A, RedisError>((resume) => {
     let client: RedisClient | null = null;
     let canceled = false;
@@ -25,7 +30,8 @@ export function redisBlocking<A>(
         client = duplicate;
         try {
           const value = await run(duplicate);
-          if (!canceled) resume(succeed(value));
+          if (canceled) giveBack?.(value);
+          else resume(succeed(value), giveBack && (() => giveBack(value)));
         } catch (cause) {
           if (!canceled) resume(fail(toRedisError(operation, cause)));
         } finally {

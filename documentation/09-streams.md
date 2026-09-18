@@ -76,9 +76,43 @@ stream whose effect type contains both errors.
 | `.combineLatest(other)` | emit when either initialized side changes |
 | `.withLatest(other)` | emit only for the main stream, paired with the latest side value |
 
-`switchMap`, `exhaustMap`, `combineLatest`, and `withLatest` run on Perfect
-fibers. Downstream cancellation interrupts their driver fibers and runs all
-source/inner finalizers; no callback or timer escapes structured concurrency.
+`merge`, `switchMap`, `exhaustMap`, `parEvalMap`, `combineLatest`,
+`withLatest`, `broadcastThrough`, `observe`, and `takeUntil` run background
+fibers, as do `groupWithin`, `debounce`, `sample`, `audit`, and `buffer`. Those
+fibers belong to the stream, not to whichever fiber pulls it. They start on the
+first pull. When the stream completes, fails, stops early, or its consumer is
+interrupted, its finalizer interrupts them and waits for them to finish before
+it releases the sources. A failure raised while they stop, such as an inner
+stream's finalizer failing, fails the stream instead of being dropped. No
+callback or timer escapes structured concurrency.
+
+Because the finalizer owns these fibers, consume the stream with a terminal
+operator such as `toArray`, `drain`, `forEach`, or `runSink`. Pulling `step` by
+hand without running the stream's finalizer leaves them running. One stream
+value also shares one finalizer, so do not consume it from two fibers at the
+same time: whichever consumer finishes first stops the other one's fibers.
+
+This matters when a pull runs on a short-lived fiber. `timeout`, `deadline`,
+`interruptAfter`, `interruptOn`, and `takeUntil` race every pull against a timer
+or signal. Composing them with these operators is safe:
+
+<!-- @embed packages/core/examples/10-streams.ts#stream-merge-interrupt-after -->
+
+```ts
+import { Stream } from "@spilne/perfect-core";
+
+// merge's background fibers belong to the stream, so pulls racing a timer
+// (interruptAfter, timeout, takeUntil, …) don't stop them.
+const ticks = await Stream.tick(10)
+  .take(3)
+  .merge(Stream.tick(15).take(2))
+  .interruptAfter(1_000)
+  .toArray()
+  .run();
+console.log(ticks.length); // → 5
+```
+
+<!-- @end -->
 
 ### Single-pass fan-out
 
@@ -142,6 +176,29 @@ work and reserve the forked form for best-effort telemetry.
 All timing goes through the `Clock` service, so these operators are
 deterministic under `TestClock`.
 
+`timeout`, `deadline`, `interruptAfter`, `interruptOn` and `takeUntil` race
+each pull against a timer or signal. When the pull is cut, they wait for it to
+finish its cleanup before they fail or end the stream (see
+[Structured teardown](./06-concurrency.md#structured-teardown)). A failure in
+that cleanup is not swallowed:
+
+- `timeout` and `deadline` fail with their error joined to the cleanup failure.
+- `interruptAfter`, `interruptOn` and `takeUntil` fail with the cleanup failure
+  instead of ending normally.
+
+A linear source cleans up inside the cut pull, so slow cleanup there delays
+the timeout. A pull of an operator with background fibers only stops waiting on
+the operator's queue, so it is cut at once. Its fibers keep their state and are
+cleaned up when the stream is finalized, where a failure joins the outcome the
+same way.
+
+A value that arrives at the same instant as a timer is not lost. That covers
+a `debounce` window closing, a `groupWithin` deadline and a `sample` or
+`audit` boundary, which wait on internal queues, and a `Stream.fromQueue` pull
+cut by `timeout` and pulled again by `retry`. A queue take that loses its race
+against the timer gives its value back (see
+[Handoff to waiting fibers](./06-concurrency.md#handoff-to-waiting-fibers)).
+
 ## Error handling
 
 Stream error operators mirror the `Eff` error algebra and preserve non-error
@@ -152,7 +209,7 @@ requirements such as `Needs<Service>`:
 | `.catch(f)` | recover every typed error with another stream |
 | `.catchTag(tag, f)` | recover one tagged error and retain the others |
 | `.catchSome(f)` | recover only when `f` returns a stream |
-| `.catchAllCause(f)` | recover typed failures, defects, or interruption |
+| `.catchAllCause(f)` | recover typed failures, defects, or an interrupt that failed an inner fiber; an interrupted consumer does not recover |
 | `.mapError(f)` | transform typed errors |
 | `.tapError(f)` / `.tapErrorCause(f)` | observe typed errors or the full Cause |
 | `.tapAnyError(f)` | observe every typed failure and defect without consuming it |
@@ -407,6 +464,30 @@ console.log(top3RunningTotals); // → [0, 37_000_000, 69_000_000, 97_000_000]
 chunk is emitted, so a later failed pull receives a fresh budget. It does not
 reacquire a source that already emitted data.
 
+Operators with background fibers (see
+[Stateful, concurrent, and reactive operators](#stateful-concurrent-and-reactive-operators))
+behave differently under `retry`, because the work that fails runs in one of
+their fibers, not in the pull:
+
+- **Interrupted pulls resume.** When `timeout` or `deadline` interrupts a pull
+  and `retry` runs it again, the pull resumes against the same fibers. No
+  second set starts and no source is acquired again. Nothing waiting for the
+  pull is lost: an element handed to the pull as it is cut goes back to the
+  operator's queue, and pull state that spans several waits (a claimed
+  `parEvalMap` slot, an open `groupWithin` batch, a pending `debounce` value)
+  carries over. The resumed stream emits the same elements as an uninterrupted
+  one, except that `debounce`, `sample` and `audit` restart their window timer
+  in the retried pull, so a window can close later and see a newer value.
+- **Delivered failures stay.** Once a failure has reached the consumer, every
+  retried pull fails again with the same cause, whether or not it was the first
+  pull. A failed element is not skipped and a failed input is not restarted.
+  Linear operators such as `evalMap` run a failed pull again instead.
+- **Retry where the work runs.** To retry a failing input or mapper, retry it
+  before it reaches the operator: `input.retry(policy).merge(other)` or
+  `.parEvalMap(n, (a) => f(a).retry(policy))`. To restart the sources, use
+  `Stream.retryFrom` or run the stream again. A stream that is run again, for
+  example as a `catch` fallback or in `concat`, starts fresh.
+
 Use `Stream.retryFrom` when retry must finalize and reconstruct the whole
 source:
 
@@ -451,6 +532,8 @@ their waiter/listeners when the consumer short-circuits with `take`, `head`,
 `runSink(Sinks.head())`, or any other terminal operation that stops before
 natural source completion. `asyncChunks` retains every emitted `Chunk` as one
 stream step, which lets batch-oriented drivers avoid per-element scheduling.
+A value emitted to a pull that is interrupted before it runs goes back to the
+head of the buffer for the next pull.
 
 `Stream.fromAsyncIterable` acquires its iterator lazily, maps both synchronous
 iterator acquisition failures and rejected pulls through `onError`, pulls one
@@ -473,6 +556,15 @@ rather than silently ending the stream.
 - **Close manual iterators.** An iterator from `toAsyncIterable()` that is
   neither exhausted nor closed with `return()` keeps its stream parked and its
   resources open. `for await` closes it for you.
+- **Counts and durations are validated when the operator is built.**
+  `parEvalMap`, `parEvalMapUnordered`, `buffer`, and `groupWithin`'s `maxSize`
+  take a positive integer or `Infinity`. `grouped` and `sliding` take a positive
+  integer. Durations (`Stream.tick`, `debounce`, `groupWithin`'s `timeoutMs`,
+  `sample`, `audit`, `throttle`/`metered`, `spaced`, `timeout`, `deadline`,
+  `interruptAfter`, and `pauseWhen`) take a finite, non-negative number of
+  milliseconds; `sample`, `audit`, and `pauseWhen` wait at least 1 ms. Any
+  other value throws `RangeError` instead of being rounded or firing
+  immediately.
 - **Fusion stops at non-fusible ops.** `mapEffect`, `flatMap`, and `take`
   break a fused chain; benchmark the actual pipeline if throughput matters.
 

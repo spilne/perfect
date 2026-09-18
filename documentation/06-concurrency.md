@@ -118,6 +118,51 @@ console.log(friends); // → ["bob", "carol"]
 
 <!-- @end -->
 
+## Structured teardown
+
+`all`, `race` and the combinators built on them (`raceAll`, `raceEither`,
+`validate`, `timeoutOption`, `timeoutFail`/`timeout`, `hedged`, `parZip`) do
+not return while one of their children is still running. When a child fails,
+when a race has its first result, or when the combinator itself is interrupted,
+the remaining children are interrupted and the combinator waits until every
+one of them has finished, finalizers included. Finalizers around the
+combinator therefore run after its children's finalizers, never alongside
+them:
+
+```ts
+import { all, ensuring, sync } from "@spilne/perfect-core";
+
+// Interrupted, this logs "parent released" only after releaseA and releaseB
+// have finished, even if they are asynchronous.
+const program = ensuring(
+  all([ensuring(taskA, releaseA), ensuring(taskB, releaseB)]),
+  sync(() => console.log("parent released")),
+);
+```
+
+The combinator's outcome:
+
+| What happened | Outcome |
+|---|---|
+| every `all` child succeeded | the results |
+| an `all` child failed | that child's failure |
+| a `race` child settled first | its value or failure |
+| the combinator was interrupted | the interrupt, joined with `Cause.both` to a child failure that had already stopped it, also if that failure was returned but not yet run |
+| a child torn down in any of these cases failed with more than the interrupt (a finalizer died, say) | that failure is joined with `Cause.both` after the above |
+
+A failure raised while a race loser is torn down fails the race even when its
+winner succeeded, the same way a failing finalizer fails `ensuring`.
+
+Waiting is the trade-off, as in ZIO and Effect: an uninterruptible child holds
+up its combinator. `timeoutOption(uninterruptible(slow), 100)` returns only
+once `slow` has finished, and a race loser blocked uninterruptibly on
+something only the caller would provide never lets the race return. Keep
+uninterruptible regions short, and move work that must outlive the
+combinator into `forkDaemon`.
+
+`fork` does not wait: a forked fiber is interrupted when its parent
+completes, but the parent does not wait for it to finish.
+
 ## Daemons
 
 `fork(eff)` ties the fiber to the parent scope — when the parent ends, the
@@ -145,11 +190,90 @@ import { uninterruptible } from "@spilne/perfect-core";
 const safe = uninterruptible(criticalCleanup);
 ```
 
+Code that must wait interruptibly while the effect around it stays masked —
+acquiring a lock, a permit, a connection — uses `uninterruptibleMask`.
+`restore(eff)` gives `eff` back the interruptibility in effect where the mask
+was entered: interruptible for an ordinary caller, still uninterruptible when
+the same code runs from a finalizer. `interruptible(eff)` would force it
+interruptible, and inside cleanup of an interrupted fiber that fails at once.
+
+```ts
+import { acquireRelease, uninterruptibleMask } from "@spilne/perfect-core";
+
+// The wait can be cancelled; once the permit is granted, its release is
+// registered before an interrupt can land.
+const permit = uninterruptibleMask((restore) =>
+  acquireRelease(restore(waitForPermit), () => releasePermit),
+);
+```
+
 Interruption is cooperative. A fiber observes it when it is running in an
 interruptible region, resumes from an async boundary, or walks its
 continuation stack. Finalizers registered by `ensuring` / `scoped` still run
-during interruption, and async waiters unregister their interrupt handles so
-late callbacks do not resume a cancelled fiber.
+during interruption, error handlers do not (an interrupted fiber cannot
+recover; see [Interruption and error handlers](./05-error-handling.md#interruption-and-error-handlers)),
+and async waiters unregister their interrupt handles.
+A callback that could not be unregistered — a promise that settles late, a
+child that finishes after its parent was interrupted — is ignored, so it
+cannot resume a cancelled fiber or cut its finalizers short.
+
+A fiber that runs for long yields to others every `DEFAULT_BUDGET` (2048)
+interpreter steps, including steps that only pass a value to the next
+`.map` or `.flatMap`. An interrupt that arrives while a fiber is paused
+between a value and the continuation that receives it is delivered at the
+fiber's next effect, once the value has arrived. If that value is the fiber's
+result, the fiber completes normally: the interrupt came too late.
+
+### Handoff to waiting fibers
+
+`Queue`, `Semaphore` and `Pool` give an item, a permit or a resource straight
+to the oldest fiber waiting for one. That fiber may be interrupted before it
+gets to run, for example because its `take` just lost a race against a timer.
+The runtime then hands the value back instead of dropping it:
+
+| Primitive | Where a value given back goes |
+|---|---|
+| `Queue` (and `PubSub`, `SubscriptionRef`, `Stream.fromQueue`) | the next waiting taker, or the head of the queue |
+| `Semaphore` | the semaphore, which serves its next waiter |
+| `Pool` | the next waiter, or the idle list; after `shutdown()` it is released |
+| `Stream.fromCallback` / `Stream.async` / `Stream.asyncChunks` | the next pull, or the head of the push buffer |
+
+Every value is received once or given back once, never both. This also holds
+when the waiter is uninterruptible (it keeps the value and sees the interrupt
+afterwards) and when `scheduler.shutdown()` dropped its queued run (the value
+is given back when the fiber is interrupted).
+
+The guarantee ends where the waiting effect returns the value. An interrupt
+that arrives after `take()` returned, before your code has used the value,
+drops it like any other result. Use the value in the same step, as in
+`queue.take().map(record)`, or inside `uninterruptible`. `Semaphore.withPermit`
+and `Pool.use` already register their release in the step that receives the
+permit or resource.
+
+Two details follow from giving values back:
+
+- Values given back to a queue go ahead of values never handed out, in the
+  order they were first handed out, so the queue stays FIFO whatever order
+  the takers are interrupted in.
+- A value given back to a bounded queue goes in even when the queue is full,
+  so `size` can briefly exceed the capacity, by at most the number of takers
+  interrupted before they ran. Blocked offers wait until it is below the
+  capacity again.
+- A blocked `offer` is admitted when a `take` makes room. If that offer is
+  interrupted before it runs, its value stays in the queue although the offer
+  fails with the interrupt.
+
+Your own `async` primitives get the same behavior by passing a second argument
+to `resume`. `onDiscard` runs exactly once if the fiber does not run the value:
+
+```ts
+import { async, succeed } from "@spilne/perfect-core";
+
+const takeSlot = async<number>((resume) => {
+  const slot = slots.pop()!;
+  resume(succeed(slot), () => slots.push(slot));
+});
+```
 
 ## Fiber status and supervision
 
@@ -176,7 +300,7 @@ Available fiber diagnostics:
 | API / concept | Behavior |
 |---|---|
 | `fiber.status` | `"ready"`, `"running"`, `"suspended"`, or `"done"` |
-| `fiber.interrupted` | true when interrupted or pending interruption |
+| `fiber.interrupted` | before completion: an interrupt is pending or has been delivered; once done: the result's cause contains an `Interrupt` (`Exit.isInterrupted` is stricter: every leaf must be one) |
 | `fiber.childCount` | number of structured children currently owned |
 | `fiber.snapshot()` | stable `{ status, interrupted, childCount }` object |
 | `fiber.childrenSnapshot()` | copy of currently owned child fibers |
@@ -197,6 +321,7 @@ Available fiber diagnostics:
 | `all(effects[])` | parallel + collect tuple |
 | `all({ a, b })` | parallel + collect record |
 | `uninterruptible(eff)` | block interruption |
+| `uninterruptibleMask((restore) => eff)` | block interruption; `restore` reinstates the caller's interruptibility |
 | `interruptible(eff)` | restore interruptibility |
 | `yieldNow` | give other fibers a turn |
 | `addFiberSupervisor(hooks)` | attach diagnostic fiber lifecycle hooks |

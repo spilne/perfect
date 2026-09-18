@@ -117,6 +117,18 @@ export function tracingMiddleware(opts: TracingOptions = {}): HttpMiddleware {
       span.end();
       spanByContext.delete(ctx);
     },
+    onInterrupt: (ctx) => {
+      const span = spanByContext.get(ctx);
+      if (!span) return;
+      span.setAttribute("http.response.duration_ms", ctx.durationMs);
+      span.setAttribute("error.type", "Interrupted");
+      span.setStatus({
+        code: SpanStatusCode.ERROR as SpanStatusCodeT,
+        message: "request interrupted",
+      });
+      span.end();
+      spanByContext.delete(ctx);
+    },
   };
 }
 

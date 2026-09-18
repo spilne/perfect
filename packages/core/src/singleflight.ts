@@ -12,10 +12,17 @@
 // Eff-typed contract; in-process by default. Distributed (Redis-backed,
 // shared-key dedup across processes) implementations live downstream.
 
-import { type Eff, type Throws } from "./eff";
-import { sync } from "./constructors";
+import { type Eff, type Throws, Suspend, Op } from "./eff";
+import { failCause, suspend, sync } from "./constructors";
 import { Cause } from "./cause";
 import { type Deferred, InProcessDeferred } from "./deferred";
+import type { Exit } from "./exit";
+
+// Followers see a typed failure; a defect or interrupt is squashed to a value.
+function errorValue<E>(cause: Cause): E {
+  const typedFail = Cause.firstFail(cause);
+  return (typedFail !== null ? typedFail.value : Cause.squash(cause)) as E;
+}
 
 export interface Singleflight<SF = never> {
   /**
@@ -26,47 +33,47 @@ export interface Singleflight<SF = never> {
   do<A, E>(key: string, eff: Eff<A, Throws<E>>): Eff<A, SF | Throws<E>>;
 }
 
-type LeaderOrFollower<A, E> =
-  | { readonly kind: "leader"; readonly deferred: Deferred<A, E> }
-  | { readonly kind: "follower"; readonly deferred: Deferred<A, E> };
-
 class InProcessSingleflight implements Singleflight {
   private readonly flights = new Map<string, Deferred<unknown, unknown>>();
 
   do<A, E>(key: string, eff: Eff<A, Throws<E>>): Eff<A, Throws<E>> {
-    // Atomic check + register in a single sync block. (Previously needed a
-    // yieldNow prefix to defeat Op.All's side-effect-pre-running fast path,
-    // but the runtime now restricts that fast path to literal Succeed only.)
-    return sync<LeaderOrFollower<A, E>>(() => {
-      const existing = this.flights.get(key) as Deferred<A, E> | undefined;
-      if (existing) return { kind: "follower", deferred: existing };
-      // Construct InProcessDeferred directly — no nested runSync.
-      const deferred = new InProcessDeferred<A, E>();
-      this.flights.set(key, deferred as Deferred<unknown, unknown>);
-      return { kind: "leader", deferred };
-    }).flatMap((state): Eff<A, Throws<E>> => {
-      if (state.kind === "follower") return state.deferred.await;
-      // Leader: run eff, fan out via deferred, cleanup, return original outcome.
-      // Use catchAllCause so defects (uncaught throws → Cause.Die) and
-      // interrupts also settle the deferred — otherwise followers deadlock.
-      const cleanup = sync(() => {
-        this.flights.delete(key);
-      });
-      return (eff as any)
-        .flatMap((value: A) =>
-          state.deferred.succeed(value).flatMap(() => cleanup.map(() => value)),
-        )
-        .catchAllCause((cause: any) => {
-          // Surface as a typed failure on the deferred so followers can re-throw.
-          // For defects, squash to the underlying value.
-          const typedFail = Cause.firstFail(cause);
-          const errVal = typedFail !== null ? typedFail.value : Cause.squash(cause);
-          return state.deferred
-            .fail(errVal as E)
-            .flatMap(() => cleanup)
-            .flatMap(() => state.deferred.await);
-        }) as Eff<A, Throws<E>>;
+    return suspend(() => {
+      let leader: Deferred<A, E> | null = null;
+      // The finalizer is in place before the key is registered, so no
+      // interrupt can land between registering and the guarantee that the
+      // key is cleared and followers are released.
+      const flight = new Suspend(
+        Op.Ensuring,
+        suspend(() => {
+          const existing = this.flights.get(key) as Deferred<A, E> | undefined;
+          if (existing) return existing.await;
+          leader = new InProcessDeferred<A, E>();
+          this.flights.set(key, leader as Deferred<unknown, unknown>);
+          return eff;
+        }),
+        (exit: Exit<unknown, A>) => (leader === null ? null : this.settle(key, leader, exit)),
+      ) as unknown as Eff<A, Throws<E>>;
+      // A leader fails the way its followers do.
+      return flight.catchAllCause((cause) =>
+        leader === null ? failCause(cause) : leader.await,
+      ) as Eff<A, Throws<E>>;
     }) as Eff<A, Throws<E>>;
+  }
+
+  private settle<A, E>(
+    key: string,
+    deferred: Deferred<A, E>,
+    exit: Exit<unknown, A>,
+  ): Eff<void, never> {
+    return (
+      exit._tag === "Success"
+        ? deferred.succeed(exit.value)
+        : deferred.fail(errorValue<E>(exit.cause))
+    ).flatMap(() =>
+      sync(() => {
+        if (this.flights.get(key) === deferred) this.flights.delete(key);
+      }),
+    );
   }
 }
 

@@ -1,7 +1,7 @@
 import { Cause } from "./cause";
 import { type Eff, type EffectCheck, Suspend, Cont, Op } from "./eff";
 import { type Context, emptyContext, mergeContexts } from "./service";
-import { Fiber, FiberState, notifyFiberStart } from "./fiber";
+import { Fiber, FiberState, type FiberResult, VALUE_IN_FLIGHT, notifyFiberStart } from "./fiber";
 import { Scope } from "./scope";
 import { type Scheduler, SyncScheduler, DEFAULT_BUDGET, getDefaultScheduler } from "./scheduler";
 import { Clock, realClock } from "./clock";
@@ -29,13 +29,9 @@ type Reject = (cause: Cause) => void;
 
 function succeedAfterFinalizer(finalizer: Suspend, value: any): Suspend {
   return new Suspend(
-    Op.SetInterruptible,
-    new Suspend(
-      Op.CatchAll,
-      new Suspend(Op.FlatMap, finalizer, () => new Suspend(Op.Succeed, value, null)),
-      (cause: Cause) => new Suspend(Op.Fail, cause, null),
-    ),
-    false,
+    Op.CatchAll,
+    new Suspend(Op.FlatMap, finalizer, () => new Suspend(Op.Succeed, value, null)),
+    (cause: Cause) => new Suspend(Op.Fail, cause, null),
   );
 }
 
@@ -43,35 +39,6 @@ function succeedAfterFinalizer(finalizer: Suspend, value: any): Suspend {
 // rethrowing inside the finalizer's own CatchAll would re-catch it and
 // compose the cause with itself.
 function failAfterFinalizer(finalizer: Suspend, cause: Cause): Suspend {
-  return new Suspend(
-    Op.SetInterruptible,
-    new Suspend(
-      Op.FlatMap,
-      new Suspend(
-        Op.CatchAll,
-        new Suspend(Op.FlatMap, finalizer, () => new Suspend(Op.Succeed, null, null)),
-        (finalizerCause: Cause) => new Suspend(Op.Succeed, finalizerCause, null),
-      ),
-      (finalizerCause: Cause | null) =>
-        new Suspend(
-          Op.Fail,
-          finalizerCause === null ? cause : Cause.then(cause, finalizerCause),
-          null,
-        ),
-    ),
-    false,
-  );
-}
-
-function succeedAfterFinalizerInline(finalizer: Suspend, value: any): Suspend {
-  return new Suspend(
-    Op.CatchAll,
-    new Suspend(Op.FlatMap, finalizer, () => new Suspend(Op.Succeed, value, null)),
-    (cause: Cause) => new Suspend(Op.Fail, cause, null),
-  );
-}
-
-function failAfterFinalizerInline(finalizer: Suspend, cause: Cause): Suspend {
   return new Suspend(
     Op.FlatMap,
     new Suspend(
@@ -88,13 +55,73 @@ function failAfterFinalizerInline(finalizer: Suspend, cause: Cause): Suspend {
   );
 }
 
+// Masks interruption for a finalizer the walk is about to run. Flipping the
+// flag here, rather than through an Op.SetInterruptible node, leaves no step
+// between popping the finalizer's frame and masking: an interrupt pending at
+// the top of the loop, or delivered while an op-budget pause has the node
+// queued, would otherwise replace the node and drop the finalizer.
+function enterUninterruptible(fiber: Fiber<any>, k: Cont | null): Cont {
+  const frame = new Cont(Op.SetInterruptible, fiber.interruptible, k);
+  fiber.interruptible = false;
+  return frame;
+}
+
+function withInterrupt(cause: Cause): Cause {
+  return Cause.hasInterrupt(cause) ? cause : Cause.then(cause, Cause.interrupt());
+}
+
+// The cause that continues past an error handler an interrupting fiber
+// bypassed. Its typed failures are dropped: the handler would have consumed or
+// mapped them, so keeping them would surface errors the effect's type says
+// were handled. Defects and the interrupt stay.
+function bypassHandler(cause: Cause): Cause {
+  const kept = stripFailures(cause);
+  return kept === null ? Cause.interrupt() : withInterrupt(kept);
+}
+
+function stripFailures(cause: Cause): Cause | null {
+  switch (cause._tag) {
+    case "Fail":
+      return null;
+    case "Die":
+    case "Interrupt":
+      return cause;
+    case "Both":
+    case "Then": {
+      const left = stripFailures(cause.left);
+      const right = stripFailures(cause.right);
+      if (left === null) return right;
+      if (right === null) return left;
+      if (left === cause.left && right === cause.right) return cause;
+      return { _tag: cause._tag, left, right };
+    }
+  }
+}
+
+// An Op.Ensuring finalizer is an effect, or a function of the body's Exit
+// (onExit) that returns null when it has nothing to run. A finalizer that is a
+// plain succeed(...) has nothing to run either, and is skipped outright.
+function exitFinalizer(finalizer: unknown, exit: Exit<unknown, unknown>): Suspend | null {
+  try {
+    return (finalizer as (exit: Exit<unknown, unknown>) => Suspend | null)(exit);
+  } catch (e) {
+    return new Suspend(Op.Fail, Cause.die(e), null);
+  }
+}
+
 // Owns resumable execution: saves the continuation on suspension, honors
 // interruption, and yields through the scheduler for cooperative fairness.
 // Keep opcode handling aligned with stepInline, whose finalization contract
 // deliberately excludes normal fiber scheduling and completion.
+//
+// Every run starts from a Ready fiber and consumes that state. A run that
+// finds the fiber in any other state is a duplicate (see Fiber.interrupt) and
+// does nothing.
 function runFiberLoop(fiber: Fiber<any>): void {
-  if (fiber.state === FiberState.Done) return;
+  if (fiber.state !== FiberState.Ready) return;
   fiber.state = FiberState.Running;
+  // A value handed over by an async resume is delivered once this run starts.
+  fiber.handoffDiscard = null;
   fiber.opCount = 0;
 
   let cur: any = fiber.current;
@@ -132,18 +159,34 @@ function runFiberLoop(fiber: Fiber<any>): void {
       return;
     }
 
-    // honour any pending interrupt the moment we're in interruptible mode
-    if (fiber.interruptible && fiber.interruptPending) {
+    // honour any pending interrupt at the next effect step in interruptible
+    // mode; a failure already on its way keeps its cause. A value, or an
+    // Op.Succeed holding one, first reaches the next frame's continuation: a
+    // primitive's fast path (a queue take, say) returns what it removed that
+    // way, and an op-budget pause may separate the two (see Fiber.interrupt).
+    if (
+      fiber.interruptible &&
+      fiber.interruptPending &&
+      cur instanceof Suspend &&
+      cur.op !== Op.Succeed
+    ) {
       fiber.interruptPending = false;
-      cur = new Suspend(Op.Fail, Cause.interrupt(), null);
+      fiber.interrupting = true;
+      cur =
+        cur instanceof Suspend && cur.op === Op.Fail
+          ? new Suspend(Op.Fail, withInterrupt(cur.a as Cause), null)
+          : new Suspend(Op.Fail, Cause.interrupt(), null);
     }
 
-    // op budget — yield to scheduler
+    // op budget — yield to scheduler. Every step counts, so a long unwind of
+    // values through already-pushed frames still yields.
     if (++fiber.opCount > budget) {
       fiber.current = cur;
       fiber.stack = k;
       fiber.context = context;
       fiber.state = FiberState.Ready;
+      if (!(cur instanceof Suspend) || cur.op === Op.Succeed)
+        fiber.handoffDiscard = VALUE_IN_FLIGHT;
       fiber.scheduler.schedule(() => runFiberLoop(fiber));
       return;
     }
@@ -174,8 +217,11 @@ function runFiberLoop(fiber: Fiber<any>): void {
           }
           case Op.SetInterruptible: {
             fiber.interruptible = frame.fn as unknown as boolean;
-            if (fiber.interruptible && fiber.interruptPending) {
+            // An uninterruptible region that handled an earlier interrupt
+            // cannot resume normal execution past its end.
+            if (fiber.interruptible && (fiber.interruptPending || fiber.interrupting)) {
               fiber.interruptPending = false;
+              fiber.interrupting = true;
               cur = new Suspend(Op.Fail, Cause.interrupt(), null);
               continue loop;
             }
@@ -183,7 +229,12 @@ function runFiberLoop(fiber: Fiber<any>): void {
           }
           case Op.EnsuringFrame: {
             const value = cur;
-            const finalizer = frame.fn as Suspend;
+            const finalizer =
+              typeof frame.fn === "function"
+                ? exitFinalizer(frame.fn, { _tag: "Success", value })
+                : (frame.fn as Suspend);
+            if (finalizer === null || finalizer.op === Op.Succeed) continue;
+            k = enterUninterruptible(fiber, k);
             cur = succeedAfterFinalizer(finalizer, value);
             continue loop;
           }
@@ -193,6 +244,7 @@ function runFiberLoop(fiber: Fiber<any>): void {
             const { scope, oldScope } = frame.fn as { scope: Scope; oldScope: Scope | null };
             const value = cur;
             fiber.scope = oldScope;
+            k = enterUninterruptible(fiber, k);
             cur = succeedAfterFinalizer(scope.close() as unknown as Suspend, value);
             continue loop;
           }
@@ -216,12 +268,12 @@ function runFiberLoop(fiber: Fiber<any>): void {
       return;
     }
 
-    switch (cur.op) {
-      case Op.Succeed: {
-        cur = cur.a;
-        continue loop;
-      }
+    if (cur.op === Op.Succeed) {
+      cur = cur.a;
+      continue loop;
+    }
 
+    switch (cur.op) {
       case Op.Sync: {
         try {
           cur = (cur.a as any)();
@@ -232,13 +284,20 @@ function runFiberLoop(fiber: Fiber<any>): void {
       }
 
       case Op.Fail: {
-        const cause = cur.a as Cause;
+        let cause = cur.a as Cause;
         while (k !== null) {
           const frame = k;
           k = frame.next;
+          // An interrupting fiber runs no error handler while interruptible:
+          // recovering would resume normal execution after the interrupt.
+          // Handlers inside uninterruptible regions (finalizers) still run.
           if (frame.op === Op.Catch) {
             const f = Cause.firstFail(cause);
             if (f) {
+              if (fiber.interrupting && fiber.interruptible) {
+                cause = bypassHandler(cause);
+                continue;
+              }
               try {
                 cur = (frame.fn as any)(f.value);
               } catch (e) {
@@ -248,6 +307,10 @@ function runFiberLoop(fiber: Fiber<any>): void {
             }
           }
           if (frame.op === Op.CatchAll) {
+            if (fiber.interrupting && fiber.interruptible) {
+              cause = bypassHandler(cause);
+              continue;
+            }
             try {
               cur = (frame.fn as any)(cause);
             } catch (e) {
@@ -261,16 +324,31 @@ function runFiberLoop(fiber: Fiber<any>): void {
           }
           if (frame.op === Op.SetInterruptible) {
             fiber.interruptible = frame.fn as unknown as boolean;
+            // Deliver an interrupt that arrived during the region into the
+            // propagating failure, keeping its typed errors and defects. Left
+            // pending, the top-of-loop check would replace the next finalizer
+            // this walk starts.
+            if (fiber.interruptible && (fiber.interruptPending || fiber.interrupting)) {
+              fiber.interruptPending = false;
+              fiber.interrupting = true;
+              cause = withInterrupt(cause);
+            }
             continue;
           }
           if (frame.op === Op.EnsuringFrame) {
-            const finalizer = frame.fn as Suspend;
+            const finalizer =
+              typeof frame.fn === "function"
+                ? exitFinalizer(frame.fn, { _tag: "Failure", cause })
+                : (frame.fn as Suspend);
+            if (finalizer === null || finalizer.op === Op.Succeed) continue;
+            k = enterUninterruptible(fiber, k);
             cur = failAfterFinalizer(finalizer, cause);
             continue loop;
           }
           if (frame.op === Op.ScopeFrame) {
             const { scope, oldScope } = frame.fn as { scope: Scope; oldScope: Scope | null };
             fiber.scope = oldScope;
+            k = enterUninterruptible(fiber, k);
             cur = failAfterFinalizer(scope.close() as unknown as Suspend, cause);
             continue loop;
           }
@@ -298,25 +376,38 @@ function runFiberLoop(fiber: Fiber<any>): void {
       }
 
       case Op.Async: {
-        const register = cur.a as (resume: (value: any) => void) => (() => void) | void;
+        const register = cur.a as (
+          resume: (value: any, onDiscard?: () => void) => void,
+        ) => (() => void) | void;
 
         fiber.stack = k;
         fiber.context = context;
         fiber.state = FiberState.Suspended;
+        const token = ++fiber.asyncToken;
 
         let resumed = false;
         try {
-          const cancel = register((value: any) => {
-            if (resumed || fiber.state === FiberState.Done) return;
+          const cancel = register((value: any, onDiscard?: () => void) => {
+            if (resumed || fiber.asyncToken !== token || fiber.state === FiberState.Done) {
+              // Nothing waits for this value any more: hand it back.
+              if (typeof onDiscard === "function") onDiscard();
+              return;
+            }
             resumed = true;
             fiber.interruptHandle = null;
             fiber.current = value;
+            fiber.handoffDiscard = typeof onDiscard === "function" ? onDiscard : null;
             fiber.state = FiberState.Ready;
             fiber.scheduler.schedule(() => runFiberLoop(fiber));
           });
-          if (cancel && !resumed) fiber.interruptHandle = cancel;
+          if (cancel && !resumed) {
+            // A mismatch means register() interrupted this fiber before the
+            // canceler could be installed.
+            if (fiber.asyncToken === token) fiber.interruptHandle = cancel;
+            else cancel();
+          }
         } catch (error) {
-          if (resumed) return;
+          if (resumed || fiber.asyncToken !== token) return;
           resumed = true;
           fiber.state = FiberState.Running;
           cur = new Suspend(Op.Fail, Cause.die(error), null);
@@ -384,37 +475,16 @@ function runFiberLoop(fiber: Fiber<any>): void {
         }
 
         // Slow path: full fiber-per-element parallel.
-        fiber.stack = k;
-        fiber.context = context;
-        const savedCtx = context;
+        const group = new ChildGroup(fiber, k, context);
         const results = new Array(len);
-        let remaining = len;
-        let failed = false;
-        const children: Fiber<any>[] = [];
-
-        for (let i = 0; i < len; i++) {
-          const child = makeChild(fiber, effects[i], savedCtx);
-          children.push(child);
-
-          child.onComplete((result) => {
-            if (failed) return;
-            if (result.ok) {
-              results[i] = result.value;
-              if (--remaining === 0) {
-                fiber.current = results;
-                fiber.state = FiberState.Ready;
-                fiber.scheduler.schedule(() => runFiberLoop(fiber));
-              }
-            } else {
-              failed = true;
-              for (const c of children) if (c !== child) c.interrupt();
-              fiber.current = new Suspend(Op.Fail, result.cause, null);
-              fiber.state = FiberState.Ready;
-              fiber.scheduler.schedule(() => runFiberLoop(fiber));
-            }
+        for (let i = 0; i < len && !group.stopped; i++) {
+          group.start(effects[i], (result) => {
+            if (result.ok) results[i] = result.value;
+            else group.childFailed(result.cause);
+            if (!group.settle()) return;
+            if (group.failure === null) group.resume(results);
+            else group.fail(group.failure);
           });
-
-          runChild(child);
         }
         return;
       }
@@ -432,30 +502,23 @@ function runFiberLoop(fiber: Fiber<any>): void {
           cur = new Suspend(Op.Fail, Cause.die(new Error("race: empty input")), null);
           continue loop;
         }
-        fiber.stack = k;
-        fiber.context = context;
-        const savedCtx = context;
-        let settled = false;
-        const children: Fiber[] = [];
-
-        for (let i = 0; i < effects.length; i++) {
-          const child = makeChild(fiber, effects[i], savedCtx);
-          children.push(child);
-
-          child.onComplete((result) => {
-            if (settled) return;
-            settled = true;
-            for (const c of children) if (c !== child) c.interrupt();
-            if (result.ok) {
-              fiber.current = result.value;
-            } else {
-              fiber.current = new Suspend(Op.Fail, result.cause, null);
+        // The first child to settle wins, and the rest are interrupted.
+        const group = new ChildGroup(fiber, k, context);
+        let won = false;
+        let value: unknown;
+        for (let i = 0; i < effects.length && !group.stopped; i++) {
+          group.start(effects[i], (result) => {
+            if (!result.ok) group.childFailed(result.cause);
+            else if (!group.stopped) {
+              won = true;
+              value = result.value;
+              group.stop();
             }
-            fiber.state = FiberState.Ready;
-            fiber.scheduler.schedule(() => runFiberLoop(fiber));
+            if (!group.settle()) return;
+            if (!won) group.fail(group.failure!);
+            else if (group.teardown === null) group.resume(value);
+            else group.fail(null);
           });
-
-          runChild(child);
         }
         return;
       }
@@ -514,7 +577,19 @@ function runFiberLoop(fiber: Fiber<any>): void {
         const prev = fiber.interruptible;
         k = new Cont(Op.SetInterruptible, prev, k);
         fiber.interruptible = newValue;
+        // An interruptible region entered after an interrupt (inside a
+        // finalizer, say) is interrupted at once.
+        if (newValue && !prev && fiber.interrupting) fiber.interruptPending = true;
         cur = cur.a;
+        // uninterruptibleMask: the body is built from the interruptibility
+        // the region was entered with.
+        if (typeof cur === "function") {
+          try {
+            cur = cur(prev);
+          } catch (e) {
+            cur = new Suspend(Op.Fail, Cause.die(e), null);
+          }
+        }
         continue loop;
       }
 
@@ -535,6 +610,149 @@ function runFiberLoop(fiber: Fiber<any>): void {
       }
     }
   }
+}
+
+// Structured children of a fiber parked in all() or race(). The fiber resumes
+// only once every child has settled, on success, on a child failure and on
+// interrupt, so no child is still running its finalizers when the fiber's own
+// continuation or finalizers run.
+//
+// The parked stack is SetInterruptible(false) -> CatchAll(onCause) ->
+// SetInterruptible(caller's flag) -> k. While parked the fiber keeps the
+// caller's interruptibility: interrupt() reaches it and its handle interrupts
+// the children at once. A failure leaving the wait passes the `false` restore
+// frame before onCause, so onCause runs even for an interrupted fiber under
+// sticky interruption: it waits for the children, and the interrupt is raised
+// again when the region ends.
+//
+// Causes: a child failure that stopped the group comes first; non-interrupt
+// failures of children torn down after that (a finalizer that dies, say) are
+// joined with Cause.both; an interrupt of the parked fiber goes in front of
+// both.
+class ChildGroup {
+  running = 0;
+  stopped = false;
+  interrupted = false;
+  failure: Cause | null = null;
+  teardown: Cause | null = null;
+  private delivered: Cause | null = null;
+  private drained: (() => void) | null = null;
+  private readonly children: Fiber<any>[] = [];
+  private readonly token: number;
+
+  constructor(
+    private readonly fiber: Fiber<any>,
+    k: Cont | null,
+    private readonly context: Context,
+  ) {
+    this.token = ++fiber.asyncToken;
+    fiber.stack = new Cont(
+      Op.SetInterruptible,
+      false,
+      new Cont(Op.CatchAll, this.onCause, new Cont(Op.SetInterruptible, fiber.interruptible, k)),
+    );
+    fiber.context = context;
+    fiber.state = FiberState.Suspended;
+    fiber.interruptHandle = this.interruptChildren;
+  }
+
+  start(effect: unknown, onDone: (result: FiberResult<any>) => void): void {
+    const child = makeChild(this.fiber, effect, this.context);
+    this.children.push(child);
+    this.running++;
+    child.onComplete(onDone);
+    runChild(child);
+    if (this.stopped) child.interrupt();
+  }
+
+  stop(): void {
+    if (this.stopped) return;
+    this.stopped = true;
+    const children = this.children;
+    for (let i = 0; i < children.length; i++) children[i]!.interrupt();
+  }
+
+  // The first failure stops the group; a later one is teardown, where the
+  // interrupt it was stopped with is expected.
+  childFailed(cause: Cause): void {
+    if (!this.stopped) {
+      this.failure = cause;
+      this.stop();
+      return;
+    }
+    const extra = Cause.stripInterrupts(cause);
+    if (extra !== null)
+      this.teardown = this.teardown === null ? extra : Cause.both(this.teardown, extra);
+  }
+
+  // Records that a child settled. True when it was the last one and the group
+  // should resume the fiber with its outcome.
+  settle(): boolean {
+    if (--this.running > 0) return false;
+    const drained = this.drained;
+    if (drained !== null) {
+      this.drained = null;
+      drained();
+      return false;
+    }
+    return (
+      !this.interrupted &&
+      this.fiber.asyncToken === this.token &&
+      this.fiber.state !== FiberState.Done
+    );
+  }
+
+  resume(value: unknown): void {
+    const fiber = this.fiber;
+    fiber.interruptHandle = null;
+    fiber.current = value;
+    fiber.state = FiberState.Ready;
+    fiber.scheduler.schedule(() => runFiberLoop(fiber));
+  }
+
+  // Fails with `first` (null when a winner succeeded) and the teardown.
+  fail(first: Cause | null): void {
+    const teardown = this.teardown;
+    const cause =
+      first === null ? teardown! : teardown === null ? first : Cause.both(first, teardown);
+    this.delivered = cause;
+    this.resume(new Suspend(Op.Fail, cause, null));
+  }
+
+  private readonly interruptChildren = (): void => {
+    this.interrupted = true;
+    this.stop();
+  };
+
+  private settledCause(cause: Cause): Suspend {
+    let combined = cause;
+    if (this.failure !== null) combined = Cause.both(combined, this.failure);
+    if (this.teardown !== null) combined = Cause.both(combined, this.teardown);
+    return new Suspend(Op.Fail, combined, null);
+  }
+
+  private readonly onCause = (cause: Cause): Suspend => {
+    // Once the group delivered a failure every child has settled. An interrupt
+    // that reached the fiber before it ran joined that failure; it gets the
+    // same shape as an interrupt that arrives while the group waits.
+    if (this.delivered !== null) {
+      return cause === this.delivered
+        ? new Suspend(Op.Fail, cause, null)
+        : this.settledCause(Cause.interrupt());
+    }
+    this.interruptChildren();
+    if (this.running === 0) return this.settledCause(cause);
+    return new Suspend(
+      Op.Async,
+      (resume: (value: Suspend) => void) => {
+        // Checked again here, so a child that settled in between cannot leave
+        // the wait without a drain signal.
+        if (this.running === 0) resume(this.settledCause(cause));
+        else this.drained = () => resume(this.settledCause(cause));
+      },
+      null,
+    );
+  };
 }
 
 // Drives cleanup through resolve/reject callbacks without completing the
@@ -585,15 +803,19 @@ function stepInline(
           }
           case Op.EnsuringFrame: {
             const value = cur;
-            const finalizer = frame.fn as Suspend;
-            cur = succeedAfterFinalizerInline(finalizer, value);
+            const finalizer =
+              typeof frame.fn === "function"
+                ? exitFinalizer(frame.fn, { _tag: "Success", value })
+                : (frame.fn as Suspend);
+            if (finalizer === null) continue;
+            cur = succeedAfterFinalizer(finalizer, value);
             continue loop;
           }
           case Op.ScopeFrame: {
             const { scope, oldScope } = frame.fn as { scope: Scope; oldScope: Scope | null };
             if (parentFiber) parentFiber.scope = oldScope;
             const value = cur;
-            cur = succeedAfterFinalizerInline(scope.close() as unknown as Suspend, value);
+            cur = succeedAfterFinalizer(scope.close() as unknown as Suspend, value);
             continue loop;
           }
         }
@@ -644,13 +866,18 @@ function stepInline(
             parentFiber.interruptible = frame.fn as unknown as boolean;
           }
           if (frame.op === Op.EnsuringFrame) {
-            cur = failAfterFinalizerInline(frame.fn as Suspend, cause);
+            const finalizer =
+              typeof frame.fn === "function"
+                ? exitFinalizer(frame.fn, { _tag: "Failure", cause })
+                : (frame.fn as Suspend);
+            if (finalizer === null) continue;
+            cur = failAfterFinalizer(finalizer, cause);
             continue loop;
           }
           if (frame.op === Op.ScopeFrame) {
             const { scope, oldScope } = frame.fn as { scope: Scope; oldScope: Scope | null };
             if (parentFiber) parentFiber.scope = oldScope;
-            cur = failAfterFinalizerInline(scope.close() as unknown as Suspend, cause);
+            cur = failAfterFinalizer(scope.close() as unknown as Suspend, cause);
             continue loop;
           }
         }
@@ -674,14 +901,18 @@ function stepInline(
       }
       case Op.Ensuring: {
         const body = cur.a as Suspend;
-        const finalizer = cur.b as Suspend;
+        const finalizer = cur.b;
+        const finalizerFor = (exit: Exit<unknown, unknown>): Suspend =>
+          typeof finalizer === "function"
+            ? (exitFinalizer(finalizer, exit) ?? new Suspend(Op.Succeed, undefined, null))
+            : (finalizer as Suspend);
         stepInline(
           body,
           context,
           null,
           (val) => {
             stepInline(
-              finalizer,
+              finalizerFor({ _tag: "Success", value: val }),
               context,
               null,
               () => {
@@ -709,7 +940,7 @@ function stepInline(
           },
           (cause) => {
             stepInline(
-              finalizer,
+              finalizerFor({ _tag: "Failure", cause }),
               context,
               null,
               () => {
@@ -759,6 +990,11 @@ function stepInline(
         // No structured parent relationship here; the fiber is orphan.
         const child = bootstrapFiber<any>(cur as Eff<any, any>, parentFiber?.scheduler);
         child.context = context;
+        // stepInline only runs cleanup. Keep the delegated fiber in the state a
+        // finalizer runs in on the owner itself: uninterruptible, and
+        // interrupting if the owner was interrupted.
+        child.interruptible = false;
+        if (parentFiber) child.interrupting = parentFiber.interrupting;
         child.onComplete((result) => {
           stepInline(
             result.ok

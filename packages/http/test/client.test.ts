@@ -2,7 +2,16 @@
 // MockTransport — no real HTTP.
 
 import { describe, test, expect } from "bun:test";
-import { type Eff, type Throws, succeed, fail, sync, run } from "@spilne/perfect-core";
+import {
+  type Eff,
+  type Throws,
+  async,
+  succeed,
+  fail,
+  sync,
+  run,
+  runFiber,
+} from "@spilne/perfect-core";
 import {
   AbstractHttpClient,
   DefaultHttpClient,
@@ -219,6 +228,28 @@ describe("Middleware — sync hooks with duration tracking", () => {
     expect(seen.length).toBe(1);
     expect(seen[0].e._tag).toBe("HttpStatusError");
     expect(seen[0].ctx.durationMs).toBeGreaterThanOrEqual(0);
+  });
+
+  test("onInterrupt fires for an interrupted request, instead of onResponse or onError", async () => {
+    const events: string[] = [];
+    const mw: HttpMiddleware = {
+      onRequest: () => events.push("request"),
+      onResponse: () => events.push("response"),
+      onError: () => events.push("error"),
+      onInterrupt: (ctx) => events.push(`interrupt ${ctx.durationMs >= 0}`),
+    };
+    const hanging: HttpTransport = {
+      execute: () => async<Response>(() => () => {}),
+    };
+    const c = new DefaultHttpClient({ transport: hanging, middleware: [mw] });
+    const fiber = runFiber(c.getJson("/slow") as any);
+    for (let i = 0; i < 20 && events.length === 0; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    fiber.interrupt();
+    await fiber.await();
+
+    expect(events).toEqual(["request", "interrupt true"]);
   });
 
   test("no middleware = zero overhead (functionally)", async () => {

@@ -55,3 +55,15 @@ for await (const n of numbers.toAsyncIterable()) {
 assertEq(firstThree, [1, 2, 3]);
 assertEq(finalized, 1);
 // <<< example
+
+// >>> example: stream-merge-interrupt-after
+// merge's background fibers belong to the stream, so pulls racing a timer
+// (interruptAfter, timeout, takeUntil, …) don't stop them.
+const ticks = await Stream.tick(10)
+  .take(3)
+  .merge(Stream.tick(15).take(2))
+  .interruptAfter(1_000)
+  .toArray()
+  .run();
+assertEq(ticks.length, 5);
+// <<< example
