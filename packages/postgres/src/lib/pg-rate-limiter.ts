@@ -14,8 +14,8 @@
 import { fail, fromPromise, sleep, succeed, sync } from "@spilne/perfect-core";
 import type { Eff, Throws, RateLimitExceeded, RateLimiter } from "@spilne/perfect-core";
 import { sql } from "drizzle-orm";
-import { type DrizzleDb, execRaw } from "./drizzle-db";
-import { PostgresError, toPostgresError } from "./postgres-error";
+import { type DrizzleDb, execRaw } from "./drizzle-db.js";
+import { PostgresError, toPostgresError } from "./postgres-error.js";
 
 export interface PgRateLimiterConfig {
   db: DrizzleDb;

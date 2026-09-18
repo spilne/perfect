@@ -9,7 +9,7 @@
 
 import { sql } from "drizzle-orm";
 import type { LeaderElection } from "@spilne/perfect-core/connect";
-import { type DrizzleDb, execRaw } from "./drizzle-db";
+import { type DrizzleDb, execRaw } from "./drizzle-db.js";
 
 export interface PgLeaderElectionConfig {
   db: DrizzleDb;

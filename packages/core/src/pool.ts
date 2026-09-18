@@ -14,8 +14,8 @@
 // across processes via Redis-coordinated leases, etc.) implement the same
 // interface.
 
-import { type Eff, type Throws } from "./eff";
-import { fail, succeed, sync, async, ensuring, suspend, uninterruptible } from "./constructors";
+import { type Eff, type Throws } from "./eff.js";
+import { fail, succeed, sync, async, ensuring, suspend, uninterruptible } from "./constructors.js";
 
 export class PoolClosed {
   readonly _tag = "PoolClosed" as const;

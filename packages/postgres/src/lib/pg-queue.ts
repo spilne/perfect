@@ -24,11 +24,11 @@ import type {
   ConsumerGroup,
 } from "@spilne/perfect-core/connect";
 import type { Stream } from "@spilne/perfect-core/stream";
-import { type DrizzleDb, execRaw } from "./drizzle-db";
-import { createQueueTable } from "./pg-queue-schema";
-import { ensureTable as ensureTableFromSchema } from "./schema-utils";
-import { pollStream } from "./poll-stream";
-import { PostgresError, toPostgresError } from "./postgres-error";
+import { type DrizzleDb, execRaw } from "./drizzle-db.js";
+import { createQueueTable } from "./pg-queue-schema.js";
+import { ensureTable as ensureTableFromSchema } from "./schema-utils.js";
+import { pollStream } from "./poll-stream.js";
+import { PostgresError, toPostgresError } from "./postgres-error.js";
 
 // ---------------------------------------------------------------------------
 // Config

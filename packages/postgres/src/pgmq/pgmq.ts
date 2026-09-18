@@ -4,9 +4,9 @@
 // ---------------------------------------------------------------------------
 
 import { sql } from "drizzle-orm";
-import { execRaw as exec, stringColumn } from "../lib/drizzle-db";
-import type { DrizzleDb } from "../lib/drizzle-db";
-import type { PgmqMessage, PgmqRecord, ReadMode } from "./types";
+import { execRaw as exec, stringColumn } from "../lib/drizzle-db.js";
+import type { DrizzleDb } from "../lib/drizzle-db.js";
+import type { PgmqMessage, PgmqRecord, ReadMode } from "./types.js";
 
 // ---------------------------------------------------------------------------
 // Internal helpers

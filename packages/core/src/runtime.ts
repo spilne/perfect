@@ -1,6 +1,6 @@
-import { Cause } from "./cause";
-import { type Eff, type EffectCheck, Suspend, Cont, Op } from "./eff";
-import { type Context, emptyContext, mergeContexts } from "./service";
+import { Cause } from "./cause.js";
+import { type Eff, type EffectCheck, Suspend, Cont, Op } from "./eff.js";
+import { type Context, emptyContext, mergeContexts } from "./service.js";
 import {
   Fiber,
   FiberState,
@@ -8,16 +8,16 @@ import {
   IN_CALLBACK,
   VALUE_IN_FLIGHT,
   notifyFiberStart,
-} from "./fiber";
-import { Scope } from "./scope";
-import { type Scheduler, SyncScheduler, DEFAULT_BUDGET, getDefaultScheduler } from "./scheduler";
-import { Clock, realClock } from "./clock";
-import { Random, realRandom } from "./random";
-import { Console, realConsole } from "./console";
-import { Logger, defaultLogger, LOG_ANNOTATIONS_KEY } from "./logger";
-import { Tracer, noopTracer, CURRENT_SPAN_KEY, NO_SPAN } from "./tracing";
-import { Metrics, defaultMetricsRegistry } from "./metrics";
-import type { Exit } from "./exit";
+} from "./fiber.js";
+import { Scope } from "./scope.js";
+import { type Scheduler, SyncScheduler, DEFAULT_BUDGET, getDefaultScheduler } from "./scheduler.js";
+import { Clock, realClock } from "./clock.js";
+import { Random, realRandom } from "./random.js";
+import { Console, realConsole } from "./console.js";
+import { Logger, defaultLogger, LOG_ANNOTATIONS_KEY } from "./logger.js";
+import { Tracer, noopTracer, CURRENT_SPAN_KEY, NO_SPAN } from "./tracing.js";
+import { Metrics, defaultMetricsRegistry } from "./metrics.js";
+import type { Exit } from "./exit.js";
 
 // Seed the default context once — real Clock/Random/Console are always
 // available so sleep() / Random.next / Console.log etc. work without an

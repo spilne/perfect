@@ -6,10 +6,10 @@
 //   const traced = withSpan(handler, "handle-request", { route });
 //   provide(traced, Tracer, new TestTracer())   // or the @spilne/perfect-otel bridge
 
-import { type Eff, Suspend, Op } from "./eff";
-import { service, type ServiceTag } from "./service";
-import { Cause } from "./cause";
-import type { Exit } from "./exit";
+import { type Eff, Suspend, Op } from "./eff.js";
+import { service, type ServiceTag } from "./service.js";
+import { Cause } from "./cause.js";
+import type { Exit } from "./exit.js";
 
 export type SpanStatus =
   | { readonly ok: true }

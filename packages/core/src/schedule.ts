@@ -1,6 +1,6 @@
-import { type Eff, Suspend, Op } from "./eff";
-import type { Cause } from "./cause";
-import { succeed, sleep, suspend } from "./constructors";
+import { type Eff, Suspend, Op } from "./eff.js";
+import type { Cause } from "./cause.js";
+import { succeed, sleep, suspend } from "./constructors.js";
 
 // A Schedule<In, Out> decides whether to continue and what delay to use.
 // Each step receives the input and returns either a delay + output, or done.

@@ -13,7 +13,7 @@ import {
   type TransactionalPartitionedStateBackend,
   type SourceRecordId,
 } from "@spilne/perfect-core/connect";
-import { execRaw, type DrizzleDb } from "./drizzle-db";
+import { execRaw, type DrizzleDb } from "./drizzle-db.js";
 
 export interface PgPartitionedStateBackendConfig<V = unknown> {
   db: DrizzleDb;

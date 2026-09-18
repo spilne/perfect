@@ -1,9 +1,9 @@
-import { Cause } from "./cause";
-import { type Cont, Suspend, Op } from "./eff";
-import type { Exit } from "./exit";
-import type { Context } from "./service";
-import { type Scheduler, getDefaultScheduler } from "./scheduler";
-import type { Scope } from "./scope";
+import { Cause } from "./cause.js";
+import { type Cont, Suspend, Op } from "./eff.js";
+import type { Exit } from "./exit.js";
+import type { Context } from "./service.js";
+import { type Scheduler, getDefaultScheduler } from "./scheduler.js";
+import type { Scope } from "./scope.js";
 
 export const enum FiberState {
   Ready = 0,

@@ -2,9 +2,9 @@ import type { Codec } from "@spilne/perfect-core/connect";
 import { JsonCodec } from "@spilne/perfect-core/connect";
 import { succeed } from "@spilne/perfect-core";
 import type { Eff, Ref, Throws } from "@spilne/perfect-core";
-import { type RedisClient } from "./redis-client";
-import { RedisError } from "./redis-error";
-import { decode, encode, numberResult, redisEff } from "./internal";
+import { type RedisClient } from "./redis-client.js";
+import { RedisError } from "./redis-error.js";
+import { decode, encode, numberResult, redisEff } from "./internal.js";
 
 const CAS_SCRIPT = `
 local current = redis.call('GET', KEYS[1])

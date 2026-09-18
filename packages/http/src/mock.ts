@@ -23,15 +23,15 @@
 // at the transport layer.
 
 import { type Eff, type Throws, succeed, fail, suspend } from "@spilne/perfect-core";
-import { type HttpClientError, HttpParseError, HttpStatusError } from "./errors";
+import { type HttpClientError, HttpParseError, HttpStatusError } from "./errors.js";
 import {
   AbstractHttpClient,
   type HttpClient,
   type HttpClientConfig,
   type HttpRequestParams,
   type RequestOptions,
-} from "./client";
-import { type HttpResponse, type ResponseDecoder, type ResponseParser } from "./response";
+} from "./client.js";
+import { type HttpResponse, type ResponseDecoder, type ResponseParser } from "./response.js";
 
 // ── Types ─────────────────────────────────────────────────────────
 

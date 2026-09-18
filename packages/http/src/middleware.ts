@@ -5,7 +5,7 @@
 // (2) exceptions inside hooks become unhandled defects (let them crash —
 // defensive wrappers should live inside the user's hook if needed).
 
-import type { HttpClientError } from "./errors";
+import type { HttpClientError } from "./errors.js";
 
 /** Lightweight context passed to every middleware callback. */
 export interface HttpRequestContext {

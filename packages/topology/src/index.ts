@@ -14,27 +14,32 @@ export {
   SourceRecordId,
   StateCheckpointId,
   LeaseEpoch,
-} from "./brands";
+} from "./brands.js";
 
-export { StreamTopology, KeyedTopology, WindowedTopology, BuiltTopology } from "./stream-topology";
+export {
+  StreamTopology,
+  KeyedTopology,
+  WindowedTopology,
+  BuiltTopology,
+} from "./stream-topology.js";
 
-export { TopologyRunner } from "./topology-runner";
+export { TopologyRunner } from "./topology-runner.js";
 
-export { DistributedRunner } from "./distributed-runner";
-export type { DistributedTopologyConfig } from "./distributed-runner";
+export { DistributedRunner } from "./distributed-runner.js";
+export type { DistributedTopologyConfig } from "./distributed-runner.js";
 
-export { planStages } from "./stage-planner";
-export type { StagePlan, TopologyStage } from "./stage-planner";
+export { planStages } from "./stage-planner.js";
+export type { StagePlan, TopologyStage } from "./stage-planner.js";
 
-export { analyze as analyzeTopology } from "./topology-analyzer";
-export type { TopologyWarning } from "./topology-analyzer";
+export { analyze as analyzeTopology } from "./topology-analyzer.js";
+export type { TopologyWarning } from "./topology-analyzer.js";
 
-export { WindowManager } from "./window-manager";
+export { WindowManager } from "./window-manager.js";
 
-export { JoinBuffer, type JoinedPair } from "./join-buffer";
+export { JoinBuffer, type JoinedPair } from "./join-buffer.js";
 
-export { InMemoryState } from "./state-backend";
-export type { StateBackend } from "./state-backend";
+export { InMemoryState } from "./state-backend.js";
+export type { StateBackend } from "./state-backend.js";
 
 export type { ShuffleTransport } from "@spilne/perfect-core/connect";
 
@@ -50,4 +55,4 @@ export type {
   BackpressureStats,
   CompiledTopology,
   ShuffleNode,
-} from "./types";
+} from "./types.js";

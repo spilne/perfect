@@ -25,9 +25,9 @@ import { Stream } from "@spilne/perfect-core/stream";
 import type { Pipe } from "@spilne/perfect-core/stream";
 import { OffsetTracker } from "@spilne/perfect-core/connect";
 import type { Envelope } from "@spilne/perfect-core/connect";
-import type { KafkaConsumer, KafkaOffsetCommit } from "./kafka-types";
-import { type TopicName, PartitionId, KafkaOffset } from "./brands";
-import { KafkaCommitError, type KafkaError } from "./kafka-error";
+import type { KafkaConsumer, KafkaOffsetCommit } from "./kafka-types.js";
+import { type TopicName, PartitionId, KafkaOffset } from "./brands.js";
+import { KafkaCommitError, type KafkaError } from "./kafka-error.js";
 
 export interface CommitBatchWithinConfig {
   /** Commit after this many messages. */

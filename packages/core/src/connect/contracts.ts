@@ -12,10 +12,10 @@
 //   broker-shaped (RabbitMQ, SQS, NATS core): opaque per-message ack token —
 //                 just Streamable + Sinkable + Acknowledgeable.
 
-import { type Brand, nominal, refined } from "../brand";
-import type { Eff } from "../eff";
-import type { Stream } from "../stream";
-import type { Codec } from "./codec";
+import { type Brand, nominal, refined } from "../brand.js";
+import type { Eff } from "../eff.js";
+import type { Stream } from "../stream/index.js";
+import type { Codec } from "./codec.js";
 
 // ── Branded identifiers — shared across all backends ───────────────
 //

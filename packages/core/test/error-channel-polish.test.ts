@@ -198,4 +198,39 @@ describe("TaggedError class helper", () => {
   test("static _tag is accessible", () => {
     expect(NotFound._tag).toBe("NotFound");
   });
+
+  describe("message", () => {
+    class WithMessage extends TaggedError("WithMessage")<{ message: string; id: number }>() {}
+
+    test("a string message in props wins, exactly as Object.assign would leave it", () => {
+      const e = new WithMessage({ message: "boom", id: 1 });
+      expect(e.message).toBe("boom");
+      expect(e.id).toBe(1);
+      expect(String(e.stack).split("\n")[0]).toBe("WithMessage: boom");
+    });
+
+    test("props without a message serialise into `Tag: {...}`", () => {
+      expect(new NotFound({ id: 42 }).message).toBe('NotFound: {"id":42}');
+    });
+
+    test("a non-string message still serialises the payload", () => {
+      class NumericMessage extends TaggedError("NumericMessage")<{ message: number }>() {}
+      const e = new NumericMessage({ message: 7 });
+      expect(e.message).toBe(7 as unknown as string);
+    });
+
+    test("a non-enumerable message is not adopted (Object.assign would skip it)", () => {
+      class Opaque extends TaggedError("Opaque")<Record<string, never>>() {}
+      const props = {};
+      Object.defineProperty(props, "message", { value: "hidden", enumerable: false });
+      expect(new Opaque(props).message).toBe("Opaque: {}");
+    });
+
+    test("an unserialisable payload falls back to String(props)", () => {
+      class Cyclic extends TaggedError("Cyclic")<Record<string, unknown>>() {}
+      const props: Record<string, unknown> = {};
+      props.self = props;
+      expect(new Cyclic(props).message).toBe("Cyclic: [object Object]");
+    });
+  });
 });

@@ -1,4 +1,4 @@
-import { type Eff, type Needs, Suspend, Op } from "./eff";
+import { type Eff, type Needs, Suspend, Op } from "./eff.js";
 
 const SERVICE_TAG: unique symbol = Symbol.for("spilne/service");
 

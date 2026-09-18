@@ -9,7 +9,7 @@
 // wrap it in an Eff when typed failures need to be exposed.
 // ---------------------------------------------------------------------------
 
-import { type Brand, nominal } from "../brand";
+import { type Brand, nominal } from "../brand.js";
 
 /**
  * A checkpoint identifier. Branded because backends with string keys

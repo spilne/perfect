@@ -8,9 +8,9 @@
 // implementations live in downstream packages — they implement this
 // interface and slot in via dependency injection.
 
-import { type Eff } from "./eff";
-import { sync } from "./constructors";
-import { clockNow } from "./clock";
+import { type Eff } from "./eff.js";
+import { sync } from "./constructors.js";
+import { clockNow } from "./clock.js";
 
 export interface CacheStore<K, V, S = never> {
   /** Read a value. Returns `undefined` if missing or expired. */

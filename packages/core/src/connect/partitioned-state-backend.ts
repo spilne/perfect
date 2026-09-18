@@ -6,7 +6,7 @@ import {
   type StateCheckpointId,
   type TopologyId,
   type TopologyInstanceId,
-} from "./contracts";
+} from "./contracts.js";
 
 export interface StatePartitionScope {
   readonly topologyId: TopologyId;

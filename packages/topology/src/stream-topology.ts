@@ -23,7 +23,7 @@ import type {
   ProcessSpec,
   JoinConfig,
   CompiledTopology,
-} from "./types";
+} from "./types.js";
 
 // ---------------------------------------------------------------------------
 // StreamTopology — entry point (unkeyed stream)

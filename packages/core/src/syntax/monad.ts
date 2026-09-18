@@ -1,7 +1,7 @@
-import { type Eff, Suspend, Op } from "../eff";
-import { succeed } from "../constructors";
+import { type Eff, Suspend, Op } from "../eff.js";
+import { succeed } from "../constructors.js";
 
-declare module "../eff" {
+declare module "../eff.js" {
   interface Suspend {
     flatMap<A, S1, B, S2>(this: Eff<A, S1>, f: (a: A) => Eff<B, S2>): Eff<B, S1 | S2>;
 

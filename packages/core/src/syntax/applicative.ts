@@ -1,7 +1,7 @@
-import { type Eff, Suspend, Op } from "../eff";
-import { succeed } from "../constructors";
+import { type Eff, Suspend, Op } from "../eff.js";
+import { succeed } from "../constructors.js";
 
-declare module "../eff" {
+declare module "../eff.js" {
   interface Suspend {
     zip<A, S1, B, S2>(this: Eff<A, S1>, that: Eff<B, S2>): Eff<[A, B], S1 | S2>;
 

@@ -1,6 +1,6 @@
-import { type Eff, type Throws, type ErrorsOf, Suspend, Op } from "../eff";
-import { type Fiber } from "../fiber";
-import { type Exit } from "../exit";
+import { type Eff, type Throws, type ErrorsOf, Suspend, Op } from "../eff.js";
+import { type Fiber } from "../fiber.js";
+import { type Exit } from "../exit.js";
 import {
   sleep,
   timeout,
@@ -14,20 +14,20 @@ import {
   acquireRelease,
   retry,
   type RetryConfig,
-} from "../constructors";
-import { provide, type ServiceTag, type ProvidedService } from "../service";
-import { type RetryPolicy } from "../retry-policy";
-import { type Schedule, repeat, retryWith } from "../schedule";
+} from "../constructors.js";
+import { provide, type ServiceTag, type ProvidedService } from "../service.js";
+import { type RetryPolicy } from "../retry-policy.js";
+import { type Schedule, repeat, retryWith } from "../schedule.js";
 import {
   retryAllBy,
   repeatUntil,
   repeatUntilWithBackoff,
   type RepeatTimeoutError,
-} from "../combinators-extra";
-import { type RetryAllByOptions } from "../combinators-extra";
-import { withSpan } from "../tracing";
+} from "../combinators-extra.js";
+import { type RetryAllByOptions } from "../combinators-extra.js";
+import { withSpan } from "../tracing.js";
 
-declare module "../eff" {
+declare module "../eff.js" {
   interface Suspend {
     fork<A, S>(this: Eff<A, S>): Eff<Fiber<A>, Exclude<S, Throws<unknown>>>;
     withSpan<A, S>(this: Eff<A, S>, name: string, attributes?: Record<string, unknown>): Eff<A, S>;

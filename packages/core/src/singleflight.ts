@@ -12,11 +12,11 @@
 // Eff-typed contract; in-process by default. Distributed (Redis-backed,
 // shared-key dedup across processes) implementations live downstream.
 
-import { type Eff, type Throws, Suspend, Op } from "./eff";
-import { failCause, suspend, sync } from "./constructors";
-import { Cause } from "./cause";
-import { type Deferred, InProcessDeferred } from "./deferred";
-import type { Exit } from "./exit";
+import { type Eff, type Throws, Suspend, Op } from "./eff.js";
+import { failCause, suspend, sync } from "./constructors.js";
+import { Cause } from "./cause.js";
+import { type Deferred, InProcessDeferred } from "./deferred.js";
+import type { Exit } from "./exit.js";
 
 // Followers see a typed failure; a defect or interrupt is squashed to a value.
 function errorValue<E>(cause: Cause): E {

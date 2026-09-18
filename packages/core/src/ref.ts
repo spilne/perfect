@@ -4,8 +4,8 @@
 // implementation. Distributed implementations (Redis, etcd, etc.) live in
 // downstream packages — they implement the same interface.
 
-import { type Eff } from "./eff";
-import { sync } from "./constructors";
+import { type Eff } from "./eff.js";
+import { sync } from "./constructors.js";
 
 export interface Ref<A, S = never> {
   /** Read the current value. */

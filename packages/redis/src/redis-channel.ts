@@ -3,10 +3,10 @@ import type { Eff, Throws } from "@spilne/perfect-core";
 import type { Codec, Sinkable, Streamable } from "@spilne/perfect-core/connect";
 import { JsonCodec } from "@spilne/perfect-core/connect";
 import { Stream } from "@spilne/perfect-core/stream";
-import { encode, redisEff } from "./internal";
-import type { RedisClient } from "./redis-client";
-import { RedisError, toRedisError } from "./redis-error";
-import { RedisPubSub } from "./redis-pubsub";
+import { encode, redisEff } from "./internal.js";
+import type { RedisClient } from "./redis-client.js";
+import { RedisError, toRedisError } from "./redis-error.js";
+import { RedisPubSub } from "./redis-pubsub.js";
 
 export interface RedisChannelConfig<T> {
   redis: RedisClient;

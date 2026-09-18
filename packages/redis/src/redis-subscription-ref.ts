@@ -1,10 +1,10 @@
 import type { Eff, QueueClosed, SubscriptionRef, Throws } from "@spilne/perfect-core";
 import type { Codec } from "@spilne/perfect-core/connect";
 import { Stream } from "@spilne/perfect-core/stream";
-import type { RedisClient } from "./redis-client";
-import { RedisError } from "./redis-error";
-import { RedisPubSub } from "./redis-pubsub";
-import { RedisRef } from "./redis-ref";
+import type { RedisClient } from "./redis-client.js";
+import { RedisError } from "./redis-error.js";
+import { RedisPubSub } from "./redis-pubsub.js";
+import { RedisRef } from "./redis-ref.js";
 
 export interface RedisSubscriptionRefConfig<A> {
   redis: RedisClient;

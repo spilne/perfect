@@ -4,7 +4,7 @@
 // Detects potential issues like missing shuffles before stateful operators.
 // ---------------------------------------------------------------------------
 
-import type { TopologyNode, CompiledTopology } from "./types";
+import type { TopologyNode, CompiledTopology } from "./types.js";
 
 export interface TopologyWarning {
   type: "missing-shuffle";

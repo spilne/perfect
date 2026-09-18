@@ -1,4 +1,4 @@
-import type { Eff } from "../eff";
+import type { Eff } from "../eff.js";
 import {
   awaitFiber,
   ensuring,
@@ -9,16 +9,16 @@ import {
   sync,
   uninterruptible,
   uninterruptibleMask,
-} from "../constructors";
-import { Cause } from "../cause";
-import { InProcessDeferred } from "../deferred";
-import type { Exit } from "../exit";
-import type { Fiber } from "../fiber";
-import { Queue } from "../queue";
-import { Semaphore } from "../semaphore";
-import type { Chunk } from "./chunk";
-import type { Stream, Step } from "./stream";
-import { driverStream, type DriverRun, type Pull } from "./driver-lifecycle";
+} from "../constructors.js";
+import { Cause } from "../cause.js";
+import { InProcessDeferred } from "../deferred.js";
+import type { Exit } from "../exit.js";
+import type { Fiber } from "../fiber.js";
+import { Queue } from "../queue.js";
+import { Semaphore } from "../semaphore.js";
+import type { Chunk } from "./chunk.js";
+import type { Stream, Step } from "./stream.js";
+import { driverStream, type DriverRun, type Pull } from "./driver-lifecycle.js";
 
 const OUTPUT_CAPACITY = 16;
 const UNIT: Eff<void, never> = succeed(undefined);

@@ -1,11 +1,11 @@
-import "./functor";
-import "./monad";
-import "./error";
-import "./applicative";
-import "./parallel";
-import "./fiber";
-import "./thenable";
-import "./generator";
-import "./runners";
+import "./functor.js";
+import "./monad.js";
+import "./error.js";
+import "./applicative.js";
+import "./parallel.js";
+import "./fiber.js";
+import "./thenable.js";
+import "./generator.js";
+import "./runners.js";
 
-export { eff } from "./generator";
+export { eff } from "./generator.js";

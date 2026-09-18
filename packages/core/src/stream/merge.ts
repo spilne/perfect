@@ -1,10 +1,10 @@
-import type { Eff } from "../eff";
-import { failCause, succeed } from "../constructors";
-import { Cause } from "../cause";
-import { Queue } from "../queue";
-import type { Chunk } from "./chunk";
-import type { Stream, Step } from "./stream";
-import { combineFinalizers, driverStream, type DriverRun } from "./driver-lifecycle";
+import type { Eff } from "../eff.js";
+import { failCause, succeed } from "../constructors.js";
+import { Cause } from "../cause.js";
+import { Queue } from "../queue.js";
+import type { Chunk } from "./chunk.js";
+import type { Stream, Step } from "./stream.js";
+import { combineFinalizers, driverStream, type DriverRun } from "./driver-lifecycle.js";
 
 type MergeEvent<A> =
   | { _tag: "chunk"; chunk: Chunk<A> }

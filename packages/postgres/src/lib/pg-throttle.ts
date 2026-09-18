@@ -8,9 +8,9 @@
 // ---------------------------------------------------------------------------
 
 import type { Eff, Throttle, Throws } from "@spilne/perfect-core";
-import { type DrizzleDb } from "./drizzle-db";
-import { PgRateLimiter } from "./pg-rate-limiter";
-import type { PostgresError } from "./postgres-error";
+import { type DrizzleDb } from "./drizzle-db.js";
+import { PgRateLimiter } from "./pg-rate-limiter.js";
+import type { PostgresError } from "./postgres-error.js";
 
 export interface PgThrottleConfig {
   db: DrizzleDb;

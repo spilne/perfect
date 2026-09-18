@@ -18,7 +18,7 @@
 //      what now?"
 
 import { type Eff, type Throws, sync, tryPromise, scoped } from "@spilne/perfect-core";
-import { HttpNetworkError, HttpTimeoutError, type HttpClientError } from "./errors";
+import { HttpNetworkError, HttpTimeoutError, type HttpClientError } from "./errors.js";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 

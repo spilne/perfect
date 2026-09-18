@@ -6,15 +6,15 @@
 //   retry(eff, RetryPolicy.recurs(3).whenError(e => e._tag === "Transient"))
 //   retry(eff, RetryPolicy.spaced(1000).withTimeBudget(30_000).onRetry(d => Log.info(...)))
 
-import { type Eff, Suspend, Op } from "./eff";
-import { Cause } from "./cause";
-import { clockNow } from "./clock";
-import { type RetryConfig, sleep, succeed } from "./constructors";
-import { Schedule, type RetryDetails } from "./schedule";
+import { type Eff, Suspend, Op } from "./eff.js";
+import { Cause } from "./cause.js";
+import { clockNow } from "./clock.js";
+import { type RetryConfig, sleep, succeed } from "./constructors.js";
+import { Schedule, type RetryDetails } from "./schedule.js";
 
 // ── Public: RetryDetails passed to onRetry hooks ────────────────────
 
-export type { RetryDetails } from "./schedule";
+export type { RetryDetails } from "./schedule.js";
 
 // ── Internal policy config ──────────────────────────────────────────
 

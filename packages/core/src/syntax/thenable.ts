@@ -9,12 +9,12 @@
 // a fiber; anything richer goes through run(). The microtask hop is
 // unavoidable either way — still ~10× slower than composed .flatMap.
 
-import { Suspend, Op } from "../eff";
-import { Cause } from "../cause";
-import { run } from "../runtime";
-import { PROMISE_THUNK, PROMISE_ON_REJECT } from "../constructors";
+import { Suspend, Op } from "../eff.js";
+import { Cause } from "../cause.js";
+import { run } from "../runtime.js";
+import { PROMISE_THUNK, PROMISE_ON_REJECT } from "../constructors.js";
 
-declare module "../eff" {
+declare module "../eff.js" {
   interface Suspend {
     /**
      * Make `await eff` work. For composition in hot paths prefer `.flatMap`

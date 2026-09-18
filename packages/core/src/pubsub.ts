@@ -16,10 +16,10 @@
 // Eff-typed contract; in-process by default. Distributed PubSub
 // implementations (Redis Pub/Sub, NATS, etc.) implement the same interface.
 
-import { type Eff, type Throws } from "./eff";
-import { succeed, sync, suspend } from "./constructors";
-import { type Queue, Queue as QueueNS, QueueClosed } from "./queue";
-import { Stream } from "./stream";
+import { type Eff, type Throws } from "./eff.js";
+import { succeed, sync, suspend } from "./constructors.js";
+import { type Queue, Queue as QueueNS, QueueClosed } from "./queue.js";
+import { Stream } from "./stream/index.js";
 
 export interface PubSub<T, S = never> {
   /** Publish a value to all current subscribers. Blocks if any subscriber queue is full. */

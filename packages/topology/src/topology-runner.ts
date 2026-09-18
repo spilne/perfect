@@ -38,18 +38,18 @@ import {
   type TransactionalPartitionedStateBackend,
   type TransactionalSinkable,
 } from "@spilne/perfect-core/connect";
-import type { StateBackend } from "./state-backend";
-import { BuiltTopology } from "./stream-topology";
-import { WindowManager } from "./window-manager";
-import { JoinBuffer } from "./join-buffer";
-import { PartitionLifecycle, type PartitionContext } from "./partition-lifecycle";
+import type { StateBackend } from "./state-backend.js";
+import { BuiltTopology } from "./stream-topology.js";
+import { WindowManager } from "./window-manager.js";
+import { JoinBuffer } from "./join-buffer.js";
+import { PartitionLifecycle, type PartitionContext } from "./partition-lifecycle.js";
 import type {
   TopologyConfig,
   TopologyHandle,
   TopologyMetrics,
   TopologyNode,
   WindowType,
-} from "./types";
+} from "./types.js";
 
 export class TopologyRunner {
   static async run(topology: BuiltTopology, config: TopologyConfig): Promise<TopologyHandle> {

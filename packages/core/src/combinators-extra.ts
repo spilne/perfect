@@ -1,13 +1,13 @@
 // Ported from promin's Pipeline: combinators that go beyond the core algebra.
 // These are standalone functions, not methods — they take an Eff and return an Eff.
 
-import { type Eff, type Throws, type ErrorsOf, Suspend, Op } from "./eff";
-import { Cause } from "./cause";
-import { succeed, fail, sleep, die, retry } from "./constructors";
-import { clockNow } from "./clock";
-import { all as allParallel } from "./combinators";
-import { RetryAttempt } from "./retry-attempt";
-import { RetryPolicy } from "./retry-policy";
+import { type Eff, type Throws, type ErrorsOf, Suspend, Op } from "./eff.js";
+import { Cause } from "./cause.js";
+import { succeed, fail, sleep, die, retry } from "./constructors.js";
+import { clockNow } from "./clock.js";
+import { all as allParallel } from "./combinators.js";
+import { RetryAttempt } from "./retry-attempt.js";
+import { RetryPolicy } from "./retry-policy.js";
 
 // ── trapError ──────────────────────────────────────────────────────
 //

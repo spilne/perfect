@@ -31,7 +31,7 @@ import { type HttpMiddleware, type HttpRequestContext } from "@spilne/perfect-ht
 import type { HttpClientError, HttpRequestOptions, HttpTransport } from "@spilne/perfect-http";
 import { defaultTransport } from "@spilne/perfect-http";
 import { type Eff, type Throws } from "@spilne/perfect-core";
-import { type RedactionPolicy, defaultRedaction, redactUrl } from "./redact";
+import { type RedactionPolicy, defaultRedaction, redactUrl } from "./redact.js";
 
 const TRACER_NAME = "@spilne/perfect-http";
 

@@ -19,11 +19,11 @@ import type {
   TransactionalEnvelope,
   TransactionalSinkable,
 } from "@spilne/perfect-core/connect";
-import type { DrizzleDb } from "../lib/drizzle-db";
-import { pollStream } from "../lib/poll-stream";
-import { PostgresError, toPostgresError } from "../lib/postgres-error";
-import type { ReadMode, AckMode } from "./types";
-import * as pgmq from "./pgmq";
+import type { DrizzleDb } from "../lib/drizzle-db.js";
+import { pollStream } from "../lib/poll-stream.js";
+import { PostgresError, toPostgresError } from "../lib/postgres-error.js";
+import type { ReadMode, AckMode } from "./types.js";
+import * as pgmq from "./pgmq.js";
 
 // ---------------------------------------------------------------------------
 // Schema errors

@@ -15,7 +15,7 @@
 // payloads (keys, values, headers, timestamps) stay plain.
 // ---------------------------------------------------------------------------
 
-import type { TopicName, GroupId, PartitionId, KafkaOffset } from "./brands";
+import type { TopicName, GroupId, PartitionId, KafkaOffset } from "./brands.js";
 
 // ---------------------------------------------------------------------------
 // Client — entry point for creating producers, consumers, admins

@@ -1,5 +1,5 @@
-import type { Eff } from "./eff";
-import { succeed, suspend, ensuring } from "./constructors";
+import type { Eff } from "./eff.js";
+import { succeed, suspend, ensuring } from "./constructors.js";
 
 export type Finalizer = () => Eff<void, unknown>;
 

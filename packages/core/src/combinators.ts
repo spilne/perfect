@@ -1,4 +1,4 @@
-import { type Eff, type InferValue, type InferEffects, Suspend, Op } from "./eff";
+import { type Eff, type InferValue, type InferEffects, Suspend, Op } from "./eff.js";
 
 // standalone combinators only — fluent methods live in syntax/
 

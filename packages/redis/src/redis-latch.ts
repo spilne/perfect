@@ -1,8 +1,8 @@
 import { succeed } from "@spilne/perfect-core";
 import type { Eff, Latch, Throws } from "@spilne/perfect-core";
-import { numberResult, redisBlocking, redisEff, redisKeyFamily } from "./internal";
-import type { RedisClient } from "./redis-client";
-import { RedisError } from "./redis-error";
+import { numberResult, redisBlocking, redisEff, redisKeyFamily } from "./internal.js";
+import type { RedisClient } from "./redis-client.js";
+import { RedisError } from "./redis-error.js";
 
 const COUNT_DOWN_SCRIPT = `
 local current = tonumber(redis.call('GET', KEYS[1]) or '0')

@@ -14,9 +14,9 @@
 // Postgres-backed, etc.) live in other @spilne/perfect-* or downstream packages —
 // they implement the same interface and are a drop-in swap.
 
-import { type Eff, type Throws } from "./eff";
-import { fail, sync } from "./constructors";
-import { Clock } from "./clock";
+import { type Eff, type Throws } from "./eff.js";
+import { fail, sync } from "./constructors.js";
+import { Clock } from "./clock.js";
 
 export type CircuitState = "closed" | "open" | "half-open";
 

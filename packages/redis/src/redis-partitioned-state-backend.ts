@@ -12,8 +12,8 @@ import {
   type StatePartitionScope,
   type SourceRecordId,
 } from "@spilne/perfect-core/connect";
-import { decode, encode, redisKeyFamily } from "./internal";
-import type { RedisClient } from "./redis-client";
+import { decode, encode, redisKeyFamily } from "./internal.js";
+import type { RedisClient } from "./redis-client.js";
 
 export interface RedisPartitionedStateBackendConfig<V = unknown> {
   redis: RedisClient;

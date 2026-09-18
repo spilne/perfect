@@ -4,8 +4,8 @@ import type {
   PartitionAssignment,
   PartitionLifecycle,
 } from "@spilne/perfect-core/connect";
-import { KafkaOffset, type TopicName } from "./brands";
-import type { KafkaConsumer, KafkaOffsetCommit } from "./kafka-types";
+import { KafkaOffset, type TopicName } from "./brands.js";
+import type { KafkaConsumer, KafkaOffsetCommit } from "./kafka-types.js";
 
 interface SubscriptionOptions {
   readonly consumer: KafkaConsumer;

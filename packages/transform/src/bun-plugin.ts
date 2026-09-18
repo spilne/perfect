@@ -1,5 +1,5 @@
 import { plugin } from "bun";
-import { rewriteEffBlocks } from "./rewrite";
+import { rewriteEffBlocks } from "./rewrite.js";
 
 // The Rust CLI transformer (crates/perfect-transform) is intentionally NOT
 // used here: its output diverges from the TS rewriter (guard handling, yield

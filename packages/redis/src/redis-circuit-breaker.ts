@@ -7,9 +7,9 @@ import type {
   Eff,
   Throws,
 } from "@spilne/perfect-core";
-import { redisEff } from "./internal";
-import type { RedisClient } from "./redis-client";
-import { RedisError } from "./redis-error";
+import { redisEff } from "./internal.js";
+import type { RedisClient } from "./redis-client.js";
+import { RedisError } from "./redis-error.js";
 
 const INSPECT_SCRIPT = `
 local state = redis.call('HGET', KEYS[1], 'state') or 'closed'
