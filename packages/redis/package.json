@@ -1,6 +1,6 @@
 {
   "name": "@spilne/perfect-redis",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Redis-backed distributed coordination primitives and messaging connectors for @spilne/perfect-core.",
   "keywords": [
     "coordination",
@@ -44,7 +44,7 @@
     "build": "bun ../../scripts/build-package.ts ."
   },
   "dependencies": {
-    "@spilne/perfect-core": "^0.1.0"
+    "@spilne/perfect-core": "^0.2.0"
   },
   "devDependencies": {
     "ioredis": "^5.7.0",

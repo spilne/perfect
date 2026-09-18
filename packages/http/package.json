@@ -1,6 +1,6 @@
 {
   "name": "@spilne/perfect-http",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "HTTP client on the Perfect effect runtime — typed errors, retries, streaming (SSE/NDJSON), mockable transport.",
   "keywords": [
     "client",
@@ -45,7 +45,7 @@
     "bench": "bun run bench/vs-clients.ts"
   },
   "dependencies": {
-    "@spilne/perfect-core": "^0.1.0"
+    "@spilne/perfect-core": "^0.2.0"
   },
   "devDependencies": {
     "axios": "^1.19.0",

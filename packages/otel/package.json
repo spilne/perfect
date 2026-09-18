@@ -1,6 +1,6 @@
 {
   "name": "@spilne/perfect-otel",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "OpenTelemetry bridge for @spilne/perfect-core observability — Tracer spans and metrics export.",
   "keywords": [
     "effect",
@@ -43,7 +43,7 @@
   },
   "dependencies": {
     "@opentelemetry/api": "^1.9.0",
-    "@spilne/perfect-core": "^0.1.0"
+    "@spilne/perfect-core": "^0.2.0"
   },
   "devDependencies": {}
 }
