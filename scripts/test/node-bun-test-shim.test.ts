@@ -2,16 +2,19 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { formatEachTitle } from "../node-bun-test-titles.mjs";
+import { TITLE_MATRIX } from "./fixtures/bun-test-titles.matrix";
 
 // The Node lane (`bun run test:node`) runs the same test files through
-// scripts/node-bun-test-shim.mjs. The fixture uses the `bun:test` features the
-// shim emulates; both runners must report the same titles and pass.
+// scripts/node-bun-test-shim.mjs. Fixtures use the `bun:test` features the
+// shim emulates; under both runners they must pass with the same titles.
 
 const root = resolve(import.meta.dir, "../..");
-const FIXTURE = "scripts/test/fixtures/bun-test-compat.fixture.ts";
+const COMPAT_FIXTURE = "scripts/test/fixtures/bun-test-compat.fixture.ts";
+const TITLES_FIXTURE = "scripts/test/fixtures/bun-test-titles.fixture.ts";
 const node = Bun.which("node");
 
-const EXPECTED_TITLES = [
+const COMPAT_TITLES = [
   "scalar 1",
   "scalar 2",
   "tuple 1 and a",
@@ -67,12 +70,24 @@ const decodeXml = (text: string): string =>
       : XML_ENTITIES[entity]!,
   );
 
-// Test titles from a Bun JUnit report, prefixed by their describe titles. The
-// outermost suite is the file.
-function junitTitles(xml: string): string[] {
+/** Test titles `bun test` reports for a fixture, prefixed by their describe titles. */
+async function bunTitles(fixture: string): Promise<string[]> {
+  const directory = await mkdtemp(join(tmpdir(), "perfect-bun-test-compat-"));
+  directories.push(directory);
+  const report = join(directory, "report.xml");
+  const result = await spawn([
+    process.execPath,
+    "test",
+    "--reporter=junit",
+    `--reporter-outfile=${report}`,
+    `./${fixture}`,
+  ]);
+  expect(result.code, result.stderr).toBe(0);
+
   const titles: string[] = [];
   const suites: string[] = [];
-  for (const match of xml.matchAll(
+  // The outermost suite is the file.
+  for (const match of (await readFile(report, "utf8")).matchAll(
     /<testsuite name="([^"]*)"|<\/testsuite>|<testcase name="([^"]*)"/g,
   )) {
     if (match[1] !== undefined) suites.push(decodeXml(match[1]));
@@ -83,57 +98,59 @@ function junitTitles(xml: string): string[] {
   return titles;
 }
 
-// Test titles from node:test's TAP output. A subtest's result line comes
-// before its parent's, indented four spaces per level.
-function tapTitles(tap: string): string[] {
+/** Test titles Node reports for a fixture run through the shim. */
+async function nodeTitles(fixture: string): Promise<string[]> {
+  const result = await spawn([
+    node!,
+    "--test",
+    "--test-reporter=./scripts/test/fixtures/test-names-reporter.mjs",
+    "--loader",
+    "./scripts/node-bun-test-loader.mjs",
+    fixture,
+  ]);
+  expect(result.code, `${result.stdout}\n${result.stderr}`).toBe(0);
+
+  // A test is reported before the suite around it, one nesting level deeper.
   const pending = new Map<number, string[]>();
-  for (const line of tap.split("\n")) {
-    const match = /^( *)(?:not )?ok \d+ - (.*?)(?: # (?:SKIP|TODO).*)?$/.exec(line);
-    if (match === null) continue;
-    const depth = match[1]!.length / 4;
-    const name = match[2]!.replace(/\\#/g, "#").replace(/\\\\/g, "\\");
-    const children = pending.get(depth + 1) ?? [];
-    pending.delete(depth + 1);
-    const entries = children.length === 0 ? [name] : children.map((child) => `${name} > ${child}`);
-    pending.set(depth, [...(pending.get(depth) ?? []), ...entries]);
+  for (const line of result.stdout.split("\n")) {
+    if (line.trim() === "") continue;
+    const { name, nesting } = JSON.parse(line) as { name: string; nesting: number };
+    const children = pending.get(nesting + 1) ?? [];
+    pending.delete(nesting + 1);
+    const titles = children.length === 0 ? [name] : children.map((child) => `${name} > ${child}`);
+    pending.set(nesting, [...(pending.get(nesting) ?? []), ...titles]);
   }
-  // Some Node versions wrap a file's tests in a subtest named after the file.
-  return (pending.get(0) ?? []).map((title) =>
-    title.replace(new RegExp(`^.*${FIXTURE.replaceAll(".", "\\.")} > `), ""),
-  );
+  // Some Node versions wrap a file's tests in a test named after the file.
+  const top = pending.get(0) ?? [];
+  return top.length > 0 && top.every((title) => title.startsWith(`${resolve(root, fixture)} > `))
+    ? top.map((title) => title.slice(resolve(root, fixture).length + 3))
+    : top;
 }
 
-test("bun test reports the fixture titles", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "perfect-bun-test-compat-"));
-  directories.push(directory);
-  const report = join(directory, "report.xml");
+const matrixTitles = TITLE_MATRIX.flatMap(([title, rows]) =>
+  rows.map((row, index) => formatEachTitle(title, Array.isArray(row) ? row : [row], index)),
+);
 
-  const result = await spawn([
-    process.execPath,
-    "test",
-    "--reporter=junit",
-    `--reporter-outfile=${report}`,
-    `./${FIXTURE}`,
-  ]);
+test("bun test reports the compat fixture titles", async () => {
+  expect(await bunTitles(COMPAT_FIXTURE)).toEqual(COMPAT_TITLES);
+});
 
-  expect(result.code, result.stderr).toBe(0);
-  expect(junitTitles(await readFile(report, "utf8"))).toEqual(EXPECTED_TITLES);
+test("the shim formats every title in the matrix as Bun does", async () => {
+  expect(await bunTitles(TITLES_FIXTURE)).toEqual(matrixTitles);
 });
 
 test.skipIf(node === null)(
-  "the Node shim runs the fixture with the same titles",
+  "the Node shim runs the compat fixture with the same titles",
   async () => {
-    const result = await spawn([
-      node!,
-      "--test",
-      "--test-reporter=tap",
-      "--loader",
-      "./scripts/node-bun-test-loader.mjs",
-      FIXTURE,
-    ]);
+    expect(await nodeTitles(COMPAT_FIXTURE)).toEqual(COMPAT_TITLES);
+  },
+  60_000,
+);
 
-    expect(result.code, `${result.stdout}\n${result.stderr}`).toBe(0);
-    expect(tapTitles(result.stdout)).toEqual(EXPECTED_TITLES);
+test.skipIf(node === null)(
+  "the Node shim runs the title matrix with the same titles",
+  async () => {
+    expect(await nodeTitles(TITLES_FIXTURE)).toEqual(matrixTitles);
   },
   60_000,
 );
