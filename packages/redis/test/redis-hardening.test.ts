@@ -213,6 +213,40 @@ describe("Redis production hardening", () => {
       expect(fake.pushed).toEqual([["{jobs}:data", ["7"]]]);
     });
 
+    test("RedisQueue.take decodes the item in the step that receives it", async () => {
+      const fake = fakeRedis();
+      const queue = RedisQueue.make<number>({ redis: fake.redis, key: "jobs" });
+      const scheduler = new SyncScheduler();
+      const taker = runFiber(queue.take() as Eff<number, never>, scheduler);
+      await settle(scheduler, fake.popping);
+
+      fake.pop(["{jobs}:data", "7"]);
+      await macrotask();
+      expect(taker.status).toBe("ready");
+      scheduler.flush();
+
+      // No further wait after BRPOP, where an interrupt would drop the item.
+      expect(taker.result).toEqual({ ok: true, value: 7 });
+      expect(fake.pushed).toEqual([]);
+    });
+
+    test("RedisQueue.take fails with a typed decode error for an undecodable item", async () => {
+      const fake = fakeRedis();
+      const queue = RedisQueue.make<number>({ redis: fake.redis, key: "jobs" });
+      const scheduler = new SyncScheduler();
+      const taker = runFiber(queue.take() as Eff<number, never>, scheduler);
+      await settle(scheduler, fake.popping);
+
+      fake.pop(["{jobs}:data", "{not json"]);
+      await macrotask();
+      scheduler.flush();
+
+      expect(taker.result).toMatchObject({
+        ok: false,
+        cause: { _tag: "Fail", error: { _tag: "RedisError", operation: "queue.decode" } },
+      });
+    });
+
     test("RedisQueue.take interrupted while BRPOP is still returning an item", async () => {
       const fake = fakeRedis();
       const queue = RedisQueue.make<number>({ redis: fake.redis, key: "jobs" });

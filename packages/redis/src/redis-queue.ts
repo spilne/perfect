@@ -1,11 +1,11 @@
-import { fail, sleep, succeed } from "@spilne/perfect-core";
+import { fail, sleep, succeed, suspend } from "@spilne/perfect-core";
 import type { Codec } from "@spilne/perfect-core/connect";
 import { JsonCodec } from "@spilne/perfect-core/connect";
 import type { Eff, Queue, Throws } from "@spilne/perfect-core";
 import { QueueClosed } from "@spilne/perfect-core";
 import { decode, encode, numberResult, redisBlocking, redisEff, redisKeyFamily } from "./internal";
 import type { RedisClient } from "./redis-client";
-import { RedisError } from "./redis-error";
+import { RedisError, toRedisError } from "./redis-error";
 
 const OFFER_SCRIPT = `
 if redis.call('HGET', KEYS[2], 'closed') == '1' then return -1 end
@@ -92,7 +92,18 @@ export class RedisQueue<A> implements Queue<A, Throws<RedisError>> {
           },
         },
       ).flatMap((result) => {
-        if (result) return redisEff("queue.decode", async () => decode(this.codec, result[1]));
+        // Decoded in the step that receives the item: an async decode would be
+        // one more wait where an interrupt drops an item nobody gives back.
+        if (result) {
+          const raw = result[1];
+          return suspend((): Eff<A, Throws<RedisError>> => {
+            try {
+              return succeed(decode(this.codec, raw));
+            } catch (cause) {
+              return fail(toRedisError("queue.decode", cause));
+            }
+          });
+        }
         return this.isClosed.flatMap((closed) => (closed ? fail(new QueueClosed()) : loop()));
       });
     return loop();
