@@ -582,6 +582,111 @@ describe("run teardown", () => {
   });
 });
 
+describe("cleanup of a cut pull", () => {
+  // A racing wrapper waits for the pull it cut to finish its cleanup. A linear
+  // source cleans up inside that pull; an operator with background fibers only
+  // stops waiting on its queue there, and its fibers clean up when the stream
+  // is finalized.
+  const failingCleanup = () =>
+    Stream.fromEffect(
+      ensuring(
+        sleep(100).map(() => 1),
+        fail(new TeardownError({})),
+      ),
+    );
+  const slowCleanup = () =>
+    Stream.fromEffect(
+      ensuring(
+        sleep(100).map(() => 1),
+        sleep(20),
+      ),
+    );
+  const sources: Record<string, (build: () => Stream<number, any>) => Stream<number, any>> = {
+    linear: (build) => build(),
+    merge: (build) => build().merge(Stream.empty<number>()),
+  };
+
+  const wrappers: {
+    name: string;
+    wrap: (stream: Stream<number, any>) => Stream<number, any>;
+    error?: string;
+  }[] = [
+    { name: "timeout", wrap: (s) => s.timeout(5), error: "StreamTimeoutError" },
+    { name: "deadline", wrap: (s) => s.deadline(5), error: "StreamDeadlineError" },
+    { name: "interruptAfter", wrap: (s) => s.interruptAfter(5) },
+    { name: "takeUntil", wrap: (s) => s.takeUntil(Stream.fromEffect(sleep(5))) },
+  ];
+
+  describe.each(wrappers)("$name", ({ wrap, error }) => {
+    test.each(Object.keys(sources))(
+      "%s source: a failing cleanup joins the outcome instead of replacing it",
+      (source) => {
+        const run = runVirtual({ effect: wrap(sources[source]!(failingCleanup)).toArray() });
+
+        expect(run.result?.ok).toBe(false);
+        if (run.result?.ok === false) {
+          const tags = Cause.failures(run.result.cause).map((e) => (e as { _tag: string })._tag);
+          expect(tags).toEqual(error === undefined ? ["TeardownError"] : [error, "TeardownError"]);
+        }
+        expect(run.now).toBe(5);
+        expect(run.leaked).toEqual([]);
+      },
+    );
+
+    test.each(Object.keys(sources))(
+      "%s source: a slow cleanup finishes before the stream does",
+      (source) => {
+        const run = runVirtual({ effect: wrap(sources[source]!(slowCleanup)).toArray() });
+
+        if (error === undefined) {
+          expect(run.result).toEqual({ ok: true, value: [] });
+        } else {
+          expect(run.result?.ok).toBe(false);
+          if (run.result?.ok === false) {
+            expect(Cause.firstFail(run.result.cause)?.value).toMatchObject({ _tag: error });
+          }
+        }
+        expect(run.now).toBe(25);
+        expect(run.leaked).toEqual([]);
+      },
+    );
+  });
+
+  test("interruptOn: a failing cleanup of the cut pull fails the stream", () => {
+    const controller = new AbortController();
+    const run = runVirtual({
+      effect: failingCleanup().interruptOn(controller.signal).toArray(),
+      onTick: (now) => {
+        if (now === 5) controller.abort();
+      },
+    });
+
+    expect(run.result?.ok).toBe(false);
+    if (run.result?.ok === false) {
+      expect(Cause.failures(run.result.cause)).toEqual([new TeardownError({})]);
+    }
+    expect(run.leaked).toEqual([]);
+  });
+
+  test("a merge pull is cut on time; its fibers clean up at finalization", () => {
+    let timedOutAt = -1;
+    const run = runVirtual({
+      effect: collect(
+        slowCleanup()
+          .merge(Stream.empty<number>())
+          .timeout(5)
+          .catchTag("StreamTimeoutError", () =>
+            Stream.fromEffect(clockNow.map((now) => void (timedOutAt = now))),
+          ),
+      ),
+    });
+
+    expect(timedOutAt).toBe(5);
+    expect(run.now).toBe(25);
+    expect(run.leaked).toEqual([]);
+  });
+});
+
 describe("retry and reuse", () => {
   test("a later failed pull fails again under retry instead of hanging", () => {
     const probe = makeProbe();

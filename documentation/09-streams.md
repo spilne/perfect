@@ -179,7 +179,18 @@ deterministic under `TestClock`.
 `timeout`, `deadline`, `interruptAfter`, `interruptOn` and `takeUntil` race
 each pull against a timer or signal. When the pull is cut, they wait for it to
 finish its cleanup before they fail or end the stream (see
-[Structured teardown](./06-concurrency.md#structured-teardown)).
+[Structured teardown](./06-concurrency.md#structured-teardown)). A failure in
+that cleanup is not swallowed:
+
+- `timeout` and `deadline` fail with their error joined to the cleanup failure.
+- `interruptAfter`, `interruptOn` and `takeUntil` fail with the cleanup failure
+  instead of ending normally.
+
+A linear source cleans up inside the cut pull, so slow cleanup there delays
+the timeout. A pull of an operator with background fibers only stops waiting on
+the operator's queue, so it is cut at once. Its fibers keep their state and are
+cleaned up when the stream is finalized, where a failure joins the outcome the
+same way.
 
 A value that arrives at the same instant as a timer is not lost. That covers
 a `debounce` window closing, a `groupWithin` deadline and a `sample` or
@@ -401,9 +412,13 @@ their fibers, not in the pull:
 
 - **Interrupted pulls resume.** When `timeout` or `deadline` interrupts a pull
   and `retry` runs it again, the pull resumes against the same fibers. No
-  second set starts and no source is acquired again. Resuming is not yet
-  lossless: a value that reaches the pull at the instant it is interrupted is
-  lost.
+  second set starts and no source is acquired again. Nothing waiting for the
+  pull is lost: an element handed to the pull as it is cut goes back to the
+  operator's queue, and pull state that spans several waits (a claimed
+  `parEvalMap` slot, an open `groupWithin` batch, a pending `debounce` value)
+  carries over. The resumed stream emits the same elements as an uninterrupted
+  one, except that `debounce`, `sample` and `audit` restart their window timer
+  in the retried pull, so a window can close later and see a newer value.
 - **Delivered failures stay.** Once a failure has reached the consumer, every
   retried pull fails again with the same cause, whether or not it was the first
   pull. A failed element is not skipped and a failed input is not restarted.

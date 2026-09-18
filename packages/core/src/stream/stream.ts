@@ -19,6 +19,7 @@ import {
   forkDaemon,
   race,
   timeoutOption,
+  timeoutFail,
   fromPromise,
   ensuring,
   onExit,
@@ -2535,11 +2536,11 @@ export class Stream<A, S = never> {
     requireFiniteMs({ operator: "timeout", name: "ms", value: ms });
     const wrap = (s: Stream<A, any>): Stream<A, any> =>
       new Stream(
-        (timeoutOption(s.step as any, ms) as any).flatMap((step: Step<A> | undefined) => {
-          if (step === undefined) return fail(new StreamTimeoutError({ ms }));
-          if (step._tag === "Done") return succeed(DONE);
-          return succeed(emit(step.chunk, wrap(step.next)));
-        }),
+        // The timer fails rather than returning a marker, so a failure while
+        // the cut pull cleans up joins the timeout instead of replacing it.
+        (timeoutFail(s.step as any, ms, () => new StreamTimeoutError({ ms })) as any).map(
+          (step: Step<A>) => (step._tag === "Done" ? DONE : emit(step.chunk, wrap(step.next))),
+        ),
         s._finalizer,
       );
     return wrap(this) as any;
@@ -2557,12 +2558,10 @@ export class Stream<A, S = never> {
         (clockNow as any).flatMap((now: number) => {
           const remaining = expiresAt - now;
           if (remaining <= 0) return fail(new StreamDeadlineError({ ms }));
-          return (timeoutOption(source.step as any, remaining) as any).flatMap(
-            (step: Step<A> | undefined) => {
-              if (step === undefined) return fail(new StreamDeadlineError({ ms }));
-              if (step._tag === "Done") return succeed(DONE);
-              return succeed(emit(step.chunk, wrap(expiresAt, step.next)));
-            },
+          return (
+            timeoutFail(source.step as any, remaining, () => new StreamDeadlineError({ ms })) as any
+          ).map((step: Step<A>) =>
+            step._tag === "Done" ? DONE : emit(step.chunk, wrap(expiresAt, step.next)),
           );
         }),
         source._finalizer,
