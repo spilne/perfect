@@ -35,6 +35,7 @@ import {
   timeoutOption,
   tryPromise,
   uninterruptible,
+  uninterruptibleMask,
   withSpan,
   yieldNow,
 } from "../src";
@@ -428,6 +429,141 @@ describe("cleanup of an interrupted fiber", () => {
 
     expect(log).toEqual(["finally effect", "finally done"]);
     expect(fiber.result).toEqual(interrupted);
+  });
+});
+
+describe("cleanup registered in the same step as the work it guards", () => {
+  test("singleflight clears a key even when an interrupt lands right after registering it", () => {
+    let windows = 0;
+    for (let length = 0; length <= DEFAULT_BUDGET; length++) {
+      const scheduler = new StepScheduler();
+      const flights = Singleflight.make();
+      let body: Eff<void, never> = succeed(undefined);
+      for (let i = 0; i < length; i++) body = body.flatMap(() => succeed(undefined));
+      const leader = runFiber(
+        body.flatMap(() => flights.do("key", waitForever)),
+        scheduler,
+      );
+      scheduler.step();
+      if (leader.status !== "ready" || !(flights as any).flights.has("key")) continue;
+      windows++;
+      leader.interrupt();
+      scheduler.flush();
+      const next = runFiber(flights.do("key", succeed("fresh")), scheduler);
+      scheduler.flush();
+
+      expect({ length, result: next.result }).toEqual({
+        length,
+        result: { ok: true, value: "fresh" },
+      });
+    }
+    expect(windows).toBeGreaterThan(0);
+  });
+
+  test("a generator's finally runs even when an interrupt lands right after it entered try", () => {
+    const center = Math.floor(DEFAULT_BUDGET / 3);
+    let windows = 0;
+    for (let pad = 0; pad < 6; pad++) {
+      for (let length = center - 24; length <= center + 24; length++) {
+        const scheduler = new StepScheduler();
+        let entered = false;
+        let finallyRan = false;
+        let body: any = succeed(undefined);
+        for (let i = 0; i < length; i++) body = body.flatMap(() => succeed(undefined));
+        let padded: any = succeed(undefined);
+        for (let i = 0; i < pad; i++) padded = succeed(padded);
+        const fiber = runFiber(
+          body
+            .flatMap(() => padded)
+            .flatMap(() =>
+              eff(function* () {
+                try {
+                  entered = true;
+                  yield* waitForever;
+                } finally {
+                  finallyRan = true;
+                }
+              }),
+            ),
+          scheduler,
+        );
+        scheduler.step();
+        if (!entered || fiber.status !== "ready") continue;
+        windows++;
+        fiber.interrupt();
+        scheduler.flush();
+
+        expect({ length, pad, finallyRan }).toEqual({ length, pad, finallyRan: true });
+      }
+    }
+    expect(windows).toBeGreaterThan(0);
+  });
+});
+
+describe("uninterruptibleMask", () => {
+  test("restore brings back interruptibility for an ordinary caller", () => {
+    const scheduler = new StepScheduler();
+    const log: string[] = [];
+    const fiber = runFiber(
+      uninterruptibleMask((restore) =>
+        ensuring(
+          restore(waitForever),
+          sync(() => void log.push("registered release")),
+        ),
+      ),
+      scheduler,
+    );
+    scheduler.flush();
+    fiber.interrupt();
+    scheduler.flush();
+
+    expect(log).toEqual(["registered release"]);
+    expect(fiber.result).toEqual(interrupted);
+  });
+
+  test("restore stays uninterruptible when the mask runs inside a finalizer", () => {
+    const scheduler = new StepScheduler();
+    const log: string[] = [];
+    const wait = gate();
+    const fiber = runFiber(
+      ensuring(
+        waitForever,
+        uninterruptibleMask((restore) =>
+          restore(wait.wait).flatMap(() => sync(() => void log.push("waited in cleanup"))),
+        ),
+      ),
+      scheduler,
+    );
+    scheduler.flush();
+    fiber.interrupt();
+    scheduler.flush();
+    expect(fiber.status).toBe("suspended");
+
+    wait.open();
+    scheduler.flush();
+    expect(log).toEqual(["waited in cleanup"]);
+    expect(fiber.result).toEqual(interrupted);
+  });
+
+  test("a fiber-level scope release behaves like a scoped release of an interrupted fiber", () => {
+    const outcomes: string[][] = [];
+    for (const withScope of [true, false]) {
+      const scheduler = new StepScheduler();
+      const log: string[] = [];
+      const release = () =>
+        interruptible(sync(() => void log.push("interruptible part")))
+          .exit()
+          .flatMap((exit) => sync(() => void log.push(`release saw ${exit._tag}`)));
+      const acquired = acquireRelease(succeed(1), release).flatMap(() => waitForever);
+      const fiber = runFiber(withScope ? scoped(acquired) : acquired, scheduler);
+      scheduler.flush();
+      fiber.interrupt();
+      scheduler.flush();
+      outcomes.push(log);
+    }
+
+    expect(outcomes[0]).toEqual(["release saw Failure"]);
+    expect(outcomes[1]).toEqual(outcomes[0]!);
   });
 });
 

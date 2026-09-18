@@ -164,7 +164,7 @@ requirements such as `Needs<Service>`:
 | `.catch(f)` | recover every typed error with another stream |
 | `.catchTag(tag, f)` | recover one tagged error and retain the others |
 | `.catchSome(f)` | recover only when `f` returns a stream |
-| `.catchAllCause(f)` | recover typed failures, defects, or interruption |
+| `.catchAllCause(f)` | recover typed failures, defects, or an interrupt that failed an inner fiber; an interrupted consumer does not recover |
 | `.mapError(f)` | transform typed errors |
 | `.tapError(f)` / `.tapErrorCause(f)` | observe typed errors or the full Cause |
 | `.tapAnyError(f)` | observe every typed failure and defect without consuming it |

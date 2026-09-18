@@ -126,6 +126,31 @@ export function interruptible<A, S>(eff: Eff<A, S>): Eff<A, S> {
   return new Suspend(Op.SetInterruptible, eff, true) as any;
 }
 
+/**
+ * Run the effect `f` builds uninterruptibly. `restore(eff)` runs `eff` with the
+ * interruptibility in effect where the mask was entered: interruptible for an
+ * ordinary caller, still uninterruptible when the mask itself runs inside a
+ * finalizer or another uninterruptible region. `interruptible(eff)` would make
+ * `eff` interruptible in both cases, so inside cleanup of an interrupted fiber
+ * it would be interrupted at once.
+ *
+ * @example
+ *   // Wait for a permit interruptibly, but register its release atomically.
+ *   uninterruptibleMask((restore) =>
+ *     acquireRelease(restore(waitForPermit), () => releasePermit),
+ *   )
+ */
+export function uninterruptibleMask<A, S>(
+  f: (restore: <B, S2>(eff: Eff<B, S2>) => Eff<B, S2>) => Eff<A, S>,
+): Eff<A, S> {
+  return new Suspend(
+    Op.SetInterruptible,
+    (wasInterruptible: boolean) =>
+      f(<B, S2>(eff: Eff<B, S2>) => new Suspend(Op.SetInterruptible, eff, wasInterruptible) as any),
+    false,
+  ) as any;
+}
+
 // Explicit cooperative yield point — forces a scheduler reschedule.
 export const yieldNow: Eff<void, never> = new Suspend(Op.YieldNow, null, null) as any;
 

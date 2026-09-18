@@ -1,11 +1,4 @@
-import {
-  acquireRelease,
-  scoped,
-  uninterruptible,
-  interruptible,
-  sleep,
-  succeed,
-} from "@spilne/perfect-core";
+import { acquireRelease, scoped, sleep, succeed, uninterruptibleMask } from "@spilne/perfect-core";
 import type { Eff, Semaphore, Throws } from "@spilne/perfect-core";
 import { numberResult, redisEff } from "./internal";
 import type { RedisClient } from "./redis-client";
@@ -59,14 +52,21 @@ export class RedisSemaphore implements Semaphore<Throws<RedisError>> {
     });
   }
 
-  private acquireMany(n: number): Eff<void, Throws<RedisError>> {
+  // Runs inside uninterruptibleMask: each ACQUIRE_SCRIPT call is atomic, and
+  // only the wait between polls restores the caller's interruptibility. That
+  // stays uninterruptible when the caller is itself cleanup, where an
+  // interruptible wait would be interrupted at once.
+  private acquireMany(
+    n: number,
+    restore: <B, S>(eff: Eff<B, S>) => Eff<B, S>,
+  ): Eff<void, Throws<RedisError>> {
     const loop = (): Eff<void, Throws<RedisError>> =>
       redisEff("semaphore.acquire", async () =>
         numberResult(await this.redis.eval(ACQUIRE_SCRIPT, 1, this.key, n)),
       ).flatMap((remaining) =>
         remaining >= 0
           ? succeed(undefined)
-          : interruptible(sleep(this.pollIntervalMs)).flatMap(() => loop()),
+          : restore(sleep(this.pollIntervalMs)).flatMap(() => loop()),
       );
     return loop();
   }
@@ -78,7 +78,7 @@ export class RedisSemaphore implements Semaphore<Throws<RedisError>> {
   }
 
   acquire(): Eff<void, Throws<RedisError>> {
-    return this.acquireMany(1);
+    return uninterruptibleMask((restore) => this.acquireMany(1, restore));
   }
 
   release(): Eff<void, Throws<RedisError>> {
@@ -97,9 +97,9 @@ export class RedisSemaphore implements Semaphore<Throws<RedisError>> {
     // A Redis command may take effect before its response arrives. Defer
     // interruption until ownership and its release finalizer are registered.
     return scoped(
-      uninterruptible(acquireRelease(this.acquireMany(n), () => this.releaseMany(n))).flatMap(
-        () => eff,
-      ),
+      uninterruptibleMask((restore) =>
+        acquireRelease(this.acquireMany(n, restore), () => this.releaseMany(n)),
+      ).flatMap(() => eff),
     );
   }
 

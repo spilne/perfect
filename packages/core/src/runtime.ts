@@ -99,7 +99,8 @@ function stripFailures(cause: Cause): Cause | null {
 }
 
 // An Op.Ensuring finalizer is an effect, or a function of the body's Exit
-// (onExit) that returns null when it has nothing to run.
+// (onExit) that returns null when it has nothing to run. A finalizer that is a
+// plain succeed(...) has nothing to run either, and is skipped outright.
 function exitFinalizer(finalizer: unknown, exit: Exit<unknown, unknown>): Suspend | null {
   try {
     return (finalizer as (exit: Exit<unknown, unknown>) => Suspend | null)(exit);
@@ -211,7 +212,7 @@ function runFiberLoop(fiber: Fiber<any>): void {
               typeof frame.fn === "function"
                 ? exitFinalizer(frame.fn, { _tag: "Success", value })
                 : (frame.fn as Suspend);
-            if (finalizer === null) continue;
+            if (finalizer === null || finalizer.op === Op.Succeed) continue;
             k = enterUninterruptible(fiber, k);
             cur = succeedAfterFinalizer(finalizer, value);
             continue loop;
@@ -333,7 +334,7 @@ function runFiberLoop(fiber: Fiber<any>): void {
               typeof frame.fn === "function"
                 ? exitFinalizer(frame.fn, { _tag: "Failure", cause })
                 : (frame.fn as Suspend);
-            if (finalizer === null) continue;
+            if (finalizer === null || finalizer.op === Op.Succeed) continue;
             k = enterUninterruptible(fiber, k);
             cur = failAfterFinalizer(finalizer, cause);
             continue loop;
@@ -574,6 +575,15 @@ function runFiberLoop(fiber: Fiber<any>): void {
         // finalizer, say) is interrupted at once.
         if (newValue && !prev && fiber.interrupting) fiber.interruptPending = true;
         cur = cur.a;
+        // uninterruptibleMask: the body is built from the interruptibility
+        // the region was entered with.
+        if (typeof cur === "function") {
+          try {
+            cur = cur(prev);
+          } catch (e) {
+            cur = new Suspend(Op.Fail, Cause.die(e), null);
+          }
+        }
         continue loop;
       }
 
@@ -966,6 +976,11 @@ function stepInline(
         // No structured parent relationship here; the fiber is orphan.
         const child = bootstrapFiber<any>(cur as Eff<any, any>, parentFiber?.scheduler);
         child.context = context;
+        // stepInline only runs cleanup. Keep the delegated fiber in the state a
+        // finalizer runs in on the owner itself: uninterruptible, and
+        // interrupting if the owner was interrupted.
+        child.interruptible = false;
+        if (parentFiber) child.interrupting = parentFiber.interrupting;
         child.onComplete((result) => {
           stepInline(
             result.ok

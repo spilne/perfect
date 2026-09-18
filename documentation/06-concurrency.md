@@ -190,6 +190,23 @@ import { uninterruptible } from "@spilne/perfect-core";
 const safe = uninterruptible(criticalCleanup);
 ```
 
+Code that must wait interruptibly while the effect around it stays masked —
+acquiring a lock, a permit, a connection — uses `uninterruptibleMask`.
+`restore(eff)` gives `eff` back the interruptibility in effect where the mask
+was entered: interruptible for an ordinary caller, still uninterruptible when
+the same code runs from a finalizer. `interruptible(eff)` would force it
+interruptible, and inside cleanup of an interrupted fiber that fails at once.
+
+```ts
+import { acquireRelease, uninterruptibleMask } from "@spilne/perfect-core";
+
+// The wait can be cancelled; once the permit is granted, its release is
+// registered before an interrupt can land.
+const permit = uninterruptibleMask((restore) =>
+  acquireRelease(restore(waitForPermit), () => releasePermit),
+);
+```
+
 Interruption is cooperative. A fiber observes it when it is running in an
 interruptible region, resumes from an async boundary, or walks its
 continuation stack. Finalizers registered by `ensuring` / `scoped` still run
@@ -272,7 +289,7 @@ Available fiber diagnostics:
 | API / concept | Behavior |
 |---|---|
 | `fiber.status` | `"ready"`, `"running"`, `"suspended"`, or `"done"` |
-| `fiber.interrupted` | while running: an interrupt is pending or delivered; once done: the result is an interruption |
+| `fiber.interrupted` | before completion: an interrupt is pending or has been delivered; once done: the result's cause contains an `Interrupt` (`Exit.isInterrupted` is stricter: every leaf must be one) |
 | `fiber.childCount` | number of structured children currently owned |
 | `fiber.snapshot()` | stable `{ status, interrupted, childCount }` object |
 | `fiber.childrenSnapshot()` | copy of currently owned child fibers |
@@ -293,6 +310,7 @@ Available fiber diagnostics:
 | `all(effects[])` | parallel + collect tuple |
 | `all({ a, b })` | parallel + collect record |
 | `uninterruptible(eff)` | block interruption |
+| `uninterruptibleMask((restore) => eff)` | block interruption; `restore` reinstates the caller's interruptibility |
 | `interruptible(eff)` | restore interruptibility |
 | `yieldNow` | give other fibers a turn |
 | `addFiberSupervisor(hooks)` | attach diagnostic fiber lifecycle hooks |

@@ -58,7 +58,12 @@ or interruption.
 
 ## Full causes with `.catchAllCause`
 
-If you need to see defects and interrupts too, use `.catchAllCause`:
+If you need to see defects too, use `.catchAllCause`. It also sees an
+`Interrupt` that reaches this fiber as a failure from elsewhere — a child fiber
+that was cancelled, say — but not this fiber's own interruption: an
+interrupted fiber skips it (see
+[Interruption and error handlers](#interruption-and-error-handlers)). Use
+`onExit` to observe that:
 
 <!-- @embed packages/core/examples/06-error-handling.ts#catch-cause -->
 
@@ -141,6 +146,7 @@ What the final `Cause` keeps:
 |---|---|
 | interrupted while running | `Interrupt` |
 | a typed failure or defect is raised before the interrupt lands, and no handler above it is bypassed | the failure, then the interrupt, e.g. `(Fail(e) ; Interrupt)` |
+| interrupted, then a finalizer fails with `e` | the interrupt, then the finalizer failure: `(Interrupt ; Fail(e))` |
 | a handler that would have received a typed failure is bypassed | the typed failure is dropped; defects stay |
 
 A failure counts as raised once the fiber is scheduled to raise it, even if it
