@@ -173,6 +173,20 @@ if (exit._tag === "Failure") {
 
 `scoped(acquireRelease(...))` follows the same rule when a scope closes.
 
+Parallel children release first. `all`, `race`, `timeoutOption` and the other
+combinators built on them wait for their children's finalizers before they
+return, so a finalizer or scope around them runs after those finalizers have
+finished. A child's finalizer failure joins the combinator's outcome with
+`Cause.both` (see
+[Structured teardown](./06-concurrency.md#structured-teardown)).
+
+An interrupt adds `Interrupt` to the outcome. An interrupt that arrives while
+a finalizer runs waits for it: interrupting `succeed(1).ensuring(release)`
+while `release` fails with `e` ends as `(Fail(e) ; Interrupt)`. Error handlers
+around an interrupted effect don't run (see
+[Interruption and error handlers](./05-error-handling.md#interruption-and-error-handlers)),
+so they can neither swallow the interrupt nor hide the finalizer failure.
+
 ## Scoped layers
 
 Layers can register finalizers via `acquireRelease` — they fire when the
@@ -186,13 +200,17 @@ program built with `.with(layer)` ends. See
 | `acquireRelease(acquire, release)` | pair acquire effect + release function |
 | `scoped(eff)` | define scope boundary; finalizers fire on exit |
 | `ensuring(eff, finalizer)` | always-run finalizer (no acquire pair) |
-| `onExit(eff, handler)` | inspect Exit, then propagate original outcome |
+| `onExit(eff, handler)` | finalizer that receives the Exit; the original outcome propagates |
 
 ## Pitfalls
 
 - **Use `scoped` to choose the release boundary.** Without an explicit scope,
   the runtime registers release in a fiber-level scope and runs it when that
   fiber completes. An explicit scope can release resources earlier.
+- **An acquire that waits needs `uninterruptibleMask`.** Wrap it so the wait
+  can be cancelled with `restore(...)` while the release is still registered
+  atomically once the resource is granted; `interruptible(...)` would fail at
+  once when the acquire runs from cleanup of an interrupted fiber.
 - **Release runs are uninterruptible.** If your release effect is slow, it
   will block scope exit. Make releases fast.
 - **Release failures are visible.** Handle them with `runExit`,
@@ -200,6 +218,13 @@ program built with `.with(layer)` ends. See
   meaningful.
 - **`ensuring` doesn't acquire — just finalizes.** Use `acquireRelease` if
   you need acquire-then-release semantics.
+- **Permits and pooled resources come back on interrupt.** `Semaphore.withPermit`
+  and `Pool.use` return what they hold on success, failure and interrupt, also
+  when the interrupt lands between the grant and the start of the body. See
+  [Handoff to waiting fibers](./06-concurrency.md#handoff-to-waiting-fibers).
+- **Cleanup belongs in finalizers, not error handlers.** An interrupted fiber
+  skips `.catchAllCause`, `.tapErrorCause` and every other handler; `ensuring`,
+  `acquireRelease` and `onExit` still run.
 
 ## Next
 

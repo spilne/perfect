@@ -376,7 +376,16 @@ console.log(conns); // → [1, 1, 1, 1, 1]
 
 `validate?: (r) => Eff<boolean, never>` runs before handing a reused
 resource to a caller — failed validation discards it (calls `release`)
-and acquires fresh.
+and acquires fresh. Resources are returned on success, failure and interrupt,
+also when a use is interrupted while validating or while releasing a rejected
+resource.
+
+`acquire` runs interruptibly, so an interrupted use can cancel a slow connect.
+The pool cannot tell a cancellable create from one that goes on producing a
+resource, such as a promise that resolves anyway: a resource that `acquire`
+produces just as its use is interrupted never reaches the pool and is not
+released. Keeping it would mean running every create to completion, holding a
+slot for connects nobody waits for.
 
 ## Pitfalls
 

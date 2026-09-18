@@ -11,7 +11,16 @@ import {
   trace,
   ROOT_CONTEXT,
 } from "@opentelemetry/api";
-import { type Eff, type Throws, succeed, fail, sync, run } from "@spilne/perfect-core";
+import {
+  type Eff,
+  type Throws,
+  async,
+  succeed,
+  fail,
+  sync,
+  run,
+  runFiber,
+} from "@spilne/perfect-core";
 import {
   type HttpClientError,
   type HttpRequestOptions,
@@ -224,6 +233,31 @@ describe("tracingMiddleware", () => {
     expect(span.attributes["error.type"]).toBe("HttpStatusError");
     expect(span.exceptions.length).toBe(1);
     expect(span.ended).toBe(true);
+  });
+
+  test("ends the span with an error status when the request is interrupted", async () => {
+    const { tracer, spans } = makeInMemTracer();
+    const transport: HttpTransport = {
+      execute: () => async<Response>(() => () => {}),
+    };
+    const client = new DefaultHttpClient({
+      transport,
+      middleware: [tracingMiddleware({ tracer })],
+    });
+
+    const fiber = runFiber(client.get("/u", UserParser) as any);
+    for (let i = 0; i < 20 && spans.length === 0; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    fiber.interrupt();
+    await fiber.await();
+
+    expect(spans).toHaveLength(1);
+    const span = spans[0]!;
+    expect(span.ended).toBe(true);
+    expect(span.status.code).toBe(SpanStatusCode.ERROR);
+    expect(span.attributes["error.type"]).toBe("Interrupted");
+    expect(span.attributes["http.response.duration_ms"]).toBeGreaterThanOrEqual(0);
   });
 
   test("spanName override + disable predicate", async () => {

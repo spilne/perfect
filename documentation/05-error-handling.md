@@ -58,7 +58,12 @@ or interruption.
 
 ## Full causes with `.catchAllCause`
 
-If you need to see defects and interrupts too, use `.catchAllCause`:
+If you need to see defects too, use `.catchAllCause`. It also sees an
+`Interrupt` that reaches this fiber as a failure from elsewhere — a child fiber
+that was cancelled, say — but not this fiber's own interruption: an
+interrupted fiber skips it (see
+[Interruption and error handlers](#interruption-and-error-handlers)). Use
+`onExit` to observe that:
 
 <!-- @embed packages/core/examples/06-error-handling.ts#catch-cause -->
 
@@ -123,6 +128,43 @@ console.log(await fallback.run()); // → "second"
 ```
 
 <!-- @end -->
+
+## Interruption and error handlers
+
+Once a fiber is interrupted it cannot recover. Every error handler above the
+interruption point is bypassed — `.catch`, `.catchTag`, `.orElse`, `.either`,
+`.option`, `.mapError`, `.tapError`, `.catchAllCause`, `.tapErrorCause`,
+`.exit()`, `.orDie()` and `retry` alike — so no handler can swallow the
+interrupt and resume normal work. Finalizers still run: `ensuring`,
+`acquireRelease` releases and `onExit` handlers. Handlers inside an
+uninterruptible region, which includes code running inside a finalizer, work
+as usual, but the interrupt is raised again when the region ends.
+
+What the final `Cause` keeps:
+
+| situation | cause |
+|---|---|
+| interrupted while running | `Interrupt` |
+| a typed failure or defect is raised before the interrupt lands, and no handler above it is bypassed | the failure, then the interrupt, e.g. `(Fail(e) ; Interrupt)` |
+| interrupted, then a finalizer fails with `e` | the interrupt, then the finalizer failure: `(Interrupt ; Fail(e))` |
+| a handler that would have received a typed failure is bypassed | the typed failure is dropped; defects stay |
+
+A failure counts as raised once the fiber is scheduled to raise it, even if it
+has not run yet. When an async callback resumed it with the failure, an
+interrupt that lands in between keeps the failure, e.g. `(Die(d) ; Interrupt)`.
+When `all` or `race` returned a child's failure, the cause is the same whether
+the interrupt lands before or after that: `(Interrupt & Die(d))` (see
+[Structured teardown](./06-concurrency.md#structured-teardown)).
+
+A typed failure is dropped only when a bypassed handler would have consumed or
+mapped it, so an interrupted effect never surfaces an error its type says was
+handled. When it stays, `run()` rejects with it (`Cause.squash` prefers typed
+failures, then defects, then interruption) and `runSafe` returns it as
+`error`; `Exit.isInterrupted` is `false` for a cause that holds more than
+interrupts.
+
+Put cleanup that must also run on interruption in `ensuring`, `acquireRelease`
+or `onExit`, not in `.catchAllCause`.
 
 ## Defects vs failures — when to use `fail` vs `throw`
 

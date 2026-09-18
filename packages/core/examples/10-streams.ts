@@ -47,3 +47,15 @@ const pages = await Stream.fromArray(["a", "b", "c"])
   .run();
 assertEq([...pages].sort(), ["a1", "a2", "b1", "b2", "c1", "c2"]);
 // <<< example
+
+// >>> example: stream-merge-interrupt-after
+// merge's background fibers belong to the stream, so pulls racing a timer
+// (interruptAfter, timeout, takeUntil, …) don't stop them.
+const ticks = await Stream.tick(10)
+  .take(3)
+  .merge(Stream.tick(15).take(2))
+  .interruptAfter(1_000)
+  .toArray()
+  .run();
+assertEq(ticks.length, 5);
+// <<< example
