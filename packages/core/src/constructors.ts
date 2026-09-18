@@ -30,8 +30,26 @@ export function suspend<A, S>(f: () => Eff<A, S>): Eff<A, S> {
   return new Suspend(Op.FlatMap, new Suspend(Op.Succeed, undefined, null), f) as any;
 }
 
+/**
+ * Suspend the fiber until `register` calls `resume` with the effect to continue
+ * with. `register` may return a canceler, called if the fiber is interrupted
+ * while it waits.
+ *
+ * `resume(value, onDiscard)` hands over something only one waiter may have,
+ * such as a queue item or a permit. The fiber may be interrupted after the
+ * resume but before it runs, or `resume` may arrive after the fiber stopped
+ * waiting. In both cases `value` is not run and `onDiscard` is called exactly
+ * once, so the caller can give the item to someone else. `onDiscard` is never
+ * called once the fiber has started running `value`.
+ *
+ * If `onDiscard` throws when an interrupt discards the value, the error joins
+ * the interrupted fiber's cause as a defect and the interrupt goes ahead. When
+ * `resume` itself calls it, the error propagates to the caller of `resume`.
+ */
 export function async<A, E = never>(
-  register: (resume: (value: Eff<A, Throws<E>>) => void) => (() => void) | void,
+  register: (
+    resume: (value: Eff<A, Throws<E>>, onDiscard?: () => void) => void,
+  ) => (() => void) | void,
 ): Eff<A, Throws<E>> {
   return new Suspend(Op.Async, register, null) as any;
 }
@@ -112,6 +130,31 @@ export function interruptible<A, S>(eff: Eff<A, S>): Eff<A, S> {
   return new Suspend(Op.SetInterruptible, eff, true) as any;
 }
 
+/**
+ * Run the effect `f` builds uninterruptibly. `restore(eff)` runs `eff` with the
+ * interruptibility in effect where the mask was entered: interruptible for an
+ * ordinary caller, still uninterruptible when the mask itself runs inside a
+ * finalizer or another uninterruptible region. `interruptible(eff)` would make
+ * `eff` interruptible in both cases, so inside cleanup of an interrupted fiber
+ * it would be interrupted at once.
+ *
+ * @example
+ *   // Wait for a permit interruptibly, but register its release atomically.
+ *   uninterruptibleMask((restore) =>
+ *     acquireRelease(restore(waitForPermit), () => releasePermit),
+ *   )
+ */
+export function uninterruptibleMask<A, S>(
+  f: (restore: <B, S2>(eff: Eff<B, S2>) => Eff<B, S2>) => Eff<A, S>,
+): Eff<A, S> {
+  return new Suspend(
+    Op.SetInterruptible,
+    (wasInterruptible: boolean) =>
+      f(<B, S2>(eff: Eff<B, S2>) => new Suspend(Op.SetInterruptible, eff, wasInterruptible) as any),
+    false,
+  ) as any;
+}
+
 // Explicit cooperative yield point — forces a scheduler reschedule.
 export const yieldNow: Eff<void, never> = new Suspend(Op.YieldNow, null, null) as any;
 
@@ -134,7 +177,8 @@ export function delay<A, S>(eff: Eff<A, S>, ms: number): Eff<A, S> {
 
 // ── Race ───────────────────────────────────────────────────────────
 
-// First settled (success OR failure) wins; losers are interrupted.
+// First settled (success OR failure) wins; losers are interrupted, and the race
+// returns once they have finished.
 // Generic over the tuple so heterogeneous arrays infer the UNION of their
 // value/effect types instead of locking onto the first element.
 export function race<E extends Eff<unknown, unknown>[]>(

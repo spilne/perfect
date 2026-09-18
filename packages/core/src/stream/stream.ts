@@ -23,6 +23,7 @@ import {
   timeoutOption,
   fromPromise,
   ensuring,
+  onExit,
   awaitFiber,
   yieldNow,
   retry as effRetry,
@@ -482,7 +483,7 @@ export class Stream<A, S = never> {
       let closed = false;
       let cleanup: (() => void) | void;
       let cleaned = false;
-      let waiter: ((step: Step<A>) => void) | null = null;
+      let waiter: ((step: Step<A>, onDiscard?: () => void) => void) | null = null;
 
       const cleanupOnce = (): void => {
         if (cleaned) return;
@@ -490,12 +491,24 @@ export class Stream<A, S = never> {
         if (cleanup) cleanup();
       };
 
+      // Values given back by a pull interrupted before it ran go to the next
+      // waiting pull, or back to the head of the buffer.
+      const giveBack = (values: A[]): void => {
+        if (waiter !== null) {
+          const w = waiter;
+          waiter = null;
+          w(emit(Chunk.fromArray(values), next()), () => giveBack(values));
+          return;
+        }
+        buffer.unshift(...values);
+      };
+
       const pushEmit = (value: A): void => {
         if (closed) return;
         if (waiter !== null) {
           const w = waiter;
           waiter = null;
-          w(emit(Chunk.single(value), next()));
+          w(emit(Chunk.single(value), next()), () => giveBack([value]));
           return;
         }
         if (buffer.length < bufferSize) buffer.push(value);
@@ -518,10 +531,10 @@ export class Stream<A, S = never> {
         return new Stream(
           new Suspend(
             Op.Async,
-            (resume: (eff: any) => void) => {
+            (resume: (eff: any, onDiscard?: () => void) => void) => {
               if (buffer.length > 0) {
                 const chunkArr: A[] = buffer.splice(0, buffer.length);
-                resume(succeed(emit(Chunk.fromArray(chunkArr), next())));
+                resume(succeed(emit(Chunk.fromArray(chunkArr), next())), () => giveBack(chunkArr));
                 return;
               }
               if (closed) {
@@ -529,7 +542,7 @@ export class Stream<A, S = never> {
                 resume(succeed(DONE));
                 return;
               }
-              waiter = (step) => resume(succeed(step));
+              waiter = (step, onDiscard) => resume(succeed(step), onDiscard);
               // interrupt handle: drop the waiter so a late emit doesn't call into nothing
               return () => {
                 closed = true;
@@ -608,7 +621,7 @@ export class Stream<A, S = never> {
         const buffer: A[] = [];
         let closed = false;
         let failure: { readonly error: unknown } | null = null;
-        let waiter: ((effect: Eff<Step<A>, unknown>) => void) | null = null;
+        let waiter: ((effect: Eff<Step<A>, unknown>, onDiscard?: () => void) => void) | null = null;
         let cleanup: (() => void) | void;
         let cleaned = false;
 
@@ -619,12 +632,24 @@ export class Stream<A, S = never> {
         };
         activeCleanup = cleanupOnce;
 
+        // Values given back by a pull interrupted before it ran go to the next
+        // waiting pull, or back to the head of the buffer.
+        const giveBack = (values: A[]): void => {
+          if (waiter !== null) {
+            const w = waiter;
+            waiter = null;
+            w(succeed(emit(Chunk.fromArray(values), next())), () => giveBack(values));
+            return;
+          }
+          buffer.unshift(...values);
+        };
+
         const pushEmit = (value: A) => {
           if (closed) return;
           if (waiter !== null) {
             const w = waiter;
             waiter = null;
-            w(succeed(emit(Chunk.single(value), next())));
+            w(succeed(emit(Chunk.single(value), next())), () => giveBack([value]));
             return;
           }
           if (buffer.length < bufferSize) buffer.push(value);
@@ -656,10 +681,12 @@ export class Stream<A, S = never> {
           return new Stream(
             new Suspend(
               Op.Async,
-              (resume: (eff: any) => void) => {
+              (resume: (eff: any, onDiscard?: () => void) => void) => {
                 if (buffer.length > 0) {
                   const chunkArr: A[] = buffer.splice(0, buffer.length);
-                  resume(succeed(emit(Chunk.fromArray(chunkArr), next())));
+                  resume(succeed(emit(Chunk.fromArray(chunkArr), next())), () =>
+                    giveBack(chunkArr),
+                  );
                   return;
                 }
                 if (failure !== null) {
@@ -672,7 +699,7 @@ export class Stream<A, S = never> {
                   resume(succeed(DONE));
                   return;
                 }
-                waiter = (effect) => resume(effect);
+                waiter = (effect, onDiscard) => resume(effect, onDiscard);
                 return () => {
                   closed = true;
                   buffer.length = 0;
@@ -724,7 +751,7 @@ export class Stream<A, S = never> {
         const buffer: Chunk<A>[] = [];
         let closed = false;
         let failure: { readonly error: unknown } | null = null;
-        let waiter: ((effect: Eff<Step<A>, unknown>) => void) | null = null;
+        let waiter: ((effect: Eff<Step<A>, unknown>, onDiscard?: () => void) => void) | null = null;
         let cleanup: (() => void) | void;
         let cleaned = false;
 
@@ -735,12 +762,24 @@ export class Stream<A, S = never> {
         };
         activeCleanup = cleanupOnce;
 
+        // A chunk given back by a pull interrupted before it ran goes to the
+        // next waiting pull, or back to the head of the buffer.
+        const giveBack = (chunk: Chunk<A>): void => {
+          if (waiter !== null) {
+            const w = waiter;
+            waiter = null;
+            w(succeed(emit(chunk, next())), () => giveBack(chunk));
+            return;
+          }
+          buffer.unshift(chunk);
+        };
+
         const pushEmit = (chunk: Chunk<A>) => {
           if (closed || chunk.isEmpty) return;
           if (waiter !== null) {
             const w = waiter;
             waiter = null;
-            w(succeed(emit(chunk, next())));
+            w(succeed(emit(chunk, next())), () => giveBack(chunk));
             return;
           }
           if (buffer.length < bufferSize) buffer.push(chunk);
@@ -772,10 +811,10 @@ export class Stream<A, S = never> {
           return new Stream(
             new Suspend(
               Op.Async,
-              (resume: (eff: any) => void) => {
+              (resume: (eff: any, onDiscard?: () => void) => void) => {
                 const chunk = buffer.shift();
                 if (chunk) {
-                  resume(succeed(emit(chunk, next())));
+                  resume(succeed(emit(chunk, next())), () => giveBack(chunk));
                   return;
                 }
                 if (failure !== null) {
@@ -788,7 +827,7 @@ export class Stream<A, S = never> {
                   resume(succeed(DONE));
                   return;
                 }
-                waiter = (effect) => resume(effect);
+                waiter = (effect, onDiscard) => resume(effect, onDiscard);
                 return () => {
                   closed = true;
                   buffer.length = 0;
@@ -1960,17 +1999,27 @@ export class Stream<A, S = never> {
     const setup: Eff<Step<B>, any> = (QueueNS.bounded<Slot>(n) as any).flatMap(
       (slots: Queue<Slot>) =>
         (Semaphore.make(n) as any).flatMap((sem: Semaphore) => {
+          // Deferreds the consumer may still await. A worker settles its own
+          // from a finalizer, so an interrupted worker cannot strand the
+          // consumer; a failing driver settles the rest with its cause, which
+          // also covers workers interrupted before they ever ran.
+          const pending = new Set<Deferred<Exit<unknown, B>>>();
           const enqueue = (item: A): Eff<void, any> =>
             (sem.acquire() as any).flatMap(() =>
               (DeferredNS.make<Exit<unknown, B>>() as any).flatMap(
                 (d: Deferred<Exit<unknown, B>>) =>
-                  (slots.offer({ _tag: "item", deferred: d }) as any).flatMap(() =>
-                    fork(
-                      (exitOf(suspend(() => f(item))) as any).flatMap((exit: Exit<unknown, B>) =>
-                        (d.succeed(exit) as any).flatMap(() => sem.release()),
-                      ),
-                    ),
-                  ),
+                  (slots.offer({ _tag: "item", deferred: d }) as any).flatMap(() => {
+                    pending.add(d);
+                    return fork(
+                      (
+                        onExit(suspend(() => f(item)) as Eff<B, unknown>, (exit) =>
+                          sync(() => pending.delete(d)).flatMap(() =>
+                            d.succeed(exit).map(() => undefined),
+                          ),
+                        ) as any
+                      ).ensuring(sem.release()),
+                    );
+                  }),
               ),
             );
 
@@ -1988,10 +2037,20 @@ export class Stream<A, S = never> {
                 : drainChunk(Array.from(step.chunk), 0, step.next),
             );
 
+          const settlePending = (cause: Cause): Eff<void, never> =>
+            suspend(() => {
+              let settled: Eff<unknown, never> = succeed(undefined);
+              for (const d of pending) {
+                settled = settled.flatMap(() => d.succeed(Exit.failure(cause)));
+              }
+              pending.clear();
+              return settled.map(() => undefined);
+            });
+
           const driver = (drain(self) as any).catchAllCause((cause: Cause) =>
             Cause.isInterruptedOnly(cause)
               ? failCause(cause)
-              : slots.offer({ _tag: "fail", cause }),
+              : settlePending(cause).flatMap(() => slots.offer({ _tag: "fail", cause })),
           );
 
           const pull = (): Eff<Step<B>, any> =>

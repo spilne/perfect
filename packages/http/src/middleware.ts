@@ -21,6 +21,13 @@ export interface HttpMiddleware {
   onRequest?: (context: HttpRequestContext) => void;
   /** Fires on successful response (after parsing + validation). */
   onResponse?: (context: HttpRequestContext & { durationMs: number }) => void;
-  /** Fires when the request fails at any stage. */
+  /** Fires when the request fails with a typed error at any stage. */
   onError?: (context: HttpRequestContext & { durationMs: number }, error: HttpClientError) => void;
+  /**
+   * Fires when the request is interrupted before it settles — cancelled by a
+   * `timeout`, a `race`, or an interrupted fiber. `onResponse` and `onError`
+   * do not fire for it, so a hook that opens state in `onRequest` (a span, a
+   * timer) should close it here too.
+   */
+  onInterrupt?: (context: HttpRequestContext & { durationMs: number }) => void;
 }

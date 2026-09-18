@@ -1,7 +1,18 @@
 import { describe, expect, test } from "bun:test";
-import { async, run, runFiber, sync, type Eff } from "@spilne/perfect-core";
+import {
+  SyncScheduler,
+  async,
+  run,
+  runFiber,
+  sync,
+  type Eff,
+  type Scheduler,
+} from "@spilne/perfect-core";
+import { RedisLatch } from "../src/redis-latch";
 import { RedisPubSub } from "../src/redis-pubsub";
+import { RedisQueue } from "../src/redis-queue";
 import { RedisSingleflight } from "../src/redis-singleflight";
+import { RedisCircuitBreaker } from "../src/redis-circuit-breaker";
 import { RedisStream } from "../src/redis-stream";
 import { redisKeyFamily } from "../src/internal";
 import type { RedisClient } from "../src/redis-client";
@@ -146,5 +157,222 @@ describe("Redis production hardening", () => {
     expect(exit).toEqual({ _tag: "Failure", cause: { _tag: "Interrupt" } });
     expect(published.map((value) => JSON.parse(value).ok)).toEqual([false]);
     expect(releases).toBe(1);
+  });
+
+  describe("a blocking pop whose waiter is gone puts back what it took", () => {
+    const macrotask = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+    // Lets promises settle and runs the fibers they resumed.
+    const settle = async (scheduler: SyncScheduler, until: () => boolean = () => false) => {
+      for (let i = 0; i < 20 && !until(); i++) {
+        await macrotask();
+        scheduler.flush();
+      }
+    };
+
+    const fakeRedis = () => {
+      const pushed: Array<[string, string[]]> = [];
+      let pop: ((value: [string, string] | null) => void) | undefined;
+      const connection: Partial<RedisClient> = {
+        brpop: () =>
+          new Promise((resolve) => {
+            pop = resolve;
+          }),
+        disconnect() {},
+      };
+      const redis: Partial<RedisClient> = {
+        duplicate: () => connection as RedisClient,
+        rpush: async (key, ...values) => {
+          pushed.push([key, values]);
+          return pushed.length;
+        },
+        get: async () => "1",
+        set: async () => "OK",
+      };
+      return {
+        redis: redis as RedisClient,
+        pushed,
+        popping: () => pop !== undefined,
+        pop: (value: [string, string] | null) => pop!(value),
+      };
+    };
+
+    test("RedisQueue.take interrupted as BRPOP returns an item", async () => {
+      const fake = fakeRedis();
+      const queue = RedisQueue.make<number>({ redis: fake.redis, key: "jobs" });
+      const scheduler = new SyncScheduler();
+      const taker = runFiber(queue.take() as Eff<number, never>, scheduler);
+      await settle(scheduler, fake.popping);
+
+      fake.pop(["{jobs}:data", "7"]);
+      await macrotask();
+      expect(taker.status).toBe("ready");
+      taker.interrupt();
+      scheduler.flush();
+
+      expect(taker.result).toEqual({ ok: false, cause: { _tag: "Interrupt" } });
+      expect(fake.pushed).toEqual([["{jobs}:data", ["7"]]]);
+    });
+
+    test("RedisQueue.take decodes the item in the step that receives it", async () => {
+      const fake = fakeRedis();
+      const queue = RedisQueue.make<number>({ redis: fake.redis, key: "jobs" });
+      const scheduler = new SyncScheduler();
+      const taker = runFiber(queue.take() as Eff<number, never>, scheduler);
+      await settle(scheduler, fake.popping);
+
+      fake.pop(["{jobs}:data", "7"]);
+      await macrotask();
+      expect(taker.status).toBe("ready");
+      scheduler.flush();
+
+      // No further wait after BRPOP, where an interrupt would drop the item.
+      expect(taker.result).toEqual({ ok: true, value: 7 });
+      expect(fake.pushed).toEqual([]);
+    });
+
+    test("RedisQueue.take fails with a typed decode error for an undecodable item", async () => {
+      const fake = fakeRedis();
+      const queue = RedisQueue.make<number>({ redis: fake.redis, key: "jobs" });
+      const scheduler = new SyncScheduler();
+      const taker = runFiber(queue.take() as Eff<number, never>, scheduler);
+      await settle(scheduler, fake.popping);
+
+      fake.pop(["{jobs}:data", "{not json"]);
+      await macrotask();
+      scheduler.flush();
+
+      expect(taker.result).toMatchObject({
+        ok: false,
+        cause: { _tag: "Fail", error: { _tag: "RedisError", operation: "queue.decode" } },
+      });
+    });
+
+    test("RedisQueue.take interrupted while BRPOP is still returning an item", async () => {
+      const fake = fakeRedis();
+      const queue = RedisQueue.make<number>({ redis: fake.redis, key: "jobs" });
+      const scheduler = new SyncScheduler();
+      const taker = runFiber(queue.take() as Eff<number, never>, scheduler);
+      await settle(scheduler, fake.popping);
+
+      taker.interrupt();
+      scheduler.flush();
+      fake.pop(["{jobs}:data", "8"]);
+      await macrotask();
+
+      expect(fake.pushed).toEqual([["{jobs}:data", ["8"]]]);
+    });
+
+    test("RedisLatch.await interrupted as BRPOP returns the wake-up token", async () => {
+      const fake = fakeRedis();
+      const latch = await unsafeRun(RedisLatch.make({ redis: fake.redis, key: "ready", count: 1 }));
+      const scheduler = new SyncScheduler();
+      const waiter = runFiber(latch.await as Eff<void, never>, scheduler);
+      await settle(scheduler, fake.popping);
+
+      fake.pop(["{ready}:notify", "1"]);
+      await macrotask();
+      expect(waiter.status).toBe("ready");
+      waiter.interrupt();
+      scheduler.flush();
+
+      expect(fake.pushed).toEqual([["{ready}:notify", ["1"]]]);
+    });
+
+    test("a BRPOP that times out gives nothing back", async () => {
+      const fake = fakeRedis();
+      const queue = RedisQueue.make<number>({ redis: fake.redis, key: "jobs" });
+      const scheduler = new SyncScheduler();
+      const taker = runFiber(queue.take() as Eff<number, never>, scheduler);
+      await settle(scheduler, fake.popping);
+
+      taker.interrupt();
+      scheduler.flush();
+      fake.pop(null);
+      await macrotask();
+
+      expect(fake.pushed).toEqual([]);
+    });
+  });
+
+  test("a singleflight leader interrupted after taking the lock still releases it", async () => {
+    const published: string[] = [];
+    let releases = 0;
+    const redis: Partial<RedisClient> = {
+      set: async () => "OK",
+      rpush: async (_key, ...values) => {
+        published.push(...values);
+        return published.length;
+      },
+      pexpire: async () => 1,
+      eval: async () => {
+        releases++;
+        return 1;
+      },
+    };
+    const queue: Array<() => void> = [];
+    const scheduler: Scheduler = {
+      schedule: (task) => void queue.push(task),
+      flush: () => {
+        while (queue.length > 0) queue.shift()!();
+      },
+      shutdown: () => void (queue.length = 0),
+    };
+    const flights = RedisSingleflight.make({ redis: redis as RedisClient });
+    const leader = runFiber(
+      flights.do(
+        "key",
+        async<void>(() => () => {}),
+      ) as any,
+      scheduler,
+    );
+    scheduler.flush();
+    // SET NX has resolved and the leader's resume is queued, but has not run.
+    for (let i = 0; i < 10 && queue.length === 0; i++) await Promise.resolve();
+    expect(queue.length).toBe(1);
+
+    leader.interrupt();
+    for (let i = 0; i < 20 && leader.status !== "done"; i++) {
+      scheduler.flush();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    expect(leader.result).toEqual({ ok: false, cause: { _tag: "Interrupt" } });
+    expect(published.map((value) => JSON.parse(value).ok)).toEqual([false]);
+    expect(releases).toBe(1);
+  });
+
+  test("an interrupted half-open circuit breaker probe releases its claim", async () => {
+    const calls: string[] = [];
+    const redis: Partial<RedisClient> = {
+      eval: async (script: string) => {
+        if (script.includes("local claim")) {
+          calls.push("inspect");
+          return [1, "half-open", 0, 0, Date.now(), 7];
+        }
+        calls.push(script.includes("and state == 'half-open'") ? "release" : "other");
+        return 1;
+      },
+    };
+    const breaker = RedisCircuitBreaker.make({
+      redis: redis as RedisClient,
+      key: "breaker",
+      failureThreshold: 1,
+      resetTimeoutMs: 10,
+    });
+    let started = false;
+    const fiber = runFiber(
+      breaker.protect(
+        sync(() => {
+          started = true;
+        }).flatMap(() => async<void>(() => () => {})),
+      ) as any,
+    );
+    for (let i = 0; i < 20 && !started; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(started).toBe(true);
+
+    fiber.interrupt();
+    await fiber.await();
+
+    expect(calls).toEqual(["inspect", "release"]);
   });
 });

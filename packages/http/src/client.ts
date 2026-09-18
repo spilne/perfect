@@ -8,7 +8,7 @@
 // The interface is `Eff`-typed so distributed / proxy / test implementations
 // drop in wherever an HttpClient is needed (typically via Layer).
 
-import { type Eff, type Throws, succeed, sync } from "@spilne/perfect-core";
+import { type Eff, type Throws, Cause, onExit, succeed, suspend, sync } from "@spilne/perfect-core";
 import type { HttpClientError } from "./errors";
 import type { HttpProxyConfig, HttpTransport } from "./transport";
 import type { HttpMiddleware, HttpRequestContext } from "./middleware";
@@ -468,11 +468,12 @@ export class DefaultHttpClient extends AbstractHttpClient {
 
   /** Wrap an effect with middleware hooks + duration tracking.
    *
-   *  The SAME context object is passed to onRequest / onResponse / onError —
-   *  not a spread copy — so middleware can key per-request state off the
-   *  context reference (e.g. a WeakMap<HttpRequestContext, Span>). The
-   *  `durationMs` field is mutated on the existing context before
-   *  onResponse / onError fire.
+   *  The SAME context object is passed to onRequest / onResponse / onError /
+   *  onInterrupt — not a spread copy — so middleware can key per-request state
+   *  off the context reference (e.g. a WeakMap<HttpRequestContext, Span>). The
+   *  `durationMs` field is mutated on the existing context before the closing
+   *  hook fires. The closing hooks run from a finalizer, so exactly one of
+   *  them fires for every request whose onRequest fired, interrupted or not.
    */
   private instrument<A, E extends HttpClientError>(
     eff: Eff<A, Throws<E>>,
@@ -487,24 +488,30 @@ export class DefaultHttpClient extends AbstractHttpClient {
       tag?: string;
       durationMs: number;
     };
-    return sync(() => {
-      for (const mw of middleware) mw.onRequest?.(context);
-      return performance.now();
-    }).flatMap((start: number) =>
-      (eff as any)
-        .tap((_value: A) =>
-          sync(() => {
-            mut.durationMs = performance.now() - start;
+    return suspend(() => {
+      // Per run: the same request effect may be retried or run concurrently.
+      let start = -1;
+      const started = sync(() => {
+        for (const mw of middleware) mw.onRequest?.(context);
+        start = performance.now();
+      }).flatMap(() => eff);
+      return onExit(started, (exit) => {
+        if (start < 0) return succeed(undefined);
+        return sync(() => {
+          mut.durationMs = performance.now() - start;
+          if (exit._tag === "Success") {
             for (const mw of middleware) mw.onResponse?.(context as any);
-          }),
-        )
-        .tapError((error: E) =>
-          sync(() => {
-            mut.durationMs = performance.now() - start;
-            for (const mw of middleware) mw.onError?.(context as any, error);
-          }),
-        ),
-    ) as Eff<A, Throws<E>>;
+            return;
+          }
+          const failure = Cause.firstFail(exit.cause);
+          if (failure !== null) {
+            for (const mw of middleware) mw.onError?.(context as any, failure.value as E);
+          } else if (Cause.hasInterrupt(exit.cause)) {
+            for (const mw of middleware) mw.onInterrupt?.(context as any);
+          }
+        });
+      });
+    }) as Eff<A, Throws<E>>;
   }
 }
 

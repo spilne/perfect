@@ -19,7 +19,8 @@ type ObjEffects<T extends Record<string, Eff<unknown, unknown>>> =
  * Tuple form — `all([a, b, c])` → `Eff<[A, B, C]>`
  * Object form — `all({ a, b, c })` → `Eff<{ a: A, b: B, c: C }>`
  *
- * If any effect fails, the rest are interrupted.
+ * If any effect fails, the rest are interrupted, and the failure is returned
+ * once they have finished.
  */
 export function all<const T extends readonly Eff<unknown, unknown>[]>(
   effects: T,
