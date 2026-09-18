@@ -93,6 +93,11 @@ export class Fiber<A = unknown> {
   // handlers are bypassed and the interrupt is raised again on leaving an
   // uninterruptible region, so the fiber can only run finalizers and fail.
   interrupting = false;
+  // Set while the fiber is Ready with a value an async resume handed over
+  // (an item, a permit) and cleared when a loop run starts from it. If
+  // interrupt() replaces that value first, it calls this so the value goes
+  // back to where it came from.
+  handoffDiscard: (() => void) | null = null;
 
   complete(result: FiberResult<A>): void {
     if (this.state === FiberState.Done) return;
@@ -130,13 +135,21 @@ export class Fiber<A = unknown> {
     }
     this.asyncToken++;
     this.interrupting = true;
+    // A value handed over by a resume whose run has not started is replaced
+    // below. It is given back once the fiber is consistently interrupted, so a
+    // discard that re-enters this fiber sees it interrupted.
+    const discard = this.handoffDiscard;
+    this.handoffDiscard = null;
     // Cleared before the call, so a canceler that interrupts again does not
     // run itself a second time.
     const cancel = this.interruptHandle;
     if (cancel !== null) {
       this.interruptHandle = null;
       cancel();
-      if ((this.state as FiberState) === FiberState.Done) return;
+      if ((this.state as FiberState) === FiberState.Done) {
+        discard?.();
+        return;
+      }
     }
     // If the fiber has a non-empty continuation stack, inject a Fail(Interrupt)
     // and re-schedule — the interpreter loop walks the stack and fires any
@@ -155,9 +168,11 @@ export class Fiber<A = unknown> {
       // Avoid a circular import on runtime.ts by going through the scheduler;
       // bootstrapFiber installs a `_resume` callback that wraps runFiberLoop.
       this.scheduler.schedule(() => this._resume?.());
+      discard?.();
       return;
     }
     this.complete({ ok: false, cause: { _tag: "Interrupt" } });
+    discard?.();
   }
 
   // Set by bootstrapFiber to point at runFiberLoop(this); avoids a fiber.ts ⇄

@@ -15,16 +15,24 @@ export class QueueClosed {
 export const QueueShutdown = QueueClosed;
 export type QueueShutdown = QueueClosed;
 
-type TakeResume<A> = (eff: Eff<A, Throws<QueueClosed>>) => void;
+type TakeResume<A> = (eff: Eff<A, Throws<QueueClosed>>, onDiscard?: () => void) => void;
 type OfferResume = (eff: Eff<boolean, Throws<QueueClosed>>) => void;
 type TakeWaiter<A> = { canceled: boolean; resume: TakeResume<A> };
 type OfferWaiter<A> = { canceled: boolean; value: A; resume: OfferResume };
 type CloseWaiter = { canceled: boolean; resume: () => void };
 
 export interface Queue<A, S = never> {
-  /** Push a value. Blocks if bounded and full. Fails with QueueClosed if closed. */
+  /**
+   * Push a value. Blocks if bounded and full. Fails with QueueClosed if closed.
+   * A blocked offer interrupted after a take made room for it has still
+   * enqueued its value.
+   */
   offer(value: A): Eff<boolean, S | Throws<QueueClosed>>;
-  /** Pop a value. Blocks if empty. Fails with QueueClosed if closed AND empty. */
+  /**
+   * Pop a value. Blocks if empty. Fails with QueueClosed if closed AND empty.
+   * A value handed to a take whose fiber is interrupted before it runs goes to
+   * the next take instead.
+   */
   take(): Eff<A, S | Throws<QueueClosed>>;
   /** Drain everything immediately, including queued offerers' values. */
   takeAll(): Eff<A[], S>;
@@ -60,11 +68,7 @@ class InProcessQueue<A> implements Queue<A> {
     // All sync. Only fall to async when blocking on capacity.
     return suspend(() => {
       if (this._closed) return fail(new QueueClosed()) as any;
-      const taker = this.nextTaker();
-      if (taker) {
-        taker.resume(succeed(value) as any);
-        return succeed(true) as any;
-      }
+      if (this.handOff(value)) return succeed(true) as any;
       if (this.buffer.length < this.capacity) {
         this.buffer.push(value);
         return succeed(true) as any;
@@ -85,10 +89,14 @@ class InProcessQueue<A> implements Queue<A> {
     return suspend(() => {
       if (this.buffer.length > 0) {
         const item = this.buffer.shift()!;
-        const offerer = this.nextOfferer();
-        if (offerer) {
-          this.buffer.push(offerer.value);
-          offerer.resume(succeed(true) as any);
+        // A value given back by an interrupted taker can leave the buffer over
+        // capacity; a blocked offerer gets in only once there is room.
+        if (this.buffer.length < this.capacity) {
+          const offerer = this.nextOfferer();
+          if (offerer) {
+            this.buffer.push(offerer.value);
+            offerer.resume(succeed(true) as any);
+          }
         }
         return succeed(item) as any;
       }
@@ -177,6 +185,18 @@ class InProcessQueue<A> implements Queue<A> {
 
   get awaitShutdown(): Eff<void, never> {
     return this.awaitClose;
+  }
+
+  // Hands value to the oldest waiting taker. A taker interrupted before it
+  // runs gives the value back: to the next taker, or to the head of the
+  // buffer, where it is still the oldest value.
+  private handOff(value: A): boolean {
+    const taker = this.nextTaker();
+    if (taker === undefined) return false;
+    taker.resume(succeed(value) as any, () => {
+      if (!this.handOff(value)) this.buffer.unshift(value);
+    });
+    return true;
   }
 
   private nextTaker(): TakeWaiter<A> | undefined {

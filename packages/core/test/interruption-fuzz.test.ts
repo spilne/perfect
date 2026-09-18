@@ -12,6 +12,9 @@ import {
   type Fiber,
   Cause,
   Clock,
+  Pool,
+  Queue,
+  Semaphore,
   TestClock,
   acquireRelease,
   addFiberSupervisor,
@@ -111,6 +114,9 @@ interface Node {
 interface Ctx {
   readonly ancestors: readonly Ancestor[];
   readonly scopeGroup: number;
+  // Code holding a permit or a pool resource takes neither again, so programs
+  // cannot deadlock on the shared semaphore and pool.
+  readonly holdsShared: boolean;
 }
 
 interface Gate {
@@ -154,6 +160,47 @@ async function runIteration(params: {
   const scheduler = new StepScheduler();
   const clock = new TestClock();
   const deferreds = [0, 1].map(() => ({ deferred: new InProcessDeferred<number>(), done: false }));
+
+  // Shared primitives whose items, permits and resources must be conserved.
+  const PERMITS = 2;
+  const semaphore = runSync(Semaphore.make(PERMITS));
+  let permitHolders = 0;
+  const QUEUE_CAPACITY = 2;
+  const queue = runSync(Queue.bounded<number>(QUEUE_CAPACITY));
+  let nextItem = 0;
+  // Items offered by the program or from outside, and whether that offer
+  // reported success; an interrupted offer may or may not have enqueued.
+  const offers = new Map<number, boolean>();
+  // How often each item came out of the queue: taken by the program, drained
+  // from outside, or left over at the end.
+  const received = new Map<number, number>();
+  const receive = (item: number) => {
+    received.set(item, (received.get(item) ?? 0) + 1);
+  };
+  const offerFromOutside = () => {
+    if (runSync(queue.size) >= QUEUE_CAPACITY) return;
+    const item = nextItem++;
+    offers.set(item, false);
+    runSync(queue.offer(item));
+    offers.set(item, true);
+  };
+  const drainFromOutside = () => {
+    for (const item of runSync(queue.takeAll())) receive(item);
+  };
+  const POOL_SIZE = 2;
+  let createdResources = 0;
+  const releasedResources = new Map<number, number>();
+  const resourcesInUse = new Set<number>();
+  const pool = runSync(
+    Pool.make<number>({
+      size: POOL_SIZE,
+      acquire: sync(() => ++createdResources),
+      release: (resource) =>
+        sync(() => {
+          releasedResources.set(resource, (releasedResources.get(resource) ?? 0) + 1);
+        }),
+    }),
+  );
   const gates: Gate[] = [];
   const promises: ManualPromise[] = [];
   const nodes: Node[] = [];
@@ -324,7 +371,7 @@ async function runIteration(params: {
 
   const leaf = (ctx: Ctx): Eff<any, any> => {
     let effect: Eff<any, any>;
-    switch (ri(11)) {
+    switch (ri(13)) {
       case 0:
       case 9:
         effect = gateLeaf({ cancellable: true, inFinalizer: false });
@@ -351,6 +398,17 @@ async function runIteration(params: {
       case 7:
         effect = fail("E");
         break;
+      case 11: {
+        const item = nextItem++;
+        // The map records the result in the same step the offer returns it.
+        effect = sync(() => void offers.set(item, false))
+          .flatMap(() => queue.offer(item))
+          .map(() => void offers.set(item, true));
+        break;
+      }
+      case 12:
+        effect = queue.take().map(receive);
+        break;
       default:
         effect = ri(4) === 0 ? die("D") : succeed(0);
     }
@@ -368,6 +426,7 @@ async function runIteration(params: {
     return {
       ancestors: [...group.ancestors, { id: group.id, crossFiber: false }],
       scopeGroup: group.id,
+      holdsShared: ctx.holdsShared,
     };
   };
 
@@ -397,8 +456,8 @@ async function runIteration(params: {
     const { ctx, depth, attach } = params;
     const node = makeNode("fin", ctx.ancestors);
     const inner: Ctx = {
+      ...ctx,
       ancestors: [...ctx.ancestors, { id: node.id, crossFiber: false }],
-      scopeGroup: ctx.scopeGroup,
     };
     const { ancestors } = ctx;
     return attach(
@@ -410,10 +469,44 @@ async function runIteration(params: {
     );
   };
 
+  const withPermit = (depth: number, ctx: Ctx): Eff<any, any> => {
+    if (ctx.holdsShared) return uninterruptible(generate(depth - 1, ctx));
+    let holding = false;
+    return semaphore.withPermit(
+      ensuring(
+        sync(() => {
+          holding = true;
+          if (++permitHolders > PERMITS) violate("more permit holders than permits");
+        }).flatMap(() => generate(depth - 1, { ...ctx, holdsShared: true })),
+        sync(() => {
+          if (holding) permitHolders--;
+        }),
+      ),
+    );
+  };
+
+  const withResource = (depth: number, ctx: Ctx): Eff<any, any> => {
+    if (ctx.holdsShared) return generate(depth - 1, ctx);
+    return pool.use((resource) => {
+      let holding = false;
+      return ensuring(
+        sync(() => {
+          if (resourcesInUse.has(resource)) violate("a pool resource was used twice at once");
+          if (releasedResources.has(resource)) violate("a released pool resource was used");
+          resourcesInUse.add(resource);
+          holding = true;
+        }).flatMap(() => generate(depth - 1, { ...ctx, holdsShared: true })),
+        sync(() => {
+          if (holding) resourcesInUse.delete(resource);
+        }),
+      );
+    });
+  };
+
   const generate = (depth: number, ctx: Ctx): Eff<any, any> => {
     if (depth <= 0 || nodeBudget <= 0 || ri(5) === 0) return leaf(ctx);
     nodeBudget--;
-    switch (ri(15)) {
+    switch (ri(17)) {
       case 0:
       case 1:
         return generate(depth - 1, ctx).flatMap(() => generate(depth - 1, ctx));
@@ -426,6 +519,7 @@ async function runIteration(params: {
       case 5: {
         const group = makeNode("scope", ctx.ancestors);
         const inner: Ctx = {
+          ...ctx,
           ancestors: [...ctx.ancestors, { id: group.id, crossFiber: false }],
           scopeGroup: group.id,
         };
@@ -449,6 +543,10 @@ async function runIteration(params: {
         return generate(depth - 1, ctx).catchAllCause(() => succeed(0));
       case 13:
         return generate(depth - 1, ctx).exit();
+      case 15:
+        return withPermit(depth, ctx);
+      case 16:
+        return withResource(depth, ctx);
       default:
         return finalizerNode({ ctx, depth, attach: (body, fin) => ensuring(body, fin) });
     }
@@ -458,6 +556,7 @@ async function runIteration(params: {
   const program = generate(4, {
     ancestors: [{ id: rootGroup.id, crossFiber: false }],
     scopeGroup: rootGroup.id,
+    holdsShared: false,
   });
 
   const stopSupervisor = addFiberSupervisor({
@@ -545,6 +644,10 @@ async function runIteration(params: {
         if (live.length > 0) live[ri(live.length)]!.interrupt();
       } else if (action < 90) {
         scheduler.flush();
+      } else if (action < 94) {
+        offerFromOutside();
+      } else if (action < 96) {
+        drainFromOutside();
       } else {
         await settleMicrotasks();
       }
@@ -582,6 +685,13 @@ async function runIteration(params: {
         }
       }
       await settleMicrotasks();
+      // Takes and offers of the program wait on each other; feed and drain
+      // the queue from outside until every fiber has completed.
+      if (!progressed && [...fibers].some((fiber) => fiber.status !== "done")) {
+        drainFromOutside();
+        offerFromOutside();
+        progressed = scheduler.queue.length > 0;
+      }
       if (!progressed && scheduler.queue.length === 0) {
         await new Promise<void>((resolve) => setImmediate(resolve));
         const more =
@@ -615,6 +725,24 @@ async function runIteration(params: {
       if (node.starts > 0 && node.entered === 0) violate("release ran without an acquire");
       if (node.dones < node.starts) violate("release started but never finished");
     }
+  }
+  if (runSync(semaphore.available) !== PERMITS) {
+    violate("semaphore permits were not all returned");
+  }
+  drainFromOutside();
+  for (const [item, count] of received) {
+    if (count > 1) violate("a queue item was received more than once");
+    if (!offers.has(item)) violate("a queue item was received that was never offered");
+  }
+  for (const [item, succeeded] of offers) {
+    if (succeeded && received.get(item) !== 1)
+      violate("a successfully offered queue item was lost");
+  }
+  if (runSync(pool.inUse) !== 0) violate("pool resources still in use after the program ended");
+  runSync(pool.shutdown());
+  for (let resource = 1; resource <= createdResources; resource++) {
+    const count = releasedResources.get(resource) ?? 0;
+    if (count !== 1) violate(`a pool resource was released ${count} times`);
   }
   if (interruptedBeforeBodyDone && root.result !== null) {
     if (root.result.ok || !Cause.hasInterrupt(root.result.cause)) {

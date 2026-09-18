@@ -119,6 +119,8 @@ function exitFinalizer(finalizer: unknown, exit: Exit<unknown, unknown>): Suspen
 function runFiberLoop(fiber: Fiber<any>): void {
   if (fiber.state !== FiberState.Ready) return;
   fiber.state = FiberState.Running;
+  // A value handed over by an async resume is delivered once this run starts.
+  fiber.handoffDiscard = null;
   fiber.opCount = 0;
 
   let cur: any = fiber.current;
@@ -167,8 +169,11 @@ function runFiberLoop(fiber: Fiber<any>): void {
           : new Suspend(Op.Fail, Cause.interrupt(), null);
     }
 
-    // op budget — yield to scheduler
-    if (++fiber.opCount > budget) {
+    // op budget — yield to scheduler. A value, or an Op.Succeed holding one,
+    // is never paused on: a pause is an interrupt point, and a primitive's
+    // fast path (a queue take, say) returns what it removed that way, so it
+    // reaches the next frame's continuation in the same step.
+    if (++fiber.opCount > budget && cur instanceof Suspend && cur.op !== Op.Succeed) {
       fiber.current = cur;
       fiber.stack = k;
       fiber.context = context;
@@ -362,7 +367,9 @@ function runFiberLoop(fiber: Fiber<any>): void {
       }
 
       case Op.Async: {
-        const register = cur.a as (resume: (value: any) => void) => (() => void) | void;
+        const register = cur.a as (
+          resume: (value: any, onDiscard?: () => void) => void,
+        ) => (() => void) | void;
 
         fiber.stack = k;
         fiber.context = context;
@@ -371,11 +378,16 @@ function runFiberLoop(fiber: Fiber<any>): void {
 
         let resumed = false;
         try {
-          const cancel = register((value: any) => {
-            if (resumed || fiber.asyncToken !== token || fiber.state === FiberState.Done) return;
+          const cancel = register((value: any, onDiscard?: () => void) => {
+            if (resumed || fiber.asyncToken !== token || fiber.state === FiberState.Done) {
+              // Nothing waits for this value any more: hand it back.
+              if (typeof onDiscard === "function") onDiscard();
+              return;
+            }
             resumed = true;
             fiber.interruptHandle = null;
             fiber.current = value;
+            fiber.handoffDiscard = typeof onDiscard === "function" ? onDiscard : null;
             fiber.state = FiberState.Ready;
             fiber.scheduler.schedule(() => runFiberLoop(fiber));
           });

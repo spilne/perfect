@@ -155,6 +155,53 @@ A callback that could not be unregistered — a promise that settles late, a
 child that finishes after its parent was interrupted — is ignored, so it
 cannot resume a cancelled fiber or cut its finalizers short.
 
+### Handoff to waiting fibers
+
+`Queue`, `Semaphore` and `Pool` give an item, a permit or a resource straight
+to the oldest fiber waiting for one. That fiber may be interrupted before it
+gets to run, for example because its `take` just lost a race against a timer.
+The runtime then hands the value back instead of dropping it:
+
+| Primitive | Where a value given back goes |
+|---|---|
+| `Queue` (and `PubSub`, `SubscriptionRef`, `Stream.fromQueue`) | the next waiting taker, or the head of the queue |
+| `Semaphore` | the semaphore, which serves its next waiter |
+| `Pool` | the next waiter, or the idle list; after `shutdown()` it is released |
+| `Stream.fromCallback` / `Stream.async` / `Stream.asyncChunks` | the next pull, or the head of the push buffer |
+
+Every value is received once or given back once, never both. This also holds
+when the waiter is uninterruptible (it keeps the value and sees the interrupt
+afterwards) and when `scheduler.shutdown()` dropped its queued run (the value
+is given back when the fiber is interrupted).
+
+The guarantee ends where the waiting effect returns the value. An interrupt
+that arrives after `take()` returned, before your code has used the value,
+drops it like any other result. Use the value in the same step, as in
+`queue.take().map(record)`, or inside `uninterruptible`. `Semaphore.withPermit`
+and `Pool.use` already register their release in the step that receives the
+permit or resource.
+
+Two details follow from giving values back:
+
+- A value given back to a bounded queue goes to its head even when the queue
+  is full, so `size` can briefly exceed the capacity. Blocked offers wait
+  until it is below the capacity again.
+- A blocked `offer` is admitted when a `take` makes room. If that offer is
+  interrupted before it runs, its value stays in the queue although the offer
+  fails with the interrupt.
+
+Your own `async` primitives get the same behavior by passing a second argument
+to `resume`. `onDiscard` runs exactly once if the fiber does not run the value:
+
+```ts
+import { async, succeed } from "@spilne/perfect-core";
+
+const takeSlot = async<number>((resume) => {
+  const slot = slots.pop()!;
+  resume(succeed(slot), () => slots.push(slot));
+});
+```
+
 ## Fiber status and supervision
 
 `Fiber` exposes lightweight diagnostics for tests and debugging:

@@ -207,6 +207,10 @@ program built with `.with(layer)` ends. See
   meaningful.
 - **`ensuring` doesn't acquire — just finalizes.** Use `acquireRelease` if
   you need acquire-then-release semantics.
+- **Permits and pooled resources come back on interrupt.** `Semaphore.withPermit`
+  and `Pool.use` return what they hold on success, failure and interrupt, also
+  when the interrupt lands between the grant and the start of the body. See
+  [Handoff to waiting fibers](./06-concurrency.md#handoff-to-waiting-fibers).
 - **Cleanup belongs in finalizers, not error handlers.** An interrupted fiber
   skips `.catchAllCause`, `.tapErrorCause` and every other handler; `ensuring`,
   `acquireRelease` and `onExit` still run.
