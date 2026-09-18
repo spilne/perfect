@@ -711,11 +711,17 @@ function startForEachPar(
   let finished = false;
   let outcome: unknown;
 
-  const group: ChildGroup = new ChildGroup(fiber, k, context, (result, index) => {
-    if (!result.ok) group.addFailure(result.cause);
-    else if (!group.stopped) results[index] = result.value;
-    advance();
-  });
+  const group: ChildGroup = new ChildGroup(
+    fiber,
+    k,
+    context,
+    (result, index) => {
+      if (!result.ok) group.addFailure(result.cause);
+      else if (!group.stopped) results[index] = result.value;
+      advance();
+    },
+    true,
+  );
   // Stopping closes the iterator, so a failure or an interrupt pulls nothing
   // more.
   group.onStop = () => {
@@ -840,10 +846,11 @@ class ChildGroup {
   onStop: (() => void) | null = null;
   private delivered: Cause | null = null;
   private drained: (() => void) | null = null;
-  // Running children. Slots are recycled, so the table stays as small as the
-  // peak number of running children.
+  // Running children. With `recycleSlots` (forEachPar) freed slots are reused,
+  // so the table stays as small as the peak number of running children. all()
+  // and race() start every child at once and skip the bookkeeping.
   private readonly slots: Array<Fiber<any> | null> = [];
-  private readonly freeSlots: number[] = [];
+  private readonly freeSlots: number[] | null;
   private readonly token: number;
 
   constructor(
@@ -852,28 +859,31 @@ class ChildGroup {
     private readonly context: Context,
     // Called when a child settles, after it stopped counting as running.
     private readonly onChild: (result: FiberResult<any>, index: number) => void,
+    recycleSlots = false,
   ) {
+    this.freeSlots = recycleSlots ? [] : null;
     this.token = ++fiber.asyncToken;
     fiber.stack = new Cont(
       Op.SetInterruptible,
       false,
-      new Cont(Op.CatchAll, this.onCause, new Cont(Op.SetInterruptible, fiber.interruptible, k)),
+      new Cont(Op.CatchAll, this.parked, new Cont(Op.SetInterruptible, fiber.interruptible, k)),
     );
     fiber.context = context;
     fiber.state = FiberState.Suspended;
-    fiber.interruptHandle = this.interruptChildren;
+    fiber.interruptHandle = this.parked;
   }
 
   // Starts a child for `effect`; `index` is passed back to onChild. An inline
   // child runs its first slice now instead of on the next scheduler turn.
   start(effect: unknown, index: number, inline: boolean): Fiber<any> {
     const child = makeChild(this.fiber, effect, this.context);
-    const slot = this.freeSlots.length > 0 ? this.freeSlots.pop()! : this.slots.length;
+    const free = this.freeSlots;
+    const slot = free !== null && free.length > 0 ? free.pop()! : this.slots.length;
     this.slots[slot] = child;
     this.running++;
     child.onComplete((result) => {
       this.slots[slot] = null;
-      this.freeSlots.push(slot);
+      if (free !== null) free.push(slot);
       this.running--;
       this.onChild(result, index);
     });
@@ -953,10 +963,21 @@ class ChildGroup {
     this.fiber.state = FiberState.Running;
   }
 
-  private readonly interruptChildren = (): void => {
+  // The parked fiber's interrupt handle, called with no argument, and its
+  // CatchAll handler, called with the cause. One closure serves both, so a
+  // group allocates one instead of two.
+  private readonly parked = (cause?: Cause): Suspend | undefined => {
+    if (cause === undefined) {
+      this.interruptChildren();
+      return undefined;
+    }
+    return this.onCause(cause);
+  };
+
+  private interruptChildren(): void {
     this.interrupted = true;
     this.stop();
-  };
+  }
 
   private settledCause(cause: Cause): Suspend {
     let combined = cause;
@@ -965,7 +986,7 @@ class ChildGroup {
     return new Suspend(Op.Fail, combined, null);
   }
 
-  private readonly onCause = (cause: Cause): Suspend => {
+  private onCause(cause: Cause): Suspend {
     // Once the group delivered a failure every child has settled. An interrupt
     // that reached the fiber before it ran joined that failure; it gets the
     // same shape as an interrupt that arrives while the group waits.
@@ -986,7 +1007,7 @@ class ChildGroup {
       },
       null,
     );
-  };
+  }
 }
 
 // Drives cleanup through resolve/reject callbacks without completing the
