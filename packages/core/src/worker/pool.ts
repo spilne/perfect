@@ -13,21 +13,101 @@ class WorkerError {
   constructor(public message: string) {}
 }
 
+/** What `executor.js` posts back for every task it is handed. */
+interface WorkerResponse {
+  id: number;
+  ok: boolean;
+  value?: unknown;
+  error?: unknown;
+}
+
+/**
+ * The slice of a worker the pool actually touches. Two implementations satisfy
+ * it and they disagree on how messages arrive: the web `Worker` global (Bun,
+ * Deno, browsers) sets `onmessage` and wraps the payload in a `MessageEvent`,
+ * while `node:worker_threads` is an `EventEmitter` that hands over the raw
+ * payload. `attach` below normalises both onto one callback.
+ */
+interface WorkerHandle {
+  postMessage(message: unknown): void;
+  terminate(): unknown;
+  on?(event: string, handler: (payload: any) => void): void;
+  onmessage?: ((event: { data: WorkerResponse }) => void) | null;
+  onerror?: ((event: { message?: string }) => void) | null;
+}
+
+type SpawnWorker = (url: URL) => WorkerHandle;
+
+/**
+ * Reach a Node builtin without a static `import`, which would drag `node:` into
+ * the module graph of every browser bundle of the root barrel (`WorkerPool` is
+ * re-exported from it). `filesystem.ts` uses a dynamic `import()` for the same
+ * reason; here the lookup has to stay synchronous so `make()` remains a `sync`
+ * effect and `runSync(WorkerPool.make())` keeps working. Browsers have no
+ * `process` at all — they hit the `Worker` global path instead.
+ */
+function nodeBuiltin<T>(id: string): T | undefined {
+  const proc = (globalThis as { process?: { getBuiltinModule?: (id: string) => unknown } }).process;
+  try {
+    return proc?.getBuiltinModule?.(id) as T | undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 // Detect the number of CPU cores available for real parallelism.
 // Tries navigator (Bun/modern Node/browser), then Node's os module, then
 // falls back to 4 — matches what cats-effect / ZIO do on the JVM side.
 function detectCoreCount(): number {
-  const nav: any = typeof navigator !== "undefined" ? navigator : undefined;
+  const nav = (globalThis as { navigator?: { hardwareConcurrency?: number } }).navigator;
   if (nav?.hardwareConcurrency) return nav.hardwareConcurrency;
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const os = (globalThis as any).require?.("node:os") ?? require("node:os");
-    if (typeof os?.availableParallelism === "function") return os.availableParallelism();
-    if (typeof os?.cpus === "function") return os.cpus().length;
-  } catch {
-    /* not in a Node-like env */
-  }
+
+  const os = nodeBuiltin<{
+    availableParallelism?: () => number;
+    cpus?: () => unknown[];
+  }>("node:os");
+  if (typeof os?.availableParallelism === "function") return os.availableParallelism();
+  if (typeof os?.cpus === "function") return os.cpus().length;
+
   return 4;
+}
+
+/**
+ * Pick the worker implementation this runtime offers. Node has no global
+ * `Worker`, only `node:worker_threads` — and `executor.js` speaks both
+ * protocols, so either one drives the same pool.
+ */
+function resolveWorkerSpawner(): SpawnWorker {
+  const WebWorker = (
+    globalThis as {
+      Worker?: new (url: URL, options?: { type?: "module" }) => WorkerHandle;
+    }
+  ).Worker;
+  if (WebWorker) return (url) => new WebWorker(url, { type: "module" });
+
+  const NodeWorker = nodeBuiltin<{
+    Worker?: new (url: URL) => WorkerHandle;
+  }>("node:worker_threads")?.Worker;
+  if (NodeWorker) return (url) => new NodeWorker(url);
+
+  throw new Error(
+    "WorkerPool requires either a global Worker (Bun, Deno, browsers) or node:worker_threads",
+  );
+}
+
+/**
+ * Locate the worker entry that runs inside each thread.
+ *
+ * The published tarball ships `dist/worker/executor.js` right beside
+ * `dist/worker/pool.js`, so `./executor.js` is the only specifier that has to
+ * resolve on its own — the same `.js`-for-`.ts` convention every relative import
+ * in `src/` already follows. Running the sources directly is what needs help,
+ * because a `new URL(…)` is a plain runtime path that no build step rewrites:
+ * Bun maps it back onto the neighbouring `executor.ts` by itself, and under Node
+ * the test loader does the same.
+ */
+function executorUrl(): URL {
+  return new URL("./executor.js", import.meta.url);
 }
 
 /**
@@ -47,11 +127,12 @@ function detectCoreCount(): number {
  *   const result = await run(pool.parMap(items, expensiveFn))
  */
 export class WorkerPool {
-  private workers: Worker[] = [];
+  private workers: WorkerHandle[] = [];
   private pending = new Map<number, PendingTask>();
   private nextId = 0;
   private roundRobin = 0;
   private _shutdown = false;
+  private failure: string | undefined;
 
   private constructor(private readonly size: number) {}
 
@@ -63,27 +144,54 @@ export class WorkerPool {
     return sync(() => {
       const poolSize = size ?? detectCoreCount();
       const pool = new WorkerPool(poolSize);
-      const executorPath = new URL("./executor.ts", import.meta.url);
+      const spawn = resolveWorkerSpawner();
+      const url = executorUrl();
 
       for (let i = 0; i < poolSize; i++) {
-        const worker = new Worker(executorPath);
-        worker.onmessage = (event: MessageEvent) => {
-          const { id, ok, value, error } = event.data;
-          const task = pool.pending.get(id);
-          if (!task) return;
-          pool.pending.delete(id);
-          if (ok) task.resolve(value);
-          else task.reject(error);
-        };
-        pool.workers.push(worker);
+        pool.workers.push(pool.attach(spawn(url)));
       }
 
       return pool;
     });
   }
 
+  private attach(worker: WorkerHandle): WorkerHandle {
+    const onMessage = (response: WorkerResponse) => {
+      const task = this.pending.get(response.id);
+      if (!task) return;
+      this.pending.delete(response.id);
+      if (response.ok) task.resolve(response.value);
+      else task.reject(response.error);
+    };
+
+    // A thread that dies — most often because it could not load its executor at
+    // all — reports it here and nowhere else. Left unhandled, every in-flight
+    // task and every task scheduled onto that thread afterwards simply never
+    // settles, so the caller sees a hang instead of a `WorkerError`.
+    const onError = (message: string) => {
+      this.failure ??= message;
+      for (const [id, task] of this.pending) {
+        this.pending.delete(id);
+        task.reject(message);
+      }
+    };
+
+    if (typeof worker.on === "function") {
+      worker.on("message", onMessage);
+      worker.on("error", (error: { message?: string }) => onError(error?.message ?? String(error)));
+    } else {
+      worker.onmessage = (event) => onMessage(event.data);
+      worker.onerror = (event) => onError(event?.message ?? "worker failed");
+    }
+
+    return worker;
+  }
+
   execute<A, B>(fn: (arg: A) => B | Promise<B>, arg: A): Eff<B, Throws<WorkerError>> {
     if (this._shutdown) return fail(new WorkerError("Pool is shut down")) as any;
+    // Once a thread has failed the remaining ones are not trustworthy either,
+    // and round-robin would keep handing tasks to a dead worker.
+    if (this.failure !== undefined) return fail(new WorkerError(this.failure)) as any;
 
     return async<B, WorkerError>((resume) => {
       const id = this.nextId++;

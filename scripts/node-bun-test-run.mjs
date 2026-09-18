@@ -19,7 +19,6 @@ const ALL_TEST_ROOTS = [
 
 const EXCLUDED_FROM_NODE_CI = new Set([
   "packages/core/test/stream-operators.test.ts",
-  "packages/core/test/worker.test.ts",
   "packages/core/test/clock-routing.test.ts",
   "packages/core/test/test-clock.test.ts",
   "packages/kafka/test/commit-batch-within.test.ts",
