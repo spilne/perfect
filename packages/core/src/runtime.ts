@@ -404,7 +404,7 @@ function runFiberLoop(fiber: Fiber<any>): void {
             // A mismatch means register() interrupted this fiber before the
             // canceler could be installed.
             if (fiber.asyncToken === token) fiber.interruptHandle = cancel;
-            else cancel();
+            else fiber.cancelAbandonedWait(cancel);
           }
         } catch (error) {
           if (resumed || fiber.asyncToken !== token) return;

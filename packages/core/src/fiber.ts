@@ -170,14 +170,21 @@ export class Fiber<A = unknown> {
     // discard that re-enters this fiber sees it interrupted.
     const discard = this.handoffDiscard;
     this.handoffDiscard = null;
-    const cause = discard === null ? interruptCause(pending) : Cause.interrupt();
+    let cause = discard === null ? interruptCause(pending) : Cause.interrupt();
     // Cleared before the call, so a canceler that interrupts again does not
     // run itself a second time.
     const cancel = this.interruptHandle;
     if (cancel !== null) {
       // Only a suspended fiber has a canceler, and a handoff only a Ready one.
       this.interruptHandle = null;
-      cancel();
+      // A throwing canceler must not abort the caller of interrupt() (all()
+      // interrupting the rest of its children, say) or leave this fiber
+      // waiting, so its error becomes a defect after the interrupt.
+      try {
+        cancel();
+      } catch (error) {
+        cause = Cause.then(cause, Cause.die(error));
+      }
       if ((this.state as FiberState) === FiberState.Done) return;
     }
     // If the fiber has a non-empty continuation stack, inject a Fail(Interrupt)
@@ -203,6 +210,20 @@ export class Fiber<A = unknown> {
       return;
     }
     this.complete({ ok: false, cause });
+  }
+
+  // Calls the canceler of a wait whose registration interrupted this fiber
+  // before the canceler could be installed. As in interrupt(), a throwing
+  // canceler becomes a defect after the interrupt the fiber is about to raise.
+  cancelAbandonedWait(cancel: () => void): void {
+    try {
+      cancel();
+    } catch (error) {
+      const next = this.current;
+      if (this.state === FiberState.Ready && next instanceof Suspend && next.op === Op.Fail) {
+        this.current = new Suspend(Op.Fail, Cause.then(next.a as Cause, Cause.die(error)), null);
+      }
+    }
   }
 
   // Gives back a value this fiber was handed. A throwing discard must not
