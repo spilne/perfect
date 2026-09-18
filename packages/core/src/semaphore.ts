@@ -28,11 +28,15 @@ class InProcessSemaphore implements Semaphore {
     this.permits = permits;
   }
 
+  // Permits are granted through resume even when they are free right away, so
+  // a fiber interrupted before it runs gives them back (see `async`), and
+  // withPermits registers its release in the run that receives them.
   private acquireMany(n: number): Eff<void, never> {
     return async<void>((resume) => {
+      const giveBack = () => this.releaseMany(n);
       if (this.waiters.length === 0 && this.permits >= n) {
         this.permits -= n;
-        resume(succeed(undefined) as any);
+        resume(succeed(undefined) as any, giveBack);
         return;
       }
       const waiter = {
@@ -41,7 +45,7 @@ class InProcessSemaphore implements Semaphore {
         resume: () => {
           if (waiter.done) return;
           waiter.done = true;
-          resume(succeed(undefined) as any);
+          resume(succeed(undefined) as any, giveBack);
         },
       };
       this.waiters.push(waiter);

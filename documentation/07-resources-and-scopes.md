@@ -173,6 +173,13 @@ if (exit._tag === "Failure") {
 
 `scoped(acquireRelease(...))` follows the same rule when a scope closes.
 
+Parallel children release first. `all`, `race`, `timeoutOption` and the other
+combinators built on them wait for their children's finalizers before they
+return, so a finalizer or scope around them runs after those finalizers have
+finished. A child's finalizer failure joins the combinator's outcome with
+`Cause.both` (see
+[Structured teardown](./06-concurrency.md#structured-teardown)).
+
 An interrupt adds `Interrupt` to the outcome. An interrupt that arrives while
 a finalizer runs waits for it: interrupting `succeed(1).ensuring(release)`
 while `release` fails with `e` ends as `(Fail(e) ; Interrupt)`. Error handlers
@@ -211,6 +218,10 @@ program built with `.with(layer)` ends. See
   meaningful.
 - **`ensuring` doesn't acquire — just finalizes.** Use `acquireRelease` if
   you need acquire-then-release semantics.
+- **Permits and pooled resources come back on interrupt.** `Semaphore.withPermit`
+  and `Pool.use` return what they hold on success, failure and interrupt, also
+  when the interrupt lands between the grant and the start of the body. See
+  [Handoff to waiting fibers](./06-concurrency.md#handoff-to-waiting-fibers).
 - **Cleanup belongs in finalizers, not error handlers.** An interrupted fiber
   skips `.catchAllCause`, `.tapErrorCause` and every other handler; `ensuring`,
   `acquireRelease` and `onExit` still run.

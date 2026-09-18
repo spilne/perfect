@@ -88,10 +88,16 @@ export class RedisDeferred<A, E = never> implements Deferred<A, E, Throws<RedisE
     return read().flatMap((result) => {
       if (result.done) return result.ok ? succeedEff(result.value) : failEff(result.error);
       const timeoutSeconds = this.timeoutMs === 0 ? 0 : Math.max(0.001, this.timeoutMs / 1000);
-      return redisBlocking(this.redis, "deferred.await", async (client) => {
-        const result = await client.brpop(this.notifyKey, timeoutSeconds);
-        if (!result) throw new Error(`RedisDeferred timed out after ${this.timeoutMs}ms`);
-      })
+      return redisBlocking(
+        this.redis,
+        "deferred.await",
+        async (client) => {
+          const result = await client.brpop(this.notifyKey, timeoutSeconds);
+          if (!result) throw new Error(`RedisDeferred timed out after ${this.timeoutMs}ms`);
+        },
+        // Another waiter needs the wake-up token this one took.
+        { giveBack: () => void this.redis.rpush(this.notifyKey, "1").catch(() => {}) },
+      )
         .flatMap(() => redisEff("deferred.notify", () => this.redis.rpush(this.notifyKey, "1")))
         .flatMap(() => read())
         .flatMap((resolved): Eff<A, Throws<E> | Throws<RedisError>> => {

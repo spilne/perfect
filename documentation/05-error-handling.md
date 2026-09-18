@@ -149,6 +149,13 @@ What the final `Cause` keeps:
 | interrupted, then a finalizer fails with `e` | the interrupt, then the finalizer failure: `(Interrupt ; Fail(e))` |
 | a handler that would have received a typed failure is bypassed | the typed failure is dropped; defects stay |
 
+A failure counts as raised once the fiber is scheduled to raise it, even if it
+has not run yet. When an async callback resumed it with the failure, an
+interrupt that lands in between keeps the failure, e.g. `(Die(d) ; Interrupt)`.
+When `all` or `race` returned a child's failure, the cause is the same whether
+the interrupt lands before or after that: `(Interrupt & Die(d))` (see
+[Structured teardown](./06-concurrency.md#structured-teardown)).
+
 A typed failure is dropped only when a bypassed handler would have consumed or
 mapped it, so an interrupted effect never surfaces an error its type says was
 handled. When it stays, `run()` rejects with it (`Cause.squash` prefers typed
