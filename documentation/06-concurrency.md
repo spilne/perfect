@@ -197,7 +197,7 @@ Available fiber diagnostics:
 | API / concept | Behavior |
 |---|---|
 | `fiber.status` | `"ready"`, `"running"`, `"suspended"`, or `"done"` |
-| `fiber.interrupted` | while running: an interrupt is pending or delivered; once done: the result is an interruption |
+| `fiber.interrupted` | before completion: an interrupt is pending or has been delivered; once done: the result's cause contains an `Interrupt` (`Exit.isInterrupted` is stricter: every leaf must be one) |
 | `fiber.childCount` | number of structured children currently owned |
 | `fiber.snapshot()` | stable `{ status, interrupted, childCount }` object |
 | `fiber.childrenSnapshot()` | copy of currently owned child fibers |

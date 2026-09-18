@@ -1,8 +1,9 @@
 // Seeded interruption fuzz. Each iteration builds a random program from
-// finalizers, scopes, masks, error handlers and concurrency operators over
-// manually driven leaves (gates, promises, TestClock sleeps, deferreds), then
-// runs a random sequence of scheduler steps, leaf completions and interrupts
-// against it and checks the invariants below.
+// finalizers, scopes, masks, error handlers, generators, concurrency operators
+// and parallel stream stages over manually driven leaves (gates, promises,
+// TestClock sleeps, deferreds), then runs a random sequence of scheduler
+// steps, leaf completions and interrupts against it and checks the invariants
+// below.
 //
 //   INTERRUPTION_FUZZ_ITERATIONS=50000 bun test test/interruption-fuzz.test.ts
 //   INTERRUPTION_FUZZ_SEED=7 INTERRUPTION_FUZZ_ONLY=123 INTERRUPTION_FUZZ_VERBOSE=1 ...
@@ -18,10 +19,12 @@ import {
   all,
   async,
   die,
+  eff,
   ensuring,
   fail,
   failCause,
   fork,
+  interruptible,
   join,
   onExit,
   provide,
@@ -34,8 +37,10 @@ import {
   timeoutOption,
   tryPromise,
   uninterruptible,
+  uninterruptibleMask,
   yieldNow,
 } from "../src";
+import { Stream } from "../src/stream";
 import { InProcessDeferred } from "../src/deferred";
 import type { Scheduler } from "../src/scheduler";
 
@@ -86,9 +91,12 @@ const CHAINS: Eff<number, never>[] = [350, 690, 1100].map((length) => {
   return chain;
 });
 
-// A finalizer ("fin": ensuring or onExit), a release ("rel"), or a group
-// that finalizers run for: a scope or a fiber.
-type NodeKind = "fin" | "rel" | "scope" | "fiber";
+// A finalizer ("fin": ensuring or onExit), a release ("rel"), a generator's
+// `finally` block ("genFinally"), or a group that finalizers run for: a scope
+// or a fiber. A `finally` block only runs as a finalizer when the fiber is
+// interrupted; otherwise it is ordinary interruptible code, so it may be cut
+// short and is not tracked as in progress.
+type NodeKind = "fin" | "rel" | "genFinally" | "scope" | "fiber";
 
 // Enclosing groups of a piece of code. A cross-fiber ancestor belongs to
 // another fiber: the runtime does not wait for children before running a
@@ -160,6 +168,15 @@ async function runIteration(params: {
   const started = new Set<number>();
   const inProgress = new Set<Node>();
   const fibers = new Set<Fiber<any>>();
+  // Effects the program itself runs on a child fiber (all, race, timeout,
+  // fork). Only those fibers are interrupted directly; a stream's internal
+  // driver and worker fibers are only ever interrupted through the stream.
+  const childEffects = new WeakSet<object>();
+  const interruptibleChildren = new Set<Fiber<any>>();
+  const child = (effect: Eff<any, any>): Eff<any, any> => {
+    childEffects.add(effect);
+    return effect;
+  };
   const ends = new Map<Fiber<any>, number>();
   let nodeBudget = 28;
 
@@ -205,7 +222,15 @@ async function runIteration(params: {
       started.add(groupId);
       checkNothingRunningInside(groupId, false);
     }
-    inProgress.add(node);
+    if (node.kind !== "genFinally") inProgress.add(node);
+  };
+  // Called from inside error handlers. The only fiber running is the one
+  // executing the handler; it must not be interrupted and interruptible.
+  const checkHandlerMayRun = () => {
+    const running = [...fibers].filter((fiber) => fiber.status === "running");
+    if (running.length === 1 && running[0]!.interrupting && running[0]!.interruptible) {
+      violate("an error handler ran in an interrupted, interruptible fiber");
+    }
   };
   const finalizerDone = (node: Node) => {
     node.dones++;
@@ -253,7 +278,24 @@ async function runIteration(params: {
 
   // What a finalizer waits on, and how to tell that the wait really finished.
   const finalizerWait = (): { effect: Eff<any, any>; finished: () => boolean } => {
-    switch (ri(10)) {
+    switch (ri(12)) {
+      case 10: {
+        // Interrupted at once when the finalizer runs for an interrupted fiber.
+        const holder = { gate: null as Gate | null };
+        return {
+          effect: interruptible(gateLeaf({ cancellable: true, inFinalizer: true, holder })),
+          finished: () => holder.gate?.fired === true,
+        };
+      }
+      case 11: {
+        const holder = { gate: null as Gate | null };
+        return {
+          effect: uninterruptibleMask((restore) =>
+            restore(gateLeaf({ cancellable: true, inFinalizer: true, holder })),
+          ),
+          finished: () => holder.gate?.fired === true,
+        };
+      }
       case 0:
         return { effect: succeed(0), finished: () => true };
       case 1:
@@ -410,15 +452,68 @@ async function runIteration(params: {
     );
   };
 
+  const generatorNode = (ctx: Ctx, depth: number): Eff<any, any> => {
+    const node = makeNode("genFinally", ctx.ancestors);
+    const inner: Ctx = {
+      ancestors: [...ctx.ancestors, { id: node.id, crossFiber: false }],
+      scopeGroup: ctx.scopeGroup,
+    };
+    const { ancestors } = ctx;
+    const body = generate(depth - 1, inner);
+    const { effect, finished } = finalizerWait();
+    return eff(function* () {
+      try {
+        yield* sync(() => {
+          checkRunsInside(ancestors, "generator body");
+          node.entered++;
+        });
+        yield* body;
+      } finally {
+        yield* sync(() => finalizerStarted(node));
+        yield* effect;
+        yield* sync(() => {
+          if (!finished()) violate("finally wait returned before its event fired");
+          node.dones++;
+        });
+      }
+    });
+  };
+
+  const streamNode = (ctx: Ctx, depth: number): Eff<any, any> => {
+    const items = 1 + ri(3);
+    const failAt = ri(items + 2);
+    const sourceCtx = childCtx(ctx);
+    const source = Stream.unfoldEffect(0, (n: number) =>
+      leaf(sourceCtx).flatMap(() =>
+        n === failAt
+          ? fail("S")
+          : n >= items
+            ? succeed(null)
+            : succeed([n, n + 1] as [number, number]),
+      ),
+    );
+    const concurrency = 1 + ri(3);
+    // Each item runs on its own worker fiber, built when the item arrives.
+    const worker = () => generate(depth - 1, childCtx(ctx));
+    const stage =
+      ri(2) === 0
+        ? source.parEvalMap(concurrency, worker)
+        : source.parEvalMapUnordered(concurrency, worker);
+    return stage.drain();
+  };
+
   const generate = (depth: number, ctx: Ctx): Eff<any, any> => {
     if (depth <= 0 || nodeBudget <= 0 || ri(5) === 0) return leaf(ctx);
     nodeBudget--;
-    switch (ri(15)) {
+    switch (ri(18)) {
       case 0:
       case 1:
         return generate(depth - 1, ctx).flatMap(() => generate(depth - 1, ctx));
       case 2:
-        return generate(depth - 1, ctx).catch(() => succeed(0));
+        return generate(depth - 1, ctx).catch(() => {
+          checkHandlerMayRun();
+          return succeed(0);
+        });
       case 3:
         return finalizerNode({ ctx, depth, attach: (body, fin) => ensuring(body, fin) });
       case 4:
@@ -436,19 +531,32 @@ async function runIteration(params: {
       case 7:
         return uninterruptible(generate(depth - 1, ctx));
       case 8:
-        return all([generate(depth - 1, childCtx(ctx)), generate(depth - 1, childCtx(ctx))]);
+        return all([
+          child(generate(depth - 1, childCtx(ctx))),
+          child(generate(depth - 1, childCtx(ctx))),
+        ]);
       case 9:
-        return race([generate(depth - 1, childCtx(ctx)), generate(depth - 1, childCtx(ctx))]);
+        return race([
+          child(generate(depth - 1, childCtx(ctx))),
+          child(generate(depth - 1, childCtx(ctx))),
+        ]);
       case 10:
-        return timeoutOption(generate(depth - 1, childCtx(ctx)), 1 + ri(80));
+        return timeoutOption(child(generate(depth - 1, childCtx(ctx))), 1 + ri(80));
       case 11:
-        return fork(generate(depth - 1, childCtx(ctx)))
+        return fork(child(generate(depth - 1, childCtx(ctx))))
           .flatMap((fiber) => join(fiber))
           .catch(() => succeed(0));
       case 12:
-        return generate(depth - 1, ctx).catchAllCause(() => succeed(0));
+        return generate(depth - 1, ctx).catchAllCause(() => {
+          checkHandlerMayRun();
+          return succeed(0);
+        });
       case 13:
         return generate(depth - 1, ctx).exit();
+      case 15:
+        return generatorNode(ctx, depth);
+      case 16:
+        return streamNode(ctx, depth);
       default:
         return finalizerNode({ ctx, depth, attach: (body, fin) => ensuring(body, fin) });
     }
@@ -461,7 +569,13 @@ async function runIteration(params: {
   });
 
   const stopSupervisor = addFiberSupervisor({
-    onStart: (fiber) => void fibers.add(fiber),
+    onStart: (fiber) => {
+      fibers.add(fiber);
+      const effect = (fiber as any).current;
+      if (typeof effect === "object" && effect !== null && childEffects.has(effect)) {
+        interruptibleChildren.add(fiber);
+      }
+    },
     onEnd: (fiber) => void ends.set(fiber, (ends.get(fiber) ?? 0) + 1),
   });
 
@@ -541,7 +655,7 @@ async function runIteration(params: {
       } else if (action < 80) {
         interruptRoot();
       } else if (action < 88) {
-        const live = [...fibers].filter((f) => f !== rootFiber && f.status !== "done");
+        const live = [...interruptibleChildren].filter((f) => f.status !== "done");
         if (live.length > 0) live[ri(live.length)]!.interrupt();
       } else if (action < 90) {
         scheduler.flush();
@@ -609,6 +723,9 @@ async function runIteration(params: {
       if (node.entered > 0 && node.starts === 0)
         violate("finalized body entered but finalizer never ran");
       if (node.dones < node.starts) violate("finalizer started but never finished");
+    }
+    if (node.kind === "genFinally" && node.entered > 0 && node.starts === 0) {
+      violate("generator body entered but its finally never ran");
     }
     if (node.kind === "rel") {
       if (node.entered > 0 && node.starts === 0) violate("resource acquired but never released");
