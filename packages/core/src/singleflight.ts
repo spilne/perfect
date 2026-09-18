@@ -13,9 +13,16 @@
 // shared-key dedup across processes) implementations live downstream.
 
 import { type Eff, type Throws } from "./eff";
-import { sync } from "./constructors";
+import { onExit, sync } from "./constructors";
 import { Cause } from "./cause";
 import { type Deferred, InProcessDeferred } from "./deferred";
+import type { Exit } from "./exit";
+
+// Followers see a typed failure; a defect or interrupt is squashed to a value.
+function errorValue<E>(cause: Cause): E {
+  const typedFail = Cause.firstFail(cause);
+  return (typedFail !== null ? typedFail.value : Cause.squash(cause)) as E;
+}
 
 export interface Singleflight<SF = never> {
   /**
@@ -46,26 +53,20 @@ class InProcessSingleflight implements Singleflight {
       return { kind: "leader", deferred };
     }).flatMap((state): Eff<A, Throws<E>> => {
       if (state.kind === "follower") return state.deferred.await;
-      // Leader: run eff, fan out via deferred, cleanup, return original outcome.
-      // Use catchAllCause so defects (uncaught throws → Cause.Die) and
-      // interrupts also settle the deferred — otherwise followers deadlock.
-      const cleanup = sync(() => {
-        this.flights.delete(key);
-      });
-      return (eff as any)
-        .flatMap((value: A) =>
-          state.deferred.succeed(value).flatMap(() => cleanup.map(() => value)),
-        )
-        .catchAllCause((cause: any) => {
-          // Surface as a typed failure on the deferred so followers can re-throw.
-          // For defects, squash to the underlying value.
-          const typedFail = Cause.firstFail(cause);
-          const errVal = typedFail !== null ? typedFail.value : Cause.squash(cause);
-          return state.deferred
-            .fail(errVal as E)
-            .flatMap(() => cleanup)
-            .flatMap(() => state.deferred.await);
-        }) as Eff<A, Throws<E>>;
+      // Leader: settle the deferred and clear the key in a finalizer, so an
+      // interrupted or dying leader still releases its followers, then fail
+      // the way followers do.
+      const { deferred } = state;
+      const settle = (exit: Exit<unknown, A>): Eff<void, never> =>
+        (exit._tag === "Success"
+          ? deferred.succeed(exit.value)
+          : deferred.fail(errorValue<E>(exit.cause))
+        ).flatMap(() =>
+          sync(() => {
+            if (this.flights.get(key) === deferred) this.flights.delete(key);
+          }),
+        );
+      return (onExit(eff, settle) as any).catchAllCause(() => deferred.await) as Eff<A, Throws<E>>;
     }) as Eff<A, Throws<E>>;
   }
 }

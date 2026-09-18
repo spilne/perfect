@@ -15,7 +15,7 @@
 // defects) because the driver threads causes back via `gen.throw`.
 
 import { type Eff, type InferEffects, Suspend, Op } from "../eff";
-import { succeed, fail, failCause } from "../constructors";
+import { die, succeed, fail, failCause } from "../constructors";
 import { Cause } from "../cause";
 
 // Make Suspend iterable so `yield* effect` works inside generator bodies.
@@ -45,9 +45,24 @@ export function eff<Y extends Eff<any, any>, A>(
 export function eff<A, S = never>(fn: EffGenFn<A, S>): Eff<A, S>;
 export function eff(fn: EffGenFn<any, any>): Eff<any, any> {
   // Lazy: build the generator inside a Sync so the fn runs on each execution.
-  return (new Suspend(Op.Sync, () => fn(), null) as any).flatMap((gen: any) =>
-    drive(gen, undefined, null),
+  return (new Suspend(Op.Sync, () => fn(), null) as any).flatMap(
+    (gen: Generator<Eff<any, any>, any, any>) =>
+      new Suspend(Op.Ensuring, drive(gen, undefined, null), () => closeGenerator(gen)),
   );
+}
+
+// An interrupted fiber bypasses the handler below that would throw the
+// interrupt into the generator, leaving it suspended at a `yield*`. Returning
+// it runs its `finally` blocks (effects they yield run within this finalizer)
+// and skips its `catch` blocks. A generator that already finished is left as is.
+function closeGenerator(gen: Generator<Eff<any, any>, any, any>): Eff<any, any> | null {
+  let step: IteratorResult<Eff<any, any>, any>;
+  try {
+    step = gen.return(undefined);
+  } catch (e) {
+    return die(e);
+  }
+  return step.done ? null : proceed(gen, step);
 }
 
 function drive<A, S>(
@@ -66,6 +81,13 @@ function drive<A, S>(
     if (errorCause !== null && e === thrown) return failCause(errorCause) as any;
     return fail(e) as any;
   }
+  return proceed(gen, step);
+}
+
+function proceed<A, S>(
+  gen: Generator<Eff<any, S>, A, any>,
+  step: IteratorResult<Eff<any, S>, A>,
+): Eff<A, S> {
   if (step.done) {
     const v = step.value;
     return (v != null && v instanceof Suspend ? v : succeed(v)) as any;
