@@ -47,9 +47,17 @@ export class RedisBarrier implements Barrier<Throws<RedisError>> {
       ),
     ).flatMap((arrived) => {
       if (arrived >= this.parties) return succeed(undefined);
-      return redisBlocking(this.redis, "barrier.await", async (client) => {
-        await client.brpop(this.notifyKey, 0);
-      }).flatMap(() =>
+      return redisBlocking(
+        this.redis,
+        "barrier.await",
+        (client) => client.brpop(this.notifyKey, 0),
+        {
+          // Another waiter needs the wake-up token this one took.
+          giveBack: (token) => {
+            if (token) void this.redis.rpush(this.notifyKey, "1").catch(() => {});
+          },
+        },
+      ).flatMap(() =>
         redisEff("barrier.notify", async () => {
           await this.redis.rpush(this.notifyKey, "1");
         }),

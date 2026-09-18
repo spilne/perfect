@@ -52,8 +52,11 @@ export class RedisLatch implements Latch<Throws<RedisError>> {
   get await(): Eff<void, Throws<RedisError>> {
     return this.remaining.flatMap((remaining) => {
       if (remaining === 0) return succeed(undefined);
-      return redisBlocking(this.redis, "latch.await", async (client) => {
-        await client.brpop(this.notifyKey, 0);
+      return redisBlocking(this.redis, "latch.await", (client) => client.brpop(this.notifyKey, 0), {
+        // Another waiter needs the wake-up token this one took.
+        giveBack: (token) => {
+          if (token) void this.redis.rpush(this.notifyKey, "1").catch(() => {});
+        },
       }).flatMap(() =>
         redisEff("latch.notify", async () => {
           await this.redis.rpush(this.notifyKey, "1");

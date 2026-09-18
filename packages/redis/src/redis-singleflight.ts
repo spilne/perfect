@@ -108,8 +108,21 @@ export class RedisSingleflight implements Singleflight<Throws<RedisError>> {
     resultKey: string,
     retry: () => Eff<A, Throws<RedisError> | Throws<E>>,
   ): Eff<A, Throws<RedisError> | Throws<E>> {
-    return redisBlocking(this.redis, "singleflight.await", (client) =>
-      client.brpop(resultKey, Math.max(0.001, this.timeoutMs / 1000)),
+    return redisBlocking(
+      this.redis,
+      "singleflight.await",
+      (client) => client.brpop(resultKey, Math.max(0.001, this.timeoutMs / 1000)),
+      {
+        // The result is republished for other followers; put it back as
+        // this follower would have.
+        giveBack: (result) => {
+          if (!result) return;
+          void this.redis
+            .rpush(resultKey, result[1])
+            .then(() => this.redis.pexpire(resultKey, this.timeoutMs))
+            .catch(() => {});
+        },
+      },
     ).flatMap((result) => {
       if (result === null) return retry();
       return redisEff("singleflight.republish", async () => {

@@ -81,8 +81,16 @@ export class RedisQueue<A> implements Queue<A, Throws<RedisError>> {
 
   take(): Eff<A, Throws<RedisError> | Throws<QueueClosed>> {
     const loop = (): Eff<A, Throws<RedisError> | Throws<QueueClosed>> =>
-      redisBlocking(this.redis, "queue.take", (client) =>
-        client.brpop(this.dataKey, Math.max(0.001, this.pollIntervalMs / 1000)),
+      redisBlocking(
+        this.redis,
+        "queue.take",
+        (client) => client.brpop(this.dataKey, Math.max(0.001, this.pollIntervalMs / 1000)),
+        {
+          // RPUSH returns the item to the end BRPOP takes from.
+          giveBack: (result) => {
+            if (result) void this.redis.rpush(this.dataKey, result[1]).catch(() => {});
+          },
+        },
       ).flatMap((result) => {
         if (result) return redisEff("queue.decode", async () => decode(this.codec, result[1]));
         return this.isClosed.flatMap((closed) => (closed ? fail(new QueueClosed()) : loop()));
