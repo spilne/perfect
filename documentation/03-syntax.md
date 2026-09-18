@@ -54,6 +54,12 @@ console.log(program.runSync()); // → 60
 <!-- @end -->
 
 `try/catch` works at runtime — failures get routed back through `gen.throw`.
+An interrupt is not: when the fiber is interrupted, the generator's `finally`
+blocks run (including effects they `yield*`), but its `catch` blocks do not.
+Those `finally` blocks run uninterruptibly, like any finalizer, so an
+`interruptible(...)` region inside one fails at once. Code that must wait there
+and also runs outside cleanup should use `uninterruptibleMask` (see
+[Interruption](./06-concurrency.md#interruption)).
 TypeScript still includes the yielded failure in the generator's effect type;
 use `.catch(...)` or `.catchTag(...)` to discharge it statically. The example
 below uses `.orDie()` at the runner boundary for any remaining failure:

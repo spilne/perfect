@@ -172,9 +172,13 @@ assertContains(JSON.stringify(transport.last!.headers), "Bearer xyz"); // base h
 ### Middleware
 
 Sync hooks fired around every request. The same `HttpRequestContext` object
-is passed through `onRequest` / `onResponse` / `onError` — middleware can
-key per-request state by reference (e.g. `WeakMap<Context, Span>` for
-tracing).
+is passed through `onRequest` / `onResponse` / `onError` / `onInterrupt` —
+middleware can key per-request state by reference (e.g.
+`WeakMap<Context, Span>` for tracing). Exactly one closing hook fires for
+every request whose `onRequest` fired: `onResponse` on success, `onError` on
+a typed failure, and `onInterrupt` when the request is cancelled by a
+`timeout`, a `race` or an interrupted fiber. They run as finalizers, so a
+hook that opens state in `onRequest` should close it in all three.
 
 <!-- @embed packages/http/examples/02-client.ts#client-middleware -->
 

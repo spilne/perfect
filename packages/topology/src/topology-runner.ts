@@ -508,14 +508,18 @@ class TopologyRunnerInstance {
               )
             : succeed(undefined)
           ).flatMap(() => sink.publish(record.value));
+    // A finalizer, not tapErrorCause: the in-flight count must drop even when
+    // the publish is interrupted.
     return publish
-      .tapErrorCause(() =>
-        sync(() => {
-          if (record.completion.pending > 0) {
-            record.completion.pending = 0;
-            record.completion.context.inflight -= 1;
-          }
-        }),
+      .onExit((exit) =>
+        exit._tag === "Success"
+          ? succeed(undefined)
+          : sync(() => {
+              if (record.completion.pending > 0) {
+                record.completion.pending = 0;
+                record.completion.context.inflight -= 1;
+              }
+            }),
       )
       .flatMap(() => this.finishRecord(record, false));
   }

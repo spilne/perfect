@@ -14,6 +14,9 @@ transport propagates the context active at request time. The middleware does
 not install its newly-created span as the active context, so combining them
 does not make that span the parent of the downstream request.
 
+An interrupted request (a `timeout`, a lost `race`) still ends its span, with
+an `ERROR` status and `error.type` set to `Interrupted`.
+
 Configure an OpenTelemetry provider and propagator in your application for
 exported spans and outgoing trace headers. The excerpts below use shared
 in-memory fixtures from the [full tracing example](../packages/http-otel/examples/01-tracing.ts).
