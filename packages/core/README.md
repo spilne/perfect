@@ -96,18 +96,19 @@ Each is also a fluent method: `program.run()`, `.runSync()`, `.runExit()`, `.run
 - **Services + Layers** — `service`, `provide`, `Layer` for memoized,
   dependency-ordered wiring
 - **Concurrency** — `fork` / `forkDaemon`, `join`, `race` / `raceAll`,
-  `all`, `timeout`, structured interruption, `Fiber` supervision
+  `all`, bounded `forEachPar`, `timeout`, structured interruption, `Fiber`
+  supervision
 - **Resources** — `acquireRelease`, `scoped`, `ensuring`, `onExit`,
   `createGracefulShutdown`
 - **Retry + schedule** — `retry`, `RetryPolicy`, `Schedule`, `repeat`,
   `repeatUntilWithBackoff`, `hedged`
 - **Streams** — `Stream` / `Chunk` / `Sink` / `Pipes`: fused, lazy,
-  effect-typed; lazy `fromAsyncIterable`, `mapAccumulate`, backend-powered
-  `statefulMap`, ordered/unordered `parEvalMap`, `switchMap`, `exhaustMap`,
-  bounded/unbounded `parJoin`, `combineLatest`, `withLatest`, single-pass
-  `broadcastThrough`, reliable `observe`/`takeUntil`, typed stream recovery,
-  source-reacquiring `retryFrom`, Clock-driven time operators, and
-  CSV/base64/binary pipes
+  effect-typed; lazy `fromAsyncIterable`, backpressured `toAsyncIterable`,
+  `mapAccumulate`, backend-powered `statefulMap`, ordered/unordered
+  `parEvalMap`, `switchMap`, `exhaustMap`, bounded/unbounded `parJoin`,
+  `combineLatest`, `withLatest`, single-pass `broadcastThrough`, reliable
+  `observe`/`takeUntil`, typed stream recovery, source-reacquiring `retryFrom`,
+  Clock-driven time operators, and CSV/base64/binary pipes
 - **Coordination** — `Ref`, `Deferred`, `Queue`, `Semaphore`, `Latch`,
   `Barrier`, `PubSub`, `SubscriptionRef`, `Pool`, `WorkerPool`
 - **Resilience** — `CircuitBreaker`, `RateLimiter`, `Throttle`,

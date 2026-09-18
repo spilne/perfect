@@ -173,8 +173,8 @@ if (exit._tag === "Failure") {
 
 `scoped(acquireRelease(...))` follows the same rule when a scope closes.
 
-Parallel children release first. `all`, `race`, `timeoutOption` and the other
-combinators built on them wait for their children's finalizers before they
+Parallel children release first. `all`, `race`, `forEachPar`, `timeoutOption`
+and the other combinators built on them wait for their children's finalizers before they
 return, so a finalizer or scope around them runs after those finalizers have
 finished. A child's finalizer failure joins the combinator's outcome with
 `Cause.both` (see

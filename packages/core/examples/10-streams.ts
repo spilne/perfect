@@ -3,7 +3,7 @@
 //
 // Run: bun packages/core/examples/10-streams.ts
 
-import { Stream, succeed } from "../src";
+import { Stream, succeed, sync } from "../src";
 import { assertEq } from "./_assert";
 
 // >>> example: stream-collect
@@ -36,6 +36,24 @@ const first3 = await Stream.iterate(0, (n) => n + 1)
   .toArray()
   .run();
 assertEq(first3, [0, 1, 2]);
+// <<< example
+
+// >>> example: stream-async-iterable
+// toAsyncIterable — consume with `for await`; leaving the loop finalizes the stream.
+let finalized = 0;
+const numbers = Stream.range(1, 1_000_000).onFinalize(
+  sync(() => {
+    finalized++;
+  }),
+);
+
+const firstThree: number[] = [];
+for await (const n of numbers.toAsyncIterable()) {
+  firstThree.push(n);
+  if (firstThree.length === 3) break;
+}
+assertEq(firstThree, [1, 2, 3]);
+assertEq(finalized, 1);
 // <<< example
 
 // >>> example: stream-par-join
