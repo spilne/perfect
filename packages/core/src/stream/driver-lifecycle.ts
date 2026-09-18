@@ -228,7 +228,7 @@ class Run<A> implements DriverRun<A> {
       this.interrupted = false;
       // An Exit finalizer, not an error handler: an interrupted pull skips
       // error handlers, but its bookkeeping must still run.
-      const settle = (exit: Exit<unknown, Step<A>>): null => {
+      const settle = (exit: Exit<unknown, Step<A>>, fiber: Fiber<any> | undefined): null => {
         if (this.pending !== id) return null;
         this.pending = 0;
         if (exit._tag === "Success") {
@@ -236,7 +236,16 @@ class Run<A> implements DriverRun<A> {
           if (exit.value._tag === "Done") this.finished = true;
         } else {
           if (this.first === null) this.abandoned = true;
-          if (Cause.hasInterrupt(exit.cause)) this.interrupted = true;
+          // A pull was cut when the fiber running it was interrupted (and
+          // could be), not when its cause holds an interruption: a failure the
+          // operator delivers can hold one too (a source that interrupted
+          // itself, a cleanup that failed while its fiber was interrupted),
+          // and it must fail retried pulls again rather than resume the run.
+          const cut =
+            fiber === undefined
+              ? Cause.hasInterrupt(exit.cause)
+              : fiber.interrupting && fiber.interruptible;
+          if (cut) this.interrupted = true;
           else this.failure = exit.cause;
         }
         return null;
@@ -263,7 +272,9 @@ class Run<A> implements DriverRun<A> {
  *   resumes the same run when retried, without a second set of fibers;
  * - a failure that reached the consumer fails every retried pull of that run
  *   again, the first pull included, because the work that failed ran in a
- *   background fiber and cannot be run again from the consumer.
+ *   background fiber and cannot be run again from the consumer. A pull counts
+ *   as interrupted only when its own fiber was, so a delivered cause that
+ *   holds an interruption fails again too.
  * Any other first pull, such as running the stream again after `catch` or in
  * `concat`, starts a fresh run and stops the fibers of runs that completed,
  * failed, or were interrupted outside a retry.

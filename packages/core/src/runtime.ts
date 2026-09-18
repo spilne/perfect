@@ -25,6 +25,10 @@ if (!emptyContext.has(CURRENT_SPAN_KEY)) emptyContext.set(CURRENT_SPAN_KEY, NO_S
 if (!emptyContext.has(Metrics.key)) emptyContext.set(Metrics.key, defaultMetricsRegistry);
 
 type Resolve = (value: any) => void;
+type ExitFinalizer = (
+  exit: Exit<unknown, unknown>,
+  fiber: Fiber<any> | undefined,
+) => Suspend | null;
 type Reject = (cause: Cause) => void;
 
 function succeedAfterFinalizer(finalizer: Suspend, value: any): Suspend {
@@ -111,9 +115,15 @@ function stripFailures(cause: Cause): Cause | null {
 // An Op.Ensuring finalizer is an effect, or a function of the body's Exit
 // (onExit) that returns null when it has nothing to run. A finalizer that is a
 // plain succeed(...) has nothing to run either, and is skipped outright.
-function exitFinalizer(finalizer: unknown, exit: Exit<unknown, unknown>): Suspend | null {
+// Internal finalizers also receive the fiber that runs them, to tell a body
+// that was interrupted from one that failed with an interruption of its own.
+function exitFinalizer(
+  finalizer: unknown,
+  exit: Exit<unknown, unknown>,
+  fiber: Fiber<any> | undefined,
+): Suspend | null {
   try {
-    return (finalizer as (exit: Exit<unknown, unknown>) => Suspend | null)(exit);
+    return (finalizer as ExitFinalizer)(exit, fiber);
   } catch (e) {
     return new Suspend(Op.Fail, Cause.die(e), null);
   }
@@ -244,7 +254,7 @@ function runFiberLoop(fiber: Fiber<any>): void {
             const value = cur;
             const finalizer =
               typeof frame.fn === "function"
-                ? exitFinalizer(frame.fn, { _tag: "Success", value })
+                ? exitFinalizer(frame.fn, { _tag: "Success", value }, fiber)
                 : (frame.fn as Suspend);
             if (finalizer === null || finalizer.op === Op.Succeed) continue;
             k = enterUninterruptible(fiber, k);
@@ -356,7 +366,7 @@ function runFiberLoop(fiber: Fiber<any>): void {
           if (frame.op === Op.EnsuringFrame) {
             const finalizer =
               typeof frame.fn === "function"
-                ? exitFinalizer(frame.fn, { _tag: "Failure", cause })
+                ? exitFinalizer(frame.fn, { _tag: "Failure", cause }, fiber)
                 : (frame.fn as Suspend);
             if (finalizer === null || finalizer.op === Op.Succeed) continue;
             k = enterUninterruptible(fiber, k);
@@ -1004,7 +1014,7 @@ function stepInline(
             const value = cur;
             const finalizer =
               typeof frame.fn === "function"
-                ? exitFinalizer(frame.fn, { _tag: "Success", value })
+                ? exitFinalizer(frame.fn, { _tag: "Success", value }, parentFiber)
                 : (frame.fn as Suspend);
             if (finalizer === null) continue;
             cur = succeedAfterFinalizer(finalizer, value);
@@ -1067,7 +1077,7 @@ function stepInline(
           if (frame.op === Op.EnsuringFrame) {
             const finalizer =
               typeof frame.fn === "function"
-                ? exitFinalizer(frame.fn, { _tag: "Failure", cause })
+                ? exitFinalizer(frame.fn, { _tag: "Failure", cause }, parentFiber)
                 : (frame.fn as Suspend);
             if (finalizer === null) continue;
             cur = failAfterFinalizer(finalizer, cause);
@@ -1103,7 +1113,8 @@ function stepInline(
         const finalizer = cur.b;
         const finalizerFor = (exit: Exit<unknown, unknown>): Suspend =>
           typeof finalizer === "function"
-            ? (exitFinalizer(finalizer, exit) ?? new Suspend(Op.Succeed, undefined, null))
+            ? (exitFinalizer(finalizer, exit, parentFiber) ??
+              new Suspend(Op.Succeed, undefined, null))
             : (finalizer as Suspend);
         stepInline(
           body,

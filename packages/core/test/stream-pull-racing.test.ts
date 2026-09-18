@@ -819,6 +819,65 @@ describe("a source that interrupts itself", () => {
     expect(run.now).toBe(1);
     expect(run.leaked).toEqual([]);
   });
+
+  // The failure reached the consumer, so a retried pull fails again with it
+  // rather than resuming the run as if the pull had been cut: a cause holding
+  // an interruption does not make the pull an interrupted one.
+  test.each(operators)("%s: under retry, fails again instead of resuming", (_name, build) => {
+    const cleanups: [Eff<void, unknown>, unknown[]][] = [
+      [succeed(undefined), []],
+      [fail(new TeardownError({})), [new TeardownError({})]],
+    ];
+    for (const [cleanup, failures] of cleanups) {
+      let started = 0;
+      const source = selfInterrupt(cleanup);
+      const counted: SelfInterrupt = {
+        effect: () => sync(() => void started++).flatMap(source.effect),
+        stream: () =>
+          Stream.suspend(() => {
+            started++;
+            return source.stream();
+          }),
+      };
+      const run = runVirtual({ effect: collect(build(counted).retry({ times: 3 })) });
+
+      expect(run.result?.ok).toBe(false);
+      if (run.result?.ok === false) {
+        expect(Cause.failures(run.result.cause)).toEqual(failures);
+        if (failures.length === 0) expect(Cause.isInterruptedOnly(run.result.cause)).toBe(true);
+      }
+      expect(started).toBe(1);
+      expect(run.now).toBe(1);
+      expect(run.leaked).toEqual([]);
+    }
+  });
+
+  test.each<[string, (source: () => Stream<number>) => Stream<unknown, unknown>]>([
+    ["merge", (source) => source().merge(Stream.fromEffect(sleep(50).map(() => 7)))],
+    [
+      "switchMap inner",
+      (source) =>
+        Stream.of(1)
+          .concat(Stream.fromEffect(sleep(50).map(() => 2)))
+          .switchMap((n) => (n === 1 ? source() : Stream.of(n))),
+    ],
+  ])(
+    "%s: under retry, does not skip the failure and carry on with later elements",
+    (_name, build) => {
+      const run = runVirtual({
+        effect: collect(
+          build(() => selfInterrupt(fail(new TeardownError({}))).stream()).retry({ times: 3 }),
+        ),
+      });
+
+      expect(run.result?.ok).toBe(false);
+      if (run.result?.ok === false) {
+        expect(Cause.failures(run.result.cause)).toEqual([new TeardownError({})]);
+      }
+      expect(run.now).toBe(1);
+      expect(run.leaked).toEqual([]);
+    },
+  );
 });
 
 describe("cleanup of a cut pull", () => {

@@ -548,7 +548,10 @@ their fibers, not in the pull:
 - **Delivered failures stay.** Once a failure has reached the consumer, every
   retried pull fails again with the same cause, whether or not it was the first
   pull. A failed element is not skipped and a failed input is not restarted.
-  Linear operators such as `evalMap` run a failed pull again instead.
+  This holds for a cause that contains an interruption too, such as a source
+  that interrupted itself: only a pull whose own fiber was interrupted counts
+  as cut and resumes. Linear operators such as `evalMap` run a failed pull
+  again instead.
 - **Retry where the work runs.** To retry a failing input or mapper, retry it
   before it reaches the operator: `input.retry(policy).merge(other)` or
   `.parEvalMap(n, (a) => f(a).retry(policy))`. To restart the sources, use
