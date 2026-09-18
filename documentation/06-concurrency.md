@@ -118,14 +118,62 @@ console.log(friends); // → ["bob", "carol"]
 
 <!-- @end -->
 
+## Bounded parallel traversal — `forEachPar`
+
+`forEachPar(items, f, { concurrency })` maps each item to an effect and runs
+them with at most `concurrency` in flight, collecting results in input order.
+`f` receives `(item, index)` and is called as slots free up, so traversing
+100k items with `concurrency: 8` holds only 8 fibers at a time.
+
+<!-- @embed packages/core/examples/07-concurrency.ts#for-each-par -->
+
+```ts
+import { succeed, sleep, forEachPar } from "@spilne/perfect-core";
+
+// forEachPar() maps items to effects with at most `concurrency` in flight.
+const fetchUser = (id: number) => sleep(10).flatMap(() => succeed({ id, name: `user-${id}` }));
+
+const users = await forEachPar([1, 2, 3, 4, 5], (id) => fetchUser(id), { concurrency: 2 }).run();
+
+const names = users.map((u) => u.name);
+console.log(names); // → ["user-1", "user-2", "user-3", "user-4", "user-5"]
+```
+
+<!-- @end -->
+
+- `concurrency: 1` runs the items one after another. Omit it, or pass
+  `"unbounded"`, to start every item at once like `all`.
+- Any iterable works, and an empty one succeeds with `[]`. `items` is read
+  each time the effect runs, and the next item is pulled only when a slot
+  frees up, so an infinite iterable is fine under a `timeout`. A
+  generator object is one-shot: a second run sees it empty. Pass an array or an
+  object with a `[Symbol.iterator]` method to run the effect more than once.
+- The first failure — a typed error, a defect, `f` throwing, or the iterator
+  throwing — interrupts the in-flight effects, closes the iterator, and calls
+  `f` for nothing else. Like `all`, the traversal then waits for the
+  interrupted effects and fails as described in
+  [Structured teardown](#structured-teardown), with the first failure and any
+  non-interrupt failure raised during their teardown.
+- Interrupting the combined effect — directly or through `timeout` / `race` —
+  also closes the iterator, and waits for the in-flight effects the same way.
+- `succeed(x)` results are collected without starting a fiber, and other
+  children start without a scheduler hop. Children that suspend still pay a
+  scheduler turn per refill round, so a small `concurrency` over many
+  suspending items costs more per item than `all`.
+
+To cap a list of effects you already have, map with the identity function:
+`forEachPar(effects, (e) => e, { concurrency: 4 })`.
+
 ## Structured teardown
 
-`all`, `race` and the combinators built on them (`raceAll`, `raceEither`,
-`validate`, `timeoutOption`, `timeoutFail`/`timeout`, `hedged`, `parZip`) do
-not return while one of their children is still running. When a child fails,
-when a race has its first result, or when the combinator itself is interrupted,
-the remaining children are interrupted and the combinator waits until every
-one of them has finished, finalizers included. Finalizers around the
+`all`, `race`, `forEachPar` and the combinators built on them (`raceAll`,
+`raceEither`, `validate`, `timeoutOption`, `timeoutFail`/`timeout`, `hedged`,
+`parZip`) do not return while one of their children is still running. When a
+child fails, when a race has its first result, or when the combinator itself is
+interrupted, the remaining children are interrupted (and `forEachPar` stops
+pulling items) and the combinator waits until every one of them has finished,
+finalizers included. All of them share one implementation, so the ordering
+and the causes below are the same for each. Finalizers around the
 combinator therefore run after its children's finalizers, never alongside
 them:
 
@@ -144,8 +192,8 @@ The combinator's outcome:
 
 | What happened | Outcome |
 |---|---|
-| every `all` child succeeded | the results |
-| an `all` child failed | that child's failure |
+| every `all` or `forEachPar` child succeeded | the results, in input order |
+| an `all` or `forEachPar` child failed (for `forEachPar` also `f` or the iterator throwing) | that failure |
 | a `race` child settled first | its value or failure |
 | the combinator was interrupted | the interrupt, joined with `Cause.both` to a child failure that had already stopped it, also if that failure was returned but not yet run |
 | a child torn down in any of these cases failed with more than the interrupt (a finalizer died, say) | that failure is joined with `Cause.both` after the above |
@@ -320,6 +368,7 @@ Available fiber diagnostics:
 | `raceEither([a, b])` / `a.raceEither(b)` | returns `Either<A, B>` |
 | `all(effects[])` | parallel + collect tuple |
 | `all({ a, b })` | parallel + collect record |
+| `forEachPar(items, f, { concurrency })` | map items to effects, at most N in flight, results in order |
 | `uninterruptible(eff)` | block interruption |
 | `uninterruptibleMask((restore) => eff)` | block interruption; `restore` reinstates the caller's interruptibility |
 | `interruptible(eff)` | restore interruptibility |
@@ -330,6 +379,8 @@ Available fiber diagnostics:
 
 - **`fork` doesn't auto-`join`.** If you want the value, you have to join.
 - **`race` takes an array** — `race([a, b])`, not `race(a, b)`.
+- **`forEachPar` is unbounded by default.** Pass `concurrency` when the
+  mapper hits a shared resource (a database pool, a rate-limited API).
 - **Daemons leak if you don't track them.** Hold onto the `Fiber` if you
   might need to cancel it.
 - **Supervisors are diagnostic hooks.** They should not contain application

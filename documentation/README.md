@@ -24,7 +24,7 @@ console.log(await run(program)); // 42
 3. [Syntax](./03-syntax.md) — generator vs `.flatMap` vs `eff($)` rewriter
 4. [Services and Layers](./04-services-and-layers.md) — typed dependency injection
 5. [Error handling](./05-error-handling.md) — `.catch`, `.catchTag`, `Cause`, defects vs failures
-6. [Concurrency](./06-concurrency.md) — fork, race, all, fibers, supervision
+6. [Concurrency](./06-concurrency.md) — fork, race, all, forEachPar, fibers, supervision
 7. [Resources and scopes](./07-resources-and-scopes.md) — `acquireRelease`, `scoped`, finalizer causes
 8. [Retry and schedule](./08-retry-and-schedule.md) — `RetryPolicy`, `Schedule`
 9. [Streams](./09-streams.md) — fused, lazy, effect-typed streams, pipes, sinks
