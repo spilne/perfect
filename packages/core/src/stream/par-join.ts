@@ -3,21 +3,22 @@ import {
   awaitFiber,
   ensuring,
   failCause,
-  fork,
-  forkDaemon,
-  interrupt,
+  onExit,
   succeed,
   suspend,
+  sync,
   uninterruptible,
+  uninterruptibleMask,
 } from "../constructors";
 import { Cause } from "../cause";
 import { InProcessDeferred } from "../deferred";
+import type { Exit } from "../exit";
 import type { Fiber } from "../fiber";
 import { Queue } from "../queue";
 import { Semaphore } from "../semaphore";
 import type { Chunk } from "./chunk";
-import { Stream, type Step } from "./stream";
-import { combineFinalizers } from "./driver-lifecycle";
+import type { Stream, Step } from "./stream";
+import { driverStream, type DriverRun, type Pull } from "./driver-lifecycle";
 
 const OUTPUT_CAPACITY = 16;
 const UNIT: Eff<void, never> = succeed(undefined);
@@ -30,24 +31,22 @@ interface InnerHandle {
   finalizer: Eff<void, unknown> | null;
 }
 
-interface Session<A> {
-  readonly pull: () => Eff<Step<A>, unknown>;
-  readonly shutdown: Eff<void, unknown>;
-}
+const parallel = (first: Cause | null, second: Cause | null): Cause | null =>
+  first === null ? second : second === null ? first : Cause.both(first, second);
 
-const andThen = (first: Cause | null, second: Cause): Cause =>
-  first === null ? second : Cause.then(first, second);
+const failureOf = (exit: Exit<unknown, unknown>): Cause | null =>
+  exit._tag === "Failure" ? Cause.stripInterrupts(exit.cause) : null;
+
+const interruptedOnly = (exit: Exit<unknown, unknown>): boolean =>
+  exit._tag === "Failure" && Cause.isInterruptedOnly(exit.cause);
 
 export function parJoinStreams<A>(params: {
   outer: Stream<AnyStream<A>, unknown>;
   maxOpen: number;
 }): Stream<A, unknown> {
   const { outer, maxOpen } = params;
-  // One join per run: re-running the first pull (e.g. `timeout(ms).retry()`)
-  // resumes the running join instead of starting a second one beside it.
-  let session: Session<A> | null = null;
 
-  const open = (): Eff<Step<A>, unknown> =>
+  const start = (run: DriverRun<A>): Eff<Pull<A>, unknown> =>
     Queue.bounded<Chunk<A>>(OUTPUT_CAPACITY).flatMap((output) =>
       (maxOpen === Infinity ? succeed(null) : Semaphore.make(maxOpen)).flatMap((permits) => {
         const handles = new Set<InnerHandle>();
@@ -60,65 +59,52 @@ export function parJoinStreams<A>(params: {
         let backlog: Chunk<AnyStream<A>> | null = null;
         let backlogIndex = 0;
         let outerDone = false;
-        let closed = false;
-        let stopping = false;
-        let observed = false;
+        // Set once the join fails or starts tearing down; nothing new is
+        // launched after that.
+        let ended = false;
         let failure: Cause | null = null;
-        let unreported: Cause | null = null;
+        // Failures raised after `failure` while the join tears down.
+        let reportedTeardown: Cause | null = null;
+        let releaseFailures: Cause | null = null;
+        let closedWith: Cause | null = null;
 
-        const close = (cause: Cause | null): Eff<void, never> =>
-          suspend(() => {
-            if (closed) return UNIT;
-            closed = true;
-            failure = cause;
-            return output.close();
-          });
+        const noteFailure = (cause: Cause): void => {
+          if (ended && failure !== null) {
+            reportedTeardown = parallel(reportedTeardown, cause);
+            return;
+          }
+          ended = true;
+          failure = cause;
+        };
 
-        // The first failure wins, as with `merge`. Interrupting the driver
-        // stops the outer and every sibling without waiting for the consumer.
-        const failJoin = (cause: Cause): Eff<void, never> =>
-          suspend(() =>
-            closed
-              ? UNIT
-              : close(cause).flatMap(() => (driver === null ? UNIT : interrupt(driver))),
-          );
-
-        const finalizerFailed = (cause: Cause): Eff<void, never> =>
-          suspend(() => {
-            const errors = Cause.stripInterrupts(cause);
-            if (errors === null) return UNIT;
-            if (!closed) return failJoin(errors);
-            unreported = andThen(unreported, errors);
-            return UNIT;
-          });
-
-        const runFinalizer = (finalizer: Eff<void, unknown> | null): Eff<void, unknown> =>
-          finalizer === null ? UNIT : finalizer.catchAllCause(finalizerFailed);
+        // Interrupting the driver tears the join down without waiting for the
+        // consumer to reach the failure.
+        const failJoin = (cause: Cause): void => {
+          const first = !ended;
+          noteFailure(cause);
+          if (first) driver?.interrupt();
+        };
 
         const releaseInner = (handle: InnerHandle): Eff<void, unknown> =>
           suspend(() => {
             const finalizer = handle.finalizer;
             handle.finalizer = null;
-            return runFinalizer(finalizer);
+            return finalizer ?? UNIT;
           });
 
         const publish = (inner: AnyStream<A>): Eff<void, unknown> =>
           inner.step.flatMap((step) => {
             if (step._tag === "Done") return UNIT;
             if (step.chunk.isEmpty) return publish(step.next);
-            return output
-              .offer(step.chunk)
-              .catch(() => succeed(false))
-              .flatMap((accepted) => (accepted && !closed ? publish(step.next) : UNIT));
+            return output.offer(step.chunk).flatMap(() => publish(step.next));
           });
 
-        // Teardown closes the output before interrupting anything, so an
-        // interruption seen while the join is still open came from the stream
-        // itself and must not pass for completion.
-        const innerFailed = (cause: Cause): Eff<void, unknown> => {
+        // An interruption the inner raised on its own, not one from teardown,
+        // must not pass for completion.
+        const noteInnerCause = (cause: Cause): void => {
           const errors = Cause.stripInterrupts(cause);
-          if (errors !== null) return failJoin(errors);
-          return closed ? failCause(cause) : failJoin(cause).flatMap(() => failCause(cause));
+          if (errors !== null) failJoin(errors);
+          else if (!ended) failJoin(cause);
         };
 
         const innerDone = (handle: InnerHandle): Eff<void, never> =>
@@ -128,21 +114,29 @@ export function parJoinStreams<A>(params: {
             return idle.succeed(undefined).flatMap(() => releasePermit);
           });
 
-        const runInner = (inner: AnyStream<A>, handle: InnerHandle): Eff<void, unknown> =>
-          ensuring(
-            publish(inner).catchAllCause(innerFailed),
-            releaseInner(handle).flatMap(() => innerDone(handle)),
+        // The handler runs in an uninterruptible region and only does
+        // synchronous bookkeeping, so it also sees the whole cause of an inner
+        // interrupted by the join's own teardown (typically its finalizer
+        // failing). While the run stops, the cause is raised for the stop.
+        const runInner = (inner: AnyStream<A>, handle: InnerHandle): Eff<unknown, unknown> =>
+          onExit(
+            uninterruptibleMask((restore) =>
+              restore(ensuring(publish(inner), releaseInner(handle))).catchAllCause((cause) =>
+                run.stopping ? failCause(cause) : sync(() => noteInnerCause(cause)),
+              ),
+            ),
+            () => innerDone(handle),
           );
 
         // Registration is uninterruptible so teardown never misses a forked inner.
         const launchNext: Eff<void, unknown> = uninterruptible(
           suspend(() => {
-            if (closed || backlog === null) return releasePermit;
+            if (ended || backlog === null) return releasePermit;
             const inner = backlog.get(backlogIndex++);
             if (backlogIndex >= backlog.length) backlog = null;
             const handle: InnerHandle = { fiber: null, finalizer: inner._finalizer };
             handles.add(handle);
-            return fork(runInner(inner, handle)).map((fiber) => {
+            return run.fork(runInner(inner, handle)).map((fiber) => {
               handle.fiber = fiber;
             });
           }),
@@ -163,110 +157,102 @@ export function parJoinStreams<A>(params: {
 
         const launchBacklog = (next: Stream<AnyStream<A>, unknown>): Eff<void, unknown> =>
           launchNext.flatMap(() => {
-            if (closed) return UNIT;
+            if (ended) return UNIT;
             if (backlog === null) return pullOuter(next, false);
             return acquire.flatMap(() => launchBacklog(next));
           });
 
         const awaitInners: Eff<void, unknown> = suspend(() => {
           outerDone = true;
-          return closed || handles.size === 0 ? UNIT : idle.await;
+          return handles.size === 0 ? UNIT : idle.await;
         });
 
-        const stopInners: Eff<void, unknown> = close(null).flatMap(() => {
+        const noteDriverExit = (exit: Exit<unknown, void>): Eff<void, never> =>
+          sync(() => {
+            const errors = failureOf(exit);
+            if (errors !== null) noteFailure(errors);
+            else if (interruptedOnly(exit) && !ended && !run.stopping) {
+              noteFailure((exit as { cause: Cause }).cause);
+            }
+          });
+
+        // Every opened inner is interrupted and awaited, then the finalizers
+        // no inner fiber ran (never started, or never launched) are released.
+        // Each release runs even when an earlier one fails.
+        const stopInners: Eff<void, unknown> = suspend(() => {
+          ended = true;
           const opened = Array.from(handles);
           const pending = backlog === null ? [] : backlog.toArray().slice(backlogIndex);
           backlog = null;
           for (const handle of opened) handle.fiber?.interrupt();
-          // An inner interrupted before its first step never reaches its own
-          // ensuring, so every handle's finalizer is released here as well.
-          const drained = opened.reduce<Eff<void, unknown>>(
+          const released = opened.reduce<Eff<void, unknown>>(
             (acc, handle) =>
-              acc
-                .flatMap((): Eff<unknown, never> =>
+              ensuring(
+                acc,
+                suspend((): Eff<unknown, never> =>
                   handle.fiber === null ? UNIT : awaitFiber(handle.fiber),
-                )
-                .flatMap(() => releaseInner(handle)),
+                ).flatMap(() => releaseInner(handle)),
+              ),
             UNIT,
           );
           return pending.reduce<Eff<void, unknown>>(
-            (acc, inner) => acc.flatMap(() => runFinalizer(inner._finalizer)),
-            drained,
+            (acc, inner) => ensuring(acc, inner._finalizer ?? UNIT),
+            released,
           );
         });
 
-        const run = ensuring(
-          pullOuter(outer, false)
-            .flatMap(() => awaitInners)
-            .flatMap(() => close(null))
-            .catchAllCause((cause) => {
-              const errors = Cause.stripInterrupts(cause);
-              if (errors !== null) return close(errors);
-              return closed || stopping ? failCause(cause) : close(cause);
-            }),
-          stopInners,
-        );
+        // The consumer sees the first failure followed by the failures raised
+        // while tearing down. When the run is stopping instead, failures that
+        // inner fibers reported rather than raised go to the stop.
+        const closeOutput = (): Eff<void, unknown> =>
+          suspend(() => {
+            const teardown = parallel(reportedTeardown, releaseFailures);
+            closedWith =
+              failure === null
+                ? teardown
+                : teardown === null
+                  ? failure
+                  : Cause.then(failure, teardown);
+            return output
+              .close()
+              .flatMap(() =>
+                run.stopping && reportedTeardown !== null ? failCause(reportedTeardown) : UNIT,
+              );
+          });
 
-        // Finalizer failures recorded after the output closed ride along with
-        // the failure the consumer observes, or are raised by `shutdown`.
-        const finish: Eff<Step<A>, unknown> = suspend(() => {
-          if (!observed) {
-            observed = true;
-            if (failure !== null && unreported !== null) {
-              failure = Cause.then(failure, unreported);
-              unreported = null;
-            }
-          }
-          return failure === null ? succeed(DONE) : failCause(failure);
-        });
+        // Failures here were already noted for the consumer, or are raised
+        // again by `reportFailure` for the stop when the run is stopping.
+        const drive: Eff<void, unknown> = run.reportFailure(
+          onExit(
+            ensuring(
+              onExit(
+                pullOuter(outer, false).flatMap(() => awaitInners),
+                noteDriverExit,
+              ),
+              onExit(stopInners, (exit) =>
+                sync(() => {
+                  releaseFailures = failureOf(exit);
+                }),
+              ),
+            ),
+            closeOutput,
+          ),
+          () => UNIT,
+        );
 
         const pull = (): Eff<Step<A>, unknown> =>
           output
             .take()
-            .map((chunk): Step<A> => ({
-              _tag: "Emit",
-              chunk,
-              next: new Stream(suspend(pull)),
-            }))
-            .catch(() => finish);
+            .map((chunk): Step<A> => ({ _tag: "Emit", chunk, next }))
+            .catch(() => (closedWith === null ? succeed(DONE) : failCause(closedWith)));
+        const next = run.continueWith(pull);
 
-        const shutdown = (fiber: Fiber<any>): Eff<void, unknown> =>
-          suspend(() => {
-            stopping = true;
-            return interrupt(fiber);
-          })
-            .flatMap(() => awaitFiber(fiber))
-            .flatMap((exit) =>
-              suspend(() => {
-                const driverErrors =
-                  exit._tag === "Failure" ? Cause.stripInterrupts(exit.cause) : null;
-                const errors =
-                  unreported === null ? driverErrors : andThen(driverErrors, unreported);
-                unreported = null;
-                return errors === null ? UNIT : failCause(errors);
-              }),
-            );
-
-        // The driver is owned by the stream finalizer rather than the pulling
-        // fiber: pulls may run on short-lived fibers (e.g. `timeout` races each
-        // pull), and a structured child would die with that fiber.
-        return uninterruptible(
-          forkDaemon(run).map((fiber) => {
-            driver = fiber;
-            session = { pull, shutdown: shutdown(fiber) };
-          }),
-        ).flatMap(pull);
+        return run.fork(drive).map((fiber) => {
+          driver = fiber;
+          return pull;
+        });
       }),
     );
 
-  const release: Eff<void, unknown> = suspend(() => {
-    const current = session;
-    session = null;
-    return current === null ? UNIT : current.shutdown;
-  });
-
-  return new Stream(
-    suspend(() => (session === null ? open() : session.pull())),
-    combineFinalizers(release, outer._finalizer),
-  );
+  return driverStream<A>({ start, finalizer: outer._finalizer });
 }

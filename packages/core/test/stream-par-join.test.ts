@@ -443,12 +443,12 @@ describe("Stream.parJoin", () => {
       Stream.suspend(() => {
         open++;
         maxOpen = Math.max(maxOpen, open);
-        return Stream.fromEffect(sleep(70).map(() => id));
-      }).onFinalize(
-        sync(() => {
-          open--;
-        }),
-      );
+        return Stream.fromEffect(sleep(70).map(() => id)).onFinalize(
+          sync(() => {
+            open--;
+          }),
+        );
+      });
 
     const fiber = start(
       Stream.iterate(1, (id) => id + 1)
@@ -492,6 +492,26 @@ describe("Stream.parJoin", () => {
   });
 });
 
+describe("Stream.parJoin runs", () => {
+  test("a join run again after an interrupted run starts a new join", () => {
+    const { start, advance } = virtualTime();
+    let outerAcquired = 0;
+    const joined = Stream.suspend(() => {
+      outerAcquired++;
+      return Stream.of(
+        ticks({ label: "a", everyMs: 10, count: 2 }),
+        ticks({ label: "b", everyMs: 15, count: 1 }),
+      );
+    }).parJoinUnbounded();
+
+    const fiber = start(joined.interruptAfter(12).concat(joined).toArray());
+    advance(60);
+
+    expect(fiber.result).toEqual({ ok: true, value: ["a1", "a1", "b1", "a2"] });
+    expect(outerAcquired).toBe(2);
+  });
+});
+
 describe("Stream.parJoin finalizer failures", () => {
   test("an inner finalizer failure during teardown follows the outer failure", async () => {
     const never = runSync(Deferred.make<void>());
@@ -528,6 +548,32 @@ describe("Stream.parJoin finalizer failures", () => {
     expect(exit._tag).toBe("Failure");
     if (exit._tag === "Failure") {
       expect(Cause.failures(exit.cause)).toEqual([innerFailure, finalizerFailure]);
+    }
+  });
+
+  test("a failure reported during the join's teardown surfaces when downstream stops meanwhile", () => {
+    const { start, advance } = virtualTime();
+    const never = runSync(Deferred.make<number>());
+    const innerFailure = new InnerFailure({});
+    const finalizerFailure = new FinalizerFailure({ stream: "fast" });
+
+    const fiber = start(
+      Stream.of<Stream<number, Throws<InnerFailure> | Throws<FinalizerFailure>>>(
+        Stream.of(0),
+        Stream.fromEffect(yieldNow).flatMap(() => Stream.fail(innerFailure)),
+        Stream.fromEffect(never.await).onFinalize(fail(finalizerFailure)),
+        Stream.fromEffect(never.await).onFinalize(sleep(50)),
+      )
+        .parJoinUnbounded()
+        .evalMap((value) => sleep(10).map(() => value))
+        .take(1)
+        .toArray(),
+    );
+    advance(100);
+
+    expect(fiber.result?.ok).toBe(false);
+    if (fiber.result?.ok === false) {
+      expect(Cause.failures(fiber.result.cause)).toEqual([finalizerFailure]);
     }
   });
 

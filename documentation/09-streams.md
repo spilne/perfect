@@ -159,15 +159,22 @@ stays alive as a fiber until its output is consumed, so memory grows with the
 number of inner streams the outer stream emits. Use `parJoin(n)` unless that
 number is bounded.
 
-A failure in the outer stream or any inner stream immediately interrupts all
-the others. The result fails after the consumer receives the chunks already
-queued, at most 16. When several streams fail at once, the first failure wins,
-as with `merge`. Finalizer failures are never dropped: an inner finalizer that
-fails while the join is running fails it, and one that fails during teardown is
-added after the original failure, or raised on its own when downstream stopped
-early. Every inner stream pulled from the outer stream is finalized, including
-one that was never started. The outer finalizer runs last, so inner streams may
-use resources the outer stream acquired.
+A failure in the outer stream or any inner stream, including an inner
+finalizer that fails, immediately interrupts all the others. The consumer first
+receives the chunks already queued (at most 16), then the failure, followed by
+any failures raised while the join tears down, such as another inner stream
+failing at the same time or a finalizer failing when its inner stream is
+interrupted. If downstream stops before it reaches the failure, the failure is
+dropped like any other element it did not pull, as with `merge`; finalizers
+that fail while the stream is being stopped still fail it. Every inner stream
+pulled from the outer stream is finalized, including one that was never
+started. The outer finalizer runs last, so inner streams may use resources the
+outer stream acquired.
+
+Under `retry`, `parJoin` follows the rules for operators with background fibers
+described in [Retry](#retry): an interrupted pull resumes the same join, a
+failure that reached the consumer fails again, and a stream that is run again
+starts a new join.
 
 ### Single-pass fan-out
 

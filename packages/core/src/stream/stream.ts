@@ -1801,12 +1801,12 @@ export class Stream<A, S = never> {
    * outer stream and every opened inner stream have completed.
    *
    * A failure in the outer stream or any inner stream interrupts all the
-   * others and fails the result once already-queued chunks (at most 16) are
-   * emitted. Each inner finalizer runs when that inner stream ends, and its
-   * failures are never dropped; the outer finalizer runs last. Use
-   * `.map(f).parJoin(n)` for a bounded concurrent `flatMap`.
-   *
-   * @throws RangeError unless `maxOpen` is a positive integer or `Infinity`.
+   * others. Once already-queued chunks (at most 16) are emitted, the result
+   * fails with that failure followed by any failures raised while the join
+   * tears down. Each inner finalizer runs when that inner stream ends; the
+   * outer finalizer runs last. Use `.map(f).parJoin(n)` for a bounded
+   * concurrent `flatMap`. `maxOpen` must be a positive integer or `Infinity`;
+   * anything else throws `RangeError`.
    */
   parJoin(
     this: Stream<Stream<any, any>, S>,
