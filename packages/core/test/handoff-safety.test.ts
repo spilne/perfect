@@ -220,9 +220,50 @@ describe("async resume with onDiscard", () => {
 
     manual.resume(succeed(1), () => void discarded++);
     fiber.interrupt();
+    scheduler.flush();
 
     expect(discarded).toBe(1);
     expect(fiber.result).toEqual(interrupted);
+  });
+
+  test("a throwing onDiscard becomes a defect of the interrupted fiber", () => {
+    const scheduler = new StepScheduler();
+    const manual = manualWait<number>();
+    const fiber = runFiber(manual.wait, scheduler);
+    scheduler.flush();
+
+    manual.resume(succeed(1), () => {
+      throw new Error("give back failed");
+    });
+    expect(() => fiber.interrupt()).not.toThrow();
+    scheduler.flush();
+
+    expect(fiber.result).toEqual({
+      ok: false,
+      cause: Cause.then(Cause.interrupt(), Cause.die(new Error("give back failed"))),
+    });
+  });
+
+  test("a throwing onDiscard does not stop all() from interrupting the other children", () => {
+    const scheduler = new StepScheduler();
+    const first = manualWait<number>();
+    const second = manualWait<number>();
+    let secondDiscarded = 0;
+    const parent = runFiber(all([first.wait, second.wait]), scheduler);
+    scheduler.flush();
+
+    first.resume(succeed(1), () => {
+      throw new Error("give back failed");
+    });
+    second.resume(succeed(2), () => void secondDiscarded++);
+    parent.interrupt();
+    scheduler.flush();
+
+    expect(secondDiscarded).toBe(1);
+    expect(parent.result).toEqual({
+      ok: false,
+      cause: Cause.both(Cause.interrupt(), Cause.die(new Error("give back failed"))),
+    });
   });
 
   test("an op-budget pause never separates a queue take's fast path from its continuation", () => {
@@ -396,9 +437,10 @@ describe("interrupting a Ready fiber keeps the failure it was about to raise", (
     fiber.interrupt();
     scheduler.flush();
 
+    // The same shape as an interrupt that arrives while all() still waits.
     expect(fiber.result).toEqual({
       ok: false,
-      cause: Cause.then(Cause.die(defect), Cause.interrupt()),
+      cause: Cause.both(Cause.interrupt(), Cause.die(defect)),
     });
   });
 
@@ -418,7 +460,7 @@ describe("interrupting a Ready fiber keeps the failure it was about to raise", (
 
     expect(fiber.result).toEqual({
       ok: false,
-      cause: Cause.then(Cause.fail("lost"), Cause.interrupt()),
+      cause: Cause.both(Cause.interrupt(), Cause.fail("lost")),
     });
   });
 

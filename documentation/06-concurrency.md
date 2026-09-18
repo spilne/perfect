@@ -147,7 +147,7 @@ The combinator's outcome:
 | every `all` child succeeded | the results |
 | an `all` child failed | that child's failure |
 | a `race` child settled first | its value or failure |
-| the combinator was interrupted | the interrupt, joined with `Cause.both` to a child failure that had already stopped it |
+| the combinator was interrupted | the interrupt, joined with `Cause.both` to a child failure that had already stopped it, also if that failure was returned but not yet run |
 | a child torn down in any of these cases failed with more than the interrupt (a finalizer died, say) | that failure is joined with `Cause.both` after the above |
 
 A failure raised while a race loser is torn down fails the race even when its

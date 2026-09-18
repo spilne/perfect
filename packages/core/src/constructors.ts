@@ -41,6 +41,10 @@ export function suspend<A, S>(f: () => Eff<A, S>): Eff<A, S> {
  * waiting. In both cases `value` is not run and `onDiscard` is called exactly
  * once, so the caller can give the item to someone else. `onDiscard` is never
  * called once the fiber has started running `value`.
+ *
+ * If `onDiscard` throws when an interrupt discards the value, the error joins
+ * the interrupted fiber's cause as a defect and the interrupt goes ahead. When
+ * `resume` itself calls it, the error propagates to the caller of `resume`.
  */
 export function async<A, E = never>(
   register: (

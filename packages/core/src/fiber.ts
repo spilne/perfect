@@ -172,21 +172,21 @@ export class Fiber<A = unknown> {
     // run itself a second time.
     const cancel = this.interruptHandle;
     if (cancel !== null) {
+      // Only a suspended fiber has a canceler, and a handoff only a Ready one.
       this.interruptHandle = null;
       cancel();
-      if ((this.state as FiberState) === FiberState.Done) {
-        discard?.();
-        return;
-      }
+      if ((this.state as FiberState) === FiberState.Done) return;
     }
     // If the fiber has a non-empty continuation stack, inject a Fail(Interrupt)
     // and re-schedule — the interpreter loop walks the stack and fires any
     // EnsuringFrame/ScopeFrame finalizers before completing. A fiber-level
     // scope isn't represented by a stack frame, so it also forces the loop
-    // path — reject() closes it. Otherwise (nothing to finalize), complete
-    // directly.
-    if (this.stack !== null || (this.scope !== null && !this.scope.isClosed)) {
-      this.current = new Suspend(Op.Fail, cause, null);
+    // path — reject() closes it. So does a value to give back, so a failing
+    // discard can still join the result. Otherwise (nothing to finalize),
+    // complete directly.
+    if (this.stack !== null || (this.scope !== null && !this.scope.isClosed) || discard !== null) {
+      const failure = new Suspend(Op.Fail, cause, null);
+      this.current = failure;
       // A Ready fiber already has a loop run queued (a resume, a yield, an
       // op-budget pause or an earlier interrupt) that starts from the new
       // current. Queue another anyway in case that one was dropped by
@@ -196,11 +196,23 @@ export class Fiber<A = unknown> {
       // Avoid a circular import on runtime.ts by going through the scheduler;
       // bootstrapFiber installs a `_resume` callback that wraps runFiberLoop.
       this.scheduler.schedule(() => this._resume?.());
-      discard?.();
+      if (discard !== null) this.runDiscard(discard, failure);
       return;
     }
     this.complete({ ok: false, cause });
-    discard?.();
+  }
+
+  // Gives back a value this fiber was handed. A throwing discard must not
+  // abort the caller of interrupt() (all() interrupting the rest of its
+  // children, say), so its error becomes a defect after the interrupt.
+  private runDiscard(discard: () => void, failure: Suspend): void {
+    try {
+      discard();
+    } catch (error) {
+      if (this.state === FiberState.Ready && this.current === failure) {
+        this.current = new Suspend(Op.Fail, Cause.then(failure.a as Cause, Cause.die(error)), null);
+      }
+    }
   }
 
   // Set by bootstrapFiber to point at runFiberLoop(this); avoids a fiber.ts ⇄

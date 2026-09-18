@@ -732,15 +732,23 @@ class ChildGroup {
   }
 
   private readonly onCause = (cause: Cause): Suspend => {
-    // Once the group delivered a failure every child has settled; an interrupt
-    // that reached the fiber before it ran has already joined that failure.
-    if (this.delivered !== null) return new Suspend(Op.Fail, cause, null);
+    // Once the group delivered a failure every child has settled. An interrupt
+    // that reached the fiber before it ran joined that failure; it gets the
+    // same shape as an interrupt that arrives while the group waits.
+    if (this.delivered !== null) {
+      return cause === this.delivered
+        ? new Suspend(Op.Fail, cause, null)
+        : this.settledCause(Cause.interrupt());
+    }
     this.interruptChildren();
     if (this.running === 0) return this.settledCause(cause);
     return new Suspend(
       Op.Async,
       (resume: (value: Suspend) => void) => {
-        this.drained = () => resume(this.settledCause(cause));
+        // Checked again here, so a child that settled in between cannot leave
+        // the wait without a drain signal.
+        if (this.running === 0) resume(this.settledCause(cause));
+        else this.drained = () => resume(this.settledCause(cause));
       },
       null,
     );

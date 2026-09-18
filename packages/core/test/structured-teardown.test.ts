@@ -256,6 +256,37 @@ describe("all() waits for its children", () => {
     expect(fiber.result).toEqual({ ok: false, cause: interruptCause });
   });
 
+  test("an interrupt after a child failure was delivered has the same cause as one before", () => {
+    const causes: unknown[] = [];
+    for (const deliveredFirst of [false, true]) {
+      const scheduler = new StepScheduler();
+      const hold = gate();
+      const failNow = gate();
+      const fiber = runFiber(
+        all([failNow.wait.flatMap(() => fail("e1")), uninterruptible(hold.wait)]),
+        scheduler,
+      );
+      scheduler.flush();
+      failNow.open();
+      scheduler.flush();
+      if (deliveredFirst) {
+        hold.open();
+        while (fiber.status !== "ready" && scheduler.queue.length > 0) scheduler.step();
+        expect(fiber.status).toBe("ready");
+        fiber.interrupt();
+      } else {
+        expect(fiber.status).toBe("suspended");
+        fiber.interrupt();
+        hold.open();
+      }
+      scheduler.flush();
+      causes.push(fiber.result);
+    }
+
+    const expected = { ok: false, cause: Cause.both(Cause.interrupt(), Cause.fail("e1")) };
+    expect(causes).toEqual([expected, expected]);
+  });
+
   test("an interrupt that lands after the results were delivered fails with the interrupt", () => {
     const scheduler = new StepScheduler();
     const first = gate();
