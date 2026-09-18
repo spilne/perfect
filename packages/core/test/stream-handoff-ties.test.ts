@@ -81,6 +81,10 @@ describe("timeout(ms).retry() ties", () => {
     merge: (source: Stream<number>) => source.merge(Stream.fromEffect(sleep(12).map(() => 100))),
     mergeAll: (source: Stream<number>) =>
       Stream.mergeAll(source, Stream.fromEffect(sleep(12).map(() => 100)), Stream.empty<number>()),
+    parJoin: (source: Stream<number>) =>
+      Stream.of(source, Stream.fromEffect(sleep(12).map(() => 100))).parJoin(2),
+    parJoinUnbounded: (source: Stream<number>) =>
+      source.map((n) => Stream.of(n)).parJoinUnbounded(),
     buffer: (source: Stream<number>) => source.buffer(2),
     parEvalMap: (source: Stream<number>) => source.parEvalMap(2, (n) => succeed(n)),
     parEvalMapUnordered: (source: Stream<number>) =>
@@ -103,6 +107,8 @@ describe("timeout(ms).retry() ties", () => {
   const expected: Record<keyof typeof operators, number[]> = {
     merge: [0, 1, 2, 3, 100],
     mergeAll: [0, 1, 2, 3, 100],
+    parJoin: [0, 1, 2, 3, 100],
+    parJoinUnbounded: [0, 1, 2, 3],
     buffer: [0, 1, 2, 3],
     parEvalMap: [0, 1, 2, 3],
     parEvalMapUnordered: [0, 1, 2, 3],

@@ -98,6 +98,21 @@ const scenarios: Record<string, Scenario> = {
     build: (p) => Stream.mergeAll(ticks(p, "a", 10, 2), ticks(p, "b", 17, 2), ticks(p, "c", 23, 1)),
     expected: ["a1", "b1", "a2", "c1", "b2"],
   },
+  parJoin: {
+    // the third inner waits for a slot, which frees when "a" ends at 30
+    build: (p) =>
+      p
+        .source("outer", Stream.of(ticks(p, "a", 10, 3), ticks(p, "b", 17, 2), ticks(p, "c", 7, 2)))
+        .parJoin(2),
+    expected: ["a1", "b1", "a2", "a3", "b2", "c1", "c2"],
+  },
+  parJoinUnbounded: {
+    build: (p) =>
+      p
+        .source("outer", Stream.of(ticks(p, "a", 10, 3), ticks(p, "b", 17, 2), ticks(p, "c", 7, 2)))
+        .parJoinUnbounded(),
+    expected: ["c1", "a1", "c2", "b1", "a2", "a3", "b2"],
+  },
   switchMap: {
     build: (p) => ticks(p, "o", 55, 2).switchMap((outer) => ticks(p, `${outer}-`, 10, 6)),
     expected: [
@@ -511,6 +526,14 @@ describe("run teardown", () => {
 
   test.each<[string, () => Stream<unknown, unknown>]>([
     ["merge", () => Stream.of(1).merge(failingCleanup(2))],
+    ["parJoin inner", () => Stream.of(Stream.of(1), failingCleanup(2)).parJoinUnbounded()],
+    [
+      "parJoin outer",
+      () =>
+        oneThenStuck()
+          .map((n) => Stream.of(n))
+          .parJoin(2),
+    ],
     ["combineLatest", () => Stream.of(1).combineLatest(oneThenStuck())],
     [
       "withLatest",
@@ -749,6 +772,13 @@ describe("retry and reuse", () => {
         Stream.of(1, 2, 3)
           .rechunk(1)
           .parEvalMapUnordered(1, (n) => (n === 2 ? fail(new SourceError({})) : succeed(n))),
+    },
+    {
+      name: "parJoin",
+      build: () =>
+        Stream.of<Stream<number, any>>(Stream.of(1), Stream.fail(new SourceError({})), Stream.of(3))
+          .rechunk(1)
+          .parJoin(1),
     },
     {
       name: "switchMap",

@@ -637,10 +637,15 @@ async function runIteration(params: {
     const concurrency = 1 + ri(3);
     // Each item runs on its own worker fiber, built when the item arrives.
     const worker = () => generate(depth - 1, childCtx(ctx, { awaited: false }));
+    const kind = ri(4);
     const stage =
-      ri(2) === 0
+      kind === 0
         ? source.parEvalMap(concurrency, worker)
-        : source.parEvalMapUnordered(concurrency, worker);
+        : kind === 1
+          ? source.parEvalMapUnordered(concurrency, worker)
+          : kind === 2
+            ? source.map(() => Stream.fromEffect(worker())).parJoin(concurrency)
+            : source.map(() => Stream.fromEffect(worker())).parJoinUnbounded();
     return stage.drain();
   };
 
