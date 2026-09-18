@@ -162,7 +162,8 @@ export class PgChangeStream<T>
             (activeListener) => {
               listener = activeListener;
               if (canceled) close();
-              else resume(succeed(close));
+              // A subscriber interrupted before it receives `close` unlistens.
+              else resume(succeed(close), close);
             },
             (cause) => {
               if (!canceled) resume(fail(toPostgresError("changeStream.listen", cause)));
