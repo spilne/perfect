@@ -93,9 +93,11 @@ const CHAINS: Eff<number, never>[] = [350, 690, 1100].map((length) => {
 // that finalizers run for: a scope or a fiber.
 type NodeKind = "fin" | "rel" | "scope" | "fiber";
 
-// Enclosing groups of a piece of code. A cross-fiber ancestor belongs to
-// another fiber: the runtime does not wait for children before running a
-// parent's finalizers, so those orderings are not checked.
+// Enclosing groups of a piece of code. A cross-fiber ancestor is outside a
+// fork: a parent does not wait for a forked fiber before running its own
+// finalizers, so those orderings are not checked. Children of all(), race()
+// and timeoutOption() are awaited, so their ancestors are checked like code on
+// the same fiber: no parent finalizer starts before the children are done.
 interface Ancestor {
   readonly id: number;
   readonly crossFiber: boolean;
@@ -418,10 +420,10 @@ async function runIteration(params: {
       .flatMap(() => sync(() => checkRunsInside(ancestors, "leaf end")));
   };
 
-  const childCtx = (ctx: Ctx): Ctx => {
+  const childCtx = (ctx: Ctx, params: { awaited: boolean }): Ctx => {
     const group = makeNode(
       "fiber",
-      ctx.ancestors.map((a) => ({ id: a.id, crossFiber: true })),
+      params.awaited ? ctx.ancestors : ctx.ancestors.map((a) => ({ id: a.id, crossFiber: true })),
     );
     return {
       ancestors: [...group.ancestors, { id: group.id, crossFiber: false }],
@@ -530,13 +532,19 @@ async function runIteration(params: {
       case 7:
         return uninterruptible(generate(depth - 1, ctx));
       case 8:
-        return all([generate(depth - 1, childCtx(ctx)), generate(depth - 1, childCtx(ctx))]);
+        return all([
+          generate(depth - 1, childCtx(ctx, { awaited: true })),
+          generate(depth - 1, childCtx(ctx, { awaited: true })),
+        ]);
       case 9:
-        return race([generate(depth - 1, childCtx(ctx)), generate(depth - 1, childCtx(ctx))]);
+        return race([
+          generate(depth - 1, childCtx(ctx, { awaited: true })),
+          generate(depth - 1, childCtx(ctx, { awaited: true })),
+        ]);
       case 10:
-        return timeoutOption(generate(depth - 1, childCtx(ctx)), 1 + ri(80));
+        return timeoutOption(generate(depth - 1, childCtx(ctx, { awaited: true })), 1 + ri(80));
       case 11:
-        return fork(generate(depth - 1, childCtx(ctx)))
+        return fork(generate(depth - 1, childCtx(ctx, { awaited: false })))
           .flatMap((fiber) => join(fiber))
           .catch(() => succeed(0));
       case 12:

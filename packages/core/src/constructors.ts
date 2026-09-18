@@ -148,7 +148,8 @@ export function delay<A, S>(eff: Eff<A, S>, ms: number): Eff<A, S> {
 
 // ── Race ───────────────────────────────────────────────────────────
 
-// First settled (success OR failure) wins; losers are interrupted.
+// First settled (success OR failure) wins; losers are interrupted, and the race
+// returns once they have finished.
 // Generic over the tuple so heterogeneous arrays infer the UNION of their
 // value/effect types instead of locking onto the first element.
 export function race<E extends Eff<unknown, unknown>[]>(

@@ -118,6 +118,51 @@ console.log(friends); // → ["bob", "carol"]
 
 <!-- @end -->
 
+## Structured teardown
+
+`all`, `race` and the combinators built on them (`raceAll`, `raceEither`,
+`validate`, `timeoutOption`, `timeoutFail`/`timeout`, `hedged`, `parZip`) do
+not return while one of their children is still running. When a child fails,
+when a race has its first result, or when the combinator itself is interrupted,
+the remaining children are interrupted and the combinator waits until every
+one of them has finished, finalizers included. Finalizers around the
+combinator therefore run after its children's finalizers, never alongside
+them:
+
+```ts
+import { all, ensuring, sync } from "@spilne/perfect-core";
+
+// Interrupted, this logs "parent released" only after releaseA and releaseB
+// have finished, even if they are asynchronous.
+const program = ensuring(
+  all([ensuring(taskA, releaseA), ensuring(taskB, releaseB)]),
+  sync(() => console.log("parent released")),
+);
+```
+
+The combinator's outcome:
+
+| What happened | Outcome |
+|---|---|
+| every `all` child succeeded | the results |
+| an `all` child failed | that child's failure |
+| a `race` child settled first | its value or failure |
+| the combinator was interrupted | the interrupt, joined with `Cause.both` to a child failure that had already stopped it |
+| a child torn down in any of these cases failed with more than the interrupt (a finalizer died, say) | that failure is joined with `Cause.both` after the above |
+
+A failure raised while a race loser is torn down fails the race even when its
+winner succeeded, the same way a failing finalizer fails `ensuring`.
+
+Waiting is the trade-off, as in ZIO and Effect: an uninterruptible child holds
+up its combinator. `timeoutOption(uninterruptible(slow), 100)` returns only
+once `slow` has finished, and a race loser blocked uninterruptibly on
+something only the caller would provide never lets the race return. Keep
+uninterruptible regions short, and move work that must outlive the
+combinator into `forkDaemon`.
+
+`fork` does not wait: a forked fiber is interrupted when its parent
+completes, but the parent does not wait for it to finish.
+
 ## Daemons
 
 `fork(eff)` ties the fiber to the parent scope — when the parent ends, the

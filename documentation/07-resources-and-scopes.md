@@ -173,6 +173,13 @@ if (exit._tag === "Failure") {
 
 `scoped(acquireRelease(...))` follows the same rule when a scope closes.
 
+Parallel children release first. `all`, `race`, `timeoutOption` and the other
+combinators built on them wait for their children's finalizers before they
+return, so a finalizer or scope around them runs after those finalizers have
+finished. A child's finalizer failure joins the combinator's outcome with
+`Cause.both` (see
+[Structured teardown](./06-concurrency.md#structured-teardown)).
+
 An interrupt adds `Interrupt` to the outcome. An interrupt that arrives while
 a finalizer runs waits for it: interrupting `succeed(1).ensuring(release)`
 while `release` fails with `e` ends as `(Fail(e) ; Interrupt)`. Error handlers

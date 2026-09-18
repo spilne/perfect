@@ -142,6 +142,11 @@ work and reserve the forked form for best-effort telemetry.
 All timing goes through the `Clock` service, so these operators are
 deterministic under `TestClock`.
 
+`timeout`, `deadline`, `interruptAfter`, `interruptOn` and `takeUntil` race
+each pull against a timer or signal. When the pull is cut, they wait for it to
+finish its cleanup before they fail or end the stream (see
+[Structured teardown](./06-concurrency.md#structured-teardown)).
+
 A value that arrives at the same instant as a timer is not lost. That covers
 a `debounce` window closing, a `groupWithin` deadline and a `sample` or
 `audit` boundary, which wait on internal queues, and a `Stream.fromQueue` pull
