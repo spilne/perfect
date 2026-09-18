@@ -31,6 +31,7 @@ import {
   timeoutOption,
   uninterruptible,
 } from "../src";
+import { VALUE_IN_FLIGHT } from "../src/fiber";
 import { DEFAULT_BUDGET, type Scheduler } from "../src/scheduler";
 
 // Runs queued loop slices one at a time so a test can act between them.
@@ -285,7 +286,7 @@ describe("async resume with onDiscard", () => {
         );
         scheduler.step();
         if (fiber.status === "ready") {
-          if (fiber.valueInFlight) pausedOnValue++;
+          if (fiber.handoffDiscard === VALUE_IN_FLIGHT) pausedOnValue++;
           fiber.interrupt();
         }
         scheduler.flush();
@@ -320,7 +321,11 @@ describe("an interrupt during an op-budget pause on a value", () => {
         scheduler.step();
         let depth = 0;
         for (let frame = fiber.stack; frame !== null; frame = frame.next) depth++;
-        if (fiber.status === "ready" && fiber.valueInFlight && depth === params.frames) {
+        if (
+          fiber.status === "ready" &&
+          fiber.handoffDiscard === VALUE_IN_FLIGHT &&
+          depth === params.frames
+        ) {
           return { fiber, scheduler };
         }
       }

@@ -53,6 +53,13 @@ function notify(fn: (supervisor: FiberSupervisor) => void): void {
   }
 }
 
+// Stands in for a handoff discard while a fiber is Ready after an op-budget
+// pause that stopped on a value, or an Op.Succeed holding one, on its way to
+// the next frame. An interrupt then waits for the next effect step instead of
+// replacing the value, so it is not dropped between a primitive handing it
+// out and its continuation. Sharing the field keeps Fiber objects small.
+export const VALUE_IN_FLIGHT = (): void => {};
+
 export function notifyFiberStart(fiber: Fiber<any>): void {
   notify((supervisor) => supervisor.onStart?.(fiber));
 }
@@ -107,13 +114,9 @@ export class Fiber<A = unknown> {
   // Set while the fiber is Ready with a value an async resume handed over
   // (an item, a permit) and cleared when a loop run starts from it. If
   // interrupt() replaces that value first, it calls this so the value goes
-  // back to where it came from.
+  // back to where it came from. VALUE_IN_FLIGHT after an op-budget pause on a
+  // value.
   handoffDiscard: (() => void) | null = null;
-  // Set while the fiber is Ready after an op-budget pause that stopped on a
-  // value, or an Op.Succeed holding one, on its way to the next frame. An
-  // interrupt then waits for the next effect step, so the value is not
-  // dropped between a primitive handing it out and its continuation.
-  valueInFlight = false;
 
   complete(result: FiberResult<A>): void {
     if (this.state === FiberState.Done) return;
@@ -152,7 +155,7 @@ export class Fiber<A = unknown> {
     // The loop delivers the interrupt once the value has reached the next
     // frame. A run is queued in case scheduler.shutdown() dropped the paused
     // one; runFiberLoop ignores a duplicate.
-    if (this.state === FiberState.Ready && this.valueInFlight) {
+    if (this.state === FiberState.Ready && this.handoffDiscard === VALUE_IN_FLIGHT) {
       this.interruptPending = true;
       this.scheduler.schedule(() => this._resume?.());
       return;

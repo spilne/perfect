@@ -1,7 +1,7 @@
 import { Cause } from "./cause";
 import { type Eff, type EffectCheck, Suspend, Cont, Op } from "./eff";
 import { type Context, emptyContext, mergeContexts } from "./service";
-import { Fiber, FiberState, type FiberResult, notifyFiberStart } from "./fiber";
+import { Fiber, FiberState, type FiberResult, VALUE_IN_FLIGHT, notifyFiberStart } from "./fiber";
 import { Scope } from "./scope";
 import { type Scheduler, SyncScheduler, DEFAULT_BUDGET, getDefaultScheduler } from "./scheduler";
 import { Clock, realClock } from "./clock";
@@ -122,7 +122,6 @@ function runFiberLoop(fiber: Fiber<any>): void {
   fiber.state = FiberState.Running;
   // A value handed over by an async resume is delivered once this run starts.
   fiber.handoffDiscard = null;
-  fiber.valueInFlight = false;
   fiber.opCount = 0;
 
   let cur: any = fiber.current;
@@ -186,7 +185,8 @@ function runFiberLoop(fiber: Fiber<any>): void {
       fiber.stack = k;
       fiber.context = context;
       fiber.state = FiberState.Ready;
-      fiber.valueInFlight = !(cur instanceof Suspend) || cur.op === Op.Succeed;
+      if (!(cur instanceof Suspend) || cur.op === Op.Succeed)
+        fiber.handoffDiscard = VALUE_IN_FLIGHT;
       fiber.scheduler.schedule(() => runFiberLoop(fiber));
       return;
     }
