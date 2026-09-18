@@ -44,10 +44,12 @@ describe.each(["parEvalMap", "parEvalMapUnordered"] as const)("%s concurrency", 
     );
   });
 
-  test.each([Infinity, 2 ** 60])("runs every element at once with %p", async (concurrency) => {
+  // Virtual time: on the real clock a loaded machine can let a 5 ms worker
+  // finish before the last one starts.
+  test.each([Infinity, 2 ** 60])("runs every element at once with %p", (concurrency) => {
     let inFlight = 0;
     let maxInFlight = 0;
-    const values = await run(
+    const result = runVirtual(
       Stream.range(0, 9)
         [method](concurrency, (n) =>
           sync(() => {
@@ -62,6 +64,8 @@ describe.each(["parEvalMap", "parEvalMapUnordered"] as const)("%s concurrency", 
         .toArray(),
     );
 
+    expect(result?.ok).toBe(true);
+    const values = result?.ok ? result.value : [];
     expect([...values].sort((a, b) => a - b)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
     if (method === "parEvalMap") expect(values).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
     expect(maxInFlight).toBe(9);
