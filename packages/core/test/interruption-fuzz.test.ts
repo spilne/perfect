@@ -36,6 +36,7 @@ import {
   runSync,
   scoped,
   succeed,
+  suspend,
   sync,
   timeoutOption,
   tryPromise,
@@ -191,7 +192,7 @@ async function runIteration(params: {
     if (runSync(queue.size) >= QUEUE_CAPACITY) return;
     const item = nextItem++;
     offers.set(item, false);
-    runSync(queue.offer(item));
+    runSync(queue.offer(item).orDie());
     offers.set(item, true);
   };
   const drainFromOutside = () => {
@@ -208,6 +209,52 @@ async function runIteration(params: {
       release: (resource) =>
         sync(() => {
           releasedResources.set(resource, (releasedResources.get(resource) ?? 0) + 1);
+        }),
+    }),
+  );
+  // A one-resource pool whose validate may reject a reused resource or wait
+  // on a gate, and whose release may wait on a gate or fail. Uses of it from
+  // parallel branches wait for each other, which puts a waiter behind a use
+  // that is releasing a rejected resource.
+  let validatingCreated = 0;
+  // The final shutdown runs outside the scheduler, so its releases neither
+  // wait nor fail.
+  let validatingPoolClosing = false;
+  const validatingReleased = new Map<number, number>();
+  const validatingPool = runSync(
+    Pool.make<number>({
+      size: 1,
+      acquire: sync(() => {
+        if (validatingCreated - validatingReleased.size >= 1) {
+          violate("the validating pool held more resources than its size");
+        }
+        return ++validatingCreated;
+      }),
+      release: (resource) =>
+        suspend(() => {
+          const record = sync(() => {
+            validatingReleased.set(resource, (validatingReleased.get(resource) ?? 0) + 1);
+          });
+          if (validatingPoolClosing) return record;
+          switch (ri(4)) {
+            case 0:
+              return gateLeaf({ cancellable: false, inFinalizer: true }).flatMap(() => record);
+            case 1:
+              return record.flatMap(() => die("release failed"));
+            default:
+              return record;
+          }
+        }),
+      validate: () =>
+        suspend(() => {
+          switch (ri(4)) {
+            case 0:
+              return gateLeaf({ cancellable: true, inFinalizer: false }).map(() => ri(2) === 0);
+            case 1:
+              return succeed(false);
+            default:
+              return succeed(true);
+          }
         }),
     }),
   );
@@ -600,10 +647,28 @@ async function runIteration(params: {
   const generate = (depth: number, ctx: Ctx): Eff<any, any> => {
     if (depth <= 0 || nodeBudget <= 0 || ri(5) === 0) return leaf(ctx);
     nodeBudget--;
-    switch (ri(19)) {
+    switch (ri(24)) {
       case 0:
       case 1:
         return generate(depth - 1, ctx).flatMap(() => generate(depth - 1, ctx));
+      case 19:
+      case 20:
+      case 21:
+      case 22:
+      case 23: {
+        if (ctx.holdsShared) return generate(depth - 1, ctx);
+        // One use leaves a resource idle, then two parallel uses contend for
+        // it: one validates the reused resource while the other waits.
+        const use = (body: Eff<any, any>) =>
+          validatingPool.use(() => body).catchAllCause(() => succeed(0));
+        const holding = (child: Ctx): Ctx => ({ ...child, holdsShared: true });
+        return use(leaf(holding(ctx))).flatMap(() =>
+          all([
+            child(use(generate(depth - 1, holding(childCtx(ctx, { awaited: true }))))),
+            child(use(generate(depth - 1, holding(childCtx(ctx, { awaited: true }))))),
+          ]),
+        );
+      }
       case 2:
         return generate(depth - 1, ctx).catch(() => {
           checkHandlerMayRun();
@@ -865,6 +930,15 @@ async function runIteration(params: {
   for (let resource = 1; resource <= createdResources; resource++) {
     const count = releasedResources.get(resource) ?? 0;
     if (count !== 1) violate(`a pool resource was released ${count} times`);
+  }
+  if (runSync(validatingPool.inUse) !== 0) {
+    violate("validating pool resources still in use after the program ended");
+  }
+  validatingPoolClosing = true;
+  runSync(validatingPool.shutdown());
+  for (let resource = 1; resource <= validatingCreated; resource++) {
+    const count = validatingReleased.get(resource) ?? 0;
+    if (count !== 1) violate(`a validating pool resource was released ${count} times`);
   }
   if (interruptedBeforeBodyDone && root.result !== null) {
     if (root.result.ok || !Cause.hasInterrupt(root.result.cause)) {

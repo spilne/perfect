@@ -22,7 +22,12 @@ export class PoolClosed {
 }
 
 export interface PoolOptions<R, S = never> {
-  /** Build a fresh resource. Called up to `size` times. */
+  /**
+   * Build a fresh resource. Called up to `size` times. It runs interruptibly
+   * so an interrupted use can cancel a slow connect; a resource it produces
+   * just as its use is interrupted is not seen by the pool and is not
+   * released.
+   */
   readonly acquire: Eff<R, S>;
   /** Tear down a resource (called on `shutdown` and on validate-fail). */
   readonly release: (resource: R) => Eff<void, S>;
@@ -140,14 +145,7 @@ class InProcessPool<R, S> implements Pool<R, S> {
       if (this.inUseCount < this.opts.size) {
         this.inUseCount++;
         lease.slot = true;
-        resume(
-          this.opts.acquire.map((resource) => {
-            lease.held = true;
-            lease.resource = resource;
-            return resource;
-          }) as any,
-          () => this.endSlot(lease),
-        );
+        resume(this.create(lease) as any, () => this.endSlot(lease));
         return;
       }
       const waiter: Waiter<R> = {
@@ -166,21 +164,36 @@ class InProcessPool<R, S> implements Pool<R, S> {
     }) as any;
   }
 
+  // Creates a resource in the lease's slot. A create that fails or is
+  // interrupted leaves the slot without a resource, and the use's finalizer
+  // frees it and wakes a waiter.
+  private create(lease: Lease<R>): Eff<R, S> {
+    return this.opts.acquire.map((resource) => {
+      lease.held = true;
+      lease.resource = resource;
+      return resource;
+    });
+  }
+
   private validated(lease: Lease<R>, r: R): Eff<R, S | Throws<PoolClosed>> {
     if (!this.opts.validate) return succeed(r);
     return (this.opts.validate(r) as any).flatMap((ok: boolean) => {
       if (ok) return succeed(r);
-      // Bad resource: release it and acquire again. Dropping it from the lease
-      // and releasing it is one uninterruptible step, so it is released once.
+      // Bad resource: release it and create a fresh one in the same slot.
+      // Dropping it from the lease and releasing it is one uninterruptible
+      // step, so it is released once. The slot stays counted in inUse until
+      // the replacement exists; if the release fails or the use is
+      // interrupted first, the use's finalizer frees the slot and wakes a
+      // waiter.
       return uninterruptible(
         suspend(() => {
           lease.held = false;
           lease.resource = undefined;
-          lease.slot = false;
-          this.inUseCount--;
           return this.opts.release(r);
         }),
-      ).flatMap(() => this.acquireInto(lease));
+      ).flatMap((): Eff<R, S | Throws<PoolClosed>> =>
+        this.closed ? fail(new PoolClosed()) : this.create(lease),
+      );
     });
   }
 

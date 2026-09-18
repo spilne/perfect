@@ -735,16 +735,19 @@ describe("Pool handoff", () => {
     released?: number[];
     acquire?: Eff<number, never>;
     validate?: (resource: number) => Eff<boolean, never>;
+    release?: (resource: number) => Eff<void, never>;
   }) => {
     let created = 0;
     return runSync(
       Pool.make<number>({
         size: params.size,
         acquire: params.acquire ?? sync(() => ++created),
-        release: (resource) =>
-          sync(() => {
-            params.released?.push(resource);
-          }),
+        release:
+          params.release ??
+          ((resource) =>
+            sync(() => {
+              params.released?.push(resource);
+            })),
         validate: params.validate,
       }),
     );
@@ -859,6 +862,60 @@ describe("Pool handoff", () => {
     scheduler.flush();
 
     expect(fiber.result).toEqual(interrupted);
+    expect({ inUse: runSync(pool.inUse), idle: runSync(pool.idle) }).toEqual({ inUse: 0, idle: 1 });
+  });
+
+  test("a use interrupted while releasing a resource that failed validation wakes the waiter", () => {
+    const scheduler = new StepScheduler();
+    const check = manualWait<boolean>();
+    const releasing = manualWait<void>();
+    let gated = false;
+    const pool = makePool({
+      size: 1,
+      validate: () => (gated ? check.wait : succeed(true)),
+      release: () => (gated ? releasing.wait : succeed(undefined)),
+    });
+    runSync(pool.use(succeed));
+    gated = true;
+    const validating = runFiber(pool.use(succeed), scheduler);
+    scheduler.flush();
+    const waiting = runFiber(pool.use(succeed), scheduler);
+    scheduler.flush();
+    expect(waiting.status).toBe("suspended");
+
+    check.resume(succeed(false));
+    scheduler.flush();
+    validating.interrupt();
+    gated = false;
+    releasing.resume(succeed(undefined));
+    scheduler.flush();
+
+    expect(validating.result).toEqual(interrupted);
+    expect(waiting.result).toEqual({ ok: true, value: 2 });
+    expect({ inUse: runSync(pool.inUse), idle: runSync(pool.idle) }).toEqual({ inUse: 0, idle: 1 });
+  });
+
+  test("a failing release of a resource that failed validation wakes the waiter", () => {
+    const scheduler = new StepScheduler();
+    const check = manualWait<boolean>();
+    let gated = false;
+    const pool = makePool({
+      size: 1,
+      validate: () => (gated ? check.wait : succeed(true)),
+      release: () => (gated ? die("release failed") : succeed(undefined)),
+    });
+    runSync(pool.use(succeed));
+    gated = true;
+    const validating = runFiber(pool.use(succeed), scheduler);
+    scheduler.flush();
+    const waiting = runFiber(pool.use(succeed), scheduler);
+    scheduler.flush();
+
+    check.resume(succeed(false));
+    scheduler.flush();
+
+    expect(validating.result).toEqual({ ok: false, cause: Cause.die("release failed") });
+    expect(waiting.result).toEqual({ ok: true, value: 2 });
     expect({ inUse: runSync(pool.inUse), idle: runSync(pool.idle) }).toEqual({ inUse: 0, idle: 1 });
   });
 
