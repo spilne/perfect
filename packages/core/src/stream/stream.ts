@@ -23,6 +23,7 @@ import {
   timeoutOption,
   fromPromise,
   ensuring,
+  onExit,
   awaitFiber,
   yieldNow,
   retry as effRetry,
@@ -1960,17 +1961,27 @@ export class Stream<A, S = never> {
     const setup: Eff<Step<B>, any> = (QueueNS.bounded<Slot>(n) as any).flatMap(
       (slots: Queue<Slot>) =>
         (Semaphore.make(n) as any).flatMap((sem: Semaphore) => {
+          // Deferreds the consumer may still await. A worker settles its own
+          // from a finalizer, so an interrupted worker cannot strand the
+          // consumer; a failing driver settles the rest with its cause, which
+          // also covers workers interrupted before they ever ran.
+          const pending = new Set<Deferred<Exit<unknown, B>>>();
           const enqueue = (item: A): Eff<void, any> =>
             (sem.acquire() as any).flatMap(() =>
               (DeferredNS.make<Exit<unknown, B>>() as any).flatMap(
                 (d: Deferred<Exit<unknown, B>>) =>
-                  (slots.offer({ _tag: "item", deferred: d }) as any).flatMap(() =>
-                    fork(
-                      (exitOf(suspend(() => f(item))) as any).flatMap((exit: Exit<unknown, B>) =>
-                        (d.succeed(exit) as any).flatMap(() => sem.release()),
-                      ),
-                    ),
-                  ),
+                  (slots.offer({ _tag: "item", deferred: d }) as any).flatMap(() => {
+                    pending.add(d);
+                    return fork(
+                      (
+                        onExit(suspend(() => f(item)) as Eff<B, unknown>, (exit) =>
+                          sync(() => pending.delete(d)).flatMap(() =>
+                            d.succeed(exit).map(() => undefined),
+                          ),
+                        ) as any
+                      ).ensuring(sem.release()),
+                    );
+                  }),
               ),
             );
 
@@ -1988,10 +1999,20 @@ export class Stream<A, S = never> {
                 : drainChunk(Array.from(step.chunk), 0, step.next),
             );
 
+          const settlePending = (cause: Cause): Eff<void, never> =>
+            suspend(() => {
+              let settled: Eff<unknown, never> = succeed(undefined);
+              for (const d of pending) {
+                settled = settled.flatMap(() => d.succeed(Exit.failure(cause)));
+              }
+              pending.clear();
+              return settled.map(() => undefined);
+            });
+
           const driver = (drain(self) as any).catchAllCause((cause: Cause) =>
             Cause.isInterruptedOnly(cause)
               ? failCause(cause)
-              : slots.offer({ _tag: "fail", cause }),
+              : settlePending(cause).flatMap(() => slots.offer({ _tag: "fail", cause })),
           );
 
           const pull = (): Eff<Step<B>, any> =>
