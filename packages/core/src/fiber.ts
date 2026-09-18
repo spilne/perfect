@@ -57,6 +57,17 @@ export function notifyFiberStart(fiber: Fiber<any>): void {
   notify((supervisor) => supervisor.onStart?.(fiber));
 }
 
+// The cause a Ready fiber is interrupted with. A failure it was about to raise
+// (a resume with a failure, a failure all() or race() delivered, a failure an
+// op-budget pause stopped at) is kept, with the interrupt after it.
+function interruptCause(pending: unknown): Cause {
+  if (pending instanceof Suspend && pending.op === Op.Fail) {
+    const cause = pending.a as Cause;
+    return Cause.hasInterrupt(cause) ? cause : Cause.then(cause, Cause.interrupt());
+  }
+  return Cause.interrupt();
+}
+
 export class Fiber<A = unknown> {
   state = FiberState.Ready;
   result: FiberResult<A> | null = null;
@@ -133,6 +144,9 @@ export class Fiber<A = unknown> {
       this.interruptPending = true;
       return;
     }
+    // Only a Ready fiber's current is the effect it runs next; a suspended
+    // fiber's is left over from an earlier run.
+    const pending = this.state === FiberState.Ready ? this.current : undefined;
     this.asyncToken++;
     this.interrupting = true;
     // A value handed over by a resume whose run has not started is replaced
@@ -140,6 +154,7 @@ export class Fiber<A = unknown> {
     // discard that re-enters this fiber sees it interrupted.
     const discard = this.handoffDiscard;
     this.handoffDiscard = null;
+    const cause = discard === null ? interruptCause(pending) : Cause.interrupt();
     // Cleared before the call, so a canceler that interrupts again does not
     // run itself a second time.
     const cancel = this.interruptHandle;
@@ -158,7 +173,7 @@ export class Fiber<A = unknown> {
     // path — reject() closes it. Otherwise (nothing to finalize), complete
     // directly.
     if (this.stack !== null || (this.scope !== null && !this.scope.isClosed)) {
-      this.current = new Suspend(Op.Fail, { _tag: "Interrupt" } as Cause, null);
+      this.current = new Suspend(Op.Fail, cause, null);
       // A Ready fiber already has a loop run queued (a resume, a yield, an
       // op-budget pause or an earlier interrupt) that starts from the new
       // current. Queue another anyway in case that one was dropped by
@@ -171,7 +186,7 @@ export class Fiber<A = unknown> {
       discard?.();
       return;
     }
-    this.complete({ ok: false, cause: { _tag: "Interrupt" } });
+    this.complete({ ok: false, cause });
     discard?.();
   }
 

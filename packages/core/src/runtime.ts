@@ -714,7 +714,9 @@ class ChildGroup {
   }
 
   private readonly onCause = (cause: Cause): Suspend => {
-    if (cause === this.delivered) return new Suspend(Op.Fail, cause, null);
+    // Once the group delivered a failure every child has settled; an interrupt
+    // that reached the fiber before it ran has already joined that failure.
+    if (this.delivered !== null) return new Suspend(Op.Fail, cause, null);
     this.interruptChildren();
     if (this.running === 0) return this.settledCause(cause);
     return new Suspend(

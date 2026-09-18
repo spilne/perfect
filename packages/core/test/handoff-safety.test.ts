@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   type Eff,
   type Fiber,
+  Cause,
   Chunk,
   Clock,
   Pool,
@@ -12,10 +13,14 @@ import {
   Stream,
   SyncScheduler,
   TestClock,
+  all,
   async,
   die,
+  ensuring,
+  fail,
   forkDaemon,
   provide,
+  race,
   run,
   runFiber,
   runSync,
@@ -234,6 +239,139 @@ describe("async resume with onDiscard", () => {
         });
       }
     }
+  });
+});
+
+describe("interrupting a Ready fiber keeps the failure it was about to raise", () => {
+  const defect = new Error("defect");
+
+  test("an async resume with a defect, interrupted before the fiber runs", () => {
+    const scheduler = new StepScheduler();
+    const manual = manualWait<void>();
+    const fiber = runFiber(manual.wait, scheduler);
+    scheduler.flush();
+
+    manual.resume(die(defect));
+    fiber.interrupt();
+    scheduler.flush();
+
+    expect(fiber.result).toEqual({
+      ok: false,
+      cause: Cause.then(Cause.die(defect), Cause.interrupt()),
+    });
+  });
+
+  test("the same with finalizers still to run", () => {
+    const scheduler = new StepScheduler();
+    const manual = manualWait<void>();
+    let finalized = 0;
+    const fiber = runFiber(
+      ensuring(
+        manual.wait.map(() => "unreachable"),
+        sync(() => void finalized++),
+      ),
+      scheduler,
+    );
+    scheduler.flush();
+
+    manual.resume(fail("typed"));
+    fiber.interrupt();
+    scheduler.flush();
+
+    expect(finalized).toBe(1);
+    expect(fiber.result).toEqual({
+      ok: false,
+      cause: Cause.then(Cause.fail("typed"), Cause.interrupt()),
+    });
+  });
+
+  test("a child defect all() delivered, interrupted before the parent runs", () => {
+    const scheduler = new StepScheduler();
+    const manual = manualWait<void>();
+    const fiber = runFiber(
+      all([manual.wait.flatMap(() => die(defect)), async<void>(() => () => {})]),
+      scheduler,
+    );
+    scheduler.flush();
+
+    manual.resume(succeed(undefined));
+    while (fiber.status !== "ready" && scheduler.queue.length > 0) scheduler.step();
+    expect(fiber.status).toBe("ready");
+    fiber.interrupt();
+    scheduler.flush();
+
+    expect(fiber.result).toEqual({
+      ok: false,
+      cause: Cause.then(Cause.die(defect), Cause.interrupt()),
+    });
+  });
+
+  test("a failed race winner, interrupted before the parent runs", () => {
+    const scheduler = new StepScheduler();
+    const manual = manualWait<void>();
+    const fiber = runFiber(
+      race([manual.wait.flatMap(() => fail("lost")), async<void>(() => () => {})]).map(() => 0),
+      scheduler,
+    );
+    scheduler.flush();
+
+    manual.resume(succeed(undefined));
+    while (fiber.status !== "ready" && scheduler.queue.length > 0) scheduler.step();
+    fiber.interrupt();
+    scheduler.flush();
+
+    expect(fiber.result).toEqual({
+      ok: false,
+      cause: Cause.then(Cause.fail("lost"), Cause.interrupt()),
+    });
+  });
+
+  test("an op-budget pause on a failure keeps it", () => {
+    const center = Math.floor(DEFAULT_BUDGET / 3);
+    let pausedOnFailure = 0;
+    for (let length = center - 12; length <= center + 12; length++) {
+      for (let pad = 0; pad < 3; pad++) {
+        const scheduler = new StepScheduler();
+        let body: Eff<unknown, never> = succeed(0);
+        for (let i = 0; i < pad; i++) body = succeed(body) as Eff<unknown, never>;
+        for (let i = 0; i < length; i++) body = body.flatMap((x) => succeed(x));
+        const fiber = runFiber(
+          body.flatMap(() => die(defect)),
+          scheduler,
+        );
+        scheduler.step();
+        const pending = fiber.current;
+        if (fiber.status === "ready") fiber.interrupt();
+        scheduler.flush();
+
+        const result = fiber.result!;
+        expect(result.ok).toBe(false);
+        if (pending instanceof Object && (pending as { op?: unknown }).op === die(defect).op) {
+          pausedOnFailure++;
+          expect(!result.ok && Cause.defects(result.cause)).toEqual([defect]);
+        }
+      }
+    }
+    expect(pausedOnFailure).toBeGreaterThan(0);
+  });
+
+  test("a failure the fiber already handled is not raised again by a later interrupt", () => {
+    const scheduler = new StepScheduler();
+    const first = manualWait<void>();
+    const second = manualWait<void>();
+    const fiber = runFiber(
+      first.wait.catch(() => succeed(undefined)).flatMap(() => second.wait),
+      scheduler,
+    );
+    scheduler.flush();
+    first.resume(fail("handled") as Eff<void, never>);
+    scheduler.flush();
+    expect(fiber.status).toBe("suspended");
+
+    fiber.interrupt();
+    scheduler.flush();
+
+    expect(fiber.result).toEqual({ ok: false, cause: Cause.interrupt() });
   });
 });
 

@@ -143,6 +143,11 @@ What the final `Cause` keeps:
 | a typed failure or defect is raised before the interrupt lands, and no handler above it is bypassed | the failure, then the interrupt, e.g. `(Fail(e) ; Interrupt)` |
 | a handler that would have received a typed failure is bypassed | the typed failure is dropped; defects stay |
 
+A failure counts as raised once the fiber is scheduled to raise it, even if it
+has not run yet: an async callback resumed it with the failure, or `all` or
+`race` returned a child's failure. An interrupt that lands in between keeps the
+failure, e.g. `(Die(d) ; Interrupt)`.
+
 A typed failure is dropped only when a bypassed handler would have consumed or
 mapped it, so an interrupted effect never surfaces an error its type says was
 handled. When it stays, `run()` rejects with it (`Cause.squash` prefers typed
