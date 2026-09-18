@@ -690,6 +690,122 @@ describe("forEachPar — iterables", () => {
     expect(clock.pendingCount).toBe(0);
   });
 
+  // Reading the next item can throw anywhere, not just from next(): a getter
+  // on `done`, on `value`, or on an array index. Each must become a defect
+  // that fails the traversal instead of escaping the scheduler.
+  const hostileInputs: [string, (boom: Error) => Iterable<number>, items: number][] = [
+    [
+      "a throwing next()",
+      (boom) => ({
+        [Symbol.iterator]: () => ({
+          next: (() => {
+            let n = 0;
+            return () => {
+              if (n++ < 2) return { done: false, value: n };
+              throw boom;
+            };
+          })(),
+        }),
+      }),
+      2,
+    ],
+    [
+      "a throwing done getter",
+      (boom) => ({
+        [Symbol.iterator]: () => ({
+          next: (() => {
+            let n = 0;
+            return () =>
+              n++ < 2
+                ? { done: false, value: n }
+                : {
+                    get done(): boolean {
+                      throw boom;
+                    },
+                    value: 0,
+                  };
+          })(),
+        }),
+      }),
+      2,
+    ],
+    [
+      "a throwing value getter",
+      (boom) => ({
+        [Symbol.iterator]: () => ({
+          next: (() => {
+            let n = 0;
+            return () =>
+              n++ < 2
+                ? { done: false, value: n }
+                : {
+                    done: false,
+                    get value(): number {
+                      throw boom;
+                    },
+                  };
+          })(),
+        }),
+      }),
+      2,
+    ],
+    [
+      "a throwing array index",
+      (boom) => {
+        const items = [0, 1, 2];
+        Object.defineProperty(items, 2, {
+          get() {
+            throw boom;
+          },
+        });
+        return items;
+      },
+      2,
+    ],
+    [
+      "a throwing [Symbol.iterator]",
+      (boom) => ({
+        [Symbol.iterator]() {
+          throw boom;
+        },
+      }),
+      0,
+    ],
+  ];
+
+  for (const [name, build, items] of hostileInputs) {
+    test.each([1, 8, "unbounded"] as const)(
+      `${name} is a defect that interrupts in-flight items (concurrency %p)`,
+      async (concurrency) => {
+        const boom = new Error("input threw");
+        const started: number[] = [];
+        const finalized: number[] = [];
+        // Items suspend, so a concurrent traversal reads the hostile item
+        // while the earlier ones are still in flight, and a sequential one
+        // reads it once they have finished.
+        const program = forEachPar(
+          build(boom),
+          (i) =>
+            ensuring(
+              sync(() => {
+                started.push(i);
+              }).flatMap(() => microtask),
+              sync(() => {
+                finalized.push(i);
+              }),
+            ),
+          { concurrency },
+        );
+
+        const exit = await runExit(program);
+
+        expect(exit).toEqual(Exit.failure(Cause.die(boom)));
+        expect(finalized.sort()).toEqual(started.sort());
+        expect(started.length).toBe(items);
+      },
+    );
+  }
+
   test("closes the iterator when the traversal stops early", async () => {
     const boom = new Error("mapper threw");
     let closed = false;

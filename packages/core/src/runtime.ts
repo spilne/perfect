@@ -749,27 +749,30 @@ function startForEachPar(
         scheduleRefill();
         return;
       }
+      // Reading the next item runs user code throughout: next(), and the
+      // `done`, `value` and index getters an iterator or array may define. A
+      // throw anywhere in it is a defect of the traversal, which then stops
+      // pulling, as a `for..of` loop leaves an iterator that threw alone.
       let item: unknown;
-      if (array !== null) {
-        if (next >= length) {
-          sourceDone = true;
-          return;
+      try {
+        if (array !== null) {
+          if (next >= length) {
+            sourceDone = true;
+            return;
+          }
+          item = array[next];
+        } else {
+          const step = iterator!.next();
+          if (step.done === true) {
+            sourceDone = true;
+            return;
+          }
+          item = step.value;
         }
-        item = array[next];
-      } else {
-        let step: IteratorResult<unknown>;
-        try {
-          step = iterator!.next();
-        } catch (e) {
-          sourceDone = true;
-          group.addFailure(Cause.die(e));
-          return;
-        }
-        if (step.done) {
-          sourceDone = true;
-          return;
-        }
-        item = step.value;
+      } catch (e) {
+        sourceDone = true;
+        group.addFailure(Cause.die(e));
+        return;
       }
       const index = next++;
       let eff: Suspend;
