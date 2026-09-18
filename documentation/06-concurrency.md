@@ -150,16 +150,12 @@ console.log(names); // → ["user-1", "user-2", "user-3", "user-4", "user-5"]
   object with a `[Symbol.iterator]` method to run the effect more than once.
 - The first failure — a typed error, a defect, `f` throwing, or the iterator
   throwing — interrupts the in-flight effects, closes the iterator, and calls
-  `f` for nothing else. The combined effect fails once the interrupted effects
-  have run their finalizers, with that first cause; any non-interrupt failure
-  raised during their teardown (a finalizer that dies, say) is added with
-  `Cause.both`.
+  `f` for nothing else. Like `all`, the traversal then waits for the
+  interrupted effects and fails as described in
+  [Structured teardown](#structured-teardown), with the first failure and any
+  non-interrupt failure raised during their teardown.
 - Interrupting the combined effect — directly or through `timeout` / `race` —
-  interrupts every in-flight effect and likewise waits for their finalizers
-  before finalizers around the traversal run. It then fails with the
-  interrupt, joined with `Cause.both` to the failure that had already stopped
-  the traversal, if any, and to non-interrupt failures raised during teardown.
-  `all` and `race` interrupt their children without waiting.
+  also closes the iterator, and waits for the in-flight effects the same way.
 - `succeed(x)` results are collected without starting a fiber, and other
   children start without a scheduler hop. Children that suspend still pay a
   scheduler turn per refill round, so a small `concurrency` over many
@@ -170,12 +166,14 @@ To cap a list of effects you already have, map with the identity function:
 
 ## Structured teardown
 
-`all`, `race` and the combinators built on them (`raceAll`, `raceEither`,
-`validate`, `timeoutOption`, `timeoutFail`/`timeout`, `hedged`, `parZip`) do
-not return while one of their children is still running. When a child fails,
-when a race has its first result, or when the combinator itself is interrupted,
-the remaining children are interrupted and the combinator waits until every
-one of them has finished, finalizers included. Finalizers around the
+`all`, `race`, `forEachPar` and the combinators built on them (`raceAll`,
+`raceEither`, `validate`, `timeoutOption`, `timeoutFail`/`timeout`, `hedged`,
+`parZip`) do not return while one of their children is still running. When a
+child fails, when a race has its first result, or when the combinator itself is
+interrupted, the remaining children are interrupted (and `forEachPar` stops
+pulling items) and the combinator waits until every one of them has finished,
+finalizers included. All of them share one implementation, so the ordering
+and the causes below are the same for each. Finalizers around the
 combinator therefore run after its children's finalizers, never alongside
 them:
 
@@ -194,8 +192,8 @@ The combinator's outcome:
 
 | What happened | Outcome |
 |---|---|
-| every `all` child succeeded | the results |
-| an `all` child failed | that child's failure |
+| every `all` or `forEachPar` child succeeded | the results, in input order |
+| an `all` or `forEachPar` child failed (for `forEachPar` also `f` or the iterator throwing) | that failure |
 | a `race` child settled first | its value or failure |
 | the combinator was interrupted | the interrupt, joined with `Cause.both` to a child failure that had already stopped it, also if that failure was returned but not yet run |
 | a child torn down in any of these cases failed with more than the interrupt (a finalizer died, say) | that failure is joined with `Cause.both` after the above |

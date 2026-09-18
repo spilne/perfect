@@ -475,17 +475,15 @@ function runFiberLoop(fiber: Fiber<any>): void {
         }
 
         // Slow path: full fiber-per-element parallel.
-        const group = new ChildGroup(fiber, k, context);
         const results = new Array(len);
-        for (let i = 0; i < len && !group.stopped; i++) {
-          group.start(effects[i], (result) => {
-            if (result.ok) results[i] = result.value;
-            else group.childFailed(result.cause);
-            if (!group.settle()) return;
-            if (group.failure === null) group.resume(results);
-            else group.fail(group.failure);
-          });
-        }
+        const group: ChildGroup = new ChildGroup(fiber, k, context, (result, index) => {
+          if (result.ok) results[index] = result.value;
+          else group.addFailure(result.cause);
+          if (!group.idle()) return;
+          if (group.failure === null) group.resume(results);
+          else group.fail(group.failure);
+        });
+        for (let i = 0; i < len && !group.stopped; i++) group.start(effects[i], i, false);
         return;
       }
 
@@ -510,22 +508,22 @@ function runFiberLoop(fiber: Fiber<any>): void {
           continue loop;
         }
         // The first child to settle wins, and the rest are interrupted.
-        const group = new ChildGroup(fiber, k, context);
         let won = false;
         let value: unknown;
+        const group: ChildGroup = new ChildGroup(fiber, k, context, (result) => {
+          if (!result.ok) group.addFailure(result.cause);
+          else if (!group.stopped) {
+            won = true;
+            value = result.value;
+            group.stop();
+          }
+          if (!group.idle()) return;
+          if (!won) group.fail(group.failure!);
+          else if (group.teardown === null) group.resume(value);
+          else group.fail(null);
+        });
         for (let i = 0; i < effects.length && !group.stopped; i++) {
-          group.start(effects[i], (result) => {
-            if (!result.ok) group.childFailed(result.cause);
-            else if (!group.stopped) {
-              won = true;
-              value = result.value;
-              group.stop();
-            }
-            if (!group.settle()) return;
-            if (!won) group.fail(group.failure!);
-            else if (group.teardown === null) group.resume(value);
-            else group.fail(null);
-          });
+          group.start(effects[i], i, false);
         }
         return;
       }
@@ -625,12 +623,11 @@ const PARKED: unique symbol = Symbol("spilne/for-each-par-parked");
 // call returns (no scheduler hop), or PARKED once the fiber is suspended and
 // will be resumed by a child completion or an interrupt.
 //
+// The fiber parks on a ChildGroup, like all() and race(), so an interrupt or a
+// failure waits for every running child and causes compose the same way.
 // Children start inline, so a slot freed by a completion is refilled in the
 // same turn and synchronous children cost no scheduling. Once a turn has spent
-// the op budget, the rest of the fill moves to the next scheduler turn. An
-// uninterruptible CatchAll frame under the fiber's continuation holds an
-// interrupt until every running child has settled, so children's finalizers
-// finish before the parent's own run.
+// the op budget, the rest of the fill moves to the next scheduler turn.
 function startForEachPar(
   fiber: Fiber<any>,
   node: Suspend,
@@ -652,67 +649,30 @@ function startForEachPar(
   }
 
   const results: unknown[] = array === null ? [] : new Array(length);
-  // Slot table instead of a Set: slots are recycled, so it stays as small as
-  // the peak number of running children and add/remove are array ops.
-  const slots: Array<Fiber<any> | null> = [];
-  const freeSlots: number[] = [];
-  let running = 0;
   let next = 0;
   let sourceDone = false;
-  let stopped = false;
-  let interrupted = false;
-  let failure: Cause | null = null;
-  let teardown: Cause | null = null;
   let busy = false;
   let budget = 0;
   let refillScheduled = false;
   let inline = true;
   let finished = false;
   let outcome: unknown;
-  let delivered: Cause | null = null;
-  let drained: (() => void) | null = null;
 
-  const fail = (cause: Cause): void => {
-    if (!stopped) {
-      failure = cause;
-      stop();
-      return;
+  const group: ChildGroup = new ChildGroup(fiber, k, context, (result, index) => {
+    if (!result.ok) group.addFailure(result.cause);
+    else if (!group.stopped) results[index] = result.value;
+    advance();
+  });
+  // Stopping closes the iterator, so a failure or an interrupt pulls nothing
+  // more.
+  group.onStop = () => {
+    if (iterator === null || sourceDone) return;
+    sourceDone = true;
+    try {
+      iterator.return?.();
+    } catch (e) {
+      group.addFailure(Cause.die(e));
     }
-    const extra = Cause.stripInterrupts(cause);
-    if (extra !== null) teardown = teardown === null ? extra : Cause.both(teardown, extra);
-  };
-
-  const stop = (): void => {
-    if (stopped) return;
-    stopped = true;
-    for (let i = 0; i < slots.length; i++) slots[i]?.interrupt();
-    if (iterator !== null && !sourceDone) {
-      sourceDone = true;
-      try {
-        iterator.return?.();
-      } catch (e) {
-        fail(Cause.die(e));
-      }
-    }
-  };
-
-  const spawn = (eff: Suspend, index: number): void => {
-    const child = makeChild(fiber, eff, context);
-    const slot = freeSlots.length > 0 ? freeSlots.pop()! : slots.length;
-    slots[slot] = child;
-    running++;
-    child.onComplete((result) => {
-      slots[slot] = null;
-      freeSlots.push(slot);
-      running--;
-      if (!result.ok) fail(result.cause);
-      else if (!stopped) results[index] = result.value;
-      advance();
-    });
-    child.state = FiberState.Ready;
-    notifyFiberStart(child);
-    runFiberLoop(child);
-    budget -= child.opCount + 1;
   };
 
   const scheduleRefill = (): void => {
@@ -725,7 +685,7 @@ function startForEachPar(
   };
 
   const fill = (): void => {
-    while (!stopped && !sourceDone && running < limit) {
+    while (!group.stopped && !sourceDone && group.running < limit) {
       if (budget <= 0) {
         scheduleRefill();
         return;
@@ -743,7 +703,7 @@ function startForEachPar(
           step = iterator!.next();
         } catch (e) {
           sourceDone = true;
-          fail(Cause.die(e));
+          group.addFailure(Cause.die(e));
           return;
         }
         if (step.done) {
@@ -757,102 +717,53 @@ function startForEachPar(
       try {
         eff = f(item, index);
       } catch (e) {
-        fail(Cause.die(e));
+        group.addFailure(Cause.die(e));
         return;
       }
+      // Each item costs a step, so a long run of calls to f yields too.
+      budget--;
       if (eff instanceof Suspend && eff.op === Op.Succeed) {
         results[index] = eff.a;
       } else if (eff instanceof Suspend && eff.op === Op.Fail) {
-        fail(eff.a as Cause);
+        group.addFailure(eff.a as Cause);
       } else {
-        spawn(eff, index);
+        const child = group.start(eff, index, true);
+        budget -= child.opCount;
       }
     }
   };
 
-  const settledCause = (cause: Cause): Suspend => {
-    let combined = cause;
-    if (failure !== null) combined = Cause.both(combined, failure);
-    if (teardown !== null) combined = Cause.both(combined, teardown);
-    return new Suspend(Op.Fail, combined, null);
-  };
-
-  // Nested calls (a child completing inside spawn) fall through to the
-  // outermost call, which re-checks every slot before settling.
+  // Nested calls (a child completing inside start) fall through to the
+  // outermost call, which re-checks the group before settling.
   const advance = (): void => {
     if (busy) return;
     busy = true;
     budget = DEFAULT_BUDGET;
     fill();
     busy = false;
-    if (running > 0) return;
-    if (drained !== null) {
-      const resume = drained;
-      drained = null;
-      resume();
-      return;
-    }
-    if (interrupted || finished || (failure === null && !sourceDone)) return;
+    if (!group.idle()) return;
+    if (finished || (group.failure === null && !sourceDone)) return;
     finished = true;
-    const cause: Cause | null =
-      failure === null ? null : teardown === null ? failure : Cause.both(failure, teardown);
-    const value = cause === null ? results : new Suspend(Op.Fail, cause, null);
     if (inline) {
-      outcome = value;
+      outcome =
+        group.failure === null ? results : new Suspend(Op.Fail, group.compose(group.failure), null);
       return;
     }
-    fiber.interruptHandle = null;
-    if (fiber.state === FiberState.Done) return;
-    delivered = cause;
-    fiber.current = value;
-    fiber.state = FiberState.Ready;
-    fiber.scheduler.schedule(() => runFiberLoop(fiber));
-  };
-
-  const onCause = (cause: Cause): Suspend => {
-    if (cause === delivered) return new Suspend(Op.Fail, cause, null);
-    interrupted = true;
-    stop();
-    if (running === 0) return settledCause(cause);
-    return new Suspend(
-      Op.Async,
-      (resume: (value: Suspend) => void) => {
-        drained = () => resume(settledCause(cause));
-      },
-      null,
-    );
-  };
-
-  // onCause sits in an uninterruptible region whose body, the parked wait,
-  // keeps the caller's interruptibility. interrupt() still reaches the parked
-  // fiber, and the failure walk leaves the body before it meets onCause, so an
-  // interrupted fiber does not bypass it: it waits for the children, and the
-  // interrupt is raised again when the region ends.
-  fiber.stack = new Cont(
-    Op.SetInterruptible,
-    false,
-    new Cont(Op.CatchAll, onCause, new Cont(Op.SetInterruptible, fiber.interruptible, k)),
-  );
-  fiber.context = context;
-  fiber.state = FiberState.Suspended;
-  fiber.interruptHandle = () => {
-    interrupted = true;
-    stop();
+    if (group.failure === null) group.resume(results);
+    else group.fail(group.failure);
   };
 
   advance();
   inline = false;
-  if (interrupted) return PARKED;
-  if (!finished) return PARKED;
-  fiber.interruptHandle = null;
-  fiber.state = FiberState.Running;
+  if (group.interrupted || !finished) return PARKED;
+  group.unpark();
   return outcome;
 }
 
-// Structured children of a fiber parked in all() or race(). The fiber resumes
-// only once every child has settled, on success, on a child failure and on
-// interrupt, so no child is still running its finalizers when the fiber's own
-// continuation or finalizers run.
+// Structured children of a fiber parked in all(), race() or forEachPar(). The
+// fiber resumes only once every child has settled, on success, on a child
+// failure and on interrupt, so no child is still running its finalizers when
+// the fiber's own continuation or finalizers run.
 //
 // The parked stack is SetInterruptible(false) -> CatchAll(onCause) ->
 // SetInterruptible(caller's flag) -> k. While parked the fiber keeps the
@@ -862,7 +773,7 @@ function startForEachPar(
 // sticky interruption: it waits for the children, and the interrupt is raised
 // again when the region ends.
 //
-// Causes: a child failure that stopped the group comes first; non-interrupt
+// Causes: the failure that stopped the group comes first; non-interrupt
 // failures of children torn down after that (a finalizer that dies, say) are
 // joined with Cause.both; an interrupt of the parked fiber goes in front of
 // both.
@@ -872,15 +783,22 @@ class ChildGroup {
   interrupted = false;
   failure: Cause | null = null;
   teardown: Cause | null = null;
+  // Called once, after the running children were interrupted.
+  onStop: (() => void) | null = null;
   private delivered: Cause | null = null;
   private drained: (() => void) | null = null;
-  private readonly children: Fiber<any>[] = [];
+  // Running children. Slots are recycled, so the table stays as small as the
+  // peak number of running children.
+  private readonly slots: Array<Fiber<any> | null> = [];
+  private readonly freeSlots: number[] = [];
   private readonly token: number;
 
   constructor(
     private readonly fiber: Fiber<any>,
     k: Cont | null,
     private readonly context: Context,
+    // Called when a child settles, after it stopped counting as running.
+    private readonly onChild: (result: FiberResult<any>, index: number) => void,
   ) {
     this.token = ++fiber.asyncToken;
     fiber.stack = new Cont(
@@ -893,25 +811,41 @@ class ChildGroup {
     fiber.interruptHandle = this.interruptChildren;
   }
 
-  start(effect: unknown, onDone: (result: FiberResult<any>) => void): void {
+  // Starts a child for `effect`; `index` is passed back to onChild. An inline
+  // child runs its first slice now instead of on the next scheduler turn.
+  start(effect: unknown, index: number, inline: boolean): Fiber<any> {
     const child = makeChild(this.fiber, effect, this.context);
-    this.children.push(child);
+    const slot = this.freeSlots.length > 0 ? this.freeSlots.pop()! : this.slots.length;
+    this.slots[slot] = child;
     this.running++;
-    child.onComplete(onDone);
-    runChild(child);
+    child.onComplete((result) => {
+      this.slots[slot] = null;
+      this.freeSlots.push(slot);
+      this.running--;
+      this.onChild(result, index);
+    });
+    if (inline) {
+      child.state = FiberState.Ready;
+      notifyFiberStart(child);
+      runFiberLoop(child);
+    } else {
+      runChild(child);
+    }
     if (this.stopped) child.interrupt();
+    return child;
   }
 
   stop(): void {
     if (this.stopped) return;
     this.stopped = true;
-    const children = this.children;
-    for (let i = 0; i < children.length; i++) children[i]!.interrupt();
+    const slots = this.slots;
+    for (let i = 0; i < slots.length; i++) slots[i]?.interrupt();
+    this.onStop?.();
   }
 
   // The first failure stops the group; a later one is teardown, where the
   // interrupt it was stopped with is expected.
-  childFailed(cause: Cause): void {
+  addFailure(cause: Cause): void {
     if (!this.stopped) {
       this.failure = cause;
       this.stop();
@@ -922,10 +856,10 @@ class ChildGroup {
       this.teardown = this.teardown === null ? extra : Cause.both(this.teardown, extra);
   }
 
-  // Records that a child settled. True when it was the last one and the group
-  // should resume the fiber with its outcome.
-  settle(): boolean {
-    if (--this.running > 0) return false;
+  // True when no child is running and the group should deliver its outcome.
+  // A wait for the children to drain after an interrupt is resumed instead.
+  idle(): boolean {
+    if (this.running > 0) return false;
     const drained = this.drained;
     if (drained !== null) {
       this.drained = null;
@@ -939,6 +873,12 @@ class ChildGroup {
     );
   }
 
+  // `first` (null when a race winner succeeded) joined with the teardown.
+  compose(first: Cause | null): Cause {
+    const teardown = this.teardown;
+    return first === null ? teardown! : teardown === null ? first : Cause.both(first, teardown);
+  }
+
   resume(value: unknown): void {
     const fiber = this.fiber;
     fiber.interruptHandle = null;
@@ -947,13 +887,17 @@ class ChildGroup {
     fiber.scheduler.schedule(() => runFiberLoop(fiber));
   }
 
-  // Fails with `first` (null when a winner succeeded) and the teardown.
   fail(first: Cause | null): void {
-    const teardown = this.teardown;
-    const cause =
-      first === null ? teardown! : teardown === null ? first : Cause.both(first, teardown);
+    const cause = this.compose(first);
     this.delivered = cause;
     this.resume(new Suspend(Op.Fail, cause, null));
+  }
+
+  // The group settled before its fiber left the op that started it: the
+  // fiber continues in the same run with its original stack.
+  unpark(): void {
+    this.fiber.interruptHandle = null;
+    this.fiber.state = FiberState.Running;
   }
 
   private readonly interruptChildren = (): void => {

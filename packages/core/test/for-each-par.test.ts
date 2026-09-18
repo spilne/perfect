@@ -24,6 +24,7 @@ import {
   succeed,
   sync,
   timeoutOption,
+  uninterruptible,
   yieldNow,
 } from "../src";
 
@@ -516,6 +517,58 @@ describe("forEachPar — failure and interruption", () => {
 
     expect(log).toEqual(["child cleanup", "parent finalizer"]);
     expect(exit).toEqual(Exit.failure(Cause.both(Cause.interrupt(), Cause.fail("boom"))));
+  });
+
+  test("an interrupt after the failure was delivered has the same cause as one before", () => {
+    // Runs queued loop slices one at a time.
+    const queue: Array<() => void> = [];
+    const scheduler = {
+      schedule: (task: () => void) => void queue.push(task),
+      flush: () => {
+        while (queue.length > 0) queue.shift()!();
+      },
+      shutdown: () => void (queue.length = 0),
+    };
+    const results: unknown[] = [];
+    for (const deliveredFirst of [false, true]) {
+      let failNow!: () => void;
+      let releaseSibling!: () => void;
+      const fiber = runFiber(
+        forEachPar(
+          [0, 1],
+          (i) =>
+            i === 0
+              ? async<void>((resume) => {
+                  failNow = () => resume(succeed(undefined));
+                }).flatMap(() => fail("e1"))
+              : uninterruptible(
+                  async<void>((resume) => {
+                    releaseSibling = () => resume(succeed(undefined));
+                  }),
+                ),
+          { concurrency: 2 },
+        ),
+        scheduler,
+      );
+      scheduler.flush();
+      failNow();
+      scheduler.flush();
+      if (deliveredFirst) {
+        releaseSibling();
+        while (fiber.status !== "ready" && queue.length > 0) queue.shift()!();
+        expect(fiber.status).toBe("ready");
+        fiber.interrupt();
+      } else {
+        expect(fiber.status).toBe("suspended");
+        fiber.interrupt();
+        releaseSibling();
+      }
+      scheduler.flush();
+      results.push(fiber.result);
+    }
+
+    const expected = { ok: false, cause: Cause.both(Cause.interrupt(), Cause.fail("e1")) };
+    expect(results).toEqual([expected, expected]);
   });
 
   test("a timeout around the traversal interrupts in-flight items and runs their finalizers", async () => {
