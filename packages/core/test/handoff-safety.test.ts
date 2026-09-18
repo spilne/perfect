@@ -13,6 +13,7 @@ import {
   Stream,
   SyncScheduler,
   TestClock,
+  acquireRelease,
   all,
   async,
   die,
@@ -243,6 +244,69 @@ describe("async resume with onDiscard", () => {
       ok: false,
       cause: Cause.then(Cause.interrupt(), Cause.die(new Error("give back failed"))),
     });
+  });
+
+  test.each<[string, (wait: Eff<number, never>) => Eff<unknown, never>]>([
+    ["nothing to finalize", (wait) => wait],
+    [
+      "a continuation stack",
+      (wait) =>
+        ensuring(
+          wait,
+          sync(() => {}),
+        ),
+    ],
+    [
+      "a fiber-level scope",
+      (wait) => acquireRelease(succeed(1), () => sync(() => {})).flatMap(() => wait),
+    ],
+  ])(
+    "a throwing onDiscard that interrupts its fiber again keeps its defect (%s)",
+    (_name, build) => {
+      const scheduler = new StepScheduler();
+      const boom = new Error("give back failed");
+      const manual = manualWait<number>();
+      const fiber = runFiber(build(manual.wait), scheduler);
+      scheduler.flush();
+
+      manual.resume(succeed(1), () => {
+        fiber.interrupt();
+        throw boom;
+      });
+      expect(() => fiber.interrupt()).not.toThrow();
+      scheduler.flush();
+
+      expect(fiber.result).toEqual({
+        ok: false,
+        cause: Cause.then(Cause.interrupt(), Cause.die(boom)),
+      });
+    },
+  );
+
+  test("a queue item goes back when the taker's own finalizer throws", () => {
+    const scheduler = new StepScheduler();
+    const boom = new Error("cleanup blew up");
+    const queue = runSync(Queue.unbounded<number>());
+    const taker = runFiber(
+      ensuring(
+        queue.take(),
+        sync(() => {
+          throw boom;
+        }),
+      ),
+      scheduler,
+    );
+    scheduler.flush();
+
+    runSync(queue.offer(1));
+    taker.interrupt();
+    scheduler.flush();
+
+    expect(taker.result).toEqual({
+      ok: false,
+      cause: Cause.then(Cause.interrupt(), Cause.die(boom)),
+    });
+    expect(runSync(queue.size)).toBe(1);
   });
 
   test("a throwing onDiscard does not stop all() from interrupting the other children", () => {

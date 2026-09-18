@@ -219,15 +219,16 @@ export class Fiber<A = unknown> {
       // Avoid a circular import on runtime.ts by going through the scheduler;
       // bootstrapFiber installs a `_resume` callback that wraps runFiberLoop.
       this.scheduler.schedule(() => this._resume?.());
-      if (discard !== null) this.runDiscard(discard, failure);
+      if (discard !== null) this.runDiscard(discard);
       return;
     }
     this.complete({ ok: false, cause });
   }
 
-  // An error thrown by a wait's registration, or by the canceler it returned,
-  // after that registration interrupted this fiber. As in interrupt(), it
-  // becomes a defect after the interrupt the fiber is about to raise.
+  // An error thrown by a wait's registration or its canceler after it
+  // interrupted this fiber, or by a discard giving a value back. As in
+  // interrupt(), it becomes a defect after the interrupt the fiber is about
+  // to raise.
   failInterruptedWait(error: unknown): void {
     const next = this.current;
     if (this.state === FiberState.Ready && next instanceof Suspend && next.op === Op.Fail) {
@@ -237,15 +238,19 @@ export class Fiber<A = unknown> {
 
   // Gives back a value this fiber was handed. A throwing discard must not
   // abort the caller of interrupt() (all() interrupting the rest of its
-  // children, say), so its error becomes a defect after the interrupt.
-  private runDiscard(discard: () => void, failure: Suspend): void {
+  // children, say), so its error becomes a defect after the interrupt. A
+  // discard that interrupts this fiber again must not complete it while it
+  // runs, or there would be no cause left to join: the sentinel makes that
+  // nested interrupt queue the interrupt through the loop instead.
+  private runDiscard(discard: () => void): void {
+    const handle = this.interruptHandle;
+    this.interruptHandle = IN_CALLBACK;
     try {
       discard();
     } catch (error) {
-      if (this.state === FiberState.Ready && this.current === failure) {
-        this.current = new Suspend(Op.Fail, Cause.then(failure.a as Cause, Cause.die(error)), null);
-      }
+      this.failInterruptedWait(error);
     }
+    if (this.interruptHandle === IN_CALLBACK) this.interruptHandle = handle;
   }
 
   // Set by bootstrapFiber to point at runFiberLoop(this); avoids a fiber.ts ⇄
