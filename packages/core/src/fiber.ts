@@ -262,8 +262,8 @@ export class Fiber<A = unknown> {
     }
   }
 
-  // Once done, whether the result carries an interrupt: an interrupt that
-  // arrives during the final scope close does not change the result.
+  // Once done, whether the result carries an interrupt, so it always agrees
+  // with the result.
   get interrupted(): boolean {
     if (this.result !== null) return !this.result.ok && Cause.hasInterrupt(this.result.cause);
     return this.interruptPending || this.interrupting;

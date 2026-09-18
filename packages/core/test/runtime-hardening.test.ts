@@ -744,20 +744,72 @@ describe("interrupt() edge cases", () => {
     expect(fiber.result).toEqual({ ok: false, cause: Cause.die(canceled) });
   });
 
-  test("an interrupt during the final scope close leaves a successful fiber not interrupted", () => {
-    const scheduler = new StepScheduler();
-    const release = gate();
-    const fiber = runFiber(
-      acquireRelease(succeed(1), () => release.wait).flatMap(() => succeed("value")),
-      scheduler,
-    );
-    scheduler.flush();
-    fiber.interrupt();
-    release.open();
-    scheduler.flush();
+  // The fiber-level scope closes like a finalizer region around the whole
+  // body, so an interrupt that arrives while it closes is raised once it has
+  // closed, exactly as for `ensuring` and `scoped`.
+  describe("an interrupt while a release runs", () => {
+    const releases: [
+      string,
+      (body: Eff<string, unknown>, release: Eff<void, unknown>) => Eff<string, unknown>,
+    ][] = [
+      ["ensuring", (body, release) => ensuring(body, release)],
+      [
+        "scoped",
+        (body, release) => scoped(acquireRelease(succeed(1), () => release).flatMap(() => body)),
+      ],
+      [
+        "the fiber-level scope",
+        (body, release) => acquireRelease(succeed(1), () => release).flatMap(() => body),
+      ],
+    ];
+    const bodyError = new Error("body");
+    const releaseError = new Error("release");
 
-    expect(fiber.result).toEqual({ ok: true, value: "value" });
-    expect(fiber.snapshot().interrupted).toBe(false);
+    test.each<[string, Eff<string, unknown>, Eff<void, unknown>, Cause]>([
+      ["a successful body and release", succeed("value"), succeed(undefined), Cause.interrupt()],
+      [
+        "a successful body and a failing release",
+        succeed("value"),
+        fail(releaseError),
+        Cause.then(Cause.fail(releaseError), Cause.interrupt()),
+      ],
+      [
+        "a failing body and a successful release",
+        fail(bodyError),
+        succeed(undefined),
+        Cause.then(Cause.fail(bodyError), Cause.interrupt()),
+      ],
+      [
+        "a failing body and release",
+        fail(bodyError),
+        fail(releaseError),
+        Cause.then(Cause.then(Cause.fail(bodyError), Cause.fail(releaseError)), Cause.interrupt()),
+      ],
+    ])(
+      "%s ends the same way whichever finalizer releases",
+      (_name, body, releaseOutcome, cause) => {
+        for (const [label, build] of releases) {
+          const scheduler = new StepScheduler();
+          const release = gate();
+          const fiber = runFiber(
+            build(
+              body,
+              release.wait.flatMap(() => releaseOutcome),
+            ) as Eff<string, never>,
+            scheduler,
+          );
+          scheduler.flush();
+          expect(fiber.result, label).toBeNull();
+
+          fiber.interrupt();
+          release.open();
+          scheduler.flush();
+
+          expect({ label, result: fiber.result }).toEqual({ label, result: { ok: false, cause } });
+          expect(fiber.snapshot().interrupted, label).toBe(true);
+        }
+      },
+    );
   });
 });
 

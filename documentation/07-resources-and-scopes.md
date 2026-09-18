@@ -171,7 +171,9 @@ if (exit._tag === "Failure") {
 }
 ```
 
-`scoped(acquireRelease(...))` follows the same rule when a scope closes.
+`scoped(acquireRelease(...))` follows the same rule when a scope closes, and so
+does a release registered without `scoped`, which runs when the fiber
+completes.
 
 Parallel children release first. `all`, `race`, `forEachPar`, `timeoutOption`
 and the other combinators built on them wait for their children's finalizers before they
@@ -182,7 +184,9 @@ finished. A child's finalizer failure joins the combinator's outcome with
 
 An interrupt adds `Interrupt` to the outcome. An interrupt that arrives while
 a finalizer runs waits for it: interrupting `succeed(1).ensuring(release)`
-while `release` fails with `e` ends as `(Fail(e) ; Interrupt)`. Error handlers
+while `release` fails with `e` ends as `(Fail(e) ; Interrupt)`, and while
+`release` succeeds as `Interrupt`. A release in `scoped` or in the fiber's own
+scope ends the same way. Error handlers
 around an interrupted effect don't run (see
 [Interruption and error handlers](./05-error-handling.md#interruption-and-error-handlers)),
 so they can neither swallow the interrupt nor hide the finalizer failure.

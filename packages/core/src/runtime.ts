@@ -70,6 +70,16 @@ function withInterrupt(cause: Cause): Cause {
   return Cause.hasInterrupt(cause) ? cause : Cause.then(cause, Cause.interrupt());
 }
 
+// The fiber-level scope closes like a finalizer region around the whole body:
+// an interrupt that arrives while it closes is raised once it has closed, as
+// leaving the region of `ensuring` or `scoped` raises it.
+function interruptedWhileClosing(fiber: Fiber<any>): boolean {
+  if (!fiber.interruptible || !(fiber.interruptPending || fiber.interrupting)) return false;
+  fiber.interruptPending = false;
+  fiber.interrupting = true;
+  return true;
+}
+
 // The cause that continues past an error handler an interrupting fiber
 // bypassed. Its typed failures are dropped: the handler would have consumed or
 // mapped them, so keeping them would surface errors the effect's type says
@@ -141,10 +151,13 @@ function runFiberLoop(fiber: Fiber<any>): void {
         context,
         null,
         () => {
-          fiber.complete({ ok: false, cause });
+          const failure = interruptedWhileClosing(fiber) ? withInterrupt(cause) : cause;
+          fiber.complete({ ok: false, cause: failure });
         },
         (closeCause) => {
-          fiber.complete({ ok: false, cause: Cause.then(cause, closeCause) });
+          const closed = Cause.then(cause, closeCause);
+          const failure = interruptedWhileClosing(fiber) ? withInterrupt(closed) : closed;
+          fiber.complete({ ok: false, cause: failure });
         },
         fiber,
       );
@@ -258,8 +271,13 @@ function runFiberLoop(fiber: Fiber<any>): void {
           closer as unknown as Suspend,
           context,
           null,
-          () => resolve(val),
-          (closeCause) => reject(closeCause),
+          () => {
+            if (interruptedWhileClosing(fiber))
+              fiber.complete({ ok: false, cause: Cause.interrupt() });
+            else resolve(val);
+          },
+          (closeCause) =>
+            reject(interruptedWhileClosing(fiber) ? withInterrupt(closeCause) : closeCause),
           fiber,
         );
         return;
