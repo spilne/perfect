@@ -17,17 +17,13 @@ function publishSource<A>(params: {
   source: Stream<A, unknown>;
 }): Eff<unknown, unknown> {
   const { run, events, source } = params;
-  return source.step
-    .flatMap((step): Eff<unknown, unknown> =>
+  const publish = (current: Stream<A, unknown>): Eff<unknown, unknown> =>
+    current.step.flatMap((step): Eff<unknown, unknown> =>
       step._tag === "Done"
         ? events.offer({ _tag: "end" })
-        : events
-            .offer({ _tag: "chunk", chunk: step.chunk })
-            .flatMap(() => publishSource({ run, events, source: step.next })),
-    )
-    .catchAllCause((cause) =>
-      run.isTeardown(cause) ? failCause(cause) : events.offer({ _tag: "fail", cause }),
+        : events.offer({ _tag: "chunk", chunk: step.chunk }).flatMap(() => publish(step.next)),
     );
+  return run.reportFailure(publish(source), (cause) => events.offer({ _tag: "fail", cause }));
 }
 
 export function mergeStreams<A, S, S2>(params: {

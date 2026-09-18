@@ -20,10 +20,10 @@ import type { FiberResult } from "../src/fiber";
 // built.
 
 /** Run on a SyncScheduler with a TestClock stepped 1 ms at a time. */
-const runVirtual = <A>(effect: Eff<A, never>): FiberResult<A> | null => {
+const runVirtual = <A>(effect: Eff<A, unknown>): FiberResult<A> | null => {
   const scheduler = new SyncScheduler();
   const clock = new TestClock();
-  const fiber = runFiber(provide(effect, Clock, clock), scheduler);
+  const fiber = runFiber(provide(effect, Clock, clock) as Eff<A, never>, scheduler);
   scheduler.flush();
   while (fiber.result === null && clock.now() < 200) {
     clock.advance(1);

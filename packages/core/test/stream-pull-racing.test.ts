@@ -87,12 +87,6 @@ interface Scenario {
     readonly timeoutMs: number;
     readonly build?: (probe: Probe) => Stream<unknown, never>;
   };
-  /**
-   * The consumer pull waits inside `race` (sample's interval, takeUntil's
-   * signal). The runtime re-runs the finalizers of a fiber interrupted there
-   * once its race children finish, independently of the stream operators.
-   */
-  readonly consumerWaitsInRace?: boolean;
 }
 
 const scenarios: Record<string, Scenario> = {
@@ -175,7 +169,6 @@ const scenarios: Record<string, Scenario> = {
     build: (p) => ticks(p, "a", 10, 3).sample(12),
     expected: ["a1", "a2"],
     resume: { timeoutMs: 8, build: (p) => ticks(p, "a", 11, 3).sample(5) },
-    consumerWaitsInRace: true,
   },
   audit: {
     build: (p) => ticks(p, "a", 10, 3).audit(15),
@@ -185,7 +178,6 @@ const scenarios: Record<string, Scenario> = {
   takeUntil: {
     build: (p) => ticks(p, "a", 10, 3).takeUntil(p.source("signal", Stream.fromEffect(sleep(25)))),
     expected: ["a1", "a2"],
-    consumerWaitsInRace: true,
     // takeUntil re-pulls its source, and a tick pull restarts its sleep; a
     // buffered source keeps the retried pull resumable.
     resume: {
@@ -377,13 +369,7 @@ describe.each(Object.entries(scenarios))("%s", (_name, scenario) => {
     if (run.result?.ok === false) expect(Cause.isInterruptedOnly(run.result.cause)).toBe(true);
     expect(run.now).toBe(cutAt);
     expect(run.leaked).toEqual([]);
-    if (scenario.consumerWaitsInRace) {
-      for (const label of probe.acquired.keys()) {
-        expect(probe.finalized.get(label) ?? 0).toBeGreaterThan(0);
-      }
-    } else {
-      expectAllFinalized(probe);
-    }
+    expectAllFinalized(probe);
   });
 
   test("timeout firing fails with StreamTimeoutError and stops every fiber", () => {
@@ -507,6 +493,90 @@ describe("run teardown", () => {
     expect(run.result?.ok).toBe(false);
     if (run.result?.ok === false) {
       expect(Cause.failures(run.result.cause)).toEqual([new TeardownError({})]);
+    }
+    expect(run.leaked).toEqual([]);
+  });
+
+  // Each background fiber is stopped inside a pull whose own cleanup fails.
+  // An interrupted fiber skips interruptible error handlers, so the failure
+  // only surfaces if the operator's handler still sees the whole cause.
+  const failingCleanup = <A>(value: A): Stream<A, never> =>
+    Stream.fromEffect(
+      ensuring(
+        sleep(100).map(() => value),
+        fail(new TeardownError({})),
+      ),
+    ) as unknown as Stream<A, never>;
+  const oneThenStuck = (): Stream<number> => Stream.of(1).concat(failingCleanup(2));
+
+  test.each<[string, () => Stream<unknown, unknown>]>([
+    ["merge", () => Stream.of(1).merge(failingCleanup(2))],
+    ["combineLatest", () => Stream.of(1).combineLatest(oneThenStuck())],
+    [
+      "withLatest",
+      () =>
+        Stream.fromEffect(sleep(1).map(() => 1))
+          .concat(Stream.fromEffect(sleep(100).map(() => 2)))
+          .withLatest(oneThenStuck()),
+    ],
+    ["broadcastThrough upstream", () => oneThenStuck().broadcastThrough((s) => s)],
+    [
+      "broadcastThrough branch",
+      () =>
+        Stream.of(1)
+          .concat(Stream.fromEffect(sleep(100).map(() => 2)))
+          .broadcastThrough((s) => s.onFinalize(fail(new TeardownError({})))),
+    ],
+    ["observe", () => oneThenStuck().observe((s) => s)],
+    ["switchMap outer", () => oneThenStuck().switchMap((n) => Stream.of(n))],
+    ["exhaustMap outer", () => oneThenStuck().exhaustMap((n) => Stream.of(n))],
+    ["parEvalMap source", () => oneThenStuck().parEvalMap(2, (n) => succeed(n))],
+    ["parEvalMapUnordered source", () => oneThenStuck().parEvalMapUnordered(2, (n) => succeed(n))],
+    [
+      "parEvalMapUnordered worker",
+      () =>
+        Stream.of(1, 2).parEvalMapUnordered(2, (n) =>
+          n === 1
+            ? sleep(1).map(() => n)
+            : ensuring(
+                sleep(100).map(() => n),
+                fail(new TeardownError({})),
+              ),
+        ),
+    ],
+    ["buffer", () => oneThenStuck().buffer(2)],
+    ["groupWithin", () => oneThenStuck().groupWithin(1, 10)],
+    ["debounce", () => oneThenStuck().debounce(5)],
+    ["sample", () => oneThenStuck().sample(5)],
+    ["audit", () => oneThenStuck().audit(5)],
+    ["takeUntil signal", () => Stream.of(1).takeUntil(failingCleanup(2))],
+  ])("%s: a cleanup failing while its fiber is stopped fails the stream", (_name, build) => {
+    const run = runVirtual({ effect: collect(build().take(1)) });
+
+    expect(run.result?.ok).toBe(false);
+    if (run.result?.ok === false) {
+      expect(Cause.failures(run.result.cause)).toEqual([new TeardownError({})]);
+    }
+    expect(run.leaked).toEqual([]);
+  });
+
+  test("cleanup failures of fibers stopped together are combined in parallel", () => {
+    const run = runVirtual({
+      effect: collect(
+        Stream.fromEffect(sleep(1).map(() => 1))
+          .concat(failingCleanup(2))
+          .withLatest(oneThenStuck())
+          .take(1),
+      ),
+    });
+
+    expect(run.result?.ok).toBe(false);
+    if (run.result?.ok === false) {
+      const cause = run.result.cause;
+      expect(Cause.failures(cause)).toEqual([new TeardownError({}), new TeardownError({})]);
+      const hasBoth = (c: Cause): boolean =>
+        c._tag === "Both" || (c._tag === "Then" && (hasBoth(c.left) || hasBoth(c.right)));
+      expect(hasBoth(cause)).toBe(true);
     }
     expect(run.leaked).toEqual([]);
   });
@@ -720,6 +790,21 @@ describe("retry and reuse", () => {
 });
 
 describe("real clock", () => {
+  test.each([
+    ["parEvalMap", (s: Stream<number>) => s.parEvalMap(4, (n) => sleep(1).map(() => n))],
+    ["buffer", (s: Stream<number>) => s.buffer(4)],
+  ] as const)("%s under timeout finishes without a spurious timeout", async (_name, operator) => {
+    const source = Stream.range(0, 20)
+      .rechunk(1)
+      .evalMap((n) => sleep(1).map(() => n));
+    const exit = await runExit(operator(source).timeout(1_000).toArray());
+
+    expect(exit).toEqual({
+      _tag: "Success",
+      value: Array.from({ length: 20 }, (_, i) => i),
+    });
+  });
+
   const merged = () =>
     Stream.tick(10)
       .take(3)

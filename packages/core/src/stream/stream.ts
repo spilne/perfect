@@ -25,6 +25,7 @@ import {
   awaitFiber,
   yieldNow,
   uninterruptible,
+  interruptible,
   retry as effRetry,
   type RetryConfig,
 } from "../constructors";
@@ -54,14 +55,6 @@ type DefectInstances<Classes extends readonly DefectClass[]> =
 type Either<E, A> =
   | { readonly _tag: "Left"; readonly left: E }
   | { readonly _tag: "Right"; readonly right: A };
-
-// Run an effect to its Exit without an error channel — worker fibers carry
-// full Causes to the consumer this way.
-function exitOf<B>(e: Eff<B, any>): Eff<Exit<unknown, B>, never> {
-  return (e as any)
-    .map((value: B) => ({ _tag: "Success", value }))
-    .catchAllCause((cause: Cause) => succeed({ _tag: "Failure", cause }));
-}
 
 import {
   combineFinalizers,
@@ -1009,19 +1002,17 @@ export class Stream<A, S = never> {
                 ).flatMap(() => drainInner(step.next, innerGeneration)),
           );
 
-        const runInner = (inner: Stream<B, any>, innerGeneration: number): Eff<void, any> =>
-          (
-            ensuring(
-              drainInner(inner, innerGeneration),
-              inner._finalizer ?? succeed(undefined),
-            ) as any
-          )
-            .flatMap(() => events.offer({ _tag: "innerEnd", generation: innerGeneration }))
-            .catchAllCause((cause: Cause) =>
-              run.isTeardown(cause)
-                ? failCause(cause)
-                : events.offer({ _tag: "innerFail", generation: innerGeneration, cause }),
-            );
+        const runInner = (inner: Stream<B, any>, innerGeneration: number): Eff<unknown, any> =>
+          run.reportFailure(
+            (
+              ensuring(
+                drainInner(inner, innerGeneration),
+                inner._finalizer ?? succeed(undefined),
+              ) as any
+            ).flatMap(() => events.offer({ _tag: "innerEnd", generation: innerGeneration })),
+            (cause: Cause) =>
+              events.offer({ _tag: "innerFail", generation: innerGeneration, cause }),
+          );
 
         // A launch outlives the pull that starts it. Waiting for the previous
         // inner stream to finalize stays interruptible, so a pull cut by
@@ -1099,8 +1090,8 @@ export class Stream<A, S = never> {
           });
         const next = run.continueWith(pull);
 
-        const outerDriver = (drainOuter(self) as any).catchAllCause((cause: Cause) =>
-          run.isTeardown(cause) ? failCause(cause) : events.offer({ _tag: "outerFail", cause }),
+        const outerDriver = run.reportFailure(drainOuter(self) as any, (cause: Cause) =>
+          events.offer({ _tag: "outerFail", cause }),
         );
 
         return run.fork(outerDriver).map(() => pull);
@@ -1199,21 +1190,18 @@ export class Stream<A, S = never> {
           });
 
         const watchSignal = (
-          ensuring(
-            (signal.step as any).flatMap((step: Step<unknown>) =>
-              (releaseSignal() as any).map((): SignalEvent =>
-                step._tag === "Done" ? { _tag: "empty" } : { _tag: "stop" },
+          run.reportFailure<SignalEvent>(
+            ensuring(
+              (signal.step as any).flatMap((step: Step<unknown>) =>
+                (releaseSignal() as any).map((): SignalEvent =>
+                  step._tag === "Done" ? { _tag: "empty" } : { _tag: "stop" },
+                ),
               ),
-            ),
-            suspend(releaseSignal),
+              suspend(releaseSignal),
+            ) as any,
+            (cause: Cause) => succeed<SignalEvent>({ _tag: "failure", cause }),
           ) as any
-        )
-          .catchAllCause((cause: Cause) =>
-            run.isTeardown(cause)
-              ? failCause(cause)
-              : succeed<SignalEvent>({ _tag: "failure", cause }),
-          )
-          .flatMap((event: SignalEvent) => control.succeed(event).map(() => undefined));
+        ).flatMap((event: SignalEvent) => control.succeed(event).map(() => undefined));
 
         const pullSource = (
           source: Stream<A, any>,
@@ -1628,8 +1616,8 @@ export class Stream<A, S = never> {
           chunkEvent: (chunk: Chunk<T>) => Event,
           endEvent: Event,
         ) =>
-          (drain(stream, chunkEvent, endEvent) as any).catchAllCause((cause: Cause) =>
-            run.isTeardown(cause) ? failCause(cause) : events.offer({ _tag: "fail", cause }),
+          run.reportFailure(drain(stream, chunkEvent, endEvent) as any, (cause: Cause) =>
+            events.offer({ _tag: "fail", cause }),
           );
 
         const pull = (): Eff<Step<[A, B]>, any> =>
@@ -1713,8 +1701,8 @@ export class Stream<A, S = never> {
           chunkEvent: (chunk: Chunk<T>) => Event,
           endEvent: Event,
         ) =>
-          (drain(stream, chunkEvent, endEvent) as any).catchAllCause((cause: Cause) =>
-            run.isTeardown(cause) ? failCause(cause) : events.offer({ _tag: "fail", cause }),
+          run.reportFailure(drain(stream, chunkEvent, endEvent) as any, (cause: Cause) =>
+            events.offer({ _tag: "fail", cause }),
           );
 
         const pull = (): Eff<Step<[A, B]>, any> =>
@@ -1832,18 +1820,16 @@ export class Stream<A, S = never> {
                 active[index] = false;
               }).flatMap(() => inputs[index]!.close());
 
-            const branchDriver = (index: number): Eff<void, any> => {
+            const branchDriver = (index: number): Eff<unknown, any> => {
               const branch = branches[index]!(inputStream(inputs[index]!));
               const drain = branch.forEach((value) =>
                 (outputs.offer({ _tag: "item", value }) as any).map(() => undefined),
               );
-              return (exitOf(ensuring(drain, closeInput(index))) as any).flatMap(
-                (exit: Exit<unknown, void>) => {
-                  if (exit._tag === "Success") return outputs.offer({ _tag: "end" });
-                  return run.isTeardown(exit.cause)
-                    ? failCause(exit.cause)
-                    : outputs.offer({ _tag: "fail", cause: exit.cause });
-                },
+              return run.reportFailure(
+                (ensuring(drain, closeInput(index)) as any).flatMap(() =>
+                  outputs.offer({ _tag: "end" }),
+                ),
+                (cause: Cause) => outputs.offer({ _tag: "fail", cause }),
               );
             };
 
@@ -1870,8 +1856,8 @@ export class Stream<A, S = never> {
                 );
               });
 
-            const upstreamDriver = (drainUpstream(self) as any).catchAllCause((cause: Cause) =>
-              run.isTeardown(cause) ? failCause(cause) : offerInput({ _tag: "fail", cause }),
+            const upstreamDriver = run.reportFailure(drainUpstream(self) as any, (cause: Cause) =>
+              offerInput({ _tag: "fail", cause }),
             );
 
             const pullOutput = (): Eff<Step<unknown>, any> =>
@@ -1997,10 +1983,8 @@ export class Stream<A, S = never> {
               return settled.map(() => undefined);
             });
 
-          const driver = (drain(self) as any).catchAllCause((cause: Cause) =>
-            run.isTeardown(cause)
-              ? failCause(cause)
-              : settlePending(cause).flatMap(() => slots.offer({ _tag: "fail", cause })),
+          const driver = run.reportFailure(drain(self) as any, (cause: Cause) =>
+            settlePending(cause).flatMap(() => slots.offer({ _tag: "fail", cause })),
           );
 
           // A slot stays claimed until its value is delivered, so a pull
@@ -2059,10 +2043,20 @@ export class Stream<A, S = never> {
           const enqueue = (item: A): Eff<void, any> =>
             (sem.acquire() as any).flatMap(() =>
               run.fork(
-                (exitOf(suspend(() => f(item))) as any).flatMap((exit: Exit<unknown, B>) =>
-                  exit._tag === "Failure" && run.stopping
-                    ? failCause(exit.cause)
-                    : (slots.offer({ _tag: "item", exit }) as any).flatMap(() => sem.release()),
+                // The handler sits in an uninterruptible region so a worker
+                // stopped with its run still sees, and re-raises, a failure
+                // from its own cleanup. Workers are interrupted only when the
+                // run stops, so the permit needs no release on that path.
+                (
+                  uninterruptible(
+                    (interruptible(suspend(() => f(item))) as any)
+                      .map((value: B) => Exit.succeed(value))
+                      .catchAllCause((cause: Cause) =>
+                        run.stopping ? failCause(cause) : succeed(Exit.failure(cause)),
+                      ),
+                  ) as any
+                ).flatMap((exit: Exit<unknown, B>) =>
+                  slots.offer({ _tag: "item", exit }).flatMap(() => sem.release()),
                 ),
               ),
             );
@@ -2081,8 +2075,8 @@ export class Stream<A, S = never> {
                 : drainChunk(Array.from(step.chunk), 0, step.next),
             );
 
-          const driver = (drain(self) as any).catchAllCause((cause: Cause) =>
-            run.isTeardown(cause) ? failCause(cause) : slots.offer({ _tag: "fail", cause }),
+          const driver = run.reportFailure(drain(self) as any, (cause: Cause) =>
+            slots.offer({ _tag: "fail", cause }),
           );
 
           const pull = (): Eff<Step<B>, any> =>
@@ -2139,8 +2133,8 @@ export class Stream<A, S = never> {
               : offerChunk(Array.from(step.chunk), 0, step.next),
           );
 
-        const driver = (drain(self) as any).catchAllCause((cause: Cause) =>
-          run.isTeardown(cause) ? failCause(cause) : slots.offer({ _tag: "fail", cause }),
+        const driver = run.reportFailure(drain(self) as any, (cause: Cause) =>
+          slots.offer({ _tag: "fail", cause }),
         );
 
         // the window opens when the first item of a batch arrives; the batch
@@ -2218,8 +2212,8 @@ export class Stream<A, S = never> {
               : offerChunk(Array.from(step.chunk), 0, step.next),
           );
 
-        const driver = (drain(self) as any).catchAllCause((cause: Cause) =>
-          run.isTeardown(cause) ? failCause(cause) : slots.offer({ _tag: "fail", cause }),
+        const driver = run.reportFailure(drain(self) as any, (cause: Cause) =>
+          slots.offer({ _tag: "fail", cause }),
         );
 
         // The value waiting for quiet outlives a pull, so an interrupted
@@ -2283,8 +2277,8 @@ export class Stream<A, S = never> {
             }).flatMap(() => drain(step.next));
           });
 
-        const driver = (drain(self) as any).catchAllCause((cause: Cause) =>
-          run.isTeardown(cause) ? failCause(cause) : events.offer({ _tag: "fail", cause }),
+        const driver = run.reportFailure(drain(self) as any, (cause: Cause) =>
+          events.offer({ _tag: "fail", cause }),
         );
 
         const pull = (): Eff<Step<A>, any> =>
@@ -2346,8 +2340,8 @@ export class Stream<A, S = never> {
             );
           });
 
-        const driver = (drain(self) as any).catchAllCause((cause: Cause) =>
-          run.isTeardown(cause) ? failCause(cause) : events.offer({ _tag: "fail", cause }),
+        const driver = run.reportFailure(drain(self) as any, (cause: Cause) =>
+          events.offer({ _tag: "fail", cause }),
         );
 
         const emitLatest = (continuation: Stream<A, unknown>): Eff<Step<A>, any> =>
@@ -2422,8 +2416,8 @@ export class Stream<A, S = never> {
               : offerChunk(Array.from(step.chunk), 0, step.next),
           );
 
-        const driver = (drain(self) as any).catchAllCause((cause: Cause) =>
-          run.isTeardown(cause) ? failCause(cause) : slots.offer({ _tag: "fail", cause }),
+        const driver = run.reportFailure(drain(self) as any, (cause: Cause) =>
+          slots.offer({ _tag: "fail", cause }),
         );
 
         // slot delivered after the values of a batch (driver stops offering

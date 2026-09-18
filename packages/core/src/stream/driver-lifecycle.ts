@@ -1,5 +1,14 @@
 import { type Eff, Suspend, Op } from "../eff";
-import { suspend, succeed, sync, failCause, awaitFiber, uninterruptible } from "../constructors";
+import {
+  suspend,
+  succeed,
+  sync,
+  failCause,
+  awaitFiber,
+  uninterruptible,
+  interruptible,
+} from "../constructors";
+import type { Exit } from "../exit";
 import { Cause } from "../cause";
 import type { Fiber } from "../fiber";
 import { emptyContext } from "../service";
@@ -13,6 +22,9 @@ const NO_CAUSE: Eff<Cause | null, never> = succeed(null);
 const sequential = (first: Cause | null, second: Cause | null): Cause | null =>
   first === null ? second : second === null ? first : Cause.then(first, second);
 
+const parallel = (first: Cause | null, second: Cause | null): Cause | null =>
+  first === null ? second : second === null ? first : Cause.both(first, second);
+
 /** Interrupt the fibers, await them all, and return their teardown failures. */
 function stopFibers(fibers: readonly Fiber<any>[]): Eff<Cause | null, never> {
   if (fibers.length === 0) return NO_CAUSE;
@@ -21,9 +33,7 @@ function stopFibers(fibers: readonly Fiber<any>[]): Eff<Cause | null, never> {
     (acc, fiber) =>
       acc.flatMap((failure) =>
         awaitFiber(fiber).map((exit) =>
-          exit._tag === "Failure"
-            ? sequential(failure, Cause.stripInterrupts(exit.cause))
-            : failure,
+          exit._tag === "Failure" ? parallel(failure, Cause.stripInterrupts(exit.cause)) : failure,
         ),
       ),
     NO_CAUSE,
@@ -85,12 +95,22 @@ export interface DriverRun<A> {
    */
   fork<B>(eff: Eff<B, unknown>): Eff<Fiber<B>, never>;
   /**
-   * Whether a background fiber should fail with `cause` instead of reporting
-   * it to the consumer: the cause is an interruption, or the run is stopping.
-   * Failing lets the stop collect teardown failures, such as a finalizer that
-   * fails while its fiber is interrupted, into the stream's exit.
+   * Run a background fiber's `body`, handing a failure to `report` (which
+   * typically offers it to the consumer). During teardown, when the cause is an
+   * interruption or the run is stopping, the full cause is re-raised instead,
+   * so the stop can collect failures such as a finalizer that failed while its
+   * fiber was interrupted.
+   *
+   * An interrupted fiber skips interruptible error handlers and drops the
+   * typed failures they would have seen, so the handler is installed in an
+   * uninterruptible region. `body` and `report` run interruptibly, so a
+   * blocked offer can still be interrupted. Use it only at the top of a fiber
+   * forked with `fork`, which starts interruptible.
    */
-  isTeardown(cause: Cause): boolean;
+  reportFailure<B>(
+    body: Eff<B, unknown>,
+    report: (cause: Cause) => Eff<B, unknown>,
+  ): Eff<B, unknown>;
   /** True once the run has started stopping its fibers. */
   readonly stopping: boolean;
   /** A continuation whose pull belongs to this run. */
@@ -128,8 +148,18 @@ class Run<A> implements DriverRun<A> {
     return this.stopRequested;
   }
 
-  isTeardown(cause: Cause): boolean {
-    return this.stopRequested || Cause.isInterruptedOnly(cause);
+  reportFailure<B>(
+    body: Eff<B, unknown>,
+    report: (cause: Cause) => Eff<B, unknown>,
+  ): Eff<B, unknown> {
+    // Background fibers start interruptible, so "restore" is interruptible.
+    return uninterruptible(
+      new Suspend(Op.CatchAll, interruptible(body), (cause: Cause) =>
+        this.stopRequested || Cause.isInterruptedOnly(cause)
+          ? failCause(cause)
+          : interruptible(report(cause)),
+      ) as Eff<B, unknown>,
+    );
   }
 
   /**
@@ -194,24 +224,22 @@ class Run<A> implements DriverRun<A> {
       this.pending = id;
       this.attempts = attempts;
       this.interrupted = false;
-      const onStep = (step: Step<A>): Eff<Step<A>, never> => {
-        if (this.pending === id) {
-          this.pending = 0;
+      // An Exit finalizer, not an error handler: an interrupted pull skips
+      // error handlers, but its bookkeeping must still run.
+      const settle = (exit: Exit<unknown, Step<A>>): null => {
+        if (this.pending !== id) return null;
+        this.pending = 0;
+        if (exit._tag === "Success") {
           this.delivered = true;
-          if (step._tag === "Done") this.finished = true;
-        }
-        return succeed(step);
-      };
-      const onCause = (cause: Cause): Eff<never, unknown> => {
-        if (this.pending === id) {
-          this.pending = 0;
+          if (exit.value._tag === "Done") this.finished = true;
+        } else {
           if (this.first === null) this.abandoned = true;
-          if (Cause.isInterruptedOnly(cause)) this.interrupted = true;
-          else this.failure = cause;
+          if (Cause.hasInterrupt(exit.cause)) this.interrupted = true;
+          else this.failure = exit.cause;
         }
-        return failCause(cause);
+        return null;
       };
-      return new Suspend(Op.CatchAll, new Suspend(Op.FlatMap, pull(), onStep), onCause);
+      return new Suspend(Op.Ensuring, pull(), settle);
     }) as Eff<Step<A>, unknown>;
   }
 
