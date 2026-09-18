@@ -103,6 +103,8 @@ export type Step<A> =
   | { readonly _tag: "Done" };
 
 const DONE: Step<any> = { _tag: "Done" };
+// Waits until interrupted.
+const NEVER: Eff<never, never> = async<never>(() => {}) as Eff<never, never>;
 
 function emit<A>(chunk: Chunk<A>, next: Stream<A, unknown>): Step<A> {
   return { _tag: "Emit", chunk, next };
@@ -1279,10 +1281,7 @@ export class Stream<A, S = never> {
       | { readonly _tag: "failure"; readonly cause: Cause };
     type RaceEvent =
       | { readonly _tag: "source"; readonly step: Step<A> }
-      | {
-          readonly _tag: "signal";
-          readonly event: Exclude<SignalEvent, { readonly _tag: "failure" }>;
-        };
+      | { readonly _tag: "stop" };
 
     const self = this;
 
@@ -1310,7 +1309,11 @@ export class Stream<A, S = never> {
             ) as any,
             (cause: Cause) => succeed<SignalEvent>({ _tag: "failure", cause }),
           ) as any
-        ).flatMap((event: SignalEvent) => control.succeed(event).map(() => undefined));
+        ).flatMap((event: SignalEvent) =>
+          sync(() => {
+            if (event._tag === "empty") signalFinished = true;
+          }).flatMap(() => control.succeed(event).map(() => undefined)),
+        );
 
         const pullSource = (
           source: Stream<A, any>,
@@ -1334,26 +1337,24 @@ export class Stream<A, S = never> {
               pullSource(source),
               // A failed signal fails its side of the race rather than winning
               // with a marker, so a failure while the cut pull cleans up joins
-              // the signal's failure instead of replacing it.
-              (control.await as any).flatMap((event: SignalEvent) =>
+              // the signal's failure instead of replacing it. A signal that
+              // ends empty never wins, so the pull in flight keeps running.
+              (control.await as any).flatMap((event: SignalEvent): Eff<RaceEvent, any> =>
                 event._tag === "failure"
                   ? failCause(event.cause)
-                  : succeed<RaceEvent>({ _tag: "signal", event }),
+                  : event._tag === "empty"
+                    ? NEVER
+                    : succeed<RaceEvent>({ _tag: "stop" }),
               ),
             ]) as any
           ).flatMap((winner: RaceEvent): Eff<Step<A>, any> => {
-            if (winner._tag === "source") {
-              const step = winner.step;
-              return succeed(
-                step._tag === "Done"
-                  ? DONE
-                  : emit(step.chunk, new Stream(suspend(() => pull(step.next)))),
-              );
-            }
-
-            if (winner.event._tag === "stop") return succeed(DONE);
-            signalFinished = true;
-            return pull(source);
+            if (winner._tag === "stop") return succeed(DONE);
+            const step = winner.step;
+            return succeed(
+              step._tag === "Done"
+                ? DONE
+                : emit(step.chunk, new Stream(suspend(() => pull(step.next)))),
+            );
           });
         };
 

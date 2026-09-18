@@ -743,6 +743,63 @@ describe("switchMap: the inner stream a switch tears down", () => {
   });
 });
 
+describe("takeUntil: a signal that ends without emitting", () => {
+  // An empty signal leaves the source unchanged: the pull in flight when the
+  // signal ends keeps running instead of being cut and started again.
+  test("does not cut the source pull in flight", () => {
+    let pulls = 0;
+    let cleanups = 0;
+    const source = Stream.fromEffect(
+      ensuring(
+        sync(() => void pulls++)
+          .flatMap(() => sleep(5))
+          .map(() => 1),
+        sync(() => void cleanups++),
+      ),
+    ).concat(Stream.fromEffect(sleep(3).map(() => 2)));
+    const emptySignal = Stream.fromEffect(sleep(2)).drop(1);
+
+    const run = runVirtual({ effect: timeline(source.takeUntil(emptySignal)) });
+
+    expect(run.result).toEqual({
+      ok: true,
+      value: [
+        ["1", 5],
+        ["2", 8],
+      ],
+    });
+    expect({ pulls, cleanups }).toEqual({ pulls: 1, cleanups: 1 });
+    expect(run.leaked).toEqual([]);
+  });
+
+  test("releases the signal once and lets later pulls run without a race", () => {
+    let signalReleased = 0;
+    const emptySignal = Stream.fromEffect(sleep(1))
+      .drop(1)
+      .onFinalize(sync(() => void signalReleased++));
+
+    const run = runVirtual({
+      effect: timeline(
+        Stream.range(0, 3)
+          .rechunk(1)
+          .evalMap((n) => sleep(2).map(() => n))
+          .takeUntil(emptySignal),
+      ),
+    });
+
+    expect(run.result).toEqual({
+      ok: true,
+      value: [
+        ["0", 2],
+        ["1", 4],
+        ["2", 6],
+      ],
+    });
+    expect(signalReleased).toBe(1);
+    expect(run.leaked).toEqual([]);
+  });
+});
+
 describe("a source that interrupts itself", () => {
   // A stream whose own effect fails with an interruption, with no interrupt
   // from outside, fails the operator with that cause as parJoin does, instead
