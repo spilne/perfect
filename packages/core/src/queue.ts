@@ -56,6 +56,11 @@ export interface Queue<A, S = never> {
 
 class InProcessQueue<A> implements Queue<A> {
   private buffer: A[] = [];
+  // Items given back by takers interrupted before they ran sit at the head of
+  // the buffer, ordered by when they were first handed out; this holds those
+  // items' handoff numbers, in buffer order.
+  private givenBack: number[] = [];
+  private nextHandoff = 0;
   private takers: TakeWaiter<A>[] = [];
   private offerers: Array<OfferWaiter<A>> = [];
   private _closed = false;
@@ -89,7 +94,8 @@ class InProcessQueue<A> implements Queue<A> {
     return suspend(() => {
       if (this.buffer.length > 0) {
         const item = this.buffer.shift()!;
-        // A value given back by an interrupted taker can leave the buffer over
+        if (this.givenBack.length > 0) this.givenBack.shift();
+        // Items given back by interrupted takers can leave the buffer over
         // capacity; a blocked offerer gets in only once there is room.
         if (this.buffer.length < this.capacity) {
           const offerer = this.nextOfferer();
@@ -119,6 +125,7 @@ class InProcessQueue<A> implements Queue<A> {
   takeAll(): Eff<A[], never> {
     return sync(() => {
       const items = this.buffer.splice(0);
+      this.givenBack.length = 0;
       let offerer: OfferWaiter<A> | undefined;
       while ((offerer = this.nextOfferer())) {
         items.push(offerer.value);
@@ -188,15 +195,28 @@ class InProcessQueue<A> implements Queue<A> {
   }
 
   // Hands value to the oldest waiting taker. A taker interrupted before it
-  // runs gives the value back: to the next taker, or to the head of the
-  // buffer, where it is still the oldest value.
-  private handOff(value: A): boolean {
+  // runs gives the value back.
+  private handOff(value: A, handoff: number = this.nextHandoff++): boolean {
     const taker = this.nextTaker();
     if (taker === undefined) return false;
-    taker.resume(succeed(value) as any, () => {
-      if (!this.handOff(value)) this.buffer.unshift(value);
-    });
+    taker.resume(succeed(value) as any, () => this.giveBack(value, handoff));
     return true;
+  }
+
+  // A value an interrupted taker never received goes to the next waiting
+  // taker. Otherwise it goes before every value never handed out, and among
+  // other given-back values in the order they were first handed out, so
+  // takers that are interrupted in any order still leave the queue FIFO.
+  // Values handed out were taken off the buffer, so a bounded queue can hold
+  // more than its capacity by at most the number of takers interrupted before
+  // they ran.
+  private giveBack(value: A, handoff: number): void {
+    if (this.handOff(value, handoff)) return;
+    const order = this.givenBack;
+    let index = order.length;
+    while (index > 0 && order[index - 1]! > handoff) index--;
+    order.splice(index, 0, handoff);
+    this.buffer.splice(index, 0, value);
   }
 
   private nextTaker(): TakeWaiter<A> | undefined {

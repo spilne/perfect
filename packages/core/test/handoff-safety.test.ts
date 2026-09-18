@@ -503,6 +503,78 @@ describe("Queue handoff", () => {
     expect(runSync(queue.size)).toBe(0);
   });
 
+  for (const order of ["in handoff order", "in reverse handoff order"]) {
+    test(`items given back ${order} return to the queue in FIFO order`, () => {
+      const scheduler = new StepScheduler();
+      const queue = runSync(Queue.unbounded<number>());
+      const takers = [0, 1, 2].map(() => runFiber(queue.take(), scheduler));
+      scheduler.flush();
+
+      for (const item of [1, 2, 3, 4, 5]) runSync(queue.offer(item));
+      const interruptOrder = order === "in handoff order" ? takers : [...takers].reverse();
+      for (const taker of interruptOrder) taker.interrupt();
+      scheduler.flush();
+
+      expect(runSync(queue.takeAll())).toEqual([1, 2, 3, 4, 5]);
+    });
+  }
+
+  test("all([take, take]) interrupted after both were handed items keeps FIFO order", () => {
+    const scheduler = new StepScheduler();
+    const queue = runSync(Queue.unbounded<number>());
+    const parent = runFiber(all([queue.take(), queue.take()]), scheduler);
+    scheduler.flush();
+
+    runSync(queue.offer(1));
+    runSync(queue.offer(2));
+    runSync(queue.offer(3));
+    parent.interrupt();
+    scheduler.flush();
+
+    expect(parent.result).toEqual(interrupted);
+    expect(runSync(queue.takeAll())).toEqual([1, 2, 3]);
+  });
+
+  test("a given-back item handed on and given back again keeps its place", () => {
+    const scheduler = new StepScheduler();
+    const queue = runSync(Queue.unbounded<number>());
+    const first = runFiber(queue.take(), scheduler);
+    const second = runFiber(queue.take(), scheduler);
+    const third = runFiber(queue.take(), scheduler);
+    scheduler.flush();
+
+    runSync(queue.offer(1));
+    runSync(queue.offer(2));
+    // 1 goes on to the third taker; then both remaining handoffs come back.
+    first.interrupt();
+    third.interrupt();
+    second.interrupt();
+    runSync(queue.offer(3));
+    scheduler.flush();
+
+    expect(runSync(queue.takeAll())).toEqual([1, 2, 3]);
+  });
+
+  test("a bounded queue overshoots its capacity by at most the interrupted handoffs", () => {
+    const scheduler = new StepScheduler();
+    const queue = runSync(Queue.bounded<number>(2));
+    const takers = Array.from({ length: 5 }, () => runFiber(queue.take(), scheduler));
+    scheduler.flush();
+    for (let item = 0; item < 5; item++) runSync(queue.offer(item));
+    runSync(queue.offer(10));
+    runSync(queue.offer(11));
+    const offerScheduler = new StepScheduler();
+    const blocked = runFiber(queue.offer(12), offerScheduler);
+    offerScheduler.flush();
+    expect(blocked.status).toBe("suspended");
+
+    for (const taker of takers) taker.interrupt();
+    scheduler.flush();
+
+    expect(runSync(queue.size)).toBe(2 + 5);
+    expect(runSync(queue.takeAll())).toEqual([0, 1, 2, 3, 4, 10, 11, 12]);
+  });
+
   test("a returned item keeps its place ahead of later offers", () => {
     const scheduler = new StepScheduler();
     const queue = runSync(Queue.unbounded<number>());

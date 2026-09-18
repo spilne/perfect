@@ -252,9 +252,13 @@ permit or resource.
 
 Two details follow from giving values back:
 
-- A value given back to a bounded queue goes to its head even when the queue
-  is full, so `size` can briefly exceed the capacity. Blocked offers wait
-  until it is below the capacity again.
+- Values given back to a queue go ahead of values never handed out, in the
+  order they were first handed out, so the queue stays FIFO whatever order
+  the takers are interrupted in.
+- A value given back to a bounded queue goes in even when the queue is full,
+  so `size` can briefly exceed the capacity, by at most the number of takers
+  interrupted before they ran. Blocked offers wait until it is below the
+  capacity again.
 - A blocked `offer` is admitted when a `take` makes room. If that offer is
   interrupted before it runs, its value stays in the queue although the offer
   fails with the interrupt.
