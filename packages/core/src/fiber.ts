@@ -60,6 +60,11 @@ function notify(fn: (supervisor: FiberSupervisor) => void): void {
 // out and its continuation. Sharing the field keeps Fiber objects small.
 export const VALUE_IN_FLIGHT = (): void => {};
 
+// Stands in for the interrupt handle while a wait's registration or its
+// canceler runs. An interrupt() that re-enters then leaves completing the
+// fiber to its loop, so the callback's own error can still join the cause.
+export const IN_CALLBACK = (): void => {};
+
 export function notifyFiberStart(fiber: Fiber<any>): void {
   notify((supervisor) => supervisor.onStart?.(fiber));
 }
@@ -171,12 +176,14 @@ export class Fiber<A = unknown> {
     const discard = this.handoffDiscard;
     this.handoffDiscard = null;
     let cause = discard === null ? interruptCause(pending) : Cause.interrupt();
-    // Cleared before the call, so a canceler that interrupts again does not
-    // run itself a second time.
     const cancel = this.interruptHandle;
-    if (cancel !== null) {
+    // Re-entered from a registration or a canceler that is still running.
+    const inCallback = cancel === IN_CALLBACK;
+    if (cancel !== null && !inCallback) {
       // Only a suspended fiber has a canceler, and a handoff only a Ready one.
-      this.interruptHandle = null;
+      // Replaced before the call, so a canceler that interrupts again does
+      // not run itself a second time.
+      this.interruptHandle = IN_CALLBACK;
       // A throwing canceler must not abort the caller of interrupt() (all()
       // interrupting the rest of its children, say) or leave this fiber
       // waiting, so its error becomes a defect after the interrupt.
@@ -185,6 +192,7 @@ export class Fiber<A = unknown> {
       } catch (error) {
         cause = Cause.then(cause, Cause.die(error));
       }
+      if (this.interruptHandle === IN_CALLBACK) this.interruptHandle = null;
       if ((this.state as FiberState) === FiberState.Done) return;
     }
     // If the fiber has a non-empty continuation stack, inject a Fail(Interrupt)
@@ -192,9 +200,14 @@ export class Fiber<A = unknown> {
     // EnsuringFrame/ScopeFrame finalizers before completing. A fiber-level
     // scope isn't represented by a stack frame, so it also forces the loop
     // path — reject() closes it. So does a value to give back, so a failing
-    // discard can still join the result. Otherwise (nothing to finalize),
-    // complete directly.
-    if (this.stack !== null || (this.scope !== null && !this.scope.isClosed) || discard !== null) {
+    // discard can still join the result, and a callback still running, so
+    // its error can. Otherwise (nothing to finalize), complete directly.
+    if (
+      this.stack !== null ||
+      (this.scope !== null && !this.scope.isClosed) ||
+      discard !== null ||
+      inCallback
+    ) {
       const failure = new Suspend(Op.Fail, cause, null);
       this.current = failure;
       // A Ready fiber already has a loop run queued (a resume, a yield, an
@@ -212,17 +225,13 @@ export class Fiber<A = unknown> {
     this.complete({ ok: false, cause });
   }
 
-  // Calls the canceler of a wait whose registration interrupted this fiber
-  // before the canceler could be installed. As in interrupt(), a throwing
-  // canceler becomes a defect after the interrupt the fiber is about to raise.
-  cancelAbandonedWait(cancel: () => void): void {
-    try {
-      cancel();
-    } catch (error) {
-      const next = this.current;
-      if (this.state === FiberState.Ready && next instanceof Suspend && next.op === Op.Fail) {
-        this.current = new Suspend(Op.Fail, Cause.then(next.a as Cause, Cause.die(error)), null);
-      }
+  // An error thrown by a wait's registration, or by the canceler it returned,
+  // after that registration interrupted this fiber. As in interrupt(), it
+  // becomes a defect after the interrupt the fiber is about to raise.
+  failInterruptedWait(error: unknown): void {
+    const next = this.current;
+    if (this.state === FiberState.Ready && next instanceof Suspend && next.op === Op.Fail) {
+      this.current = new Suspend(Op.Fail, Cause.then(next.a as Cause, Cause.die(error)), null);
     }
   }
 

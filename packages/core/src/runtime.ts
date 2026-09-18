@@ -1,7 +1,14 @@
 import { Cause } from "./cause";
 import { type Eff, type EffectCheck, Suspend, Cont, Op } from "./eff";
 import { type Context, emptyContext, mergeContexts } from "./service";
-import { Fiber, FiberState, type FiberResult, VALUE_IN_FLIGHT, notifyFiberStart } from "./fiber";
+import {
+  Fiber,
+  FiberState,
+  type FiberResult,
+  IN_CALLBACK,
+  VALUE_IN_FLIGHT,
+  notifyFiberStart,
+} from "./fiber";
 import { Scope } from "./scope";
 import { type Scheduler, SyncScheduler, DEFAULT_BUDGET, getDefaultScheduler } from "./scheduler";
 import { Clock, realClock } from "./clock";
@@ -414,6 +421,9 @@ function runFiberLoop(fiber: Fiber<any>): void {
         const token = ++fiber.asyncToken;
 
         let resumed = false;
+        // While register() runs, an interrupt() it makes leaves completing the
+        // fiber to this loop, so an error it throws afterwards is kept.
+        fiber.interruptHandle = IN_CALLBACK;
         try {
           const cancel = register((value: any, onDiscard?: () => void) => {
             if (resumed || fiber.asyncToken !== token || fiber.state === FiberState.Done) {
@@ -428,14 +438,29 @@ function runFiberLoop(fiber: Fiber<any>): void {
             fiber.state = FiberState.Ready;
             fiber.scheduler.schedule(() => runFiberLoop(fiber));
           });
+          if (fiber.interruptHandle === IN_CALLBACK) fiber.interruptHandle = null;
           if (cancel && !resumed) {
             // A mismatch means register() interrupted this fiber before the
             // canceler could be installed.
-            if (fiber.asyncToken === token) fiber.interruptHandle = cancel;
-            else fiber.cancelAbandonedWait(cancel);
+            if (fiber.asyncToken === token) {
+              fiber.interruptHandle = cancel;
+            } else {
+              fiber.interruptHandle = IN_CALLBACK;
+              try {
+                cancel();
+              } catch (error) {
+                fiber.failInterruptedWait(error);
+              }
+              if (fiber.interruptHandle === IN_CALLBACK) fiber.interruptHandle = null;
+            }
           }
         } catch (error) {
-          if (resumed || fiber.asyncToken !== token) return;
+          if (fiber.interruptHandle === IN_CALLBACK) fiber.interruptHandle = null;
+          if (resumed) return;
+          if (fiber.asyncToken !== token) {
+            fiber.failInterruptedWait(error);
+            return;
+          }
           resumed = true;
           fiber.state = FiberState.Running;
           cur = new Suspend(Op.Fail, Cause.die(error), null);

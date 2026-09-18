@@ -34,7 +34,9 @@ export function suspend<A, S>(f: () => Eff<A, S>): Eff<A, S> {
  * Suspend the fiber until `register` calls `resume` with the effect to continue
  * with. `register` may return a canceler, called if the fiber is interrupted
  * while it waits. A canceler that throws does not stop the interrupt: its
- * error joins the interrupted fiber's cause as a defect.
+ * error joins the interrupted fiber's cause as a defect, also when the
+ * canceler interrupts the fiber again first. So does an error thrown by
+ * `register` after it interrupted its own fiber.
  *
  * `resume(value, onDiscard)` hands over something only one waiter may have,
  * such as a queue item or a permit. The fiber may be interrupted after the

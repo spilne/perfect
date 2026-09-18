@@ -694,6 +694,81 @@ describe("interrupt() edge cases", () => {
     });
   });
 
+  test("a throwing canceler that interrupts its fiber again still adds its defect", () => {
+    for (const withStack of [true, false]) {
+      const scheduler = new StepScheduler();
+      const wait = async<void>(() => () => {
+        fiber.interrupt();
+        throw canceled;
+      });
+      const fiber: Fiber<void> = runFiber(
+        withStack
+          ? ensuring(
+              wait,
+              sync(() => {}),
+            )
+          : wait,
+        scheduler,
+      );
+      scheduler.flush();
+
+      expect(() => fiber.interrupt()).not.toThrow();
+      scheduler.flush();
+
+      expect({ withStack, result: fiber.result }).toEqual({
+        withStack,
+        result: { ok: false, cause: Cause.then(Cause.interrupt(), Cause.die(canceled)) },
+      });
+    }
+  });
+
+  test("a registration that interrupts its own fiber keeps the defect of its throwing canceler", () => {
+    for (const [label, wrap] of [
+      ["no stack", (eff: Eff<void, never>) => eff],
+      [
+        "a fiber-level scope",
+        (eff: Eff<void, never>) =>
+          acquireRelease(succeed(1), () => sync(() => {})).flatMap(() => eff),
+      ],
+    ] as const) {
+      const scheduler = new StepScheduler();
+      const fiber: Fiber<void> = runFiber(
+        wrap(
+          async<void>(() => {
+            fiber.interrupt();
+            return () => {
+              throw canceled;
+            };
+          }),
+        ),
+        scheduler,
+      );
+      scheduler.flush();
+
+      expect({ label, result: fiber.result }).toEqual({
+        label,
+        result: { ok: false, cause: Cause.then(Cause.interrupt(), Cause.die(canceled)) },
+      });
+    }
+  });
+
+  test("a registration that interrupts its own fiber and then throws keeps the defect", () => {
+    const scheduler = new StepScheduler();
+    const fiber: Fiber<void> = runFiber(
+      async<void>(() => {
+        fiber.interrupt();
+        throw canceled;
+      }),
+      scheduler,
+    );
+    scheduler.flush();
+
+    expect(fiber.result).toEqual({
+      ok: false,
+      cause: Cause.then(Cause.interrupt(), Cause.die(canceled)),
+    });
+  });
+
   test.each<[string, (children: Eff<void, never>[]) => Eff<unknown, never>]>([
     ["all", (children) => all(children)],
     ["race", (children) => race(children)],
@@ -731,6 +806,33 @@ describe("interrupt() edge cases", () => {
       });
     },
   );
+
+  test.each<[string, (children: Eff<void, never>[]) => Eff<unknown, never>]>([
+    ["all", (children) => all(children)],
+    ["race", (children) => race(children)],
+    ["forEachPar", (children) => forEachPar(children, (child) => child, { concurrency: 3 })],
+  ])("%s: the defects of several throwing cancelers are all kept", (_name, combine) => {
+    const scheduler = new StepScheduler();
+    const second = new Error("second canceler blew up");
+    const throwing = (error: Error) =>
+      async<void>(() => () => {
+        throw error;
+      });
+    const parent = runFiber(
+      combine([throwing(canceled), throwing(second), waitForever]),
+      scheduler,
+    );
+    scheduler.flush();
+
+    parent.interrupt();
+    scheduler.flush();
+
+    expect(parent.result?.ok).toBe(false);
+    if (parent.result?.ok === false) {
+      expect(Cause.defects(parent.result.cause)).toEqual([canceled, second]);
+      expect(Cause.hasInterrupt(parent.result.cause)).toBe(true);
+    }
+  });
 
   test("race: a loser's throwing canceler fails the race its winner settled", () => {
     const scheduler = new StepScheduler();
