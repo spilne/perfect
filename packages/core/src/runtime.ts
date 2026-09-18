@@ -99,7 +99,8 @@ function stripFailures(cause: Cause): Cause | null {
 }
 
 // An Op.Ensuring finalizer is an effect, or a function of the body's Exit
-// (onExit) that returns null when it has nothing to run.
+// (onExit) that returns null when it has nothing to run. A finalizer that is a
+// plain succeed(...) has nothing to run either, and is skipped outright.
 function exitFinalizer(finalizer: unknown, exit: Exit<unknown, unknown>): Suspend | null {
   try {
     return (finalizer as (exit: Exit<unknown, unknown>) => Suspend | null)(exit);
@@ -219,7 +220,7 @@ function runFiberLoop(fiber: Fiber<any>): void {
               typeof frame.fn === "function"
                 ? exitFinalizer(frame.fn, { _tag: "Success", value })
                 : (frame.fn as Suspend);
-            if (finalizer === null) continue;
+            if (finalizer === null || finalizer.op === Op.Succeed) continue;
             k = enterUninterruptible(fiber, k);
             cur = succeedAfterFinalizer(finalizer, value);
             continue loop;
@@ -326,7 +327,7 @@ function runFiberLoop(fiber: Fiber<any>): void {
               typeof frame.fn === "function"
                 ? exitFinalizer(frame.fn, { _tag: "Failure", cause })
                 : (frame.fn as Suspend);
-            if (finalizer === null) continue;
+            if (finalizer === null || finalizer.op === Op.Succeed) continue;
             k = enterUninterruptible(fiber, k);
             cur = failAfterFinalizer(finalizer, cause);
             continue loop;

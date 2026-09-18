@@ -431,6 +431,74 @@ describe("cleanup of an interrupted fiber", () => {
   });
 });
 
+describe("cleanup registered in the same step as the work it guards", () => {
+  test("singleflight clears a key even when an interrupt lands right after registering it", () => {
+    let windows = 0;
+    for (let length = 0; length <= DEFAULT_BUDGET; length++) {
+      const scheduler = new StepScheduler();
+      const flights = Singleflight.make();
+      let body: Eff<void, never> = succeed(undefined);
+      for (let i = 0; i < length; i++) body = body.flatMap(() => succeed(undefined));
+      const leader = runFiber(
+        body.flatMap(() => flights.do("key", waitForever)),
+        scheduler,
+      );
+      scheduler.step();
+      if (leader.status !== "ready" || !(flights as any).flights.has("key")) continue;
+      windows++;
+      leader.interrupt();
+      scheduler.flush();
+      const next = runFiber(flights.do("key", succeed("fresh")), scheduler);
+      scheduler.flush();
+
+      expect({ length, result: next.result }).toEqual({
+        length,
+        result: { ok: true, value: "fresh" },
+      });
+    }
+    expect(windows).toBeGreaterThan(0);
+  });
+
+  test("a generator's finally runs even when an interrupt lands right after it entered try", () => {
+    const center = Math.floor(DEFAULT_BUDGET / 3);
+    let windows = 0;
+    for (let pad = 0; pad < 6; pad++) {
+      for (let length = center - 24; length <= center + 24; length++) {
+        const scheduler = new StepScheduler();
+        let entered = false;
+        let finallyRan = false;
+        let body: any = succeed(undefined);
+        for (let i = 0; i < length; i++) body = body.flatMap(() => succeed(undefined));
+        let padded: any = succeed(undefined);
+        for (let i = 0; i < pad; i++) padded = succeed(padded);
+        const fiber = runFiber(
+          body
+            .flatMap(() => padded)
+            .flatMap(() =>
+              eff(function* () {
+                try {
+                  entered = true;
+                  yield* waitForever;
+                } finally {
+                  finallyRan = true;
+                }
+              }),
+            ),
+          scheduler,
+        );
+        scheduler.step();
+        if (!entered || fiber.status !== "ready") continue;
+        windows++;
+        fiber.interrupt();
+        scheduler.flush();
+
+        expect({ length, pad, finallyRan }).toEqual({ length, pad, finallyRan: true });
+      }
+    }
+    expect(windows).toBeGreaterThan(0);
+  });
+});
+
 describe("interrupt() edge cases", () => {
   test("a fiber whose queued run was dropped by scheduler.shutdown() still completes", () => {
     const scheduler = new StepScheduler();
