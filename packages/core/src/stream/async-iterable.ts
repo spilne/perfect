@@ -19,10 +19,11 @@ export function streamToAsyncIterable<A>(stream: Stream<A, unknown>): AsyncItera
   };
 }
 
-// One driver fiber per iterator. It pulls a chunk only while a `next()` call
-// is waiting, then parks until the consumer drains the chunk and asks again.
-// Keeping the fiber alive between pulls matters: fibers forked by concurrent
-// operators are children of the pulling fiber and die with it.
+// One driver fiber per iterator runs every pull and, through `ensuring`, the
+// stream's finalizer, which also stops the fibers the stream's operators own.
+// It pulls a chunk only while a `next()` call is waiting, then parks until the
+// consumer drains the chunk and asks again. Keeping pulls on that fiber lets
+// `return()` interrupt one in flight without skipping or repeating the finalizer.
 class StreamAsyncIterator<A> implements AsyncIterableIterator<A> {
   private stream: Stream<A, unknown> | null;
   private fiber: Fiber<void> | null = null;

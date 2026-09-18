@@ -2962,9 +2962,9 @@ export class Stream<A, S = never> {
   /**
    * Consume the stream with `for await`. Each iterator runs the stream on its
    * own fiber and pulls a chunk only after the previous one has been consumed.
-   * Leaving the loop early stops the stream, runs its finalizers, and
-   * interrupts its fibers. Failures reject `next()` with `Cause.squash`, as in
-   * `run()`.
+   * Leaving the loop early stops the stream and runs its finalizers, which
+   * also stop its operators' fibers. Failures reject `next()` with
+   * `Cause.squash`, as in `run()`.
    *
    * Stream does not implement `Symbol.asyncIterator` because TypeScript ignores
    * `this` constraints in `for await` and `AsyncIterable` assignability, which

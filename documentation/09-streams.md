@@ -271,9 +271,9 @@ console.log(finalized); // → 1
   order.
 - **Early exit is safe.** Once `next()` has been called, `break`, `return()`, or
   a throw in the loop body stops the stream and runs its finalizers. The loop
-  continues only after the finalizers have run, and fibers the stream started,
-  such as `merge` drivers or `parEvalMap` workers, are interrupted. Calling
-  `return()` while a `next()` is pending interrupts that pull.
+  continues only after the finalizers have run and the fibers the stream
+  started, such as `merge` drivers or `parEvalMap` workers, have stopped.
+  Calling `return()` while a `next()` is pending interrupts that pull.
 - **Close it yourself.** The iterator runs on its own root fiber, so
   interrupting an enclosing fiber does not stop it. End it with `for await` or
   `return()`.

@@ -371,9 +371,7 @@ describe("Stream.toAsyncIterable", () => {
     expect(await iterator.next()).toEqual(DONE);
   });
 
-  // Skipped until the runtime ignores a late resume from a canceler-less async
-  // op (such as a fromAsyncIterable pull) after the fiber was interrupted.
-  test.skip("return during a pending async-iterable pull resolves after source cleanup", async () => {
+  test("return during a pending async-iterable pull resolves after source cleanup", async () => {
     const events: string[] = [];
     async function* source() {
       try {
@@ -397,9 +395,7 @@ describe("Stream.toAsyncIterable", () => {
     expect(await pending).toEqual(DONE);
   });
 
-  // Skipped until interrupting a fiber that is already scheduled as Ready no
-  // longer schedules a second run loop.
-  test.skip("return during a CPU-heavy pull runs the finalizer once before resolving", async () => {
+  test("return during a CPU-heavy pull runs the finalizer once before resolving", async () => {
     let finalized = 0;
     let heavy: Eff<number> = succeed(0);
     for (let i = 0; i < 10_000; i++) heavy = heavy.flatMap((n) => succeed(n + 1));
