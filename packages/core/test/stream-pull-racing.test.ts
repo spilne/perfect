@@ -16,6 +16,7 @@ import {
   TaggedError,
   ensuring,
   fail,
+  failCause,
   succeed,
   uninterruptible,
   type Eff,
@@ -738,6 +739,84 @@ describe("switchMap: the inner stream a switch tears down", () => {
 
     expect(run.result).toEqual({ ok: true, value: ["2"] });
     expect(run.now).toBe(15);
+    expect(run.leaked).toEqual([]);
+  });
+});
+
+describe("a source that interrupts itself", () => {
+  // A stream whose own effect fails with an interruption, with no interrupt
+  // from outside, fails the operator with that cause as parJoin does, instead
+  // of passing for teardown and leaving the consumer waiting.
+  interface SelfInterrupt {
+    stream: () => Stream<number>;
+    effect: () => Eff<number, never>;
+  }
+  const never = (): Stream<number> => Stream.fromEffect(sleep(NEVER_MS).map(() => 0));
+
+  const operators: [string, (source: SelfInterrupt) => Stream<unknown, unknown>][] = [
+    ["merge", ({ stream }) => stream().merge(never())],
+    ["mergeAll", ({ stream }) => Stream.mergeAll(never(), stream(), never())],
+    ["combineLatest", ({ stream }) => stream().combineLatest(never())],
+    ["withLatest main", ({ stream }) => stream().withLatest(never())],
+    ["withLatest side", ({ stream }) => never().withLatest(stream())],
+    ["switchMap outer", ({ stream }) => stream().switchMap((n) => Stream.of(n))],
+    ["switchMap inner", ({ stream }) => Stream.of(1).switchMap(() => stream())],
+    ["exhaustMap outer", ({ stream }) => stream().exhaustMap((n) => Stream.of(n))],
+    ["exhaustMap inner", ({ stream }) => Stream.of(1).exhaustMap(() => stream())],
+    ["parEvalMap source", ({ stream }) => stream().parEvalMap(2, (n) => succeed(n))],
+    ["parEvalMap worker", ({ effect }) => Stream.of(1).parEvalMap(2, () => effect())],
+    [
+      "parEvalMapUnordered source",
+      ({ stream }) => stream().parEvalMapUnordered(2, (n) => succeed(n)),
+    ],
+    ["parEvalMapUnordered worker", ({ effect }) => Stream.of(1).parEvalMapUnordered(2, effect)],
+    ["buffer", ({ stream }) => stream().buffer(2)],
+    ["groupWithin", ({ stream }) => stream().groupWithin(2, 10)],
+    ["debounce", ({ stream }) => stream().debounce(5)],
+    ["sample", ({ stream }) => stream().sample(5)],
+    ["audit", ({ stream }) => stream().audit(5)],
+    ["broadcastThrough upstream", ({ stream }) => stream().broadcastThrough((s) => s)],
+    ["broadcastThrough branch", ({ stream }) => never().broadcastThrough((s) => s, stream)],
+    ["observe", ({ stream }) => never().observe(stream)],
+    ["takeUntil signal", ({ stream }) => never().takeUntil(stream())],
+    ["parJoin inner", ({ stream }) => Stream.of(stream()).parJoin(2)],
+    [
+      "parJoin outer",
+      ({ stream }) =>
+        stream()
+          .map((n) => Stream.of(n))
+          .parJoin(2),
+    ],
+  ];
+
+  const selfInterrupt = (cleanup: Eff<void, unknown>): SelfInterrupt => {
+    const effect = () =>
+      ensuring(
+        sleep(1).flatMap(() => failCause(Cause.interrupt())),
+        cleanup,
+      ) as unknown as Eff<number, never>;
+    return { effect, stream: () => Stream.fromEffect(effect()) };
+  };
+
+  test.each(operators)("%s: fails the stream with the interruption", (_name, build) => {
+    const run = runVirtual({ effect: collect(build(selfInterrupt(succeed(undefined)))) });
+
+    expect(run.result?.ok).toBe(false);
+    if (run.result?.ok === false) expect(Cause.isInterruptedOnly(run.result.cause)).toBe(true);
+    expect(run.now).toBe(1);
+    expect(run.leaked).toEqual([]);
+  });
+
+  test.each(operators)("%s: fails the stream with a failing cleanup", (_name, build) => {
+    const run = runVirtual({
+      effect: collect(build(selfInterrupt(fail(new TeardownError({}))))),
+    });
+
+    expect(run.result?.ok).toBe(false);
+    if (run.result?.ok === false) {
+      expect(Cause.failures(run.result.cause)).toEqual([new TeardownError({})]);
+    }
+    expect(run.now).toBe(1);
     expect(run.leaked).toEqual([]);
   });
 });

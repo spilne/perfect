@@ -1085,7 +1085,6 @@ export class Stream<A, S = never> {
                 handle.teardown = Cause.stripInterrupts(cause);
                 return succeed(undefined);
               }
-              if (Cause.isInterruptedOnly(cause)) return failCause(cause);
               return restore(
                 events.offer({ _tag: "innerFail", generation: handle.generation, cause }),
               );

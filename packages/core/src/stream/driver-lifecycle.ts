@@ -96,16 +96,20 @@ export interface DriverRun<A> {
   fork<B>(eff: Eff<B, unknown>): Eff<Fiber<B>, never>;
   /**
    * Run a background fiber's `body`, handing a failure to `report` (which
-   * typically offers it to the consumer). During teardown, when the cause is an
-   * interruption or the run is stopping, the full cause is re-raised instead,
-   * so the stop can collect failures such as a finalizer that failed while its
-   * fiber was interrupted.
+   * typically offers it to the consumer). Once the run is stopping, the full
+   * cause is re-raised instead, so the stop can collect failures such as a
+   * finalizer that failed while its fiber was interrupted.
+   *
+   * Only the stop interrupts these fibers, so before it an interruption is
+   * one the body raised itself, and it is reported like any other failure
+   * rather than passing for teardown with nobody left to see it.
    *
    * An interrupted fiber skips interruptible error handlers and drops the
    * typed failures they would have seen, so the handler is installed in an
    * uninterruptible region. `body` and `report` run interruptibly, so a
    * blocked offer can still be interrupted. Use it only at the top of a fiber
-   * forked with `fork`, which starts interruptible.
+   * forked with `fork`, which starts interruptible. An operator that
+   * interrupts its own fibers outside the stop needs its own bookkeeping.
    */
   reportFailure<B>(
     body: Eff<B, unknown>,
@@ -155,9 +159,7 @@ class Run<A> implements DriverRun<A> {
     // Background fibers start interruptible, so "restore" is interruptible.
     return uninterruptible(
       new Suspend(Op.CatchAll, interruptible(body), (cause: Cause) =>
-        this.stopRequested || Cause.isInterruptedOnly(cause)
-          ? failCause(cause)
-          : interruptible(report(cause)),
+        this.stopRequested ? failCause(cause) : interruptible(report(cause)),
       ) as Eff<B, unknown>,
     );
   }

@@ -87,8 +87,10 @@ interrupted, its finalizer interrupts them and waits for them to finish before
 it releases the sources. A failure raised while they stop, such as an inner
 stream's finalizer failing, fails the stream instead of being dropped. So does
 a failure while `switchMap` finalizes the inner stream it switches away from;
-the next inner stream then does not start. No callback or timer escapes
-structured concurrency.
+the next inner stream then does not start. A source that fails with an
+interruption of its own, rather than being stopped, fails the stream with that
+interruption instead of leaving the consumer waiting. No callback or timer
+escapes structured concurrency.
 
 Because the finalizer owns these fibers, consume the stream with a terminal
 operator such as `toArray`, `drain`, `forEach`, or `runSink`. Pulling `step` by
