@@ -631,10 +631,10 @@ const PARKED: unique symbol = Symbol("spilne/for-each-par-parked");
 //
 // Children start inline, so a slot freed by a completion is refilled in the
 // same turn and synchronous children cost no scheduling. Once a turn has spent
-// the op budget, the rest of the fill moves to the next scheduler turn. A
-// CatchAll frame under the fiber's continuation holds an interrupt until every
-// running child has settled, so children's finalizers finish before the
-// parent's own run.
+// the op budget, the rest of the fill moves to the next scheduler turn. An
+// uninterruptible CatchAll frame under the fiber's continuation holds an
+// interrupt until every running child has settled, so children's finalizers
+// finish before the parent's own run.
 function startForEachPar(
   fiber: Fiber<any>,
   node: Suspend,
@@ -819,19 +819,24 @@ function startForEachPar(
     stop();
     if (running === 0) return settledCause(cause);
     return new Suspend(
-      Op.SetInterruptible,
-      new Suspend(
-        Op.Async,
-        (resume: (value: Suspend) => void) => {
-          drained = () => resume(settledCause(cause));
-        },
-        null,
-      ),
-      false,
+      Op.Async,
+      (resume: (value: Suspend) => void) => {
+        drained = () => resume(settledCause(cause));
+      },
+      null,
     );
   };
 
-  fiber.stack = new Cont(Op.CatchAll, onCause, k);
+  // onCause sits in an uninterruptible region whose body, the parked wait,
+  // keeps the caller's interruptibility. interrupt() still reaches the parked
+  // fiber, and the failure walk leaves the body before it meets onCause, so an
+  // interrupted fiber does not bypass it: it waits for the children, and the
+  // interrupt is raised again when the region ends.
+  fiber.stack = new Cont(
+    Op.SetInterruptible,
+    false,
+    new Cont(Op.CatchAll, onCause, new Cont(Op.SetInterruptible, fiber.interruptible, k)),
+  );
   fiber.context = context;
   fiber.state = FiberState.Suspended;
   fiber.interruptHandle = () => {

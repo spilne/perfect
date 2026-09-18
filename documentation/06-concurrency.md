@@ -156,8 +156,10 @@ console.log(names); // → ["user-1", "user-2", "user-3", "user-4", "user-5"]
   `Cause.both`.
 - Interrupting the combined effect — directly or through `timeout` / `race` —
   interrupts every in-flight effect and likewise waits for their finalizers
-  before finalizers around the traversal run. `all` and `race` interrupt their
-  children without waiting.
+  before finalizers around the traversal run. It then fails with the
+  interrupt, joined with `Cause.both` to the failure that had already stopped
+  the traversal, if any, and to non-interrupt failures raised during teardown.
+  `all` and `race` interrupt their children without waiting.
 - `succeed(x)` results are collected without starting a fiber, and other
   children start without a scheduler hop. Children that suspend still pay a
   scheduler turn per refill round, so a small `concurrency` over many
