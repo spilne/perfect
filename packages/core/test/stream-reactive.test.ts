@@ -3,14 +3,18 @@ import {
   Cause,
   Clock,
   Stream,
+  SyncScheduler,
   TaggedError,
   TestClock,
   provide,
   run,
   runExit,
+  runFiber,
   sleep,
   sync,
+  type Eff,
 } from "../src";
+import type { FiberResult } from "../src/fiber";
 
 class ReactiveError extends TaggedError("ReactiveError")<{
   readonly message: string;
@@ -19,6 +23,22 @@ class ReactiveError extends TaggedError("ReactiveError")<{
 class AsyncIterableError extends TaggedError("AsyncIterableError")<{
   readonly cause: unknown;
 }>() {}
+
+/**
+ * Run on a SyncScheduler with a TestClock stepped 1 ms at a time, so tests
+ * that depend on which of two sleeps ends first cannot flake under load.
+ */
+const runVirtual = <A>(effect: Eff<A, unknown>): FiberResult<A> | null => {
+  const scheduler = new SyncScheduler();
+  const clock = new TestClock();
+  const fiber = runFiber(provide(effect, Clock, clock) as Eff<A, never>, scheduler);
+  scheduler.flush();
+  while (fiber.result === null && clock.now() < 1_000) {
+    clock.advance(1);
+    scheduler.flush();
+  }
+  return fiber.result;
+};
 
 const drainScheduler = async (): Promise<void> => {
   for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve));
@@ -35,11 +55,11 @@ describe("Stream.switchMap", () => {
     ).toEqual([10, 20, 30]);
   });
 
-  test("cancels and finalizes the previous inner stream", async () => {
+  test("cancels and finalizes the previous inner stream", () => {
     let firstFinalized = false;
     const outer = Stream.of(1).concat(Stream.fromEffect(sleep(10).map(() => 2)));
 
-    const result = await run(
+    const result = runVirtual(
       outer
         .switchMap((value) =>
           Stream.fromEffect(sleep(value === 1 ? 40 : 5).map(() => value * 10)).onFinalize(
@@ -53,7 +73,7 @@ describe("Stream.switchMap", () => {
         .toArray(),
     );
 
-    expect(result).toEqual([20]);
+    expect(result).toEqual({ ok: true, value: [20] });
     expect(firstFinalized).toBe(true);
   });
 });
@@ -69,21 +89,21 @@ describe("Stream.exhaustMap", () => {
     ).toEqual([10, 20, 30]);
   });
 
-  test("ignores outer values while the current inner stream is active", async () => {
+  test("ignores outer values while the current inner stream is active", () => {
     const outer = Stream.of(1)
       .concat(Stream.fromEffect(sleep(5).map(() => 2)))
       .concat(Stream.fromEffect(sleep(30).map(() => 3)));
 
-    const result = await run(
+    const result = runVirtual(
       outer.exhaustMap((value) => Stream.fromEffect(sleep(20).map(() => value * 10))).toArray(),
     );
 
-    expect(result).toEqual([10, 30]);
+    expect(result).toEqual({ ok: true, value: [10, 30] });
   });
 });
 
 describe("Stream.combineLatest", () => {
-  test("emits whenever either initialized side changes", async () => {
+  test("emits whenever either initialized side changes", () => {
     const left = Stream.fromEffect(sleep(10).map(() => 1)).concat(
       Stream.fromEffect(sleep(20).map(() => 2)),
     );
@@ -91,11 +111,14 @@ describe("Stream.combineLatest", () => {
       Stream.fromEffect(sleep(20).map(() => "b")),
     );
 
-    expect(await run(left.combineLatest(right).toArray())).toEqual([
-      [1, "a"],
-      [2, "a"],
-      [2, "b"],
-    ]);
+    expect(runVirtual(left.combineLatest(right).toArray())).toEqual({
+      ok: true,
+      value: [
+        [1, "a"],
+        [2, "a"],
+        [2, "b"],
+      ],
+    });
   });
 
   test("completes immediately when one side ends before producing a value", async () => {
@@ -112,7 +135,7 @@ describe("Stream.combineLatest", () => {
 });
 
 describe("Stream.withLatest", () => {
-  test("emits only on the main stream using the latest side value", async () => {
+  test("emits only on the main stream using the latest side value", () => {
     const main = Stream.fromEffect(sleep(10).map(() => 1))
       .concat(Stream.fromEffect(sleep(10).map(() => 2)))
       .concat(Stream.fromEffect(sleep(10).map(() => 3)));
@@ -120,11 +143,14 @@ describe("Stream.withLatest", () => {
       Stream.fromEffect(sleep(20).map(() => "b")),
     );
 
-    expect(await run(main.withLatest(side).toArray())).toEqual([
-      [1, "a"],
-      [2, "a"],
-      [3, "b"],
-    ]);
+    expect(runVirtual(main.withLatest(side).toArray())).toEqual({
+      ok: true,
+      value: [
+        [1, "a"],
+        [2, "a"],
+        [3, "b"],
+      ],
+    });
   });
 
   test("cancels the side stream when the main stream completes", async () => {
