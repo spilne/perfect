@@ -21,8 +21,26 @@
 // worktree before running. Only the measured source differs; otherwise an edit
 // to the benchmark definitions would show up as a performance change, and a
 // baseline predating the harness could not be measured at all.
+//
+// TWO PASSES. Those rounds are a SCREEN: they decide which benchmarks deserve a
+// second look, and they never fail the build on their own. Whatever they flag is
+// then RE-MEASURED over more rounds — only the flagged benchmarks, so a clean
+// run costs nothing extra — and the build fails only if the same benchmark moves
+// the same way again.
+//
+// Three rounds is a sample of three, and a sample of three is wrong often enough
+// to matter. Fifteen recorded rounds of an identical-code comparison contain 455
+// distinct three-round windows; 7.0% of them flag at least one gating benchmark,
+// which is the false-failure rate the gate had. Following each of those windows
+// with five confirmation rounds brought it to 0. See scripts/perf/README.md.
+//
+// The confirmation run uses an EVEN number of rounds. Order-flipping only
+// cancels drift when each side leads equally often, and with the three rounds CI
+// screens on, the current tree leads twice and the baseline once. That residual
+// was measured at ~0.4% on a quiet machine — small, but it is a bias with a
+// sign, and the pass that decides the build should not carry one.
 
-import { cp, mkdir, rm } from "node:fs/promises";
+import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 function arg(name: string, fallback?: string): string | undefined {
@@ -33,6 +51,16 @@ function arg(name: string, fallback?: string): string | undefined {
 
 const BASELINE_REF = arg("baseline", "main")!;
 const ROUNDS = Number(arg("rounds", "2"));
+/**
+ * Rounds the confirmation run measures the flagged benchmarks over. Rounded up
+ * to an even number so each side leads exactly half of them.
+ */
+const CONFIRM_ROUNDS = (() => {
+  const requested = Number(arg("confirm-rounds", "6"));
+  return requested % 2 === 0 ? requested : requested + 1;
+})();
+/** Skip the confirmation run and let the first pass fail the build, as before. */
+const NO_CONFIRM = process.argv.includes("--no-confirm");
 const OUT_DIR = resolve(arg("out-dir", ".perf")!);
 const WORKTREE = resolve(arg("worktree", ".perf/baseline-tree")!);
 const KEEP = process.argv.includes("--keep-worktree");
@@ -91,7 +119,12 @@ if (baselineSha === headSha && !dirty) {
 
 console.log(`Baseline : ${BASELINE_REF} ${baselineSha.slice(0, 8)}`);
 console.log(`Current  : HEAD ${headSha.slice(0, 8)}`);
-console.log(`Rounds   : ${ROUNDS} (interleaved)\n`);
+console.log(
+  `Rounds   : ${ROUNDS} (interleaved)` +
+    (NO_CONFIRM
+      ? ", confirmation disabled\n"
+      : `, + ${CONFIRM_ROUNDS} to confirm anything they flag\n`),
+);
 
 // ── Prepare the baseline worktree ─────────────────────────────────
 
@@ -132,82 +165,189 @@ try {
 
   await mkdir(OUT_DIR, { recursive: true });
 
-  const currentFiles: string[] = [];
-  const baselineFiles: string[] = [];
-
-  for (let round = 1; round <= ROUNDS; round++) {
-    const currentOut = join(OUT_DIR, `current-${round}.json`);
-    const baselineOut = join(OUT_DIR, `baseline-${round}.json`);
-
-    const runCurrent = async (): Promise<void> => {
-      console.log(`\n── Round ${round}/${ROUNDS}: current ──`);
-      if (
-        (await sh(
-          [
-            "bun",
-            "scripts/perf/collect.ts",
-            "--out",
-            currentOut,
-            "--label",
-            "current",
-            ...collectArgs,
-          ],
-          repoRoot,
-        )) !== 0
-      ) {
-        console.error("collect failed on the current tree");
-        process.exit(1);
-      }
-      currentFiles.push(currentOut);
-    };
-
-    const runBaseline = async (): Promise<void> => {
-      console.log(`\n── Round ${round}/${ROUNDS}: baseline ──`);
-      // Absolute out path so the worktree writes into the main .perf directory.
-      if (
-        (await sh(
-          [
-            "bun",
-            "scripts/perf/collect.ts",
-            "--out",
-            baselineOut,
-            "--label",
-            "baseline",
-            ...collectArgs,
-          ],
-          WORKTREE,
-        )) !== 0
-      ) {
-        console.error("collect failed on the baseline tree");
-        process.exit(1);
-      }
-      baselineFiles.push(baselineOut);
-    };
-
-    // Flip the order every round so drift over the run cancels instead of
-    // always penalising whichever side goes second.
-    if (round % 2 === 1) {
-      await runCurrent();
-      await runBaseline();
-    } else {
-      await runBaseline();
-      await runCurrent();
-    }
+  interface PassResult {
+    readonly baselineFiles: readonly string[];
+    readonly currentFiles: readonly string[];
   }
 
-  console.log("\n── Comparison ──\n");
-  const compare = [
+  /**
+   * Measure both trees over `rounds` interleaved rounds.
+   *
+   * `currentLeadsFirst` picks which side goes first in round 1; the order flips
+   * every round after that. `extra` carries the `--only` filter a confirmation
+   * run uses to narrow what gets MEASURED — priming stays whole, so a
+   * re-measured benchmark meets the same machine state it did the first time.
+   */
+  async function runRounds(options: {
+    rounds: number;
+    prefix: string;
+    currentLeadsFirst: boolean;
+    extra?: readonly string[];
+  }): Promise<PassResult> {
+    const { rounds, prefix, currentLeadsFirst, extra = [] } = options;
+    const currentFiles: string[] = [];
+    const baselineFiles: string[] = [];
+
+    for (let round = 1; round <= rounds; round++) {
+      const currentOut = join(OUT_DIR, `${prefix}current-${round}.json`);
+      const baselineOut = join(OUT_DIR, `${prefix}baseline-${round}.json`);
+
+      const runCurrent = async (): Promise<void> => {
+        console.log(`\n── Round ${round}/${rounds}: current ──`);
+        if (
+          (await sh(
+            [
+              "bun",
+              "scripts/perf/collect.ts",
+              "--out",
+              currentOut,
+              "--label",
+              "current",
+              ...collectArgs,
+              ...extra,
+            ],
+            repoRoot,
+          )) !== 0
+        ) {
+          console.error("collect failed on the current tree");
+          process.exit(1);
+        }
+        currentFiles.push(currentOut);
+      };
+
+      const runBaseline = async (): Promise<void> => {
+        console.log(`\n── Round ${round}/${rounds}: baseline ──`);
+        // Absolute out path so the worktree writes into the main .perf directory.
+        if (
+          (await sh(
+            [
+              "bun",
+              "scripts/perf/collect.ts",
+              "--out",
+              baselineOut,
+              "--label",
+              "baseline",
+              ...collectArgs,
+              ...extra,
+            ],
+            WORKTREE,
+          )) !== 0
+        ) {
+          console.error("collect failed on the baseline tree");
+          process.exit(1);
+        }
+        baselineFiles.push(baselineOut);
+      };
+
+      // Flip the order every round so drift over the run cancels instead of
+      // always penalising whichever side goes second.
+      if ((round % 2 === 1) === currentLeadsFirst) {
+        await runCurrent();
+        await runBaseline();
+      } else {
+        await runBaseline();
+        await runCurrent();
+      }
+    }
+
+    return { baselineFiles, currentFiles };
+  }
+
+  const compareCommand = (pass: PassResult, out: string, extra: readonly string[]): string[] => [
     "bun",
     "scripts/perf/compare.ts",
-    ...baselineFiles.flatMap((f) => ["--baseline", f]),
-    ...currentFiles.flatMap((f) => ["--current", f]),
+    ...pass.baselineFiles.flatMap((f) => ["--baseline", f]),
+    ...pass.currentFiles.flatMap((f) => ["--current", f]),
     "--out",
-    join(OUT_DIR, "compare.md"),
+    out,
     ...compareArgs,
+    ...extra,
   ];
-  const code = await sh(compare, repoRoot);
+
+  const combinedOut = join(OUT_DIR, "compare.md");
+  const screenOut = join(OUT_DIR, "compare-screen.md");
+  const confirmOut = join(OUT_DIR, "compare-confirm.md");
+  const flaggedOut = join(OUT_DIR, "flagged.json");
+
+  // ── Pass 1: screen ──────────────────────────────────────────────
+
+  const screen = await runRounds({ rounds: ROUNDS, prefix: "", currentLeadsFirst: true });
+
+  console.log("\n── Comparison ──\n");
+  const screenCode = await sh(
+    compareCommand(
+      screen,
+      NO_CONFIRM ? combinedOut : screenOut,
+      NO_CONFIRM ? [] : ["--pass", "screen", "--flagged-out", flaggedOut],
+    ),
+    repoRoot,
+  );
+  if (NO_CONFIRM) {
+    await cleanup();
+    process.exit(screenCode);
+  }
+  // The report is the reason the job exists, so never let a missing one turn a
+  // clear verdict into a stack trace.
+  const publishScreen = async (): Promise<void> => {
+    if (await Bun.file(screenOut).exists()) await cp(screenOut, combinedOut);
+  };
+
+  if (screenCode !== 0) {
+    // A screening pass only exits non-zero on an absolute threshold breach,
+    // which no amount of re-measurement argues with.
+    await publishScreen();
+    await cleanup();
+    process.exit(screenCode);
+  }
+
+  const flagged = JSON.parse(await readFile(flaggedOut, "utf8")) as {
+    cases: { name: string; suite: string }[];
+  };
+  if (flagged.cases.length === 0) {
+    await publishScreen();
+    await cleanup();
+    process.exit(0);
+  }
+
+  // ── Pass 2: confirm ─────────────────────────────────────────────
+
+  console.log(
+    `\n── Confirming ${flagged.cases.length} flagged benchmark(s) over ${CONFIRM_ROUNDS} rounds ──`,
+  );
+  for (const c of flagged.cases) console.log(`   ${c.name}`);
+
+  // Only the suites that actually flagged something. Suites are set up, primed,
+  // measured and torn down one at a time, so dropping a suite that runs LATER
+  // changes nothing about the ones kept — and dropping the HTTP suite saves its
+  // server setup. `--only` then narrows the measure phase to the flagged cases
+  // while every case in the surviving suites is still primed.
+  const suites = [...new Set(flagged.cases.map((c) => c.suite))];
+  const confirmArgs = [
+    ...(collectArgs.includes("--suite") ? [] : suites.flatMap((s) => ["--suite", s])),
+    ...flagged.cases.flatMap((c) => ["--only", c.name]),
+  ];
+
+  const confirm = await runRounds({
+    rounds: CONFIRM_ROUNDS,
+    prefix: "confirm-",
+    // Opposite lead to the screen's first round, and an even round count, so
+    // this pass is order-balanced on its own.
+    currentLeadsFirst: false,
+    extra: confirmArgs,
+  });
+
+  console.log("\n── Confirmation ──\n");
+  const confirmCode = await sh(
+    compareCommand(confirm, confirmOut, ["--pass", "confirm", "--confirming", flaggedOut]),
+    repoRoot,
+  );
+
+  await writeFile(
+    combinedOut,
+    `${await readFile(screenOut, "utf8")}\n${await readFile(confirmOut, "utf8")}`,
+  );
   await cleanup();
-  process.exit(code);
+  process.exit(confirmCode);
 } catch (error) {
   console.error(error);
   await cleanup();

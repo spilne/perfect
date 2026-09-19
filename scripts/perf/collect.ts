@@ -2,6 +2,7 @@
 //
 //   bun scripts/perf/collect.ts --out .perf/current.json --label current
 //   bun scripts/perf/collect.ts --suite core --samples 100
+//   bun scripts/perf/collect.ts --suite core --only "core/run(sync)"
 //
 // Two habits here exist because getting them wrong produced visibly wrong
 // numbers earlier:
@@ -12,6 +13,15 @@
 //   2. A case that throws is recorded as `unavailable`, not dropped. Baselines
 //      are older trees; a case exercising an API that did not exist yet must
 //      show up as "no baseline", never as a silent pass.
+//
+// `--only` narrows the MEASURE phase, never the prime phase. A confirmation run
+// re-measures a handful of cases, and it has to re-measure them in the same
+// machine state the first run saw — priming only the shortlist would change the
+// answer rather than check it. Priming the whole suite and skipping the
+// measurement of everything else costs a few hundred milliseconds and keeps the
+// two runs comparable. (`--suite` does narrow priming: suites are set up,
+// primed, measured and torn down one at a time, so a suite that is not selected
+// never ran before the selected one anyway.)
 
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
@@ -43,6 +53,14 @@ const LABEL = arg("label", "current")!;
 const SAMPLES = Number(arg("samples", process.env.PERF_SAMPLES ?? "50"));
 const WARMUP = Number(arg("warmup", process.env.PERF_WARMUP ?? "10"));
 const PRIME = Number(arg("prime", process.env.PERF_PRIME ?? "40"));
+
+/**
+ * Cases to measure, as `suite/name` or bare `name`. Empty means all of them.
+ * Everything is still primed; see the note at the top.
+ */
+const ONLY = new Set(argAll("only"));
+const measured = (suite: string, name: string): boolean =>
+  ONLY.size === 0 || ONLY.has(name) || ONLY.has(`${suite}/${name}`);
 
 const selected = argAll("suite");
 const suites =
@@ -80,6 +98,7 @@ for (const suite of suites) {
 
     // Phase 2 — measure.
     for (const c of cases) {
+      if (!measured(suite.name, c.name)) continue;
       const failure = broken.get(c.name);
       if (failure !== undefined) {
         console.error(`  ! ${suite.name}/${c.name}: ${failure}`);
@@ -126,6 +145,14 @@ for (const suite of suites) {
   } finally {
     await suite.teardown?.();
   }
+}
+
+// A `--only` that matches nothing would write an empty results file, and an
+// empty file compares as "nothing regressed" — a typo would silently turn the
+// confirmation run into an automatic pass. Refuse instead.
+if (ONLY.size > 0 && results.length === 0) {
+  console.error(`No cases matched --only ${[...ONLY].join(", ")}`);
+  process.exit(2);
 }
 
 const file: ResultsFile = {

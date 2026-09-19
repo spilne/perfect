@@ -7,7 +7,8 @@ git baseline _on the same machine, in the same job_, alternating between them,
 and flags any change that clears a per-benchmark noise band **and** moves the
 same way in a majority of rounds. On a quiet runner it resolves regressions from
 about 12%; on a loaded one the noisier benchmarks widen their own band and stay
-quiet rather than guessing.
+quiet rather than guessing. Whatever it flags is then **re-measured** before the
+build fails — see [Screen, then confirm](#screen-then-confirm).
 
 **The absolute thresholds are a catastrophic floor.** Deliberately generous
 (the original cases used ~20× local medians; scaling cases use broader ceilings),
@@ -16,8 +17,10 @@ they aim to catch large regressions while leaving room for runner noise.
 ```bash
 bun run perf:collect      # measure, write .perf/current.json
 bun run perf:gate         # measure + enforce absolute thresholds
+bun run test:perf         # the verdict logic, against fixed numbers
 bun run perf:compare --baseline main          # the real check
 bun run perf:compare --baseline HEAD --rounds 4   # is my uncommitted change slow?
+bun run perf:compare --baseline main --no-confirm # fail on the first pass
 ```
 
 ## Why not store main's numbers and compare later
@@ -26,6 +29,78 @@ Runner-to-runner variance on shared CI is larger than most regressions worth
 catching, so a baseline recorded on a different machine days ago tells you
 almost nothing. Measuring both trees in one job cancels the machine out, which
 is the only way a tight tolerance is honest. It costs 2× the benchmark time.
+
+## Screen, then confirm
+
+A flagged benchmark is re-measured before it can fail a build.
+
+The first pass is exactly the comparison described above — three interleaved
+rounds on CI — but it is now a **screen**: it reports, it writes a shortlist, and
+it exits 0. Anything on that shortlist is then measured again over six more
+interleaved rounds, and the build fails only if the same benchmark moves the same
+way past its own tolerance a second time. Both passes appear in the job summary
+and in the PR comment.
+
+**Why.** Three rounds is a sample of three. The statistics above are honest about
+_within-round_ and _between-round_ noise, but they are estimated from three
+numbers, and three numbers are wrong often enough to matter:
+
+> Fifteen recorded rounds of an **identical-code** comparison (09eb654 against
+> itself, this machine, interleaved and order-flipped) contain 455 distinct
+> three-round windows. **7.0% of those windows flag at least one gating
+> benchmark.** Following each window with five more rounds and requiring the
+> same verdict again: **0 of 455.**
+
+That 7% is not a hypothetical. Four `performance` failures in a row, each on a
+different benchmark, each in a situation where a regression was impossible or was
+later disproved:
+
+| flagged                                     | comparison                       | why it was not real                                 |
+| ------------------------------------------- | -------------------------------- | --------------------------------------------------- |
+| `all(sync) x100 fibers` +23.6% (±18.0%)     | PR #26 head                      | a re-run of the same head flagged a different case  |
+| `stream map/filter full traversal` +49.9%   | PR #26 head, re-run              | same tree as the run above                          |
+| `stream map/filter full traversal` +57.3%   | 09eb654 vs f890d6d               | the case was measuring its own warmup; fixed in #27 |
+| `deferred waiter cancellation x1000` +13.2% | d9cf54e vs 09eb654 (#27's merge) | that diff touches `scripts/perf` only               |
+
+The last one is the clearest: the two trees have byte-identical `packages/`, and
+the harness is copied from the current tree into the baseline worktree, so both
+sides ran the same benchmark definitions over the same runtime. There was nothing
+there to regress.
+
+**Why this still catches regressions.** The screen is the old gate, unchanged —
+nothing it used to catch stops being caught there. The confirmation run then sees
+the same effect with _twice_ the rounds, so its standard error is smaller and its
+tolerance tighter: a change the screen can resolve, the confirmation run can
+resolve too. What the second pass removes is the 1-in-14 window where three
+rounds happened to line up.
+
+**Cost.** Nothing on a clean run, which is the common case: the shortlist is
+empty and the job ends after the screen. When something does flag, the
+confirmation run measures **only the shortlisted benchmarks** — `collect.ts
+--only` narrows the measure phase — so six rounds a side cost about as much as
+one full round instead of six.
+
+`--only` deliberately does **not** narrow priming. Priming the whole suite is
+what puts the runtime in the state the benchmarks are measured in; priming only
+the shortlist measures something else. Measured: priming just
+`stream map/filter full traversal` reads ~4.8 ns/item where priming the whole
+suite first reads ~7.8 ns/item in the same process. A confirmation run has to
+re-ask the same question, not a cheaper one.
+
+**The confirmation run uses an even number of rounds.** Flipping the order every
+round only cancels drift when each side leads equally often. With three rounds
+the current tree leads twice and the baseline once, leaving a residual; measured
+on the identical-code control, the side that leads a round reads ~1.1% slower,
+so three rounds carry ~0.4% of systematic bias. Small — but it has a sign, and
+the pass that decides a build should not carry one.
+
+**No absolute-effect floor.** A minimum change in nanoseconds was considered and
+rejected on the data. The false flags in that control were not sub-nanosecond
+artifacts: `range take(1)` moved a median of 640-920 ns/op across them and
+`group singleton chunks` 17-30 ns/item. A floor low enough to be safe for a real
+regression (≤1 ns/item) blocks none of them; one high enough to block them would
+also hide real regressions on exactly the benchmarks whose per-operation cost is
+small. The noise here is proportional, so the bar stays proportional.
 
 ## Design decisions, and the evidence for them
 
@@ -120,6 +195,21 @@ but it buries the transient rather than excluding it — the IQR and p99 carry i
 for the rest of the run. The row keeps its gate and now reports the steady state
 it was always meant to.
 
+A long per-case warmup is a fair thing to be suspicious of, because `collect.ts`
+measures every case in one process: 200 warmup samples of a 160 µs traversal is
+~32 ms of extra work that the twelve cases measured after it inherit the JIT and
+GC state from. It was checked. Twelve interleaved, order-flipped rounds of two
+trees whose `packages/` are byte-identical and whose harnesses differ only by
+this `warmup: 200`: the row itself moves −33.1% (which is the point of it), and
+**every other case lands within ±2.4%, none flagged**, including
+`deferred waiter cancellation` at +1.1% (x1000) and −1.5% (x8000). Round-to-round
+spread does not grow either — mean CV across the suite is 3.05% with the long
+warmup against 3.70% without.
+
+It could not have explained a between-tree difference in any case: `compare-refs`
+copies `scripts/perf` from the current tree into the baseline worktree, so both
+sides of that comparison ran the same 200-sample warmup over the same runtime.
+
 The general rule: if a benchmark's per-operation cost is near the runner's
 timing floor, measure it and watch the trend, but do not let it fail a build.
 
@@ -153,8 +243,9 @@ failed the other; that is what the two together are for.
 
 ## CI
 
-The `performance` job runs the absolute gate, then compares against the PR's
-merge-base (or `HEAD~1` on a push), and posts the table as a sticky PR comment.
+The `performance` job runs the harness's own unit tests and the absolute gate,
+then compares against the PR's merge-base (or `HEAD~1` on a push), and posts both
+passes as a sticky PR comment.
 `performance-history` appends each main run to the `perf-history` branch, which
 holds `history.jsonl` plus a rendered trend — the comparison gate catches one bad
 commit, but cannot see a 3% regression repeated ten times where every step is
@@ -169,6 +260,7 @@ inside tolerance.
 | `suites/http.ts`  | HTTP client comparison (no thresholds — relative only) |
 | `collect.ts`      | measure suites → `results.json`                        |
 | `compare.ts`      | baseline vs current → verdict + markdown               |
-| `compare-refs.ts` | worktree + interleaved rounds, calls `compare`         |
+| `compare-refs.ts` | worktree + interleaved rounds, screen then confirm     |
 | `gate.ts`         | absolute-threshold check                               |
 | `history.ts`      | append a run, render the trend                         |
+| `tests/`          | the verdict logic, against fixed numbers               |
