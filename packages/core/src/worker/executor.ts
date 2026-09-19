@@ -13,11 +13,19 @@ type WorkerNodePort = {
   postMessage(message: unknown): void;
 };
 
+// `require` does not exist in an ESM module, which is exactly what the published
+// `dist/worker/executor.js` is ("type": "module"), so the old `require("node:…")`
+// always threw and this fell through to the web branch — leaving a Node worker
+// that listened on nothing. `process.getBuiltinModule` reaches the builtin
+// synchronously from ESM; browsers have no `process` and take the web branch.
 const nodeWorkerPort: WorkerNodePort | null = (() => {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { parentPort } = require("node:worker_threads");
-    return parentPort;
+    const proc = (globalThis as { process?: { getBuiltinModule?: (id: string) => unknown } })
+      .process;
+    const workerThreads = proc?.getBuiltinModule?.("node:worker_threads") as
+      | { parentPort?: WorkerNodePort | null }
+      | undefined;
+    return workerThreads?.parentPort ?? null;
   } catch {
     return null;
   }

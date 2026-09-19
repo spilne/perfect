@@ -47,6 +47,40 @@ describe("WorkerPool", () => {
     await expect(run(program)).rejects.toHaveProperty("_tag", "WorkerError");
   });
 
+  test("a thread that dies fails the task instead of hanging", async () => {
+    // A worker whose entry cannot be loaded — the shape of every packaging bug
+    // here — reports it on the error channel and never answers a message. The
+    // pool has to turn that into a WorkerError; otherwise the task sits pending
+    // forever and the caller just stops.
+    class BrokenWorker {
+      onmessage: ((event: { data: unknown }) => void) | null = null;
+      onerror: ((event: { message?: string }) => void) | null = null;
+      postMessage() {
+        queueMicrotask(() => this.onerror?.({ message: "ModuleNotFound resolving executor" }));
+      }
+      terminate() {}
+    }
+
+    const realWorker = (globalThis as { Worker?: unknown }).Worker;
+    (globalThis as { Worker?: unknown }).Worker = BrokenWorker;
+
+    try {
+      const pool = await run(WorkerPool.make(1));
+      await expect(run(pool.execute((x: number) => x * 2, 21))).rejects.toHaveProperty(
+        "_tag",
+        "WorkerError",
+      );
+      // And the pool stays failed rather than routing the next task to a dead thread.
+      await expect(run(pool.execute((x: number) => x, 1))).rejects.toHaveProperty(
+        "_tag",
+        "WorkerError",
+      );
+      await run(pool.shutdown());
+    } finally {
+      (globalThis as { Worker?: unknown }).Worker = realWorker;
+    }
+  });
+
   test("CPU-bound work runs in parallel", async () => {
     const program = WorkerPool.make(4).flatMap((pool) =>
       ensuring(
