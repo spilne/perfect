@@ -241,6 +241,24 @@ statistics change:
 Every intermediate version of the statistics passed one of these tests and
 failed the other; that is what the two together are for.
 
+The screen/confirm split was validated the same way, at CI settings
+(`--rounds 3`) on a machine deliberately left loaded:
+
+- _False positives_ — three identical-code comparisons, all exited 0. The
+  interesting one is the second: its screen flagged
+  `fiber reverse completion x1000` at **+12.9%** against a ±12.0% band, which is
+  a build failure under the old gate. The confirmation run re-measured that one
+  benchmark over 6 × 6 rounds and read **+0.1%**. Passed.
+- _True positives_ — a deliberately modest slowdown injected into `succeed()`
+  (one multiply-modulo per call, ≈ +15% on `all(succeed) x100 fast path`
+  measured in isolation). The screen read **+23.1%**, the confirmation run
+  **+14.7%** against ±12.0%, and the job exited 1. A regression barely above the
+  tolerance floor still fails, which is the property the second pass had to keep.
+- _Cost_ — a full `core` round takes ~31 s per side; a round measuring one
+  shortlisted case takes ~1 s, because all that remains is priming. Six
+  confirmation rounds a side therefore add ~12 s to a ~3 min screen, and nothing
+  at all when the shortlist is empty.
+
 ## CI
 
 The `performance` job runs the harness's own unit tests and the absolute gate,
