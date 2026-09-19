@@ -1,4 +1,13 @@
-export type { Eff, Throws, Needs, InferValue, InferEffects, EffectCheck } from "./eff.js";
+export type {
+  Eff,
+  Throws,
+  Needs,
+  InferValue,
+  InferEffects,
+  EffectCheck,
+  ErrorsOf,
+  Suspend,
+} from "./eff.js";
 export { Cause } from "./cause.js";
 export type { Cause as CauseT } from "./cause.js";
 export { Exit } from "./exit.js";
@@ -60,8 +69,9 @@ export { CacheStore } from "./cache-store.js";
 export type { MemoryCacheStoreOptions } from "./cache-store.js";
 export type { RepeatTimeoutError } from "./combinators-extra.js";
 export { service, provide } from "./service.js";
-export type { ServiceTag } from "./service.js";
+export type { ServiceTag, ProvidedService } from "./service.js";
 export { TaggedError } from "./tagged-error.js";
+export type { TaggedErrorClass, TaggedErrorInstance } from "./tagged-error.js";
 export { Layer, LayerCycleError, LayerMissingDependencyError } from "./layer.js";
 export type { Layer as LayerT } from "./layer.js";
 import "./layer.js";
