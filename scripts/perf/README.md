@@ -258,6 +258,11 @@ The screen/confirm split was validated the same way, at CI settings
   shortlisted case takes ~1 s, because all that remains is priming. Six
   confirmation rounds a side therefore add ~12 s to a ~3 min screen, and nothing
   at all when the shortlist is empty.
+- _On the runner itself_ — the PR that introduced this ran on a shared GitHub
+  runner against a merge-base its `packages/` is identical to. The screen flagged
+  `stream evalMap single chunk x10000` at **+43.6%** against a ±30.6% band, which
+  would have been the fifth false failure in the series. The confirmation run read
+  **+5.8%** against ±12.0% and the job passed, in 3 min 33 s total.
 
 ## CI
 
