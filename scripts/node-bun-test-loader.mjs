@@ -91,6 +91,21 @@ export async function resolve(specifier, context, nextResolve) {
     };
   }
 
+  // A worker entry arrives here as an absolute file: URL with no useful parent —
+  // `new Worker(new URL("./executor.js", import.meta.url))` in packages/core. The
+  // same .js-for-.ts mapping applies: the sources name the file they will be
+  // published as, and on disk it is still TypeScript.
+  if (specifier.startsWith("file:")) {
+    try {
+      const localImport = resolveLocalImport(fileURLToPath(specifier));
+      if (localImport !== null) {
+        return { url: pathToFileURL(localImport).href, shortCircuit: true };
+      }
+    } catch {
+      // noop: let Node resolve continue for special cases.
+    }
+  }
+
   if (context.parentURL && (specifier.startsWith(".") || specifier.startsWith("/"))) {
     try {
       const candidatePath = fileURLToPath(new URL(specifier, context.parentURL));

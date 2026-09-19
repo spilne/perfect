@@ -88,10 +88,15 @@ for (const pkg of packages) {
   }
 
   await assertExplicitExtensions(pkg.dir, packageJson.name);
+  await assertRuntimeUrlTargets(pkg.dir, packageJson.name);
 }
 
 await assertNodeEsmResolves();
-await assertConsumerTypechecks();
+
+const consumer = await installPackedCore();
+await assertConsumerTypechecks(consumer);
+await assertPackedWorkerPoolRuns(consumer);
+await rm(consumer.dir, { recursive: true, force: true });
 
 // Bun's resolver and `"moduleResolution": "bundler"` both accept an extensionless
 // relative specifier, so `export { x } from "./y"` in dist/ looks fine from inside
@@ -127,6 +132,40 @@ async function assertExplicitExtensions(packageDir: string, packageName: string)
   }
 }
 
+// `new URL("./x", import.meta.url)` is how a module points at a sibling *file* at
+// runtime — a worker entry, a wasm blob, a template. Nothing resolves it at build
+// time, unlike an import specifier, so a source-only path survives every compile
+// step and only blows up once a consumer reaches that line. The canonical case is
+// `new URL("./executor.ts", …)` in the worker pool: `executor.ts` exists next to
+// the source and never in dist/, so `WorkerPool.make()` worked in this repo and
+// failed for everyone installing the package.
+async function assertRuntimeUrlTargets(packageDir: string, packageName: string): Promise<void> {
+  const runtimeUrl = /new URL\(\s*(["'`])(\.\.?\/[^"'`]*)\1\s*,\s*import\.meta\.url\s*\)/g;
+  const distDir = join(packageDir, "dist");
+  const offenders: string[] = [];
+
+  for (const file of await listFiles(distDir)) {
+    if (!file.endsWith(".js")) continue;
+    const source = await readFile(file, "utf8");
+    for (const match of source.matchAll(runtimeUrl)) {
+      const target = join(dirname(file), match[2]!);
+      try {
+        await access(target);
+      } catch {
+        offenders.push(`${file}: ${match[2]} (no ${target})`);
+      }
+    }
+  }
+
+  if (offenders.length > 0) {
+    throw new Error(
+      `${packageName}: ${offenders.length} runtime file reference(s) in dist/ point at a file that ` +
+        `is not published next to them, so they resolve only when the sources are run in-repo.\n  ` +
+        offenders.join("\n  "),
+    );
+  }
+}
+
 // The loop above imports each entrypoint through Bun, whose resolver is looser than
 // Node's. Re-run the same imports on real Node so a regression cannot hide behind it.
 async function assertNodeEsmResolves(): Promise<void> {
@@ -150,13 +189,18 @@ async function assertNodeEsmResolves(): Promise<void> {
   console.log(`ok  ${entries.length} entrypoints resolve under Node ESM`);
 }
 
-// The strongest guard: pack @spilne/perfect-core exactly as `npm publish` would, install
-// the tarball into a throwaway consumer, and typecheck that consumer the way a real
-// downstream project does — "moduleResolution": "nodenext", declaration emit on, and
-// skipLibCheck *off* so broken published types are reported instead of swallowed.
-// Catches both packaging regressions: unresolvable relative specifiers (TS2834) and
-// public types that the barrel forgets to export (TS2742).
-async function assertConsumerTypechecks(): Promise<void> {
+interface PackedConsumer {
+  /** Throwaway project the tarball is installed into. */
+  dir: string;
+  /** Where the extracted tarball lives, exactly as `npm install` would place it. */
+  installDir: string;
+}
+
+// Pack @spilne/perfect-core exactly as `npm publish` would and install the tarball
+// into a throwaway consumer project. Whatever `files` leaves out is simply absent
+// here, so every check that runs against this fixture sees the package a real
+// downstream project sees — not the working tree.
+async function installPackedCore(): Promise<PackedConsumer> {
   const fixtureDir = "node_modules/.cache/perfect-consumer-smoke";
   const installDir = join(fixtureDir, "node_modules/@spilne/perfect-core");
   await rm(fixtureDir, { recursive: true, force: true });
@@ -181,6 +225,16 @@ async function assertConsumerTypechecks(): Promise<void> {
     join(fixtureDir, "package.json"),
     JSON.stringify({ name: "perfect-consumer-smoke", private: true, type: "module" }, null, 2),
   );
+
+  return { dir: fixtureDir, installDir };
+}
+
+// The strongest static guard: typecheck the consumer the way a real downstream
+// project does — "moduleResolution": "nodenext", declaration emit on, and
+// skipLibCheck *off* so broken published types are reported instead of swallowed.
+// Catches both packaging regressions: unresolvable relative specifiers (TS2834) and
+// public types that the barrel forgets to export (TS2742).
+async function assertConsumerTypechecks({ dir: fixtureDir }: PackedConsumer): Promise<void> {
   await writeFile(
     join(fixtureDir, "tsconfig.json"),
     JSON.stringify(
@@ -237,8 +291,82 @@ async function assertConsumerTypechecks(): Promise<void> {
         `${tsc.stdout}${tsc.stderr}`.trim(),
     );
   }
-  await rm(fixtureDir, { recursive: true, force: true });
   console.log(`ok  packed @spilne/perfect-core typechecks from a nodenext consumer`);
+}
+
+// Typechecking proves the published *types* resolve; it says nothing about the files
+// a module opens at runtime. `WorkerPool` spawns `dist/worker/executor.js` through
+// `new URL(…, import.meta.url)`, which no compiler or import graph ever visits — it
+// pointed at the source-only `./executor.ts` for a while and nothing noticed, because
+// in-repo runs have that file and consumers do not. So actually drive a pool out of
+// the packed tarball, on every runtime the package claims to support.
+async function assertPackedWorkerPoolRuns({ dir, installDir }: PackedConsumer): Promise<void> {
+  // A pool whose executor is missing does not throw, it goes quiet: the tasks
+  // never settle. Cap the run so a regression fails the guard instead of parking
+  // CI until the job timeout.
+  const timeout = 60_000;
+  const executor = join(installDir, "dist/worker/executor.js");
+
+  try {
+    await access(executor);
+  } catch {
+    throw new Error(
+      `@spilne/perfect-core: the packed tarball has no dist/worker/executor.js — ` +
+        `WorkerPool spawns it at runtime, so check the build emits it and that "files" ships it.`,
+    );
+  }
+
+  const script = resolve(dir, "worker-pool-smoke.mjs");
+  await writeFile(
+    script,
+    [
+      `import { run } from "@spilne/perfect-core";`,
+      `import { WorkerPool } from "@spilne/perfect-core/worker";`,
+      ``,
+      `const pool = await run(WorkerPool.make(2));`,
+      `try {`,
+      `  const doubled = await run(pool.execute((x) => x * 2, 21));`,
+      `  if (doubled !== 42) throw new Error(\`execute returned \${doubled}\`);`,
+      `  const squares = await run(pool.parMap([1, 2, 3, 4], (x) => x * x));`,
+      `  if (squares.join(",") !== "1,4,9,16") throw new Error(\`parMap returned \${squares}\`);`,
+      `} finally {`,
+      `  await run(pool.shutdown());`,
+      `}`,
+      ``,
+    ].join("\n"),
+  );
+
+  const runtimes: { name: string; command: string; args: string[] }[] = [
+    { name: "Bun", command: "bun", args: [script] },
+    { name: "Node", command: "node", args: [script] },
+  ];
+
+  for (const runtime of runtimes) {
+    const result = spawnSync(runtime.command, runtime.args, {
+      cwd: dir,
+      encoding: "utf8",
+      timeout,
+    });
+
+    if (result.error && (result.error as { code?: string }).code === "ENOENT") {
+      console.log(`warn ${runtime.command} not on PATH — skipping its WorkerPool runtime check`);
+      continue;
+    }
+    if (result.signal) {
+      throw new Error(
+        `WorkerPool from the packed @spilne/perfect-core never settled under ${runtime.name} ` +
+          `(killed after ${timeout / 1000}s) — a worker that cannot load its executor hangs instead ` +
+          `of failing.\n${`${result.stdout}${result.stderr}`.trim()}`,
+      );
+    }
+    if (result.status !== 0) {
+      throw new Error(
+        `WorkerPool from the packed @spilne/perfect-core fails under ${runtime.name}:\n` +
+          `${result.stdout}${result.stderr}`.trim(),
+      );
+    }
+    console.log(`ok  packed @spilne/perfect-core WorkerPool executes a task under ${runtime.name}`);
+  }
 }
 
 async function listFiles(dir: string): Promise<string[]> {
