@@ -3,9 +3,16 @@ import type { Codec } from "@spilne/perfect-core/connect";
 import { JsonCodec } from "@spilne/perfect-core/connect";
 import type { Eff, Queue, Throws } from "@spilne/perfect-core";
 import { QueueClosed } from "@spilne/perfect-core";
-import { decode, encode, numberResult, redisBlocking, redisEff, redisKeyFamily } from "./internal";
-import type { RedisClient } from "./redis-client";
-import { RedisError, toRedisError } from "./redis-error";
+import {
+  decode,
+  encode,
+  numberResult,
+  redisBlocking,
+  redisEff,
+  redisKeyFamily,
+} from "./internal.js";
+import type { RedisClient } from "./redis-client.js";
+import { RedisError, toRedisError } from "./redis-error.js";
 
 const OFFER_SCRIPT = `
 if redis.call('HGET', KEYS[2], 'closed') == '1' then return -1 end

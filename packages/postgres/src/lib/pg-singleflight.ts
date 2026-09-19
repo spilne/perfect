@@ -17,8 +17,8 @@
 import { fromPromise, run } from "@spilne/perfect-core";
 import type { Eff, Throws, Singleflight } from "@spilne/perfect-core";
 import { sql } from "drizzle-orm";
-import { type DrizzleDb, execRaw } from "./drizzle-db";
-import { PostgresError, toPostgresError } from "./postgres-error";
+import { type DrizzleDb, execRaw } from "./drizzle-db.js";
+import { PostgresError, toPostgresError } from "./postgres-error.js";
 
 export interface PgSingleflightConfig {
   db: DrizzleDb;

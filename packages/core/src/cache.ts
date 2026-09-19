@@ -7,9 +7,9 @@
 // `cachedBy(build, opts?)` — keyed cache with optional TTL (flat or per-value),
 // optional LRU eviction via `maxSize`, and introspection methods.
 
-import { type Eff } from "./eff";
-import { succeed, sync } from "./constructors";
-import { Clock } from "./clock";
+import { type Eff } from "./eff.js";
+import { succeed, sync } from "./constructors.js";
+import { Clock } from "./clock.js";
 
 // ── cached: single-entry, optional TTL ─────────────────────────────
 

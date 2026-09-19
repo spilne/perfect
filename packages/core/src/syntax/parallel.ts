@@ -1,6 +1,6 @@
-import { type Eff, Suspend, Op } from "../eff";
+import { type Eff, Suspend, Op } from "../eff.js";
 
-declare module "../eff" {
+declare module "../eff.js" {
   interface Suspend {
     parZip<A, S1, B, S2>(this: Eff<A, S1>, that: Eff<B, S2>): Eff<[A, B], S1 | S2>;
 

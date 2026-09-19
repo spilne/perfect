@@ -11,9 +11,9 @@
 // Eff-typed contract; in-process by default. Distributed backends fit the
 // same interface.
 
-import { type Eff } from "./eff";
-import { type Deferred, Deferred as DeferredNS } from "./deferred";
-import { Ref } from "./ref";
+import { type Eff } from "./eff.js";
+import { type Deferred, Deferred as DeferredNS } from "./deferred.js";
+import { Ref } from "./ref.js";
 
 export interface Barrier<S = never> {
   /** Arrive at the barrier and block until all `parties` have arrived. */
@@ -25,7 +25,7 @@ export interface Barrier<S = never> {
 class InProcessBarrier implements Barrier {
   constructor(
     private readonly parties: number,
-    private readonly count: import("./ref").Ref<number>,
+    private readonly count: import("./ref.js").Ref<number>,
     private readonly deferred: Deferred<void, never>,
   ) {}
 

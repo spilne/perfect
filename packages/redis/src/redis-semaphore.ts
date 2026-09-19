@@ -1,8 +1,8 @@
 import { acquireRelease, scoped, sleep, succeed, uninterruptibleMask } from "@spilne/perfect-core";
 import type { Eff, Semaphore, Throws } from "@spilne/perfect-core";
-import { numberResult, redisEff } from "./internal";
-import type { RedisClient } from "./redis-client";
-import { RedisError } from "./redis-error";
+import { numberResult, redisEff } from "./internal.js";
+import type { RedisClient } from "./redis-client.js";
+import { RedisError } from "./redis-error.js";
 
 const ACQUIRE_SCRIPT = `
 local available = tonumber(redis.call('GET', KEYS[1]) or '0')

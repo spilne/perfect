@@ -1,6 +1,6 @@
 import { TaggedError } from "@spilne/perfect-core";
-import type { TopicName } from "./brands";
-import type { KafkaOffsetCommit } from "./kafka-types";
+import type { TopicName } from "./brands.js";
+import type { KafkaOffsetCommit } from "./kafka-types.js";
 
 export class KafkaCommitError extends TaggedError("KafkaCommitError")<{
   readonly cause: unknown;

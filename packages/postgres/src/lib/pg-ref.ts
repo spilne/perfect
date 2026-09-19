@@ -12,8 +12,8 @@
 import { fromPromise } from "@spilne/perfect-core";
 import type { Eff, Ref, Throws } from "@spilne/perfect-core";
 import { sql } from "drizzle-orm";
-import { type DrizzleDb, execRaw, stringColumn } from "./drizzle-db";
-import { PostgresError, toPostgresError } from "./postgres-error";
+import { type DrizzleDb, execRaw, stringColumn } from "./drizzle-db.js";
+import { PostgresError, toPostgresError } from "./postgres-error.js";
 
 export interface PgRefConfig<T> {
   db: DrizzleDb;

@@ -28,9 +28,9 @@ import type {
   Codec,
   ConsumerGroup,
 } from "@spilne/perfect-core/connect";
-import type { DrizzleDb } from "./drizzle-db";
-import { pollStream } from "./poll-stream";
-import { PostgresError, toPostgresError } from "./postgres-error";
+import type { DrizzleDb } from "./drizzle-db.js";
+import { pollStream } from "./poll-stream.js";
+import { PostgresError, toPostgresError } from "./postgres-error.js";
 import type postgres from "postgres";
 
 // ---------------------------------------------------------------------------

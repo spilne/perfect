@@ -3,7 +3,7 @@
 // perfect keeps them in one file until there's cross-type machinery that
 // justifies a package.
 
-import type { Codec } from "./connect/codec";
+import type { Codec } from "./connect/codec.js";
 
 // ---------------------------------------------------------------------------
 // Eq<T> — Equality typeclass

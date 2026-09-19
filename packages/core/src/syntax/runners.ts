@@ -1,10 +1,10 @@
-import { type Eff, type EffectCheck, Suspend } from "../eff";
-import { run, runSync, runExit, runFiber } from "../runtime";
-import type { Scheduler } from "../scheduler";
-import type { Fiber } from "../fiber";
-import type { Exit } from "../exit";
+import { type Eff, type EffectCheck, Suspend } from "../eff.js";
+import { run, runSync, runExit, runFiber } from "../runtime.js";
+import type { Scheduler } from "../scheduler.js";
+import type { Fiber } from "../fiber.js";
+import type { Exit } from "../exit.js";
 
-declare module "../eff" {
+declare module "../eff.js" {
   interface Suspend {
     run<A, S>(this: Eff<A, S> & EffectCheck<S>, scheduler?: Scheduler): Promise<A>;
     runSync<A>(this: Eff<A, never>): A;

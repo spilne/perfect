@@ -21,7 +21,7 @@
 // on every operation anyway — branding would force rebrand ceremony at each
 // step for no swap protection inside a single (partition, offset) pair.
 
-import type { Partition } from "./contracts";
+import type { Partition } from "./contracts.js";
 
 export class OffsetTracker {
   // partition → set of completed offsets

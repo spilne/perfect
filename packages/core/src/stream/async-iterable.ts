@@ -1,10 +1,10 @@
-import type { Eff } from "../eff";
-import { async, ensuring, succeed, suspend } from "../constructors";
-import { Cause } from "../cause";
-import type { Fiber, FiberResult } from "../fiber";
-import { runFiber } from "../runtime";
-import type { Chunk } from "./chunk";
-import type { Step, Stream } from "./stream";
+import type { Eff } from "../eff.js";
+import { async, ensuring, succeed, suspend } from "../constructors.js";
+import { Cause } from "../cause.js";
+import type { Fiber, FiberResult } from "../fiber.js";
+import { runFiber } from "../runtime.js";
+import type { Chunk } from "./chunk.js";
+import type { Step, Stream } from "./stream.js";
 
 interface Settle<T> {
   readonly resolve: (value: T) => void;

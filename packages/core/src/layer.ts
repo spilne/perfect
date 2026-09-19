@@ -17,9 +17,9 @@
 // frame. Any `acquireRelease` inside the layer has its release tied to
 // that scope, so resources clean up after the program exits.
 
-import { type Eff, type Needs, Suspend, Op } from "./eff";
-import { scoped } from "./constructors";
-import type { Scope } from "./scope";
+import { type Eff, type Needs, Suspend, Op } from "./eff.js";
+import { scoped } from "./constructors.js";
+import type { Scope } from "./scope.js";
 
 // ── Type alias ─────────────────────────────────────────────────────
 
@@ -265,7 +265,7 @@ export function build<L extends readonly Layer<any, any>[]>(
 
 // ── .with() method ─────────────────────────────────────────────────
 
-declare module "./eff" {
+declare module "./eff.js" {
   interface Suspend {
     /**
      * Apply a layer — run the layer, install each service in context,

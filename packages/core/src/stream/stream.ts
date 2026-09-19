@@ -15,7 +15,7 @@ import {
   type ExcludeTags,
   Suspend,
   Op,
-} from "../eff";
+} from "../eff.js";
 import {
   succeed,
   fail,
@@ -39,17 +39,17 @@ import {
   interruptible,
   retry as effRetry,
   type RetryConfig,
-} from "../constructors";
-import { TaggedError } from "../tagged-error";
-import type { RetryPolicy } from "../retry-policy";
-import { type Queue, Queue as QueueNS, QueueClosed } from "../queue";
-import { type Deferred, Deferred as DeferredNS } from "../deferred";
-import { Semaphore } from "../semaphore";
-import { Cause } from "../cause";
-import { clockNow } from "../clock";
-import { Exit } from "../exit";
-import type { Fiber } from "../fiber";
-import type { StateBackend } from "../connect/state-backend";
+} from "../constructors.js";
+import { TaggedError } from "../tagged-error.js";
+import type { RetryPolicy } from "../retry-policy.js";
+import { type Queue, Queue as QueueNS, QueueClosed } from "../queue.js";
+import { type Deferred, Deferred as DeferredNS } from "../deferred.js";
+import { Semaphore } from "../semaphore.js";
+import { Cause } from "../cause.js";
+import { clockNow } from "../clock.js";
+import { Exit } from "../exit.js";
+import type { Fiber } from "../fiber.js";
+import type { StateBackend } from "../connect/state-backend.js";
 
 export interface StatefulMapOptions<A, K, V, B, S> {
   readonly stateBackend: StateBackend<K, V>;
@@ -73,12 +73,12 @@ import {
   withPullAttempts,
   type DriverRun,
   type Pull,
-} from "./driver-lifecycle";
-import { mergeStreams } from "./merge";
-import { streamToAsyncIterable } from "./async-iterable";
-import { parJoinStreams } from "./par-join";
-import { Chunk } from "./chunk";
-import { type FusibleOp, compileFused, hasFilterOps, SKIP } from "./fusion";
+} from "./driver-lifecycle.js";
+import { mergeStreams } from "./merge.js";
+import { streamToAsyncIterable } from "./async-iterable.js";
+import { parJoinStreams } from "./par-join.js";
+import { Chunk } from "./chunk.js";
+import { type FusibleOp, compileFused, hasFilterOps, SKIP } from "./fusion.js";
 
 // ── Errors ─────────────────────────────────────────────────────────
 

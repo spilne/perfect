@@ -1,11 +1,11 @@
 // Built-in pipes — reusable stream transformations
 
-import { Stream } from "./stream";
-import { Chunk } from "./chunk";
-import type { Pipe } from "./stream";
-import type { Throws } from "../eff";
-import { succeed, fail } from "../constructors";
-import { TaggedError } from "../tagged-error";
+import { Stream } from "./stream.js";
+import { Chunk } from "./chunk.js";
+import type { Pipe } from "./stream.js";
+import type { Throws } from "../eff.js";
+import { succeed, fail } from "../constructors.js";
+import { TaggedError } from "../tagged-error.js";
 
 const stripCR = (s: string): string => (s.endsWith("\r") ? s.slice(0, -1) : s);
 

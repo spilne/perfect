@@ -1,8 +1,8 @@
 // Deferred<A, E> — write-once promise/handle.
 // Eff-typed contract; in-process implementation by default.
 
-import { type Eff, type Throws } from "./eff";
-import { succeed, fail, sync, async } from "./constructors";
+import { type Eff, type Throws } from "./eff.js";
+import { succeed, fail, sync, async } from "./constructors.js";
 
 export type DeferredState<A, E> =
   | { readonly _tag: "Pending"; readonly waiters: Set<(result: DeferredResult<A, E>) => void> }

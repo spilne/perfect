@@ -16,7 +16,7 @@
 // ±Infinity, -0. Anything else JSON-native passes through untouched.
 // ---------------------------------------------------------------------------
 
-import type { Codec } from "./codec";
+import type { Codec } from "./codec.js";
 
 type Tag =
   | "undefined"

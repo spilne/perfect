@@ -10,7 +10,7 @@
 import { fromPromise, sleep, succeed } from "@spilne/perfect-core";
 import type { Throws } from "@spilne/perfect-core";
 import { Stream } from "@spilne/perfect-core/stream";
-import { PostgresError, toPostgresError } from "./postgres-error";
+import { PostgresError, toPostgresError } from "./postgres-error.js";
 
 export function pollStream<R>(
   poll: () => Promise<R[]>,

@@ -11,11 +11,11 @@
 // implements it, topology consumes it); DistributedTopologyConfig is local.
 // ---------------------------------------------------------------------------
 
-import { StreamTopology, BuiltTopology } from "./stream-topology";
-import { TopologyRunner } from "./topology-runner";
-import { planStages } from "./stage-planner";
-import type { TopologyHandle, TopologyMetrics, TopologyConfig } from "./types";
-import type { StateBackend } from "./state-backend";
+import { StreamTopology, BuiltTopology } from "./stream-topology.js";
+import { TopologyRunner } from "./topology-runner.js";
+import { planStages } from "./stage-planner.js";
+import type { TopologyHandle, TopologyMetrics, TopologyConfig } from "./types.js";
+import type { StateBackend } from "./state-backend.js";
 import type {
   Streamable,
   Acknowledgeable,

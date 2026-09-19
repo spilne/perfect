@@ -1,8 +1,8 @@
 import type { Codec } from "@spilne/perfect-core/connect";
-import { GroupId, TopicName } from "./brands";
-import { KafkaTopic } from "./kafka-topic";
-import type { KafkaTopicConfig } from "./kafka-topic";
-import type { KafkaClient, KafkaConsumerOptions } from "./kafka-types";
+import { GroupId, TopicName } from "./brands.js";
+import { KafkaTopic } from "./kafka-topic.js";
+import type { KafkaTopicConfig } from "./kafka-topic.js";
+import type { KafkaClient, KafkaConsumerOptions } from "./kafka-types.js";
 
 export class KafkaConfigBuilder<T> {
   private kafkaClient?: KafkaClient;

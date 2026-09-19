@@ -10,8 +10,8 @@
 // an external API's documented rate limit). Use RateLimiter directly when
 // you want fail-fast OR wait-mode at different call sites.
 
-import { type Eff } from "./eff";
-import { type RateLimiter, RateLimiter as RateLimiterNS } from "./rate-limiter";
+import { type Eff } from "./eff.js";
+import { type RateLimiter, RateLimiter as RateLimiterNS } from "./rate-limiter.js";
 
 export interface Throttle<S = never> {
   /** Block until a permit is available. */

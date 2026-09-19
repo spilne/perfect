@@ -1,7 +1,7 @@
 import type { Eff, Throttle, Throws } from "@spilne/perfect-core";
-import type { RedisClient } from "./redis-client";
-import { RedisError } from "./redis-error";
-import { RedisRateLimiter } from "./redis-rate-limiter";
+import type { RedisClient } from "./redis-client.js";
+import { RedisError } from "./redis-error.js";
+import { RedisRateLimiter } from "./redis-rate-limiter.js";
 
 export interface RedisThrottleConfig {
   redis: RedisClient;

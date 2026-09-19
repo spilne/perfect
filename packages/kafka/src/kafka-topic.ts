@@ -38,10 +38,10 @@ import type {
   KafkaProducer,
   KafkaMessage,
   KafkaBatchPayload,
-} from "./kafka-types";
-import { type TopicName, type GroupId, PartitionId, KafkaOffset } from "./brands";
-import { KafkaError, toKafkaError } from "./kafka-error";
-import { AckSubscriptionLifecycle } from "./ack-subscription-lifecycle";
+} from "./kafka-types.js";
+import { type TopicName, type GroupId, PartitionId, KafkaOffset } from "./brands.js";
+import { KafkaError, toKafkaError } from "./kafka-error.js";
+import { AckSubscriptionLifecycle } from "./ack-subscription-lifecycle.js";
 
 export interface KafkaTopicConfig<T> {
   /** Kafka client instance. */

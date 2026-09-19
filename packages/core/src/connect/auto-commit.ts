@@ -13,12 +13,12 @@
 //     .through(autoCommitBatchWithin(500, 15_000))
 //     .drain()
 
-import type { Eff } from "../eff";
-import { succeed } from "../constructors";
-import { TaggedError } from "../tagged-error";
-import { Stream } from "../stream";
-import type { Pipe } from "../stream";
-import type { Envelope } from "./contracts";
+import type { Eff } from "../eff.js";
+import { succeed } from "../constructors.js";
+import { TaggedError } from "../tagged-error.js";
+import { Stream } from "../stream/index.js";
+import type { Pipe } from "../stream/index.js";
+import type { Envelope } from "./contracts.js";
 
 export class AckError extends TaggedError("AckError")<{
   readonly cause: unknown;

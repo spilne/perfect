@@ -17,6 +17,21 @@ const resolveLocalImport = (candidatePath) => {
     return candidatePath;
   }
 
+  // packages/*/src imports siblings as "./x.js" so the emitted dist/ resolves under
+  // Node ESM and "moduleResolution": "nodenext". Running those same sources through
+  // this loader means mapping that specifier back onto the .ts file on disk.
+  if (candidatePath.endsWith(".js")) {
+    const source = `${candidatePath.slice(0, -3)}.ts`;
+    if (existsSync(source)) {
+      return source;
+    }
+
+    const sourceTsx = `${candidatePath.slice(0, -3)}.tsx`;
+    if (existsSync(sourceTsx)) {
+      return sourceTsx;
+    }
+  }
+
   if (existsSync(`${candidatePath}.ts`)) {
     return `${candidatePath}.ts`;
   }

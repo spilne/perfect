@@ -12,6 +12,6 @@
 // tag is just for when you want DI.
 
 import { service } from "@spilne/perfect-core";
-import type { HttpClient as HttpClientT } from "./client";
+import type { HttpClient as HttpClientT } from "./client.js";
 
 export const HttpClient = service<HttpClientT>()("HttpClient");

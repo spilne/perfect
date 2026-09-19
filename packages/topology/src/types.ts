@@ -10,7 +10,7 @@ import type {
   TopologyInstanceId,
 } from "@spilne/perfect-core/connect";
 import type { ExitT } from "@spilne/perfect-core";
-import type { StateBackend } from "./state-backend";
+import type { StateBackend } from "./state-backend.js";
 import type { PartitionedStateBackend } from "@spilne/perfect-core/connect";
 
 export interface TimeWindow {

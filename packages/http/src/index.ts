@@ -16,11 +16,11 @@ export {
   HttpUnknownError,
   HttpParseError,
   HTTP_RETRYABLE,
-} from "./errors";
-export type { HttpClientError } from "./errors";
+} from "./errors.js";
+export type { HttpClientError } from "./errors.js";
 
-export { FetchTransport, defaultTransport } from "./transport";
-export type { HttpTransport, HttpRequestOptions, HttpProxyConfig } from "./transport";
+export { FetchTransport, defaultTransport } from "./transport.js";
+export type { HttpTransport, HttpRequestOptions, HttpProxyConfig } from "./transport.js";
 
 export {
   binaryDecoder,
@@ -28,14 +28,14 @@ export {
   jsonDecoder,
   arrayBufferDecoder,
   blobDecoder,
-} from "./response";
-export type { HttpResponse, ResponseDecoder, ResponseParser } from "./response";
+} from "./response.js";
+export type { HttpResponse, ResponseDecoder, ResponseParser } from "./response.js";
 
-export { httpFetch, httpFetchOk, httpRequest, httpRequestJson, httpRequestText } from "./fetch";
-export type { AcceptStatus, WithTransport } from "./fetch";
+export { httpFetch, httpFetchOk, httpRequest, httpRequestJson, httpRequestText } from "./fetch.js";
+export type { AcceptStatus, WithTransport } from "./fetch.js";
 
 // ── Phase 2 ──────────────────────────────────────────────────────
-export { AbstractHttpClient, DefaultHttpClient, identityParser } from "./client";
+export { AbstractHttpClient, DefaultHttpClient, identityParser } from "./client.js";
 export type {
   HttpClient,
   HttpClientConfig,
@@ -43,11 +43,11 @@ export type {
   RequestOptions,
   RequestBodyOptions,
   MultipartOptions,
-} from "./client";
-export type { HttpMiddleware, HttpRequestContext } from "./middleware";
+} from "./client.js";
+export type { HttpMiddleware, HttpRequestContext } from "./middleware.js";
 /** Service tag for Layer-based DI. Re-exported as `HttpClientService` to
  *  avoid clashing with the `HttpClient` interface type. */
-export { HttpClient as HttpClientService } from "./service";
+export { HttpClient as HttpClientService } from "./service.js";
 
 // ── Phase 3 ──────────────────────────────────────────────────────
 // withRetryAll = full outcome ADT.
@@ -60,13 +60,13 @@ export {
   Retry,
   RetryAttempt,
   RetryDecision,
-} from "./retry";
+} from "./retry.js";
 export type {
   RetryHttpOptions,
   RetryAllOptions,
   RetryAllByOptions,
   RetryAttemptHandler,
-} from "./retry";
+} from "./retry.js";
 
 // ── Phase 4 — streaming ──────────────────────────────────────────
 // One base (httpStream) + composable pipes (parseSSE, parseNDJSON), with
@@ -81,9 +81,9 @@ export {
   httpStreamSSE,
   parseSSE,
   parseNDJSON,
-} from "./stream";
-export type { SSEvent } from "./stream";
+} from "./stream.js";
+export type { SSEvent } from "./stream.js";
 
 // ── Phase 5 — test utilities ─────────────────────────────────────
-export { MockHttpClient, mockHttpClient } from "./mock";
-export type { RecordedCall, ResponseHandler } from "./mock";
+export { MockHttpClient, mockHttpClient } from "./mock.js";
+export type { RecordedCall, ResponseHandler } from "./mock.js";

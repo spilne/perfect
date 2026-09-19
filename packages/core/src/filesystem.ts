@@ -6,12 +6,12 @@
 // with a typed FileSystemError rather than throwing a defect — a missing file
 // is an expected outcome, not a bug.
 
-import type { Eff, Throws } from "./eff";
-import { Suspend, Op } from "./eff";
-import { sync, tryPromise } from "./constructors";
-import { service, type ServiceTag } from "./service";
-import { Stream } from "./stream";
-import { TaggedError } from "./tagged-error";
+import type { Eff, Throws } from "./eff.js";
+import { Suspend, Op } from "./eff.js";
+import { sync, tryPromise } from "./constructors.js";
+import { service, type ServiceTag } from "./service.js";
+import { Stream } from "./stream/index.js";
+import { TaggedError } from "./tagged-error.js";
 
 /** Typed failure for every FileSystem operation. `cause` is the original error. */
 export class FileSystemError extends TaggedError("FileSystemError")<{

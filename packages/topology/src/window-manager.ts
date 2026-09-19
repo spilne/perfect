@@ -2,7 +2,7 @@
 // WindowManager — manages windowed state for keyed aggregation
 // ---------------------------------------------------------------------------
 
-import type { TimeWindow, WindowType, AggregateSpec } from "./types";
+import type { TimeWindow, WindowType, AggregateSpec } from "./types.js";
 
 interface WindowEntry<S> {
   window: TimeWindow;

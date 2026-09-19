@@ -1,13 +1,13 @@
-import { type Eff, type Throws, type ErrorsOf, type ExcludeTags, Suspend, Op } from "../eff";
-import { Cause } from "../cause";
-import { type Exit, Exit as ExitNS } from "../exit";
-import { succeed, fail, die } from "../constructors";
+import { type Eff, type Throws, type ErrorsOf, type ExcludeTags, Suspend, Op } from "../eff.js";
+import { Cause } from "../cause.js";
+import { type Exit, Exit as ExitNS } from "../exit.js";
+import { succeed, fail, die } from "../constructors.js";
 
 type Either<E, A> =
   | { readonly _tag: "Left"; readonly left: E }
   | { readonly _tag: "Right"; readonly right: A };
 
-declare module "../eff" {
+declare module "../eff.js" {
   interface Suspend {
     catch<A, S, B, S2>(
       this: Eff<A, S>,

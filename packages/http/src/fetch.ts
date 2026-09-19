@@ -12,9 +12,14 @@
 // timeout, race, etc. via Perfect's fluent API.
 
 import { type Eff, type Throws, fail, succeed, tryPromise } from "@spilne/perfect-core";
-import { type HttpClientError, HttpParseError, HttpStatusError, HttpUnknownError } from "./errors";
-import { type ResponseParser } from "./response";
-import { type HttpRequestOptions, type HttpTransport, defaultTransport } from "./transport";
+import {
+  type HttpClientError,
+  HttpParseError,
+  HttpStatusError,
+  HttpUnknownError,
+} from "./errors.js";
+import { type ResponseParser } from "./response.js";
+import { type HttpRequestOptions, type HttpTransport, defaultTransport } from "./transport.js";
 
 /** Transport override available on every request-taking function. */
 export interface WithTransport {

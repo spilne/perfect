@@ -1,4 +1,4 @@
-import { type Eff, Suspend, Op } from "../eff";
+import { type Eff, Suspend, Op } from "../eff.js";
 import {
   suspend,
   succeed,
@@ -7,12 +7,12 @@ import {
   awaitFiber,
   uninterruptible,
   interruptible,
-} from "../constructors";
-import type { Exit } from "../exit";
-import { Cause } from "../cause";
-import type { Fiber } from "../fiber";
-import { emptyContext } from "../service";
-import { Stream, type Step } from "./stream";
+} from "../constructors.js";
+import type { Exit } from "../exit.js";
+import { Cause } from "../cause.js";
+import type { Fiber } from "../fiber.js";
+import { emptyContext } from "../service.js";
+import { Stream, type Step } from "./stream.js";
 
 const UNIT: Eff<void, never> = succeed(undefined);
 const DONE: Step<never> = { _tag: "Done" };

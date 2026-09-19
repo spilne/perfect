@@ -1,5 +1,5 @@
-import { type Eff, Suspend, Op } from "./eff";
-import { service, type ServiceTag } from "./service";
+import { type Eff, Suspend, Op } from "./eff.js";
+import { service, type ServiceTag } from "./service.js";
 
 // ── Console service ────────────────────────────────────────────────
 

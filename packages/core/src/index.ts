@@ -1,8 +1,8 @@
-export type { Eff, Throws, Needs, InferValue, InferEffects, EffectCheck } from "./eff";
-export { Cause } from "./cause";
-export type { Cause as CauseT } from "./cause";
-export { Exit } from "./exit";
-export type { Exit as ExitT } from "./exit";
+export type { Eff, Throws, Needs, InferValue, InferEffects, EffectCheck } from "./eff.js";
+export { Cause } from "./cause.js";
+export type { Cause as CauseT } from "./cause.js";
+export { Exit } from "./exit.js";
+export type { Exit as ExitT } from "./exit.js";
 export {
   succeed,
   fail,
@@ -36,13 +36,13 @@ export {
   acquireRelease,
   scoped,
   retry,
-} from "./constructors";
-export type { RetryConfig } from "./constructors";
-export { RetryAttempt } from "./retry-attempt";
-export { RetryPolicy, runRetry } from "./retry-policy";
-export type { RetryDetails } from "./retry-policy";
-export { all, forEachPar } from "./combinators";
-export type { ForEachParOptions } from "./combinators";
+} from "./constructors.js";
+export type { RetryConfig } from "./constructors.js";
+export { RetryAttempt } from "./retry-attempt.js";
+export { RetryPolicy, runRetry } from "./retry-policy.js";
+export type { RetryDetails } from "./retry-policy.js";
+export { all, forEachPar } from "./combinators.js";
+export type { ForEachParOptions } from "./combinators.js";
 export {
   trapError,
   validate,
@@ -52,30 +52,30 @@ export {
   retryAllBy,
   retryAllCause,
   RetryDecision,
-} from "./combinators-extra";
-export type { RetryAllByOptions, RetryAttemptHandler } from "./combinators-extra";
-export { cached, cachedBy } from "./cache";
-export type { KeyedCache } from "./cache";
-export { CacheStore } from "./cache-store";
-export type { MemoryCacheStoreOptions } from "./cache-store";
-export type { RepeatTimeoutError } from "./combinators-extra";
-export { service, provide } from "./service";
-export type { ServiceTag } from "./service";
-export { TaggedError } from "./tagged-error";
-export { Layer, LayerCycleError, LayerMissingDependencyError } from "./layer";
-export type { Layer as LayerT } from "./layer";
-import "./layer";
-export { Clock, RealClock, TestClock, realClock } from "./clock";
+} from "./combinators-extra.js";
+export type { RetryAllByOptions, RetryAttemptHandler } from "./combinators-extra.js";
+export { cached, cachedBy } from "./cache.js";
+export type { KeyedCache } from "./cache.js";
+export { CacheStore } from "./cache-store.js";
+export type { MemoryCacheStoreOptions } from "./cache-store.js";
+export type { RepeatTimeoutError } from "./combinators-extra.js";
+export { service, provide } from "./service.js";
+export type { ServiceTag } from "./service.js";
+export { TaggedError } from "./tagged-error.js";
+export { Layer, LayerCycleError, LayerMissingDependencyError } from "./layer.js";
+export type { Layer as LayerT } from "./layer.js";
+import "./layer.js";
+export { Clock, RealClock, TestClock, realClock } from "./clock.js";
 export {
   FileSystem,
   FileSystemError,
   RealFileSystem,
   TestFileSystem,
   realFileSystem,
-} from "./filesystem";
-export type { FileEvent, FileStat } from "./filesystem";
-export { Random, RealRandom, TestRandom, realRandom } from "./random";
-export { Console, RealConsole, TestConsole, realConsole } from "./console";
+} from "./filesystem.js";
+export type { FileEvent, FileStat } from "./filesystem.js";
+export { Random, RealRandom, TestRandom, realRandom } from "./random.js";
+export { Console, RealConsole, TestConsole, realConsole } from "./console.js";
 export {
   Logger,
   Log,
@@ -86,7 +86,7 @@ export {
   levelEnabled,
   type LogLevel,
   type LogEntry,
-} from "./logger";
+} from "./logger.js";
 export {
   Tracer,
   withSpan,
@@ -97,7 +97,7 @@ export {
   type SpanStatus,
   type SpanOptions,
   type RecordedSpan,
-} from "./tracing";
+} from "./tracing.js";
 export {
   Metrics,
   MetricsRegistry,
@@ -108,7 +108,7 @@ export {
   DEFAULT_BUCKETS,
   type Labels,
   type MetricsSnapshot,
-} from "./metrics";
+} from "./metrics.js";
 export {
   type Eq,
   type Ord,
@@ -123,36 +123,36 @@ export {
   arrayMonoid,
   sumMonoid,
   stringMonoid,
-} from "./typeclasses";
-export { createGracefulShutdown, type GracefulShutdown } from "./graceful-shutdown";
-export { type Brand, type Unbrand, nominal, refined, BrandError } from "./brand";
-export { Gen, forAll } from "./gen";
-export type { PropertyFailure } from "./gen";
-export { run, runSync, runFiber, runExit, runSafe } from "./runtime";
-export { Fiber, addFiberSupervisor } from "./fiber";
-export type { FiberSnapshot, FiberStatus, FiberSupervisor } from "./fiber";
-export { Ref } from "./ref";
-export { Deferred } from "./deferred";
-export { Queue, QueueClosed, QueueShutdown } from "./queue";
-export { Semaphore } from "./semaphore";
-export { CircuitBreaker } from "./circuit-breaker";
-export type { CircuitState, CircuitOpen, CircuitBreakerOptions } from "./circuit-breaker";
-export { Latch } from "./latch";
-export { Barrier } from "./barrier";
-export { Singleflight } from "./singleflight";
-export { PubSub } from "./pubsub";
-export { SubscriptionRef } from "./subscription-ref";
-export { RateLimiter } from "./rate-limiter";
-export type { RateLimitStrategy, RateLimitExceeded, RateLimiterOptions } from "./rate-limiter";
-export { Throttle } from "./throttle";
-export { Duration, resolveMs } from "./duration";
-export type { DurationInput } from "./duration";
-export { Pool, PoolClosed } from "./pool";
-export type { PoolOptions } from "./pool";
-export { Schedule, retryWith, repeat } from "./schedule";
-export type { Scheduler } from "./scheduler";
-export { AsyncScheduler, BunScheduler, SyncScheduler, setDefaultScheduler } from "./scheduler";
-export { WorkerPool } from "./worker";
+} from "./typeclasses.js";
+export { createGracefulShutdown, type GracefulShutdown } from "./graceful-shutdown.js";
+export { type Brand, type Unbrand, nominal, refined, BrandError } from "./brand.js";
+export { Gen, forAll } from "./gen.js";
+export type { PropertyFailure } from "./gen.js";
+export { run, runSync, runFiber, runExit, runSafe } from "./runtime.js";
+export { Fiber, addFiberSupervisor } from "./fiber.js";
+export type { FiberSnapshot, FiberStatus, FiberSupervisor } from "./fiber.js";
+export { Ref } from "./ref.js";
+export { Deferred } from "./deferred.js";
+export { Queue, QueueClosed, QueueShutdown } from "./queue.js";
+export { Semaphore } from "./semaphore.js";
+export { CircuitBreaker } from "./circuit-breaker.js";
+export type { CircuitState, CircuitOpen, CircuitBreakerOptions } from "./circuit-breaker.js";
+export { Latch } from "./latch.js";
+export { Barrier } from "./barrier.js";
+export { Singleflight } from "./singleflight.js";
+export { PubSub } from "./pubsub.js";
+export { SubscriptionRef } from "./subscription-ref.js";
+export { RateLimiter } from "./rate-limiter.js";
+export type { RateLimitStrategy, RateLimitExceeded, RateLimiterOptions } from "./rate-limiter.js";
+export { Throttle } from "./throttle.js";
+export { Duration, resolveMs } from "./duration.js";
+export type { DurationInput } from "./duration.js";
+export { Pool, PoolClosed } from "./pool.js";
+export type { PoolOptions } from "./pool.js";
+export { Schedule, retryWith, repeat } from "./schedule.js";
+export type { Scheduler } from "./scheduler.js";
+export { AsyncScheduler, BunScheduler, SyncScheduler, setDefaultScheduler } from "./scheduler.js";
+export { WorkerPool } from "./worker/index.js";
 export {
   Chunk,
   Pipe,
@@ -164,8 +164,8 @@ export {
   Sink,
   Pipes,
   Sinks,
-} from "./stream";
-export type { CsvOptions, SchemaParser, StatefulMapOptions } from "./stream";
+} from "./stream/index.js";
+export type { CsvOptions, SchemaParser, StatefulMapOptions } from "./stream/index.js";
 
-export { eff } from "./syntax";
-import "./syntax";
+export { eff } from "./syntax/index.js";
+import "./syntax/index.js";

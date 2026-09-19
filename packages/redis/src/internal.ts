@@ -1,8 +1,8 @@
 import { async, fail, fromPromise, succeed } from "@spilne/perfect-core";
 import type { Codec } from "@spilne/perfect-core/connect";
 import type { Eff, Throws } from "@spilne/perfect-core";
-import { closeRedisClient, type RedisClient } from "./redis-client";
-import { RedisError, toRedisError } from "./redis-error";
+import { closeRedisClient, type RedisClient } from "./redis-client.js";
+import { RedisError, toRedisError } from "./redis-error.js";
 
 export function redisEff<A>(
   operation: string,

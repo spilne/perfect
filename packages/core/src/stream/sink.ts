@@ -1,6 +1,6 @@
-import type { Eff } from "../eff";
-import { succeed } from "../constructors";
-import type { Stream } from "./stream";
+import type { Eff } from "../eff.js";
+import { succeed } from "../constructors.js";
+import type { Stream } from "./stream.js";
 
 export class Sink<A, B, S = never> {
   // Polymorphic in the input's effect union, like Pipe: a sink THREADS the

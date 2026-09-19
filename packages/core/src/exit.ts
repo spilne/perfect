@@ -1,4 +1,4 @@
-import { Cause } from "./cause";
+import { Cause } from "./cause.js";
 
 export type Exit<E = unknown, A = unknown> =
   | { readonly _tag: "Success"; readonly value: A }

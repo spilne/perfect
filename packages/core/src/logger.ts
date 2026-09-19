@@ -9,9 +9,9 @@
 //   Log.annotated(program, { requestId })          // annotations inherited
 //   provide(program, Logger, new TestLogger())     // capture in tests
 
-import { type Eff, Suspend, Op } from "./eff";
-import { service, type ServiceTag } from "./service";
-import { clockNow } from "./clock";
+import { type Eff, Suspend, Op } from "./eff.js";
+import { service, type ServiceTag } from "./service.js";
+import { clockNow } from "./clock.js";
 
 export type LogLevel = "trace" | "debug" | "info" | "warn" | "error" | "fatal";
 

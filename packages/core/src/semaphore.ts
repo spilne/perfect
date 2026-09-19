@@ -1,8 +1,8 @@
 // Semaphore — counting semaphore with fair FIFO ordering.
 // Eff-typed contract; in-process implementation by default.
 
-import { type Eff } from "./eff";
-import { succeed, sync, async, ensuring } from "./constructors";
+import { type Eff } from "./eff.js";
+import { succeed, sync, async, ensuring } from "./constructors.js";
 
 export interface Semaphore<S = never> {
   /** Take one permit, blocking until available. */

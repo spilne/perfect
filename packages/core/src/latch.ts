@@ -13,10 +13,10 @@
 // Eff-typed contract; in-process implementation by default. Distributed
 // (Redis/Postgres) backends live in downstream packages.
 
-import { type Eff } from "./eff";
-import { succeed } from "./constructors";
-import { type Deferred, Deferred as DeferredNS } from "./deferred";
-import { Ref } from "./ref";
+import { type Eff } from "./eff.js";
+import { succeed } from "./constructors.js";
+import { type Deferred, Deferred as DeferredNS } from "./deferred.js";
+import { Ref } from "./ref.js";
 
 export interface Latch<S = never> {
   /** Decrement the counter by 1. Releases all awaiters when it hits 0. */
@@ -31,7 +31,7 @@ export interface Latch<S = never> {
 
 class InProcessLatch implements Latch {
   constructor(
-    private readonly count: import("./ref").Ref<number>,
+    private readonly count: import("./ref.js").Ref<number>,
     private readonly deferred: Deferred<void, never>,
   ) {}
 

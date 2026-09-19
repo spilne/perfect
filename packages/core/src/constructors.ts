@@ -1,8 +1,8 @@
-import { Cause } from "./cause";
-import { type Eff, type Throws, type InferValue, type InferEffects, Suspend, Op } from "./eff";
-import { Fiber } from "./fiber";
-import { type Exit, Exit as ExitNS } from "./exit";
-import { RetryPolicy, runRetry as runRetryUnified } from "./retry-policy";
+import { Cause } from "./cause.js";
+import { type Eff, type Throws, type InferValue, type InferEffects, Suspend, Op } from "./eff.js";
+import { Fiber } from "./fiber.js";
+import { type Exit, Exit as ExitNS } from "./exit.js";
+import { RetryPolicy, runRetry as runRetryUnified } from "./retry-policy.js";
 
 export function succeed<A>(value: A): Eff<A, never> {
   return new Suspend(Op.Succeed, value, null) as any;
@@ -18,7 +18,9 @@ export function die(defect: unknown): Eff<never, never> {
 
 /** Fail with a pre-existing Cause — useful for re-failing unchanged after
  *  inspecting it, without `mapErrorCause`'s transformation step. */
-export function failCause<E = unknown>(cause: import("./cause").Cause<E>): Eff<never, Throws<E>> {
+export function failCause<E = unknown>(
+  cause: import("./cause.js").Cause<E>,
+): Eff<never, Throws<E>> {
   return new Suspend(Op.Fail, cause, null) as any;
 }
 

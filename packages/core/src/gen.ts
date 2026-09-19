@@ -7,9 +7,9 @@
 // No shrinking yet — counterexamples are reported as-generated. Adding
 // shrinking is a separate, much larger piece of work (cf. fast-check).
 
-import { type Eff, type Throws, Suspend, Op } from "./eff";
-import { Random } from "./random";
-import { fail, sync } from "./constructors";
+import { type Eff, type Throws, Suspend, Op } from "./eff.js";
+import { Random } from "./random.js";
+import { fail, sync } from "./constructors.js";
 
 // ── Gen<A> ─────────────────────────────────────────────────────────
 

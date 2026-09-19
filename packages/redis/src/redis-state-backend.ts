@@ -1,7 +1,7 @@
 import type { Codec, StateBackend, CheckpointName } from "@spilne/perfect-core/connect";
 import { JsonCodec } from "@spilne/perfect-core/connect";
-import { decode, encode, redisKeyFamily } from "./internal";
-import type { RedisClient } from "./redis-client";
+import { decode, encode, redisKeyFamily } from "./internal.js";
+import type { RedisClient } from "./redis-client.js";
 
 const COPY_HASH_SCRIPT = `
 if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end

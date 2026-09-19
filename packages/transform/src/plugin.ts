@@ -1,6 +1,6 @@
 import { plugin } from "bun";
-import { rewriteEffBlocks } from "./rewrite";
-import { ensureCoreImports } from "./auto-import";
+import { rewriteEffBlocks } from "./rewrite.js";
+import { ensureCoreImports } from "./auto-import.js";
 
 plugin({
   name: "spilne-eff-transform",

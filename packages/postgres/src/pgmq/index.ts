@@ -1,6 +1,6 @@
 // Drizzle DB type (re-export for convenience)
-export type { DrizzleDb } from "../lib/drizzle-db";
-export { PostgresError } from "../lib/postgres-error";
+export type { DrizzleDb } from "../lib/drizzle-db.js";
+export { PostgresError } from "../lib/postgres-error.js";
 
 // Types
 export {
@@ -10,7 +10,7 @@ export {
   type ReadMode,
   ReadMode as ReadModes,
   type AckMode,
-} from "./types";
+} from "./types.js";
 
 // High-level typed queue (Streamable + Sinkable + Acknowledgeable)
 export {
@@ -20,7 +20,7 @@ export {
   type PgmqEnvelope,
   type PgmqOnSchemaError,
   PgmqSchemaValidationError,
-} from "./pgmq-queue";
+} from "./pgmq-queue.js";
 
 // Low-level SQL functions
 export {
@@ -43,4 +43,4 @@ export {
   enableNotify,
   disableNotify,
   createFifoIndex,
-} from "./pgmq";
+} from "./pgmq.js";

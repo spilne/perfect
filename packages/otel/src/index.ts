@@ -1,2 +1,2 @@
-export { OtelTracer } from "./tracer";
-export { OtelMetricsExporter } from "./metrics";
+export { OtelTracer } from "./tracer.js";
+export { OtelMetricsExporter } from "./metrics.js";

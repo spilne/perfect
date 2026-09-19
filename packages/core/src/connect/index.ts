@@ -24,7 +24,7 @@ export type {
   Offset,
   ShuffleTransport,
   LeaderElection,
-} from "./contracts";
+} from "./contracts.js";
 
 export {
   ConsumerGroup,
@@ -36,7 +36,7 @@ export {
   SourceRecordId,
   StateCheckpointId,
   LeaseEpoch,
-} from "./contracts";
+} from "./contracts.js";
 
 export {
   isStreamable,
@@ -49,15 +49,15 @@ export {
   isManagedAcknowledgeable,
   isTransactionalEnvelope,
   isCheckpointable,
-} from "./contracts";
+} from "./contracts.js";
 
-export type { Codec } from "./codec";
-export { JsonCodec, codecFromSchema, codecTuple, codecRecord, codecArray } from "./codec";
-export { LosslessJsonCodec } from "./lossless-codec";
-export { canonicalJSON, payloadHash } from "./canonicalize";
+export type { Codec } from "./codec.js";
+export { JsonCodec, codecFromSchema, codecTuple, codecRecord, codecArray } from "./codec.js";
+export { LosslessJsonCodec } from "./lossless-codec.js";
+export { canonicalJSON, payloadHash } from "./canonicalize.js";
 
-export { OffsetTracker } from "./offset-tracker";
-export { type StateBackend, CheckpointName, InMemoryState } from "./state-backend";
+export { OffsetTracker } from "./offset-tracker.js";
+export { type StateBackend, CheckpointName, InMemoryState } from "./state-backend.js";
 export {
   type StatePartitionScope,
   type StatePartitionLease,
@@ -69,5 +69,5 @@ export {
   type TransactionalPartitionedStateBackend,
   InMemoryPartitionedState,
   isTransactionalPartitionedStateBackend,
-} from "./partitioned-state-backend";
-export { AckError, autoCommitBatchWithin } from "./auto-commit";
+} from "./partitioned-state-backend.js";
+export { AckError, autoCommitBatchWithin } from "./auto-commit.js";

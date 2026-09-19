@@ -14,14 +14,14 @@
 // `try/catch` inside the generator catches failures (both typed errors and
 // defects) because the driver threads causes back via `gen.throw`.
 
-import { type Eff, type InferEffects, Suspend, Op } from "../eff";
-import { die, succeed, fail, failCause } from "../constructors";
-import { Cause } from "../cause";
+import { type Eff, type InferEffects, Suspend, Op } from "../eff.js";
+import { die, succeed, fail, failCause } from "../constructors.js";
+import { Cause } from "../cause.js";
 
 // Make Suspend iterable so `yield* effect` works inside generator bodies.
 // Yield the concrete effect so the generator retains each requirement, and
 // return its value type so yield* preserves the type at the call site.
-declare module "../eff" {
+declare module "../eff.js" {
   interface Suspend {
     [Symbol.iterator](): Generator<
       this,

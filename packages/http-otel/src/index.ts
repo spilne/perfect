@@ -6,8 +6,8 @@
 //
 //   defaultRedaction / makeRedaction — header redaction for span attrs
 
-export { tracingMiddleware, TracingFetchTransport, tracingTransport } from "./tracing";
-export type { TracingOptions, TracingTransportOptions } from "./tracing";
+export { tracingMiddleware, TracingFetchTransport, tracingTransport } from "./tracing.js";
+export type { TracingOptions, TracingTransportOptions } from "./tracing.js";
 
-export { defaultRedaction, makeRedaction, redactHeaders, redactUrl } from "./redact";
-export type { RedactionPolicy } from "./redact";
+export { defaultRedaction, makeRedaction, redactHeaders, redactUrl } from "./redact.js";
+export type { RedactionPolicy } from "./redact.js";

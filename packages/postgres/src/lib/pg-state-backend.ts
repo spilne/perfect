@@ -9,10 +9,10 @@
 
 import { sql } from "drizzle-orm";
 import type { StateBackend, CheckpointName } from "@spilne/perfect-core/connect";
-import type { DrizzleDb } from "./drizzle-db";
-import { execRaw, stringColumn } from "./drizzle-db";
-import { createTopologyStateTable, topologyState } from "./pg-state-schema";
-import { ensureTable as ensureTableFromSchema } from "./schema-utils";
+import type { DrizzleDb } from "./drizzle-db.js";
+import { execRaw, stringColumn } from "./drizzle-db.js";
+import { createTopologyStateTable, topologyState } from "./pg-state-schema.js";
+import { ensureTable as ensureTableFromSchema } from "./schema-utils.js";
 
 export interface PgStateBackendConfig {
   db: DrizzleDb;

@@ -1,6 +1,6 @@
-import { type Eff, type Throws } from "../eff";
-import { succeed, fail, sync, async } from "../constructors";
-import { all } from "../combinators";
+import { type Eff, type Throws } from "../eff.js";
+import { succeed, fail, sync, async } from "../constructors.js";
+import { all } from "../combinators.js";
 
 interface PendingTask {
   id: number;

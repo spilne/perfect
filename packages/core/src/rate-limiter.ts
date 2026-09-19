@@ -14,10 +14,10 @@
 // Eff-typed contract; in-process by default. Distributed RateLimiters
 // (Redis-backed shared limits) implement the same interface.
 
-import { type Eff, type Throws } from "./eff";
-import { sync, fail, sleep } from "./constructors";
-import { type Ref, Ref as RefNS } from "./ref";
-import { clockNow } from "./clock";
+import { type Eff, type Throws } from "./eff.js";
+import { sync, fail, sleep } from "./constructors.js";
+import { type Ref, Ref as RefNS } from "./ref.js";
+import { clockNow } from "./clock.js";
 
 export type RateLimitStrategy = "sliding-window" | "fixed-window" | "token-bucket";
 

@@ -16,7 +16,7 @@
 // after `filter` takes post-filter elements — while runs of pure ops on either
 // side still fuse.
 
-import { type FusibleOp, SKIP, compileFused } from "./fusion";
+import { type FusibleOp, SKIP, compileFused } from "./fusion.js";
 
 export class RawStream<A> implements Iterable<A> {
   private constructor(

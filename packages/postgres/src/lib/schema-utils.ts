@@ -9,7 +9,7 @@
 import { sql } from "drizzle-orm";
 import { getTableConfig } from "drizzle-orm/pg-core";
 import type { PgTable } from "drizzle-orm/pg-core";
-import type { DrizzleDb } from "./drizzle-db";
+import type { DrizzleDb } from "./drizzle-db.js";
 
 /**
  * Create a table from a Drizzle schema definition if it doesn't exist.

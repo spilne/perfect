@@ -15,10 +15,10 @@ import type {
   KeyedSinkable,
 } from "@spilne/perfect-core/connect";
 import type { Throws } from "@spilne/perfect-core";
-import { KafkaTopic } from "./kafka-topic";
-import type { KafkaClient } from "./kafka-types";
-import { TopicName } from "./brands";
-import type { KafkaError } from "./kafka-error";
+import { KafkaTopic } from "./kafka-topic.js";
+import type { KafkaClient } from "./kafka-types.js";
+import { TopicName } from "./brands.js";
+import type { KafkaError } from "./kafka-error.js";
 
 export interface KafkaShuffleTransportConfig {
   /** Kafka client instance. */

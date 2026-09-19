@@ -13,11 +13,16 @@
 // ergonomics — they just inline the pipe chain above.
 
 import { type Throws, type Pipe, Stream, sync, Pipes } from "@spilne/perfect-core";
-import { type HttpClientError, HttpParseError, HttpNetworkError, HttpTimeoutError } from "./errors";
-import { type ResponseParser } from "./response";
-import { type HttpRequestOptions } from "./transport";
-import { type WithTransport } from "./fetch";
-import { httpFetchOk } from "./fetch";
+import {
+  type HttpClientError,
+  HttpParseError,
+  HttpNetworkError,
+  HttpTimeoutError,
+} from "./errors.js";
+import { type ResponseParser } from "./response.js";
+import { type HttpRequestOptions } from "./transport.js";
+import { type WithTransport } from "./fetch.js";
+import { httpFetchOk } from "./fetch.js";
 
 // ── SSE event shape ──────────────────────────────────────────────
 

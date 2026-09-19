@@ -10,8 +10,8 @@
 // ---------------------------------------------------------------------------
 
 import { ChannelName, type ConsumerGroup } from "@spilne/perfect-core/connect";
-import { StageId } from "./brands";
-import type { TopologyNode, CompiledTopology, ShuffleNode, SinkNode } from "./types";
+import { StageId } from "./brands.js";
+import type { TopologyNode, CompiledTopology, ShuffleNode, SinkNode } from "./types.js";
 
 // ---------------------------------------------------------------------------
 // Stage plan types

@@ -4,8 +4,8 @@
 // `close()` (alias `shutdown()`) signals "no more values" — pending takers
 // receive `QueueClosed`; new offers fail; already-buffered values drain.
 
-import { type Eff, type Throws } from "./eff";
-import { succeed, fail, sync, async, suspend } from "./constructors";
+import { type Eff, type Throws } from "./eff.js";
+import { succeed, fail, sync, async, suspend } from "./constructors.js";
 
 export class QueueClosed {
   readonly _tag = "QueueClosed" as const;
