@@ -138,6 +138,21 @@ export const coreSuite: Suite = {
         unit: "ns/item",
         divisor: STREAM_N,
         threshold: 1_000,
+        // The default 10-sample warmup measured the settle, not the runtime,
+        // and read bimodal: one full traversal costs ~160us, so mitata takes a
+        // single iteration per sample and the case was still speeding up when
+        // the window opened. Almost every process reported 7.6-9.3 ns/item; a
+        // few caught the same build already settled and reported 5.1-5.4, with
+        // nothing in between. Whichever side of that split each tree landed on
+        // decided the comparison, which read up to +-55% between trees that
+        // differ by nothing.
+        //
+        // Priming harder does not reach it (unchanged at 800 prime iterations)
+        // because the settle happens inside mitata's own loop, which priming
+        // never enters. Warming up longer does: across fresh processes this
+        // reads 5.13-5.34 ns/item, a 4% spread with no second mode, and holds
+        // the within-window IQR at 2-5%.
+        warmup: 200,
         run: () =>
           do_not_optimize(
             runSync(

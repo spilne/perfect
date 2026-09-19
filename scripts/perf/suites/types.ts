@@ -16,6 +16,18 @@ export interface BenchCase {
    * reported and recorded in the trend, just never build-failing.
    */
   readonly gating?: boolean;
+  /**
+   * Warmup samples for this case, overriding the run-wide `--warmup`.
+   *
+   * Raise it for a case that is still speeding up when the window opens.
+   * Priming runs the case, but the timings mitata keeps come from its own
+   * measurement loop, which priming never enters; a case slow enough to get one
+   * iteration per sample therefore settles inside the window itself, and the
+   * median reports the transient. Warming up longer moves the settle out of the
+   * window, which is what warmup is for — widening the window instead buries
+   * the transient in the median but leaves it in the IQR.
+   */
+  readonly warmup?: number;
   readonly run: () => unknown | Promise<unknown>;
 }
 
