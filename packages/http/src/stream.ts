@@ -43,7 +43,14 @@ export interface SSEvent {
 }
 
 type StreamOptions = HttpRequestOptions &
-  WithTransport & { readonly acceptStatus?: (status: number) => boolean };
+  WithTransport & {
+    readonly acceptStatus?: (status: number) => boolean;
+    /**
+     * Fail with HttpTimeoutError when no data arrives for this many ms.
+     * Default: no limit (a quiet Server-Sent Events stream stays open).
+     */
+    readonly idleTimeoutMs?: number;
+  };
 
 // ── httpStream — the one base ────────────────────────────────────
 
@@ -52,55 +59,82 @@ type StreamOptions = HttpRequestOptions &
  * Cancellation (via take / interrupt) cancels the underlying reader so
  * the TCP connection closes immediately.
  *
- * `timeoutMs` (default 30 s) covers the whole response, including reading
- * the body. For a long-lived stream such as Server-Sent Events, pass a
- * timeout as long as you want to keep listening, or the stream fails with
- * HttpTimeoutError when it runs out.
+ * Timeouts work differently from a normal request, because a stream (like
+ * Server-Sent Events) can stay open for as long as you listen:
+ * - `timeoutMs` (default 30 s) only covers waiting for the response headers.
+ * - `idleTimeoutMs` (default: none) fails the stream when no data arrives for
+ *   that long.
  */
 export function httpStream(opts: StreamOptions): Stream<Uint8Array, Throws<HttpClientError>> {
-  return Stream.fromEffect(httpFetchOk(opts)).flatMap((response) =>
-    Stream.async<Uint8Array, Throws<HttpClientError>>((emit, close, failStream) =>
-      sync(() => {
-        if (!response.body) {
-          close();
-          return undefined;
-        }
-        const reader = response.body.getReader();
-        (async () => {
-          try {
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) {
-                close();
-                return;
-              }
-              // If the stream's buffer is full, wait before reading more,
-              // so a slow consumer slows down the download.
-              const wait = emit(value);
-              if (wait) await wait;
-            }
-          } catch (cause) {
-            const url = String(opts.url);
-            failStream(
-              cause instanceof DOMException && cause.name === "TimeoutError"
-                ? new HttpTimeoutError({
-                    url,
-                    timeoutMs: opts.timeoutMs ?? 30_000,
-                    message: `Response body from ${url} timed out`,
-                  })
-                : new HttpNetworkError({
-                    url,
-                    cause,
-                    message: `Failed to read response body from ${url}`,
-                  }),
-            );
+  const { idleTimeoutMs, ...request } = opts;
+  return Stream.fromEffect(httpFetchOk({ ...request, timeoutUntilHeaders: true })).flatMap(
+    (response) =>
+      Stream.async<Uint8Array, Throws<HttpClientError>>((emit, close, failStream) =>
+        sync(() => {
+          if (!response.body) {
+            close();
+            return undefined;
           }
-        })();
-        return () => {
-          reader.cancel().catch(() => {});
-        };
-      }),
-    ),
+          const reader = response.body.getReader();
+          // reader.read(), but failing if nothing arrives within idleTimeoutMs.
+          let idleTimedOut = false;
+          const readNext = (): ReturnType<typeof reader.read> => {
+            if (idleTimeoutMs === undefined) return reader.read();
+            return new Promise((resolve, reject) => {
+              const timer = setTimeout(() => {
+                idleTimedOut = true;
+                reject(new DOMException("no data", "TimeoutError"));
+              }, idleTimeoutMs);
+              reader.read().then(
+                (result) => {
+                  clearTimeout(timer);
+                  resolve(result);
+                },
+                (error) => {
+                  clearTimeout(timer);
+                  reject(error);
+                },
+              );
+            });
+          };
+          (async () => {
+            try {
+              while (true) {
+                const { done, value } = await readNext();
+                if (done) {
+                  close();
+                  return;
+                }
+                // If the stream's buffer is full, wait before reading more,
+                // so a slow consumer slows down the download.
+                const wait = emit(value);
+                if (wait) await wait;
+              }
+            } catch (cause) {
+              const url = String(opts.url);
+              if (idleTimedOut) reader.cancel().catch(() => {});
+              failStream(
+                cause instanceof DOMException && cause.name === "TimeoutError"
+                  ? new HttpTimeoutError({
+                      url,
+                      timeoutMs: idleTimedOut ? idleTimeoutMs! : (opts.timeoutMs ?? 30_000),
+                      message: idleTimedOut
+                        ? `No data from ${url} for ${idleTimeoutMs}ms`
+                        : `Response body from ${url} timed out`,
+                    })
+                  : new HttpNetworkError({
+                      url,
+                      cause,
+                      message: `Failed to read response body from ${url}`,
+                    }),
+              );
+            }
+          })();
+          return () => {
+            reader.cancel().catch(() => {});
+          };
+        }),
+      ),
   );
 }
 
