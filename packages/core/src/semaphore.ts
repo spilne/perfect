@@ -27,7 +27,8 @@ export interface Semaphore<S = never> {
   readonly available: Eff<number, S>;
 }
 
-class InProcessSemaphore implements Semaphore {
+// Exported for use inside core (Stream.buffer). Not part of the public API.
+export class InProcessSemaphore implements Semaphore {
   private permits: number;
   // FIFO queue; each waiter wants `n` permits, granted atomically. New
   // acquirers queue behind existing waiters even when permits are free, so
@@ -41,7 +42,7 @@ class InProcessSemaphore implements Semaphore {
   // Permits are granted through resume even when they are free right away, so
   // a fiber interrupted before it runs gives them back (see `async`), and
   // withPermits registers its release in the run that receives them.
-  private acquireMany(n: number): Eff<void, never> {
+  acquireMany(n: number): Eff<void, never> {
     return async<void>((resume) => {
       const giveBack = () => this.releaseMany(n);
       if (this.waiters.length === 0 && this.permits >= n) {
@@ -61,7 +62,7 @@ class InProcessSemaphore implements Semaphore {
     }) as any;
   }
 
-  private releaseMany(n: number): void {
+  releaseMany(n: number): void {
     this.permits += n;
     let head = this.waiters.peek();
     while (head !== undefined && this.permits >= head.n) {

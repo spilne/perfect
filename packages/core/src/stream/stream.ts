@@ -44,7 +44,7 @@ import { TaggedError } from "../tagged-error.js";
 import type { RetryPolicy } from "../retry-policy.js";
 import { type Queue, Queue as QueueNS, QueueClosed } from "../queue.js";
 import { type Deferred, Deferred as DeferredNS } from "../deferred.js";
-import { Semaphore } from "../semaphore.js";
+import { InProcessSemaphore, Semaphore } from "../semaphore.js";
 import { Cause } from "../cause.js";
 import { clockNow } from "../clock.js";
 import { Exit } from "../exit.js";
@@ -102,6 +102,10 @@ export type Step<A> =
   | { readonly _tag: "Done" };
 
 const DONE: Step<any> = { _tag: "Done" };
+
+// How many chunks a background producer (groupWithin, debounce) may get
+// ahead of its consumer.
+const SLOTS_AHEAD = 16;
 // Waits until interrupted.
 const NEVER: Eff<never, never> = async<never>(() => {}) as Eff<never, never>;
 
@@ -1644,7 +1648,7 @@ export class Stream<A, S = never> {
       | { readonly _tag: "end" }
       | { readonly _tag: "fail"; readonly cause: Cause };
     type OutputSlot =
-      | { readonly _tag: "item"; readonly value: unknown }
+      | { readonly _tag: "chunk"; readonly chunk: Chunk<unknown> }
       | { readonly _tag: "end" }
       | { readonly _tag: "fail"; readonly cause: Cause };
 
@@ -1689,9 +1693,17 @@ export class Stream<A, S = never> {
 
             const branchDriver = (index: number): Eff<unknown, any> => {
               const branch = branches[index]!(inputStream(inputs[index]!));
-              const drain = branch.forEach((value) =>
-                (outputs.offer({ _tag: "item", value }) as any).map(() => undefined),
-              );
+              // Pass the branch's output on a whole chunk at a time. (It used
+              // to go one value at a time, each with its own queue slot.)
+              const forward = (stream: Stream<unknown, any>): Eff<void, any> =>
+                (stream.step as any).flatMap((step: Step<unknown>) => {
+                  if (step._tag === "Done") return succeed(undefined);
+                  if (step.chunk.isEmpty) return forward(step.next);
+                  return (outputs.offer({ _tag: "chunk", chunk: step.chunk }) as any).flatMap(() =>
+                    forward(step.next),
+                  );
+                });
+              const drain = branch._finalize(forward(branch));
               return run.reportFailure(
                 (ensuring(drain, closeInput(index)) as any).flatMap(() =>
                   outputs.offer({ _tag: "end" }),
@@ -1734,7 +1746,7 @@ export class Stream<A, S = never> {
                   open--;
                   return open === 0 ? succeed(DONE) : pullOutput();
                 }
-                return succeed(emit(Chunk.single(slot.value), next));
+                return succeed(emit(slot.chunk, next));
               });
             const next = run.continueWith(pullOutput);
 
@@ -1755,16 +1767,13 @@ export class Stream<A, S = never> {
    * waits for its interruption and finalization.
    */
   observe<B, S2>(observer: (stream: Stream<A, S>) => Stream<B, S2>): Stream<A, S | S2> {
-    type Observed = { readonly _tag: "source"; readonly value: A } | { readonly _tag: "observer" };
-
+    // Two branches: one passes the source through untouched, the other runs
+    // the observer and throws its output away (as empty chunks, which are
+    // skipped). No per-value wrapping needed.
     return this.broadcastThrough(
-      (stream) =>
-        stream.map<Observed>((value) => ({
-          _tag: "source",
-          value,
-        })),
-      (stream) => observer(stream).map<Observed>(() => ({ _tag: "observer" })),
-    ).filterMap((event: Observed) => (event._tag === "source" ? event.value : undefined)) as any;
+      (stream) => stream,
+      (stream) => observer(stream).mapChunks(() => Chunk.empty<never>()),
+    ) as any;
   }
 
   // ── Concurrency ──────────────────────────────────────────────────
@@ -1791,6 +1800,8 @@ export class Stream<A, S = never> {
       value: concurrency,
       unbounded: true,
     });
+    // One at a time is just evalMap, without the fibers and the queue.
+    if (n === 1) return this.evalMap(f);
     const permits = semaphorePermits(n);
     type Slot =
       | { _tag: "item"; deferred: Deferred<Exit<unknown, B>> }
@@ -1837,7 +1848,7 @@ export class Stream<A, S = never> {
                 ? (sem.withPermits(permits, succeed(undefined)) as any).flatMap(() =>
                     slots.offer({ _tag: "end" }),
                   )
-                : drainChunk(Array.from(step.chunk), 0, step.next),
+                : drainChunk(step.chunk.toArray(), 0, step.next),
             );
 
           const settlePending = (cause: Cause): Eff<void, never> =>
@@ -1898,6 +1909,7 @@ export class Stream<A, S = never> {
       value: concurrency,
       unbounded: true,
     });
+    if (n === 1) return this.evalMap(f);
     const permits = semaphorePermits(n);
     type Slot =
       | { _tag: "item"; exit: Exit<unknown, B> }
@@ -1939,7 +1951,7 @@ export class Stream<A, S = never> {
                 ? (sem.withPermits(permits, succeed(undefined)) as any).flatMap(() =>
                     slots.offer({ _tag: "end" }),
                   )
-                : drainChunk(Array.from(step.chunk), 0, step.next),
+                : drainChunk(step.chunk.toArray(), 0, step.next),
             );
 
           const driver = run.reportFailure(drain(self) as any, (cause: Cause) =>
@@ -1982,23 +1994,23 @@ export class Stream<A, S = never> {
       value: maxSize,
       unbounded: true,
     });
-    type Slot = { _tag: "item"; value: A } | { _tag: "end" } | { _tag: "fail"; cause: Cause };
+    type Slot =
+      | { _tag: "chunk"; chunk: Chunk<A> }
+      | { _tag: "end" }
+      | { _tag: "fail"; cause: Cause };
 
     const start = (run: DriverRun<Chunk<A>>): Eff<Pull<Chunk<A>>, any> =>
-      (QueueNS.bounded<Slot>(cap) as any).flatMap((slots: Queue<Slot>) => {
-        const offerChunk = (items: A[], i: number, next: Stream<A, any>): Eff<void, any> =>
-          i >= items.length
-            ? drain(next)
-            : (slots.offer({ _tag: "item", value: items[i]! }) as any).flatMap(() =>
-                offerChunk(items, i + 1, next),
-              );
-
+      // The queue holds whole chunks. A few are enough to keep the producer
+      // busy while the consumer is filling a group.
+      (QueueNS.bounded<Slot>(SLOTS_AHEAD) as any).flatMap((slots: Queue<Slot>) => {
         const drain = (s: Stream<A, any>): Eff<void, any> =>
-          (s.step as any).flatMap((step: Step<A>) =>
-            step._tag === "Done"
-              ? slots.offer({ _tag: "end" })
-              : offerChunk(Array.from(step.chunk), 0, step.next),
-          );
+          (s.step as any).flatMap((step: Step<A>) => {
+            if (step._tag === "Done") return slots.offer({ _tag: "end" });
+            if (step.chunk.isEmpty) return drain(step.next);
+            return (slots.offer({ _tag: "chunk", chunk: step.chunk }) as any).flatMap(() =>
+              drain(step.next),
+            );
+          });
 
         const driver = run.reportFailure(drain(self) as any, (cause: Cause) =>
           slots.offer({ _tag: "fail", cause }),
@@ -2008,6 +2020,16 @@ export class Stream<A, S = never> {
         // flushes at maxSize items, window expiry, or end of input. The open
         // batch outlives a pull, so an interrupted pull resumes it.
         let batch: { readonly items: A[]; readonly deadline: number } | null = null;
+        // Values already taken from the queue that didn't fit in the last
+        // batch. They start the next one.
+        let leftover: Chunk<A> | null = null;
+
+        // Move as many values as fit into the open batch; keep the rest.
+        const fill = (open: { readonly items: A[] }, chunk: Chunk<A>): void => {
+          const room = Math.min(chunk.length, cap - open.items.length);
+          for (let i = 0; i < room; i++) open.items.push(chunk.get(i));
+          leftover = room < chunk.length ? chunk.drop(room) : null;
+        };
 
         const flush = (continuation: Stream<Chunk<A>, unknown>): Eff<Step<Chunk<A>>, any> =>
           sync(() => {
@@ -2018,7 +2040,7 @@ export class Stream<A, S = never> {
 
         const collect = (): Eff<Step<Chunk<A>>, any> => {
           const open = batch!;
-          if (open.items.length >= maxSize) return flush(next);
+          if (open.items.length >= cap || leftover !== null) return flush(next);
           return (clockNow as any).flatMap((now: number) => {
             const remaining = open.deadline - now;
             if (remaining <= 0) return flush(next);
@@ -2027,25 +2049,30 @@ export class Stream<A, S = never> {
                 if (slot === undefined) return flush(next);
                 if (slot._tag === "fail") return failCause(slot.cause);
                 if (slot._tag === "end") return flush(run.end);
-                open.items.push(slot.value);
+                fill(open, slot.chunk);
                 return collect();
               },
             );
           });
         };
 
-        const pull = (): Eff<Step<Chunk<A>>, any> =>
-          batch !== null
-            ? collect()
-            : (slots.take() as any).flatMap((slot: Slot): any => {
-                if (slot._tag === "fail") return failCause(slot.cause);
-                if (slot._tag === "end") return succeed(DONE);
-                return uninterruptible(
-                  (clockNow as any).map((now: number) => {
-                    batch = { items: [slot.value], deadline: now + timeoutMs };
-                  }),
-                ).flatMap(collect);
-              });
+        const openBatch = (chunk: Chunk<A>): Eff<Step<Chunk<A>>, any> =>
+          uninterruptible(
+            (clockNow as any).map((now: number) => {
+              batch = { items: [], deadline: now + timeoutMs };
+              fill(batch, chunk);
+            }),
+          ).flatMap(collect);
+
+        const pull = (): Eff<Step<Chunk<A>>, any> => {
+          if (batch !== null) return collect();
+          if (leftover !== null) return openBatch(leftover);
+          return (slots.take() as any).flatMap((slot: Slot): any => {
+            if (slot._tag === "fail") return failCause(slot.cause);
+            if (slot._tag === "end") return succeed(DONE);
+            return openBatch(slot.chunk);
+          });
+        };
         const next = run.continueWith(pull);
 
         return run.fork(driver).map(() => pull);
@@ -2057,27 +2084,26 @@ export class Stream<A, S = never> {
   /** Emit a value once `ms` passes without a newer one. `ms` must be a
    *  finite, non-negative number; anything else throws `RangeError`. */
   debounce(ms: number): Stream<A, S> {
-    // emit the latest value once `ms` elapses with no newer one; the driver
-    // free-runs (unbounded queue) and the consumer conflates to the latest
+    // emit the latest value once `ms` elapses with no newer one.
     requireFiniteMs({ operator: "debounce", name: "ms", value: ms });
     const self = this;
     type Slot = { _tag: "item"; value: A } | { _tag: "end" } | { _tag: "fail"; cause: Cause };
 
     const start = (run: DriverRun<A>): Eff<Pull<A>, any> =>
-      (QueueNS.unbounded<Slot>() as any).flatMap((slots: Queue<Slot>) => {
-        const offerChunk = (items: A[], i: number, next: Stream<A, any>): Eff<void, any> =>
-          i >= items.length
-            ? drain(next)
-            : (slots.offer({ _tag: "item", value: items[i]! }) as any).flatMap(() =>
-                offerChunk(items, i + 1, next),
-              );
-
+      // A small bounded queue: memory stays bounded even if the consumer
+      // stops pulling for a while (the producer then waits).
+      (QueueNS.bounded<Slot>(SLOTS_AHEAD) as any).flatMap((slots: Queue<Slot>) => {
+        // Values in one chunk arrive together, so only the last one could
+        // ever survive the quiet period. We only send that one.
         const drain = (s: Stream<A, any>): Eff<void, any> =>
-          (s.step as any).flatMap((step: Step<A>) =>
-            step._tag === "Done"
-              ? slots.offer({ _tag: "end" })
-              : offerChunk(Array.from(step.chunk), 0, step.next),
-          );
+          (s.step as any).flatMap((step: Step<A>) => {
+            if (step._tag === "Done") return slots.offer({ _tag: "end" });
+            if (step.chunk.isEmpty) return drain(step.next);
+            const latest = step.chunk.get(step.chunk.length - 1);
+            return (slots.offer({ _tag: "item", value: latest }) as any).flatMap(() =>
+              drain(step.next),
+            );
+          });
 
         const driver = run.reportFailure(drain(self) as any, (cause: Cause) =>
           slots.offer({ _tag: "fail", cause }),
@@ -2257,6 +2283,11 @@ export class Stream<A, S = never> {
    * consumption timing. `capacity` must be a positive integer or `Infinity`;
    * anything else throws `RangeError`.
    */
+  /**
+   * Run the upstream ahead of the consumer, keeping up to `capacity` values
+   * ready. Values move through the buffer as whole chunks; `capacity` still
+   * counts values, not chunks.
+   */
   buffer(capacity: number): Stream<A, S> {
     const self = this;
     const cap = requireCount({
@@ -2265,22 +2296,36 @@ export class Stream<A, S = never> {
       value: capacity,
       unbounded: true,
     });
-    type Slot = { _tag: "item"; value: A } | { _tag: "end" } | { _tag: "fail"; cause: Cause };
+    type Slot =
+      | { _tag: "chunk"; chunk: Chunk<A> }
+      | { _tag: "end" }
+      | { _tag: "fail"; cause: Cause };
 
     const start = (run: DriverRun<A>): Eff<Pull<A>, any> =>
-      (QueueNS.bounded<Slot>(cap) as any).flatMap((slots: Queue<Slot>) => {
-        const offerChunk = (items: A[], i: number, next: Stream<A, any>): Eff<void, any> =>
-          i >= items.length
-            ? drain(next)
-            : (slots.offer({ _tag: "item", value: items[i]! }) as any).flatMap(() =>
-                offerChunk(items, i + 1, next),
-              );
+      (QueueNS.unbounded<Slot>() as any).flatMap((slots: Queue<Slot>) => {
+        // One permit per buffered value. The producer takes permits before
+        // it puts a chunk in the queue, and the consumer gives them back when
+        // it takes the chunk out. So at most `cap` values wait at any time.
+        const room = cap === Infinity ? null : new InProcessSemaphore(cap);
+
+        const waitForRoom = (values: number): Eff<void, never> =>
+          room === null ? succeed(undefined) : room.acquireMany(values);
+
+        const offerChunk = (chunk: Chunk<A>, next: Stream<A, any>): Eff<void, any> => {
+          if (chunk.isEmpty) return drain(next);
+          // A chunk bigger than the whole buffer could never fit, so it goes
+          // in pieces of at most `cap` values. For a normal chunk, `piece` is
+          // the whole chunk and `rest` is empty.
+          const piece = chunk.take(cap);
+          const rest = chunk.drop(cap);
+          return (waitForRoom(piece.length) as any)
+            .flatMap(() => slots.offer({ _tag: "chunk", chunk: piece }))
+            .flatMap(() => offerChunk(rest, next));
+        };
 
         const drain = (s: Stream<A, any>): Eff<void, any> =>
           (s.step as any).flatMap((step: Step<A>) =>
-            step._tag === "Done"
-              ? slots.offer({ _tag: "end" })
-              : offerChunk(Array.from(step.chunk), 0, step.next),
+            step._tag === "Done" ? slots.offer({ _tag: "end" }) : offerChunk(step.chunk, step.next),
           );
 
         const driver = run.reportFailure(drain(self) as any, (cause: Cause) =>
@@ -2294,20 +2339,23 @@ export class Stream<A, S = never> {
         const finish = (): Eff<Step<A>, any> =>
           terminal!._tag === "fail" ? failCause((terminal as any).cause) : succeed(DONE);
 
+        // Take everything that is ready and hand it on as one chunk.
         const pull = (): Eff<Step<A>, any> => {
           if (terminal !== null) return suspend(() => finish()) as any;
           return (slots.take() as any).flatMap((first: Slot): any => {
-            if (first._tag !== "item") {
+            if (first._tag !== "chunk") {
               terminal = first;
               return finish();
             }
             return (slots.takeAll() as any).flatMap((rest: Slot[]) => {
-              const values: A[] = [first.value];
+              const chunks = [first.chunk];
               for (const slot of rest) {
-                if (slot._tag === "item") values.push(slot.value);
+                if (slot._tag === "chunk") chunks.push(slot.chunk);
                 else terminal = slot;
               }
-              return succeed(emit(Chunk.fromArray(values), next));
+              const chunk = joinChunks(chunks);
+              room?.releaseMany(chunk.length);
+              return succeed(emit(chunk, next));
             });
           });
         };
@@ -2880,6 +2928,20 @@ function concatSegments<A>(segments: readonly Stream<A, any>[]): Stream<A, unkno
   });
   CONCAT_SEGMENTS.set(stream, segments);
   return stream;
+}
+
+// Join several chunks into one, copying each value once. (Calling concat in
+// a loop would copy the growing result again and again.)
+function joinChunks<A>(chunks: readonly Chunk<A>[]): Chunk<A> {
+  if (chunks.length === 1) return chunks[0]!;
+  let total = 0;
+  for (const chunk of chunks) total += chunk.length;
+  const values = new Array<A>(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    for (let i = 0; i < chunk.length; i++) values[offset++] = chunk.get(i);
+  }
+  return Chunk.fromArray(values);
 }
 
 // ── Pipe type ──────────────────────────────────────────────────────
