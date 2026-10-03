@@ -112,14 +112,35 @@ function stripLabels(key: string): string {
   return brace === -1 ? key : key.slice(0, brace);
 }
 
+// Keys look like `name{k=v,k2=v2}`; inside the braces, `\` escapes the next
+// character (core escapes \ , = { } in label names and values).
 function parseLabels(key: string): Labels {
   const brace = key.indexOf("{");
   if (brace === -1) return {};
-  const inner = key.slice(brace + 1, -1);
   const labels: Labels = {};
-  for (const pair of inner.split(",")) {
-    const eq = pair.indexOf("=");
-    if (eq > 0) labels[pair.slice(0, eq)] = pair.slice(eq + 1);
+  let name = "";
+  let value = "";
+  let inValue = false;
+  const finishPair = () => {
+    if (name !== "") labels[name] = value;
+    name = "";
+    value = "";
+    inValue = false;
+  };
+  for (let i = brace + 1; i < key.length - 1; i++) {
+    let ch = key[i]!;
+    if (ch === "\\") {
+      ch = key[++i] ?? "";
+    } else if (ch === "=" && !inValue) {
+      inValue = true;
+      continue;
+    } else if (ch === ",") {
+      finishPair();
+      continue;
+    }
+    if (inValue) value += ch;
+    else name += ch;
   }
+  finishPair();
   return labels;
 }

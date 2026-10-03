@@ -61,6 +61,11 @@ export class OffsetTracker {
   }
 
   complete(partition: Partition, offset: number): void {
+    // Already committed (a redelivered message finishing again). Recording it
+    // would leave it below the frontier forever, where the cursor never
+    // looks, and pendingCount would keep growing.
+    const frontier = this.frontier.get(partition);
+    if (frontier !== undefined && offset < frontier) return;
     if (!this.completed.has(partition)) {
       this.completed.set(partition, new Set());
     }

@@ -2443,19 +2443,23 @@ export class Stream<A, S = never> {
    *  non-negative number; anything else throws `RangeError`. */
   throttle(ms: number): Stream<A, S> {
     requireFiniteMs({ operator: "throttle", name: "ms", value: ms });
-    let nextAt: number | undefined;
-    return this.rechunk(1).evalMap(
-      (a) =>
-        (clockNow as any).flatMap((now: number) => {
-          if (nextAt === undefined) {
-            nextAt = now + ms;
-            return succeed(a);
-          }
-          const wait = Math.max(0, nextAt - now);
-          nextAt = Math.max(now, nextAt) + ms;
-          return wait > 0 ? sleep(wait).map(() => a) : succeed(a);
-        }) as any,
-    );
+    // Created per run: a second run of the same stream must not inherit the
+    // first run's schedule (it delayed the first value of the next run).
+    return Stream.suspend(() => {
+      let nextAt: number | undefined;
+      return this.rechunk(1).evalMap(
+        (a) =>
+          (clockNow as any).flatMap((now: number) => {
+            if (nextAt === undefined) {
+              nextAt = now + ms;
+              return succeed(a);
+            }
+            const wait = Math.max(0, nextAt - now);
+            nextAt = Math.max(now, nextAt) + ms;
+            return wait > 0 ? sleep(wait).map(() => a) : succeed(a);
+          }) as any,
+      );
+    });
   }
 
   /** Pace delivery to at most one element per interval. */

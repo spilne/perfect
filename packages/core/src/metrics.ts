@@ -15,11 +15,18 @@ import { service, type ServiceTag } from "./service.js";
 
 export type Labels = Record<string, string>;
 
+// Keys look like `requests{method=GET,route=/a}`. Characters that have a
+// meaning there (\ , = { }) are escaped with a backslash, so a label value
+// like "x,b=y" can't produce the same key as two separate labels.
+function escapeLabelPart(text: string): string {
+  return text.replace(/[\\,={}]/g, (ch) => `\\${ch}`);
+}
+
 function labelKey(name: string, labels?: Labels): string {
   if (!labels) return name;
   const parts = Object.keys(labels)
     .sort()
-    .map((k) => `${k}=${labels[k]}`);
+    .map((k) => `${escapeLabelPart(k)}=${escapeLabelPart(labels[k]!)}`);
   return parts.length === 0 ? name : `${name}{${parts.join(",")}}`;
 }
 
