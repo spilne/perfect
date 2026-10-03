@@ -169,8 +169,8 @@ class TopologyRunnerInstance {
     this.stateBackend =
       config.partitionedStateBackend ??
       (config.stateBackend
-        ? new LegacyPartitionedStateBackend(config.stateBackend)
-        : new InMemoryPartitionedState());
+        ? new LegacyPartitionedStateBackend(config.stateBackend, config.processedRetentionMs)
+        : new InMemoryPartitionedState({ processedRetentionMs: config.processedRetentionMs }));
     if (
       config.deliveryGuarantee === "exactly-once" &&
       !isTransactionalPartitionedStateBackend(this.stateBackend)
@@ -816,6 +816,7 @@ function validateTopologyConfig(config: TopologyConfig): void {
     ["checkpointIntervalMs", config.checkpointIntervalMs],
     ["maxBufferSize", config.maxBufferSize],
     ["maxDedupeSize", config.maxDedupeSize],
+    ["processedRetentionMs", config.processedRetentionMs],
     ["ackBatchSize", config.ackBatchSize],
     ["ackMaxWaitMs", config.ackMaxWaitMs],
   ];
@@ -836,8 +837,27 @@ function validateTopologyConfig(config: TopologyConfig): void {
 
 class LegacyPartitionedStateBackend implements PartitionedStateBackend<unknown> {
   private readonly leases = new InMemoryPartitionedState<unknown>();
+  // "@seen:" keys this process knows about, with the time each was written,
+  // roughly oldest first. Used to delete them once they are older than the
+  // retention. Keys already in the store are added when a partition loads
+  // (in store order, so one of those may be deleted up to one retention
+  // period late). Only kept when a retention is set.
+  private readonly seenAt = new Map<string, number>();
 
-  constructor(private readonly backend: StateBackend<string, unknown>) {}
+  constructor(
+    private readonly backend: StateBackend<string, unknown>,
+    private readonly processedRetentionMs?: number,
+  ) {}
+
+  // A "@seen:" value is the time it was written (older versions wrote
+  // `true`). It counts as seen unless it is older than the retention.
+  private stillSeen(value: unknown): boolean {
+    if (value === true) return true;
+    if (typeof value !== "number") return false;
+    return (
+      this.processedRetentionMs === undefined || value >= Date.now() - this.processedRetentionMs
+    );
+  }
 
   acquire(params: {
     scope: StatePartitionScope;
@@ -861,7 +881,12 @@ class LegacyPartitionedStateBackend implements PartitionedStateBackend<unknown> 
     for (const [key, value] of await this.backend.entries()) {
       if (key.startsWith(prefix)) {
         const relative = key.slice(prefix.length);
-        if (!relative.startsWith("@")) values.set(relative, value);
+        if (relative.startsWith("@seen:")) {
+          // Keys from older versions hold `true`: count their age from now.
+          if (this.processedRetentionMs !== undefined) {
+            this.seenAt.set(key, typeof value === "number" ? value : Date.now());
+          }
+        } else if (!relative.startsWith("@")) values.set(relative, value);
       } else if (lease.scope.partition === 0 && !key.startsWith("@partition/"))
         values.set(key, value);
     }
@@ -878,9 +903,8 @@ class LegacyPartitionedStateBackend implements PartitionedStateBackend<unknown> 
     sourceId: SourceRecordId;
   }): Promise<boolean> {
     if (!(await this.leases.load(params.lease))) return false;
-    return (
-      (await this.backend.get(`${this.prefix(params.lease.scope)}@seen:${params.sourceId}`)) ===
-      true
+    return this.stillSeen(
+      await this.backend.get(`${this.prefix(params.lease.scope)}@seen:${params.sourceId}`),
     );
   }
 
@@ -888,8 +912,9 @@ class LegacyPartitionedStateBackend implements PartitionedStateBackend<unknown> 
     if (!(await this.leases.load(commit.lease))) return "fenced" as const;
     if (
       commit.sourceId &&
-      (await this.backend.get(`${this.prefix(commit.lease.scope)}@seen:${commit.sourceId}`)) ===
-        true
+      this.stillSeen(
+        await this.backend.get(`${this.prefix(commit.lease.scope)}@seen:${commit.sourceId}`),
+      )
     ) {
       return "duplicate" as const;
     }
@@ -904,7 +929,16 @@ class LegacyPartitionedStateBackend implements PartitionedStateBackend<unknown> 
         ? this.backend.put(`${prefix}${mutation.key}`, mutation.value)
         : this.backend.delete(`${prefix}${mutation.key}`),
     );
-    if (commit.sourceId) writes.push(this.backend.put(`${prefix}@seen:${commit.sourceId}`, true));
+    if (commit.sourceId) {
+      const seenKey = `${prefix}@seen:${commit.sourceId}`;
+      const now = Date.now();
+      writes.push(this.backend.put(seenKey, now));
+      if (this.processedRetentionMs !== undefined) {
+        this.seenAt.delete(seenKey);
+        this.seenAt.set(seenKey, now);
+      }
+    }
+    writes.push(...this.forgetOldSeenKeys());
     if (commit.sourceOffset) writes.push(this.backend.put(`${prefix}@offset`, commit.sourceOffset));
     if (commit.checkpointId) {
       writes.push(this.backend.put(`${prefix}@checkpoint`, commit.checkpointId));
@@ -916,6 +950,19 @@ class LegacyPartitionedStateBackend implements PartitionedStateBackend<unknown> 
 
   release(lease: StatePartitionLease): Promise<boolean> {
     return this.leases.release(lease);
+  }
+
+  // Delete "@seen:" keys older than the retention, oldest first.
+  private forgetOldSeenKeys(): Promise<unknown>[] {
+    if (this.processedRetentionMs === undefined) return [];
+    const cutoff = Date.now() - this.processedRetentionMs;
+    const deletes: Promise<unknown>[] = [];
+    for (const [key, writtenAt] of this.seenAt) {
+      if (writtenAt >= cutoff) break;
+      this.seenAt.delete(key);
+      deletes.push(this.backend.delete(key));
+    }
+    return deletes;
   }
 
   private prefix(scope: StatePartitionScope): string {

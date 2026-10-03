@@ -95,13 +95,36 @@ interface InMemoryPartition<V> {
   epoch: number;
   expiresAt: number;
   values: Map<string, V>;
-  processed: Set<SourceRecordId>;
+  // Source records already committed, with the time they were committed.
+  // A Map keeps insertion order, so the oldest come first.
+  processed: Map<SourceRecordId, number>;
   sourceOffset?: string;
   checkpointId?: StateCheckpointId;
 }
 
+export interface InMemoryPartitionedStateOptions {
+  /**
+   * Forget processed source records after this many ms, like the Postgres and
+   * Redis backends. Without it every source record id is kept forever, so a
+   * long-running topology's memory keeps growing. Duplicates older than this
+   * are no longer detected.
+   */
+  readonly processedRetentionMs?: number;
+}
+
 export class InMemoryPartitionedState<V = unknown> implements PartitionedStateBackend<V> {
   private readonly partitions = new Map<string, InMemoryPartition<V>>();
+  private readonly processedRetentionMs?: number;
+
+  constructor(options: InMemoryPartitionedStateOptions = {}) {
+    const retention = options.processedRetentionMs;
+    if (retention !== undefined && (!Number.isSafeInteger(retention) || retention < 1)) {
+      throw new RangeError(
+        `processedRetentionMs must be a positive safe integer, got ${retention}`,
+      );
+    }
+    this.processedRetentionMs = retention;
+  }
 
   async acquire(params: {
     scope: StatePartitionScope;
@@ -115,7 +138,7 @@ export class InMemoryPartitionedState<V = unknown> implements PartitionedStateBa
       epoch: 0,
       expiresAt: 0,
       values: new Map<string, V>(),
-      processed: new Set<SourceRecordId>(),
+      processed: new Map<SourceRecordId, number>(),
     };
 
     if (current.ownerId === params.ownerId && current.expiresAt > now) {
@@ -161,7 +184,8 @@ export class InMemoryPartitionedState<V = unknown> implements PartitionedStateBa
       if (mutation.type === "put") current.values.set(mutation.key, mutation.value);
       else current.values.delete(mutation.key);
     }
-    if (commit.sourceId !== undefined) current.processed.add(commit.sourceId);
+    if (commit.sourceId !== undefined) current.processed.set(commit.sourceId, Date.now());
+    this.forgetOldRecords(current);
     if (commit.sourceOffset !== undefined) current.sourceOffset = commit.sourceOffset;
     if (commit.checkpointId !== undefined) current.checkpointId = commit.checkpointId;
     return "committed";
@@ -175,6 +199,16 @@ export class InMemoryPartitionedState<V = unknown> implements PartitionedStateBa
     return Boolean(
       current && owns(current, params.lease) && current.processed.has(params.sourceId),
     );
+  }
+
+  // Drop processed records older than the retention, oldest first.
+  private forgetOldRecords(partition: InMemoryPartition<V>): void {
+    if (this.processedRetentionMs === undefined) return;
+    const cutoff = Date.now() - this.processedRetentionMs;
+    for (const [sourceId, committedAt] of partition.processed) {
+      if (committedAt >= cutoff) break;
+      partition.processed.delete(sourceId);
+    }
   }
 
   async release(lease: StatePartitionLease): Promise<boolean> {

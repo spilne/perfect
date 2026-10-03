@@ -145,6 +145,14 @@ The default is `"at-least-once"`:
 A crash between these steps can replay an already-published output, so sinks
 must be idempotent.
 
+The dedupe information (which source records were already processed) is kept
+forever by default. Set `processedRetentionMs` to forget records older than
+that: on `TopologyRunner.run` when it keeps state itself (the default
+in-memory state or a plain `stateBackend`), or on the partitioned state
+backend (`InMemoryPartitionedState`, `PgPartitionedStateBackend`,
+`RedisPartitionedStateBackend`). Redeliveries older than the retention are no
+longer detected as duplicates.
+
 `"exactly-once"` is accepted only when source envelope, sinks, and partitioned
 state backend advertise the same transaction domain. Today the complete
 atomic path is PGMQ source + PGMQ sink + `PgPartitionedStateBackend` sharing
