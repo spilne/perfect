@@ -16,6 +16,8 @@
 
 import { type Eff, type Throws } from "./eff.js";
 import { fail, succeed, sync, async, ensuring, suspend, uninterruptible } from "./constructors.js";
+import { Deque } from "./internal/deque.js";
+import { Waiter, WaiterList } from "./internal/waiter-list.js";
 
 export class PoolClosed {
   readonly _tag = "PoolClosed" as const;
@@ -65,19 +67,22 @@ interface Lease<R> {
   resource: R | undefined;
 }
 
-interface Waiter<R> {
-  canceled: boolean;
-  // A resource released by another use; inUse already counts it.
-  readonly grant: (resource: R) => void;
-  // Capacity freed by a failed create: acquire again.
-  readonly retry: () => void;
-  readonly close: (error: PoolClosed) => void;
+class PoolWaiter<R> extends Waiter {
+  constructor(
+    // A resource released by another use; inUse already counts it.
+    readonly grant: (resource: R) => void,
+    // Capacity freed by a failed create: acquire again.
+    readonly retry: () => void,
+    readonly close: (error: PoolClosed) => void,
+  ) {
+    super();
+  }
 }
 
 class InProcessPool<R, S> implements Pool<R, S> {
-  private readonly idleList: R[] = [];
+  private readonly idleList = new Deque<R>();
   private inUseCount = 0;
-  private waiters: Array<Waiter<R>> = [];
+  private readonly waiters = new WaiterList<PoolWaiter<R>>();
   private closed = false;
 
   constructor(private readonly opts: PoolOptions<R, S>) {}
@@ -108,14 +113,9 @@ class InProcessPool<R, S> implements Pool<R, S> {
     return sync(() => {
       if (this.closed) return [];
       this.closed = true;
-      const waiters = this.waiters.splice(0);
       const closedToken = new PoolClosed();
-      for (const w of waiters) {
-        if (w.canceled) continue;
-        w.canceled = true;
-        w.close(closedToken);
-      }
-      return this.idleList.splice(0);
+      for (const w of this.waiters.drain()) w.close(closedToken);
+      return this.idleList.drain();
     }).flatMap((toRelease: R[]) => {
       if (toRelease.length === 0) return sync(() => undefined) as any;
       return toRelease.reduce<Eff<void, never>>(
@@ -136,7 +136,7 @@ class InProcessPool<R, S> implements Pool<R, S> {
         return;
       }
       if (this.idleList.length > 0) {
-        const r = this.idleList.shift()!;
+        const r = this.idleList.shift() as R;
         this.inUseCount++;
         this.grant(lease, r);
         resume(this.validated(lease, r) as any, () => this.ungrant(lease, r));
@@ -148,19 +148,17 @@ class InProcessPool<R, S> implements Pool<R, S> {
         resume(this.create(lease) as any, () => this.endSlot(lease));
         return;
       }
-      const waiter: Waiter<R> = {
-        canceled: false,
-        grant: (r) => {
-          this.grant(lease, r);
-          resume(succeed(r) as any, () => this.ungrant(lease, r));
-        },
-        retry: () => resume(this.acquireInto(lease) as any, () => this.wakeRetry()),
-        close: (error) => resume(fail(error) as any),
-      };
-      this.waiters.push(waiter);
-      return () => {
-        waiter.canceled = true;
-      };
+      const node = this.waiters.push(
+        new PoolWaiter<R>(
+          (r) => {
+            this.grant(lease, r);
+            resume(succeed(r) as any, () => this.ungrant(lease, r));
+          },
+          () => resume(this.acquireInto(lease) as any, () => this.wakeRetry()),
+          (error) => resume(fail(error) as any),
+        ),
+      );
+      return () => this.waiters.remove(node);
     }) as any;
   }
 
@@ -253,15 +251,8 @@ class InProcessPool<R, S> implements Pool<R, S> {
     return succeed(undefined);
   }
 
-  private nextWaiter(): Waiter<R> | undefined {
-    while (this.waiters.length > 0) {
-      const waiter = this.waiters.shift()!;
-      if (!waiter.canceled) {
-        waiter.canceled = true;
-        return waiter;
-      }
-    }
-    return undefined;
+  private nextWaiter(): PoolWaiter<R> | undefined {
+    return this.waiters.shift();
   }
 }
 
