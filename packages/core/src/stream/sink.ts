@@ -1,5 +1,5 @@
 import type { Eff } from "../eff.js";
-import { succeed } from "../constructors.js";
+import { suspend } from "../constructors.js";
 import type { Stream } from "./stream.js";
 
 export class Sink<A, B, S = never> {
@@ -24,16 +24,18 @@ export class Sink<A, B, S = never> {
   }
 
   static foldEffect<A, B, S>(zero: B, f: (acc: B, a: A) => Eff<B, S>): Sink<A, B, S> {
-    return new Sink((input) => {
-      let acc = zero;
-      return input
-        .forEach((a) =>
-          f(acc, a).map((next) => {
-            acc = next;
-          }),
-        )
-        .map(() => acc);
-    });
+    return new Sink((input) =>
+      suspend(() => {
+        let acc = zero;
+        return input
+          .forEach((a) =>
+            f(acc, a).map((next) => {
+              acc = next;
+            }),
+          )
+          .map(() => acc);
+      }),
+    );
   }
 
   static collectN<A>(n: number): Sink<A, A[], never> {
@@ -53,15 +55,7 @@ export class Sink<A, B, S = never> {
   }
 
   static forEachWhile<A, S>(f: (a: A) => Eff<boolean, S>): Sink<A, void, S> {
-    return new Sink((input) => {
-      let stopped = false;
-      return input.forEach((a) => {
-        if (stopped) return succeed(undefined);
-        return f(a).map((keepGoing) => {
-          stopped = !keepGoing;
-        });
-      });
-    });
+    return new Sink((input) => input.forEachWhile(f));
   }
 
   static drainWith<A, B, S>(eff: Eff<B, S>): Sink<A, B, S> {

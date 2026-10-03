@@ -9,7 +9,7 @@
 
 import { type Eff, type Throws, Suspend, Op } from "./eff.js";
 import { Random } from "./random.js";
-import { fail, sync } from "./constructors.js";
+import { fail, suspend, sync } from "./constructors.js";
 
 // ── Gen<A> ─────────────────────────────────────────────────────────
 
@@ -113,7 +113,7 @@ function objectGen<T extends Record<string, Gen<unknown>>>(
           return collect(i + 1, acc);
         }) as any;
       };
-      return collect(0, {});
+      return suspend(() => collect(0, {}));
     })(),
   );
 }
@@ -155,7 +155,7 @@ function tupleGen<A extends readonly Gen<unknown>[]>(
           return collect(i + 1, acc);
         }) as any;
       };
-      return collect(0, []);
+      return suspend(() => collect(0, []));
     })(),
   );
 }

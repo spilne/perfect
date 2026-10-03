@@ -224,6 +224,13 @@ export class Stream<A, S = never> {
     iterable: AsyncIterable<A>,
     onError: (error: unknown) => E,
   ): Stream<A, Throws<E>> {
+    return Stream.suspend(() => Stream.fromAsyncIteratorOnce(iterable, onError));
+  }
+
+  private static fromAsyncIteratorOnce<A, E>(
+    iterable: AsyncIterable<A>,
+    onError: (error: unknown) => E,
+  ): Stream<A, Throws<E>> {
     let iterator: AsyncIterator<A> | null = null;
     let completed = false;
 
@@ -1485,21 +1492,25 @@ export class Stream<A, S = never> {
   }
 
   zipWithIndex(): Stream<[A, number], S> {
-    let index = 0;
-    return this.map((a) => [a, index++] as [A, number]);
+    return Stream.suspend(() => {
+      let index = 0;
+      return this.map((a) => [a, index++] as [A, number]);
+    });
   }
 
   changes(
     eq: (previous: A, current: A) => boolean = (previous, current) => previous === current,
   ): Stream<A, S> {
-    let last: A | typeof SENTINEL = SENTINEL;
-    return this.filter((a) => {
-      if (last !== SENTINEL && eq(last, a)) {
+    return Stream.suspend(() => {
+      let last: A | typeof SENTINEL = SENTINEL;
+      return this.filter((a) => {
+        if (last !== SENTINEL && eq(last, a)) {
+          last = a;
+          return false;
+        }
         last = a;
-        return false;
-      }
-      last = a;
-      return true;
+        return true;
+      });
     });
   }
 
@@ -1522,12 +1533,14 @@ export class Stream<A, S = never> {
    */
   dedupe(keyFn?: (a: A) => unknown): Stream<A, S> {
     const key = keyFn ?? ((a: A) => a as unknown);
-    const seen = new Set<unknown>();
-    return this.filter((a) => {
-      const k = key(a);
-      if (seen.has(k)) return false;
-      seen.add(k);
-      return true;
+    return Stream.suspend(() => {
+      const seen = new Set<unknown>();
+      return this.filter((a) => {
+        const k = key(a);
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      });
     });
   }
 
@@ -3032,10 +3045,12 @@ export class Stream<A, S = never> {
   }
 
   toArray(): Eff<A[], S> {
-    return this.fold<A[]>([], (acc, a) => {
-      acc.push(a);
-      return acc;
-    });
+    return suspend(() =>
+      this.fold<A[]>([], (acc, a) => {
+        acc.push(a);
+        return acc;
+      }),
+    );
   }
 
   drain(): Eff<void, S> {
@@ -3052,7 +3067,21 @@ export class Stream<A, S = never> {
     function go(stream: Stream<A, any>): Eff<void, any> {
       return (stream.step as any).flatMap((s: Step<A>) => {
         if (s._tag === "Done") return succeed(undefined);
-        return runChunkForEach(s.chunk, f).flatMap(() => go(s.next));
+        return runChunkForEach(s.chunk, f, () => go(s.next));
+      });
+    }
+    return this._finalize(go(this) as any) as any;
+  }
+
+  /**
+   * Run `f` on each value until it returns false. After that we stop
+   * reading the stream and run its cleanup (finalizers).
+   */
+  forEachWhile<S2>(f: (a: A) => Eff<boolean, S2>): Eff<void, S | S2> {
+    function go(stream: Stream<A, any>): Eff<void, any> {
+      return (stream.step as any).flatMap((s: Step<A>) => {
+        if (s._tag === "Done") return succeed(undefined);
+        return runChunkWhile(s.chunk, f, () => go(s.next));
       });
     }
     return this._finalize(go(this) as any) as any;
@@ -3221,22 +3250,75 @@ function trapDefects<E>(cause: Cause<E>, classes: readonly DefectClass[]): Cause
   }
 }
 
+// These helpers run `f` on every item of a chunk with a plain loop.
+//
+// The old version built one big chain of flatMaps for the whole chunk
+// before running anything, which was slow and used a lot of memory. Now, if
+// `f` returns an effect that is already done (like succeed(x)), we just take
+// the value and move on. Only effects that really need to run get a flatMap.
+//
+// We copy the chunk first, because the chunk can share its array with user
+// code, and `f` might change that array while we loop.
 function evalMapChunk<A, B, S>(chunk: Chunk<A>, f: (a: A) => Eff<B, S>): Eff<Chunk<B>, S> {
-  if (chunk.isEmpty) return succeed(Chunk.empty()) as any;
-  return chunk
-    .reduce<Eff<B[], S>>(succeed([]) as any, (acc, item) =>
-      (acc as any).flatMap((arr: B[]) =>
-        (f(item) as any).map((b: B) => {
-          arr.push(b);
-          return arr;
-        }),
-      ),
-    )
-    .map((arr) => Chunk.fromArray(arr)) as any;
+  const length = chunk.length;
+  if (length === 0) return succeed(Chunk.empty()) as any;
+  // We reuse the copy for the results: we always read item i before we
+  // write result i, so nothing gets overwritten too early.
+  const items = chunk.toArray() as unknown[];
+  const loop = (from: number): Eff<Chunk<B>, S> => {
+    for (let i = from; i < length; i++) {
+      const eff = f(items[i] as A) as unknown as Suspend;
+      if (eff.op === Op.Succeed) {
+        items[i] = eff.a;
+        continue;
+      }
+      return new Suspend(Op.FlatMap, eff, (b: B) => {
+        items[i] = b;
+        return loop(i + 1);
+      }) as any;
+    }
+    return succeed(Chunk.fromArray(items as B[])) as any;
+  };
+  return loop(0);
 }
 
-function runChunkForEach<A, S>(chunk: Chunk<A>, f: (a: A) => Eff<void, S>): Eff<void, S> {
-  return chunk.reduce<Eff<void, S>>(succeed(undefined) as any, (acc, item) =>
-    (acc as any).flatMap(() => f(item)),
-  );
+function runChunkForEach<A, S>(
+  chunk: Chunk<A>,
+  f: (a: A) => Eff<void, S>,
+  then: () => Eff<void, any>,
+): Eff<void, any> {
+  const length = chunk.length;
+  const items = chunk.toArray();
+  const loop = (from: number): Eff<void, any> => {
+    for (let i = from; i < length; i++) {
+      const eff = f(items[i]!) as unknown as Suspend;
+      if (eff.op === Op.Succeed) continue;
+      return new Suspend(Op.FlatMap, eff, () => loop(i + 1)) as any;
+    }
+    return then();
+  };
+  return loop(0);
+}
+
+function runChunkWhile<A, S>(
+  chunk: Chunk<A>,
+  f: (a: A) => Eff<boolean, S>,
+  then: () => Eff<void, any>,
+): Eff<void, any> {
+  const length = chunk.length;
+  const items = chunk.toArray();
+  const loop = (from: number): Eff<void, any> => {
+    for (let i = from; i < length; i++) {
+      const eff = f(items[i]!) as unknown as Suspend;
+      if (eff.op === Op.Succeed) {
+        if (eff.a === false) return succeed(undefined) as any;
+        continue;
+      }
+      return new Suspend(Op.FlatMap, eff, (keepGoing: boolean) =>
+        keepGoing === false ? succeed(undefined) : loop(i + 1),
+      ) as any;
+    }
+    return then();
+  };
+  return loop(0);
 }
