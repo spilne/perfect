@@ -13,7 +13,7 @@ import type {
   KafkaMessage,
   KafkaProducer,
 } from "@spilne/perfect-kafka";
-import { KafkaOffset, PartitionId, TopicName } from "@spilne/perfect-kafka";
+import { AssignmentTracker, KafkaOffset, PartitionId, TopicName } from "@spilne/perfect-kafka";
 
 type BinaryConsumerOptions = ConsumerOptions<Buffer, Buffer, Buffer, Buffer>;
 type BinaryProducerOptions = ProducerOptions<Buffer, Buffer, Buffer, Buffer>;
@@ -108,70 +108,24 @@ export function createPlatformaticClient(
       let stopped = false;
       let activeStream: MessagesStream<Buffer, Buffer, Buffer, Buffer> | null = null;
       const offsets = new Map<number, bigint>();
-      type AssignmentListener = (assignment: {
-        topic: TopicName;
-        partitions: readonly ReturnType<typeof PartitionId>[];
-        generation?: number;
-      }) => void | Promise<void>;
-      const assignedListeners = new Set<AssignmentListener>();
-      const revokedListeners = new Set<AssignmentListener>();
-      const assignments = new Map<string, Set<number>>();
-      let assignmentBarrier = Promise.resolve();
-
-      const notify = (
-        listeners: Set<AssignmentListener>,
-        topic: string,
-        partitions: readonly number[],
-        generation?: number,
-      ) => {
-        if (partitions.length === 0) return;
-        const assignment = {
-          topic: TopicName(topic),
-          partitions: partitions.map(PartitionId),
-          generation,
-        };
-        assignmentBarrier = assignmentBarrier.then(() =>
-          Promise.all([...listeners].map((listener) => listener(assignment))).then(() => {}),
-        );
-      };
+      const tracker = new AssignmentTracker();
 
       consumer.on("consumer:group:join", (payload) => {
-        for (const assignment of payload.assignments ?? []) {
-          assignments.set(assignment.topic, new Set(assignment.partitions));
-          notify(assignedListeners, assignment.topic, assignment.partitions, payload.generationId);
-        }
+        tracker.assignAll(
+          (payload.assignments ?? []).map((a) => [a.topic, a.partitions] as const),
+          payload.generationId,
+        );
       });
-      consumer.on("consumer:group:rebalance", () => {
-        for (const [topic, partitions] of assignments) {
-          notify(revokedListeners, topic, [...partitions]);
-        }
-        assignments.clear();
-      });
-
-      const ensureAssigned = async (topic: string, partition: number) => {
-        let topicAssignments = assignments.get(topic);
-        if (!topicAssignments) {
-          topicAssignments = new Set();
-          assignments.set(topic, topicAssignments);
-        }
-        if (!topicAssignments.has(partition)) {
-          topicAssignments.add(partition);
-          notify(assignedListeners, topic, [partition]);
-        }
-        await assignmentBarrier;
-      };
+      consumer.on("consumer:group:rebalance", () => tracker.revokeAll());
 
       return {
         connect: async () => {},
         disconnect: async () => {
           stopped = true;
-          for (const [topic, partitions] of assignments) {
-            notify(revokedListeners, topic, [...partitions]);
-          }
-          assignments.clear();
+          tracker.revokeAll();
           let failure: unknown;
           try {
-            await assignmentBarrier;
+            await tracker.settle();
           } catch (cause) {
             failure = cause;
           }
@@ -217,7 +171,8 @@ export function createPlatformaticClient(
           try {
             for await (const message of eventIterable(stream, streamBufferCapacity)) {
               if (stopped) break;
-              await ensureAssigned(message.topic, message.partition);
+              const wait = tracker.ensureAssigned(message.topic, message.partition);
+              if (wait) await wait;
               yield toKafkaMessage(message);
             }
           } finally {
@@ -246,14 +201,8 @@ export function createPlatformaticClient(
             offsets.set(params.partition, BigInt(params.offset));
           }
         },
-        onPartitionsAssigned: (listener) => {
-          assignedListeners.add(listener);
-          return () => assignedListeners.delete(listener);
-        },
-        onPartitionsRevoked: (listener) => {
-          revokedListeners.add(listener);
-          return () => revokedListeners.delete(listener);
-        },
+        onPartitionsAssigned: (listener) => tracker.onAssigned(listener),
+        onPartitionsRevoked: (listener) => tracker.onRevoked(listener),
       };
     },
 

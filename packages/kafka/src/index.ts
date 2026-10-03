@@ -12,6 +12,7 @@ export {
   type KafkaAckSubscription,
 } from "./kafka-topic.js";
 export { commitBatchWithin, type CommitBatchWithinConfig } from "./commit-batch-within.js";
+export { AssignmentTracker, type AssignmentListener } from "./assignment-tracker.js";
 export { KafkaCommitError } from "./kafka-error.js";
 export { KafkaError } from "./kafka-error.js";
 export { KafkaConfigBuilder, kafkaConfig } from "./kafka-config-builder.js";
