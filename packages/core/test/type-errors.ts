@@ -32,6 +32,8 @@ import {
   forEachPar,
   race,
   fork,
+  join,
+  type Fiber,
   forkDaemon,
   RetryPolicy,
   Stream,
@@ -609,4 +611,13 @@ const _err8 = run(
 // async<A> with no error type has no error channel.
 {
   const _noErrors: Eff<number, never> = async<number>((resume) => resume(succeed(1)));
+}
+
+// A fiber carries its effect's typed errors; join puts them back.
+{
+  const failing = null as unknown as Eff<number, Throws<"db down">>;
+  const _joined: Eff<number, Throws<"db down">> = fork(failing).flatMap(join);
+  const _plain: Eff<Fiber<number>, never> = fork(failing);
+  // @ts-expect-error — the error is not dropped
+  const _dropped: Eff<number, never> = fork(failing).flatMap(join);
 }

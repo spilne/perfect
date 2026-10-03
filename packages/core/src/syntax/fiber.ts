@@ -29,9 +29,9 @@ import { withSpan } from "../tracing.js";
 
 declare module "../eff.js" {
   interface Suspend {
-    fork<A, S>(this: Eff<A, S>): Eff<Fiber<A>, Exclude<S, Throws<unknown>>>;
+    fork<A, S>(this: Eff<A, S>): Eff<Fiber<A, ErrorsOf<S>>, Exclude<S, Throws<unknown>>>;
     withSpan<A, S>(this: Eff<A, S>, name: string, attributes?: Record<string, unknown>): Eff<A, S>;
-    forkDaemon<A, S>(this: Eff<A, S>): Eff<Fiber<A>, Exclude<S, Throws<unknown>>>;
+    forkDaemon<A, S>(this: Eff<A, S>): Eff<Fiber<A, ErrorsOf<S>>, Exclude<S, Throws<unknown>>>;
     ensuring<A, S, S2>(this: Eff<A, S>, finalizer: Eff<void, S2>): Eff<A, S | S2>;
     onExit<A, S, S2>(
       this: Eff<A, S>,
