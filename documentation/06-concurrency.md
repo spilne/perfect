@@ -24,9 +24,11 @@ console.log(await forkExample.orDie().run()); // → 42
 
 `fork(eff)` returns an effect producing `Fiber<A>`. It retains the child's
 service requirements, but child failures are observed through the fiber.
-The scheduler starts the child. `join(fiber)` awaits its result and exposes a
-failed child as `Throws<Cause>`; use `awaitFiber(fiber)` to inspect its `Exit`
-without adding a typed failure.
+The scheduler starts the child. The fiber remembers the typed errors its
+effect can fail with (`Fiber<A, E>`), and `join(fiber)` awaits it and raises
+a failure exactly as it was: a typed error stays typed (`Throws<E>` in the
+type), a defect stays a defect and an interrupt stays an interrupt. Use
+`awaitFiber(fiber)` to inspect its `Exit<E, A>` without failing.
 
 ## Race
 
@@ -371,7 +373,7 @@ Available fiber diagnostics:
 |---|---|
 | `fork(eff)` | spawn a fiber, scoped to parent |
 | `forkDaemon(eff)` | spawn an unscoped fiber |
-| `join(fiber)` | await fiber result |
+| `join(fiber)` | await fiber result; re-raises its failure as it was |
 | `interrupt(fiber)` | cancel a fiber |
 | `awaitFiber(fiber)` | await Exit (never throws) |
 | `race(effects[])` / `a.race(b)` | first to settle wins, success or failure; losers are interrupted and awaited |

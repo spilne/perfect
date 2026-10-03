@@ -1,6 +1,14 @@
 import { Cause } from "./cause.js";
 import type { WithError } from "./either.js";
-import { type Eff, type Throws, type InferValue, type InferEffects, Suspend, Op } from "./eff.js";
+import {
+  type Eff,
+  type ErrorsOf,
+  type Throws,
+  type InferValue,
+  type InferEffects,
+  Suspend,
+  Op,
+} from "./eff.js";
 import { Fiber } from "./fiber.js";
 import { type Exit, Exit as ExitNS } from "./exit.js";
 import { RetryPolicy, runRetry as runRetryUnified } from "./retry-policy.js";
@@ -97,22 +105,33 @@ export function tryPromise<A, E>(
 
 // ── Fiber constructors ─────────────────────────────────────────────
 
-export function fork<A, S>(eff: Eff<A, S>): Eff<Fiber<A>, Exclude<S, Throws<unknown>>> {
+export function fork<A, S>(
+  eff: Eff<A, S>,
+): Eff<Fiber<A, ErrorsOf<S>>, Exclude<S, Throws<unknown>>> {
   return new Suspend(Op.Fork, eff, null) as any;
 }
 
 // Spawn a fiber that is NOT tied to the parent's lifecycle.
 // Use for long-running background workers.
-export function forkDaemon<A, S>(eff: Eff<A, S>): Eff<Fiber<A>, Exclude<S, Throws<unknown>>> {
+export function forkDaemon<A, S>(
+  eff: Eff<A, S>,
+): Eff<Fiber<A, ErrorsOf<S>>, Exclude<S, Throws<unknown>>> {
   return new Suspend(Op.ForkDaemon, eff, null) as any;
 }
 
-export function join<A>(fiber: Fiber<A>): Eff<A, Throws<Cause>> {
+/**
+ * Wait for a fiber and take over its result. If the fiber failed, the
+ * failure is raised here exactly as it was: its typed errors stay typed
+ * (and show up in the type), a defect stays a defect, and an interrupt
+ * stays an interrupt. (It used to arrive as one typed error holding the
+ * raw Cause, so even defects could be caught with .catch.)
+ */
+export function join<A, E>(fiber: Fiber<A, E>): Eff<A, WithError<never, E>> {
   return async<A, Cause>((resume) =>
     // Returning the remover means a join that gives up stops listening.
     fiber.onComplete((result) => {
       if (result.ok) resume(succeed(result.value) as any);
-      else resume(fail(result.cause) as any);
+      else resume(failCause(result.cause) as any);
     }),
   ) as any;
 }
@@ -122,8 +141,8 @@ export function interrupt(fiber: Fiber): Eff<void, never> {
 }
 
 // Wait for a fiber and get its Exit, never failing.
-export function awaitFiber<A>(fiber: Fiber<A>): Eff<Exit<unknown, A>, never> {
-  return async<Exit<unknown, A>>((resume) =>
+export function awaitFiber<A, E>(fiber: Fiber<A, E>): Eff<Exit<E, A>, never> {
+  return async<Exit<E, A>>((resume) =>
     fiber.onComplete((result) => {
       resume(
         succeed(result.ok ? ExitNS.succeed(result.value) : ExitNS.failure(result.cause)) as any,

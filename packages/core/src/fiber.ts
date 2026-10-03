@@ -84,7 +84,14 @@ function interruptCause(pending: unknown): Cause {
   return Cause.interrupt();
 }
 
-export class Fiber<A = unknown> {
+export class Fiber<A = unknown, E = unknown> {
+  /**
+   * Type-level only: the typed errors this fiber can fail with. There is no
+   * such field at runtime. Being read-only (an output), it lets a
+   * Fiber<A, DbError> be used wherever a plain Fiber<A> is expected.
+   */
+  declare readonly _E?: E;
+
   /** @internal Runtime bookkeeping; not part of the public API. */
   state = FiberState.Ready;
   result: FiberResult<A> | null = null;
@@ -343,10 +350,16 @@ export class Fiber<A = unknown> {
   }
 
   // Await completion and resolve with an Exit — never rejects.
-  await(): Promise<Exit<unknown, A>> {
+  await(): Promise<Exit<E, A>> {
     return new Promise((resolve) => {
       this.onComplete((r) => {
-        resolve(r.ok ? { _tag: "Success", value: r.value } : { _tag: "Failure", cause: r.cause });
+        // The runtime keeps causes untyped; E is what the fiber's effect said
+        // it can fail with.
+        resolve(
+          r.ok
+            ? { _tag: "Success", value: r.value }
+            : { _tag: "Failure", cause: r.cause as Cause<E> },
+        );
       });
     });
   }

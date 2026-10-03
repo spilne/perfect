@@ -1,5 +1,5 @@
 import { Cause } from "./cause.js";
-import { type Eff, type EffectCheck, Suspend, Cont, Op } from "./eff.js";
+import { type Eff, type EffectCheck, type ErrorsOf, Suspend, Cont, Op } from "./eff.js";
 import { type Context, emptyContext, mergeContexts } from "./service.js";
 import {
   Fiber,
@@ -1403,11 +1403,14 @@ export function runSync<A>(eff: Eff<A, never>): A {
   return result as A;
 }
 
-export function runFiber<A, S>(eff: Eff<A, S> & EffectCheck<S>, scheduler?: Scheduler): Fiber<A> {
+export function runFiber<A, S>(
+  eff: Eff<A, S> & EffectCheck<S>,
+  scheduler?: Scheduler,
+): Fiber<A, ErrorsOf<S>> {
   const fiber = bootstrapFiber<A>(eff as Eff<A, any>, scheduler);
   notifyFiberStart(fiber);
   fiber.scheduleRun();
-  return fiber;
+  return fiber as Fiber<A, ErrorsOf<S>>;
 }
 
 /**
