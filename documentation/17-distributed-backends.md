@@ -73,7 +73,7 @@ the public `DrizzleDb` type also accepts other Drizzle PostgreSQL drivers.
 
 | Adapter | Role |
 | --- | --- |
-| `PgQueue` | durable work queue with `FOR UPDATE SKIP LOCKED`, delayed publication, manual ack/nack, archive mode, metrics, and explicit requeue management |
+| `PgQueue` | durable work queue with `FOR UPDATE SKIP LOCKED`, delayed publication, manual ack/nack, redelivery when a consumer dies (after its visibility timeout), dead-lettering after `maxAttempts` (`requeueDead()` brings them back), archive mode and metrics |
 | `PgChangeStream` | LISTEN/NOTIFY wakeups with offset-based polling replay so notifications are not the durability boundary |
 | `PgRateLimiter` / `PgThrottle` | cross-instance admission and pacing |
 | `PgSingleflight` | one leader execution per distributed key |

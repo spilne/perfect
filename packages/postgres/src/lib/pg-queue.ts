@@ -3,17 +3,29 @@
 //
 // Implements Streamable + Sinkable + Acknowledgeable using plain Postgres:
 //   - Enqueue: INSERT into queue table
-//   - Dequeue: SELECT ... FOR UPDATE SKIP LOCKED
+//   - Dequeue: SELECT ... FOR UPDATE SKIP LOCKED, then mark the rows
+//     'processing' and hide them for the visibility timeout (VT)
 //   - Ack: DELETE (or UPDATE status = 'completed')
-//   - Nack: UPDATE visible_at = NOW() + vt (makes visible again after timeout)
-//   - Visibility timeout: messages invisible to other consumers until VT expires
+//   - Nack: make the message visible again right away
+//   - A consumer that dies without ack or nack: once the VT runs out the
+//     message is picked up again
+//   - After `maxAttempts` deliveries a message is marked 'dead' instead of
+//     being retried forever. `requeueDead()` puts dead messages back.
+//
+// Every delivery gets a random token (locked_by). ack and nack only touch
+// the row if the token still matches, so a consumer whose VT ran out (and
+// whose message went to someone else) can't ack or nack the new delivery.
+//
+// All values are sent as query parameters and the table name is always a
+// quoted identifier, so queue names with capitals or dashes work and can't
+// inject SQL.
 //
 // Works with any Postgres 9.5+ — no pgmq extension needed.
 // Ported from promin (Effect-TS StreamPipeline → perfect Stream).
 // ---------------------------------------------------------------------------
 
 import { sql } from "drizzle-orm";
-import { fromPromise, type Throws } from "@spilne/perfect-core";
+import { fail, fromPromise, succeed, suspend, type Eff, type Throws } from "@spilne/perfect-core";
 import { JsonCodec } from "@spilne/perfect-core/connect";
 import type {
   Streamable,
@@ -103,11 +115,16 @@ export class PgQueue<T>
   private readonly defaultBatchSize: number;
   private readonly pollIntervalMs: number;
   private readonly ackMode: "delete" | "archive";
+  private readonly maxAttempts: number;
+  // The quoted table name, ready to put in a query.
+  private readonly table: ReturnType<typeof sql.identifier>;
 
   private constructor(config: PgQueueConfig<T>) {
     this.db = config.db;
     this.queue = config.queue;
     this.tableName = `pgq_${config.queue}`;
+    this.table = sql.identifier(this.tableName);
+    this.maxAttempts = config.maxAttempts ?? 3;
     this.codec = config.codec ?? (JsonCodec as Codec<T>);
     this.defaultVtSeconds = config.defaultVtSeconds ?? 30;
     this.defaultBatchSize = config.defaultBatchSize ?? 10;
@@ -164,19 +181,16 @@ export class PgQueue<T>
   publish(
     value: T,
     params?: { delay?: number; headers?: Record<string, string> },
-  ): import("@spilne/perfect-core").Eff<void, Throws<PostgresError>> {
+  ): Eff<void, Throws<PostgresError>> {
     return fromPromise(
       async () => {
         const payload = JSON.stringify(this.codec.encode(value));
         const headers = params?.headers ? JSON.stringify(params.headers) : null;
         const delaySeconds = params?.delay ?? 0;
-
-        await this.db.execute(
-          sql.raw(`
-            INSERT INTO ${this.tableName} (payload, headers, visible_at)
-            VALUES ('${payload.replace(/'/g, "''")}'::jsonb, ${headers ? `'${headers.replace(/'/g, "''")}'::jsonb` : "NULL"}, NOW() + INTERVAL '${delaySeconds} seconds')
-          `),
-        );
+        await this.db.execute(sql`
+          INSERT INTO ${this.table} (payload, headers, visible_at)
+          VALUES (${payload}::jsonb, ${headers}::jsonb, NOW() + make_interval(secs => ${delaySeconds}))
+        `);
       },
       (cause) => toPostgresError("queue.publish", cause),
     );
@@ -191,12 +205,19 @@ export class PgQueue<T>
       () => this.pop(this.defaultBatchSize),
       this.pollIntervalMs,
       "queue.pop",
-    ).evalMap((row) =>
-      fromPromise(
-        async () => this.codec.decode(row.payload),
-        (cause) => toPostgresError("queue.decode", cause),
-      ),
-    );
+    ).evalMap((row) => this.decode(row.payload));
+  }
+
+  // Decoding is synchronous, so we don't need a promise for it. A codec
+  // that throws fails the stream with a PostgresError.
+  private decode(payload: unknown): Eff<T, Throws<PostgresError>> {
+    return suspend(() => {
+      try {
+        return succeed(this.codec.decode(payload));
+      } catch (cause) {
+        return fail(toPostgresError("queue.decode", cause));
+      }
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -214,28 +235,25 @@ export class PgQueue<T>
       this.pollIntervalMs,
       "queue.dequeue",
     ).evalMap((row) =>
-      fromPromise(
-        async (): Promise<Envelope<T, Throws<PostgresError>>> => ({
-          value: this.codec.decode(row.payload),
-          ack: () =>
-            fromPromise(
-              () => this.ack(row.id),
-              (cause) => toPostgresError("queue.ack", cause),
-            ),
-          nack: () =>
-            fromPromise(
-              () => this.nack(row.id),
-              (cause) => toPostgresError("queue.nack", cause),
-            ),
-          metadata: {
-            msgId: row.id,
-            attemptCount: row.attemptCount,
-            createdAt: row.createdAt,
-            headers: row.headers,
-          },
-        }),
-        (cause) => toPostgresError("queue.decode", cause),
-      ),
+      this.decode(row.payload).map((value): Envelope<T, Throws<PostgresError>> => ({
+        value,
+        ack: () =>
+          fromPromise(
+            () => this.ack(row.id, row.lockToken),
+            (cause) => toPostgresError("queue.ack", cause),
+          ),
+        nack: () =>
+          fromPromise(
+            () => this.nack(row.id, row.lockToken),
+            (cause) => toPostgresError("queue.nack", cause),
+          ),
+        metadata: {
+          msgId: row.id,
+          attemptCount: row.attemptCount,
+          createdAt: row.createdAt,
+          headers: row.headers,
+        },
+      })),
     );
   }
 
@@ -243,30 +261,58 @@ export class PgQueue<T>
   // Core operations
   // ---------------------------------------------------------------------------
 
-  /** Dequeue messages with visibility timeout (SKIP LOCKED). */
+  /**
+   * Claim up to `limit` messages for `vtSeconds` (SKIP LOCKED, so parallel
+   * consumers never get the same message).
+   *
+   * A message can be claimed when it is visible and has attempts left:
+   *   - 'pending': new, or nacked
+   *   - 'processing' whose VT ran out: its consumer died or got stuck
+   * In the same statement, messages that ran out of attempts are marked
+   * 'dead', so they stop coming back.
+   */
   private async dequeue(
     limit: number,
     vtSeconds: number,
   ): Promise<
-    { id: number; payload: unknown; attemptCount: number; createdAt: Date; headers: unknown }[]
+    {
+      id: number;
+      payload: unknown;
+      attemptCount: number;
+      createdAt: Date;
+      headers: unknown;
+      lockToken: string;
+    }[]
   > {
+    const lockToken = crypto.randomUUID();
     const rows = await execRaw(
       this.db,
-      sql.raw(`
-        UPDATE ${this.tableName}
-        SET status = 'processing',
-            visible_at = NOW() + INTERVAL '${vtSeconds} seconds',
-            attempt_count = attempt_count + 1,
-            locked_by = '${crypto.randomUUID()}'
-        WHERE id IN (
-          SELECT id FROM ${this.tableName}
-          WHERE status = 'pending' AND visible_at <= NOW()
+      sql`
+        WITH out_of_attempts AS (
+          UPDATE ${this.table}
+          SET status = 'dead', locked_by = NULL
+          WHERE status IN ('pending', 'processing')
+            AND visible_at <= NOW()
+            AND attempt_count >= ${this.maxAttempts}
+        ),
+        claimable AS (
+          SELECT id FROM ${this.table}
+          WHERE status IN ('pending', 'processing')
+            AND visible_at <= NOW()
+            AND attempt_count < ${this.maxAttempts}
           ORDER BY created_at ASC
           LIMIT ${limit}
           FOR UPDATE SKIP LOCKED
         )
-        RETURNING id, payload, attempt_count, created_at, headers
-      `),
+        UPDATE ${this.table} AS q
+        SET status = 'processing',
+            visible_at = NOW() + make_interval(secs => ${vtSeconds}),
+            attempt_count = q.attempt_count + 1,
+            locked_by = ${lockToken}
+        FROM claimable
+        WHERE q.id = claimable.id
+        RETURNING q.id, q.payload, q.attempt_count, q.created_at, q.headers
+      `,
     );
     return rows.map((r: any) => ({
       id: Number(r.id),
@@ -274,6 +320,7 @@ export class PgQueue<T>
       attemptCount: r.attempt_count,
       createdAt: r.created_at instanceof Date ? r.created_at : new Date(r.created_at),
       headers: r.headers,
+      lockToken,
     }));
   }
 
@@ -281,41 +328,53 @@ export class PgQueue<T>
   private async pop(limit: number): Promise<{ id: number; payload: unknown }[]> {
     const rows = await execRaw(
       this.db,
-      sql.raw(`
-        DELETE FROM ${this.tableName}
+      sql`
+        DELETE FROM ${this.table}
         WHERE id IN (
-          SELECT id FROM ${this.tableName}
-          WHERE status = 'pending' AND visible_at <= NOW()
+          SELECT id FROM ${this.table}
+          WHERE status IN ('pending', 'processing')
+            AND visible_at <= NOW()
+            AND attempt_count < ${this.maxAttempts}
           ORDER BY created_at ASC
           LIMIT ${limit}
           FOR UPDATE SKIP LOCKED
         )
         RETURNING id, payload
-      `),
+      `,
     );
     return rows.map((r: any) => ({ id: Number(r.id), payload: r.payload }));
   }
 
-  /** Acknowledge — delete or mark completed. */
-  private async ack(msgId: number): Promise<void> {
+  /**
+   * Acknowledge — delete or mark completed. Only if this delivery still
+   * holds the message (see the note at the top of the file).
+   */
+  private async ack(msgId: number, lockToken: string): Promise<void> {
     if (this.ackMode === "delete") {
-      await this.db.execute(sql.raw(`DELETE FROM ${this.tableName} WHERE id = ${msgId}`));
-    } else {
       await this.db.execute(
-        sql.raw(
-          `UPDATE ${this.tableName} SET status = 'completed', completed_at = NOW() WHERE id = ${msgId}`,
-        ),
+        sql`DELETE FROM ${this.table} WHERE id = ${msgId} AND locked_by = ${lockToken}`,
       );
+    } else {
+      await this.db.execute(sql`
+        UPDATE ${this.table}
+        SET status = 'completed', completed_at = NOW(), locked_by = NULL
+        WHERE id = ${msgId} AND locked_by = ${lockToken}
+      `);
     }
   }
 
-  /** Nack — make message visible again immediately. */
-  private async nack(msgId: number): Promise<void> {
-    await this.db.execute(
-      sql.raw(
-        `UPDATE ${this.tableName} SET status = 'pending', visible_at = NOW(), locked_by = NULL WHERE id = ${msgId}`,
-      ),
-    );
+  /**
+   * Nack — make the message visible again right away, or mark it 'dead' if
+   * it has used all its attempts. Only if this delivery still holds it.
+   */
+  private async nack(msgId: number, lockToken: string): Promise<void> {
+    await this.db.execute(sql`
+      UPDATE ${this.table}
+      SET status = CASE WHEN attempt_count >= ${this.maxAttempts} THEN 'dead' ELSE 'pending' END,
+          visible_at = NOW(),
+          locked_by = NULL
+      WHERE id = ${msgId} AND locked_by = ${lockToken}
+    `);
   }
 
   // ---------------------------------------------------------------------------
@@ -327,48 +386,57 @@ export class PgQueue<T>
     pending: number;
     processing: number;
     completed: number;
+    dead: number;
     total: number;
   }> {
     const [row] = await execRaw(
       this.db,
-      sql.raw(`
+      sql`
         SELECT
           COUNT(*) FILTER (WHERE status = 'pending') as pending,
           COUNT(*) FILTER (WHERE status = 'processing') as processing,
           COUNT(*) FILTER (WHERE status = 'completed') as completed,
+          COUNT(*) FILTER (WHERE status = 'dead') as dead,
           COUNT(*) as total
-        FROM ${this.tableName}
-      `),
+        FROM ${this.table}
+      `,
     );
     return {
       pending: Number(row?.pending ?? 0),
       processing: Number(row?.processing ?? 0),
       completed: Number(row?.completed ?? 0),
+      dead: Number(row?.dead ?? 0),
       total: Number(row?.total ?? 0),
     };
   }
 
   /** Purge all messages from the queue. */
   async purge(): Promise<number> {
-    const rows = await execRaw(this.db, sql.raw(`DELETE FROM ${this.tableName} RETURNING id`));
+    const rows = await execRaw(this.db, sql`DELETE FROM ${this.table} RETURNING id`);
     return rows.length;
   }
 
   /** Drop the queue table entirely. */
   async drop(): Promise<void> {
-    await this.db.execute(sql.raw(`DROP TABLE IF EXISTS ${this.tableName}`));
+    await this.db.execute(sql`DROP TABLE IF EXISTS ${this.table}`);
   }
 
-  /** Requeue dead messages (exceeded max attempts but still in processing). */
+  /**
+   * Put 'dead' messages (the ones that used all their attempts) back in the
+   * queue with a fresh attempt count. Returns how many were requeued.
+   *
+   * Messages whose consumer died are redelivered automatically once their
+   * visibility timeout runs out; this is only for dead ones.
+   */
   async requeueDead(): Promise<number> {
     const rows = await execRaw(
       this.db,
-      sql.raw(`
-        UPDATE ${this.tableName}
-        SET status = 'pending', visible_at = NOW(), locked_by = NULL
-        WHERE status = 'processing' AND visible_at < NOW()
+      sql`
+        UPDATE ${this.table}
+        SET status = 'pending', visible_at = NOW(), attempt_count = 0, locked_by = NULL
+        WHERE status = 'dead'
         RETURNING id
-      `),
+      `,
     );
     return rows.length;
   }
