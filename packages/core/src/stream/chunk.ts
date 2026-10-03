@@ -129,9 +129,31 @@ export class Chunk<A> {
     return this.array.slice(this.start, this.start + this.length) as A[];
   }
 
-  *[Symbol.iterator](): Iterator<A> {
-    for (let i = 0; i < this.length; i++) {
-      yield this.array[this.start + i]!;
+  // `for (const x of chunk)` is used in many hot loops. A generator here was
+  // several times slower than a plain loop. For a chunk that covers its whole
+  // array we hand out the array's own (native, fast) iterator; for a slice we
+  // use a small iterator object.
+  [Symbol.iterator](): Iterator<A> {
+    if (this.start === 0 && this.length === this.array.length) {
+      return this.array[Symbol.iterator]();
     }
+    return new SliceIterator(this.array, this.start, this.start + this.length);
+  }
+}
+
+class SliceIterator<A> implements Iterator<A> {
+  constructor(
+    private readonly array: ReadonlyArray<A>,
+    private index: number,
+    private readonly end: number,
+  ) {}
+
+  next(): IteratorResult<A> {
+    if (this.index >= this.end) return { done: true, value: undefined };
+    return { done: false, value: this.array[this.index++]! };
+  }
+
+  [Symbol.iterator](): Iterator<A> {
+    return this;
   }
 }
