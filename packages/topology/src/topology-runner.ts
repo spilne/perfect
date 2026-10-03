@@ -359,21 +359,51 @@ class TopologyRunnerInstance {
     const managers = new Map<Partition, WindowManager<unknown, unknown, unknown>>();
     this.windowManagers.push(managers);
 
+    // Each key's windows are saved under their own state entry, so a record
+    // only rewrites its own key's windows. (Before, every record saved every
+    // window of the partition under one entry.)
+    const windowsEntry = (key: string) => `${operatorId}:windows:${encodeURIComponent(key)}`;
+    const windowsPrefix = `${operatorId}:windows:`;
+    // Partitions restored from the old single-entry format. Their first
+    // record writes every key in the new format, removes the old entry and
+    // sets a marker. The marker matters because the old entry can sit where
+    // a commit can't delete it (the store's root, for partition 0); after
+    // the marker it is ignored, so flushed windows can't come back from it.
+    const migrating = new Set<Partition>();
+    const migratedMarker = `${operatorId}:windows-migrated`;
+
     return this.compile(node.parent).flatMap((record) => {
       if (record.skip) return Stream.fromArray([record]);
       const context = record.completion.context;
       let manager = managers.get(record.partition);
       if (!manager) {
         manager = new WindowManager(windowType, node.spec);
-        const saved = context.values.get(operatorId);
-        if (Array.isArray(saved)) manager.restore(saved as any);
+        const legacy = context.values.get(operatorId);
+        if (Array.isArray(legacy) && context.values.get(migratedMarker) !== true) {
+          manager.restore(legacy as any);
+          migrating.add(record.partition);
+        }
+        for (const [entryKey, saved] of context.values) {
+          if (entryKey.startsWith(windowsPrefix) && Array.isArray(saved))
+            manager.restore(saved as any);
+        }
         managers.set(record.partition, manager);
       }
 
       const key = keyFn(record.value);
       const now = this.extractTimestamp(record.value);
       const outputs = [...manager.add(key, record.value, now), ...manager.flush(key, now)];
-      this.putMutation(record, operatorId, manager.snapshot());
+
+      if (migrating.delete(record.partition)) {
+        for (const openKey of manager.keys()) {
+          this.putMutation(record, windowsEntry(openKey), manager.snapshotKey(openKey));
+        }
+        this.deleteMutation(record, operatorId);
+        this.putMutation(record, migratedMarker, true);
+      }
+      const windows = manager.snapshotKey(key);
+      if (windows.length > 0) this.putMutation(record, windowsEntry(key), windows);
+      else this.deleteMutation(record, windowsEntry(key));
       return Stream.fromArray(this.branch(record, outputs));
     });
   }
@@ -688,8 +718,7 @@ class TopologyRunnerInstance {
       ),
       activeWindows: this.windowManagers.reduce(
         (total, byPartition) =>
-          total +
-          [...byPartition.values()].reduce((sum, manager) => sum + manager.snapshot().length, 0),
+          total + [...byPartition.values()].reduce((sum, manager) => sum + manager.size, 0),
         0,
       ),
       joinBufferSize: this.joinBuffers.reduce(
@@ -865,14 +894,22 @@ class LegacyPartitionedStateBackend implements PartitionedStateBackend<unknown> 
       return "duplicate" as const;
     }
     const prefix = this.prefix(commit.lease.scope);
-    for (const mutation of commit.mutations) {
-      if (mutation.type === "put")
-        await this.backend.put(`${prefix}${mutation.key}`, mutation.value);
-      else await this.backend.delete(`${prefix}${mutation.key}`);
+    // Only the last mutation of each key matters, and different keys don't
+    // depend on each other, so they are written in parallel instead of one
+    // round trip at a time.
+    const lastByKey = new Map<string, (typeof commit.mutations)[number]>();
+    for (const mutation of commit.mutations) lastByKey.set(mutation.key, mutation);
+    const writes: Promise<unknown>[] = [...lastByKey.values()].map((mutation) =>
+      mutation.type === "put"
+        ? this.backend.put(`${prefix}${mutation.key}`, mutation.value)
+        : this.backend.delete(`${prefix}${mutation.key}`),
+    );
+    if (commit.sourceId) writes.push(this.backend.put(`${prefix}@seen:${commit.sourceId}`, true));
+    if (commit.sourceOffset) writes.push(this.backend.put(`${prefix}@offset`, commit.sourceOffset));
+    if (commit.checkpointId) {
+      writes.push(this.backend.put(`${prefix}@checkpoint`, commit.checkpointId));
     }
-    if (commit.sourceId) await this.backend.put(`${prefix}@seen:${commit.sourceId}`, true);
-    if (commit.sourceOffset) await this.backend.put(`${prefix}@offset`, commit.sourceOffset);
-    if (commit.checkpointId) await this.backend.put(`${prefix}@checkpoint`, commit.checkpointId);
+    await Promise.all(writes);
     await this.leases.commit(commit);
     return "committed" as const;
   }

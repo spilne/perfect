@@ -1,5 +1,11 @@
 // ---------------------------------------------------------------------------
 // WindowManager — manages windowed state for keyed aggregation
+//
+// Windows are stored per key: key → (window id → window). A window id is
+// the window's start time, or "session". Keeping keys separate means that
+// flushing one key only looks at that key's windows, and keys that contain
+// ":" can't be mixed up with each other (they were, when everything was in
+// one map under "key:windowId" strings).
 // ---------------------------------------------------------------------------
 
 import type { TimeWindow, WindowType, AggregateSpec } from "./types.js";
@@ -10,14 +16,35 @@ interface WindowEntry<S> {
   lastActivity: number;
 }
 
-/** Manages windows for a single key, flushing completed windows. */
+/** One saved window. `key` is missing in snapshots from older versions. */
+export interface WindowSnapshot<S> {
+  readonly windowKey: string;
+  readonly key?: string;
+  readonly entry: WindowEntry<S>;
+}
+
+const SESSION = "session";
+
+/** Manages windows for many keys, flushing completed windows. */
 export class WindowManager<S, T, U> {
-  private windows = new Map<string, WindowEntry<S>>();
+  private readonly windowsByKey = new Map<string, Map<string, WindowEntry<S>>>();
 
   constructor(
     private readonly windowType: WindowType,
     private readonly spec: AggregateSpec<S, T, U>,
   ) {}
+
+  /** The keys that have at least one open window. */
+  keys(): IterableIterator<string> {
+    return this.windowsByKey.keys();
+  }
+
+  /** How many windows are open, across all keys. */
+  get size(): number {
+    let total = 0;
+    for (const windows of this.windowsByKey.values()) total += windows.size;
+    return total;
+  }
 
   /** Add an item to the appropriate window(s). Returns any completed windows to emit. */
   add(key: string, value: T, eventTimeMs: number): U[] {
@@ -27,8 +54,7 @@ export class WindowManager<S, T, U> {
       case "tumbling": {
         const { windowMs } = this.windowType;
         const windowStart = Math.floor(eventTimeMs / windowMs) * windowMs;
-        const windowKey = `${key}:${windowStart}`;
-        const entry = this.getOrCreate(windowKey, windowStart, windowStart + windowMs);
+        const entry = this.getOrCreate(key, windowStart, windowStart + windowMs);
         entry.state = this.spec.add(entry.state, value);
         entry.lastActivity = eventTimeMs;
         break;
@@ -40,8 +66,7 @@ export class WindowManager<S, T, U> {
         const earliestStart = Math.floor((eventTimeMs - windowMs) / slideMs + 1) * slideMs;
         for (let start = earliestStart; start <= eventTimeMs; start += slideMs) {
           if (start < 0) continue;
-          const windowKey = `${key}:${start}`;
-          const entry = this.getOrCreate(windowKey, start, start + windowMs);
+          const entry = this.getOrCreate(key, start, start + windowMs);
           entry.state = this.spec.add(entry.state, value);
           entry.lastActivity = eventTimeMs;
         }
@@ -49,9 +74,8 @@ export class WindowManager<S, T, U> {
       }
 
       case "session": {
-        // Find or create a session for this key
-        const sessionKey = `${key}:session`;
-        const existing = this.windows.get(sessionKey);
+        const windows = this.windowsFor(key);
+        const existing = windows.get(SESSION);
 
         if (existing && eventTimeMs - existing.lastActivity <= this.windowType.gapMs) {
           // Extend existing session
@@ -60,17 +84,13 @@ export class WindowManager<S, T, U> {
           existing.lastActivity = eventTimeMs;
         } else {
           // Close old session if exists
-          if (existing) {
-            emitted.push(this.spec.emit(key, existing.window, existing.state));
-            this.windows.delete(sessionKey);
-          }
+          if (existing) emitted.push(this.spec.emit(key, existing.window, existing.state));
           // Start new session
-          const entry: WindowEntry<S> = {
+          windows.set(SESSION, {
             window: { start: eventTimeMs, end: eventTimeMs },
             state: this.spec.add(this.spec.init(), value),
             lastActivity: eventTimeMs,
-          };
-          this.windows.set(sessionKey, entry);
+          });
         }
         break;
       }
@@ -79,13 +99,13 @@ export class WindowManager<S, T, U> {
     return emitted;
   }
 
-  /** Flush all windows that have closed (their end time <= watermark). */
+  /** Flush this key's windows that have closed (their end time <= watermark). */
   flush(key: string, watermarkMs: number): U[] {
+    const windows = this.windowsByKey.get(key);
+    if (windows === undefined) return [];
     const emitted: U[] = [];
 
-    for (const [windowKey, entry] of this.windows) {
-      if (!windowKey.startsWith(`${key}:`)) continue;
-
+    for (const [windowId, entry] of windows) {
       const shouldFlush =
         this.windowType.type === "session"
           ? watermarkMs - entry.lastActivity > this.windowType.gapMs
@@ -93,9 +113,10 @@ export class WindowManager<S, T, U> {
 
       if (shouldFlush) {
         emitted.push(this.spec.emit(key, entry.window, entry.state));
-        this.windows.delete(windowKey);
+        windows.delete(windowId);
       }
     }
+    if (windows.size === 0) this.windowsByKey.delete(key);
 
     return emitted;
   }
@@ -103,36 +124,65 @@ export class WindowManager<S, T, U> {
   /** Flush all remaining windows (e.g., on shutdown). */
   flushAll(): U[] {
     const emitted: U[] = [];
-    for (const [windowKey, entry] of this.windows) {
-      const key = windowKey.split(":")[0]!;
-      emitted.push(this.spec.emit(key, entry.window, entry.state));
+    for (const [key, windows] of this.windowsByKey) {
+      for (const entry of windows.values()) {
+        emitted.push(this.spec.emit(key, entry.window, entry.state));
+      }
     }
-    this.windows.clear();
+    this.windowsByKey.clear();
     return emitted;
   }
 
-  /** Snapshot current window state for checkpointing. */
-  snapshot(): Array<{ windowKey: string; entry: WindowEntry<S> }> {
-    return [...this.windows.entries()].map(([windowKey, entry]) => ({ windowKey, entry }));
+  /** Snapshot every window, for checkpointing. */
+  snapshot(): WindowSnapshot<S>[] {
+    const snapshots: WindowSnapshot<S>[] = [];
+    for (const key of this.windowsByKey.keys()) snapshots.push(...this.snapshotKey(key));
+    return snapshots;
   }
 
-  /** Restore window state from a checkpoint. */
-  restore(snapshots: Array<{ windowKey: string; entry: WindowEntry<S> }>): void {
-    this.windows.clear();
-    for (const { windowKey, entry } of snapshots) {
-      this.windows.set(windowKey, entry);
+  /** Snapshot one key's windows, so a checkpoint only writes what changed. */
+  snapshotKey(key: string): WindowSnapshot<S>[] {
+    const windows = this.windowsByKey.get(key);
+    if (windows === undefined) return [];
+    return [...windows].map(([windowId, entry]) => ({
+      windowKey: `${key}:${windowId}`,
+      key,
+      entry,
+    }));
+  }
+
+  /** Restore windows from a checkpoint. Adds to what is already there. */
+  restore(snapshots: readonly WindowSnapshot<S>[]): void {
+    for (const { windowKey, key, entry } of snapshots) {
+      // Older snapshots only have "key:windowId". The window id never
+      // contains ":", so the key is everything before the last ":".
+      const split = windowKey.lastIndexOf(":");
+      const ownerKey = key ?? windowKey.slice(0, split);
+      const windowId = windowKey.slice(split + 1);
+      this.windowsFor(ownerKey).set(windowId, entry);
     }
   }
 
-  private getOrCreate(windowKey: string, start: number, end: number): WindowEntry<S> {
-    let entry = this.windows.get(windowKey);
+  private windowsFor(key: string): Map<string, WindowEntry<S>> {
+    let windows = this.windowsByKey.get(key);
+    if (windows === undefined) {
+      windows = new Map();
+      this.windowsByKey.set(key, windows);
+    }
+    return windows;
+  }
+
+  private getOrCreate(key: string, start: number, end: number): WindowEntry<S> {
+    const windows = this.windowsFor(key);
+    const windowId = String(start);
+    let entry = windows.get(windowId);
     if (!entry) {
       entry = {
         window: { start, end },
         state: this.spec.init(),
         lastActivity: start,
       };
-      this.windows.set(windowKey, entry);
+      windows.set(windowId, entry);
     }
     return entry;
   }
