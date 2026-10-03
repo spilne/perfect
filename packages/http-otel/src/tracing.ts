@@ -30,29 +30,29 @@ import {
 import { type HttpMiddleware, type HttpRequestContext } from "@spilne/perfect-http";
 import type { HttpClientError, HttpRequestOptions, HttpTransport } from "@spilne/perfect-http";
 import { defaultTransport } from "@spilne/perfect-http";
-import { type Eff, type Throws } from "@spilne/perfect-core";
-import { type RedactionPolicy, defaultRedaction, redactUrl } from "./redact.js";
+import { type Eff, type Throws, suspend } from "@spilne/perfect-core";
+import { type RedactionPolicy, redactUrl } from "./redact.js";
 
 const TRACER_NAME = "@spilne/perfect-http";
 
 // ── Per-request span storage ──────────────────────────────────────
 //
-// The middleware protocol is sync (onRequest/onResponse/onError fire in
-// order for each request). We store the active span under a unique key
-// per request — indexed by a mutable WeakMap<context, span> isn't viable
-// because the context value is a plain object we don't own, so we use a
-// WeakMap indexed by... actually, we need something contextual. Simplest
-// correct approach: wrap the sync callbacks in a closure-local map keyed
-// by the request identity (context.method + url + random). But race-safe
-// approach: store span in a field on the context itself — but it's
-// readonly. Compromise: use a WeakMap keyed by the context reference.
+// The client creates one context object per request run and passes that
+// same object to every middleware hook and to the transport (as
+// `options.context`). So we keep each request's span in a WeakMap keyed by
+// that object. The middleware puts the span in; the transport reads it to
+// tell downstream services that this span is their parent.
 
 const spanByContext = new WeakMap<HttpRequestContext, Span>();
 
 export interface TracingOptions {
   /** Custom tracer. Default: `trace.getTracer("@spilne/perfect-http")`. */
   readonly tracer?: Tracer;
-  /** Header redaction policy for span attributes. */
+  /**
+   * Header redaction policy for span attributes. Currently unused: no
+   * header attributes are recorded yet. Kept so configs that set it keep
+   * working once they are.
+   */
   readonly redaction?: RedactionPolicy;
   /** Include raw URL query in `http.url` attribute. Default: false (stripped). */
   readonly includeQuery?: boolean;
@@ -68,7 +68,6 @@ export interface TracingOptions {
  */
 export function tracingMiddleware(opts: TracingOptions = {}): HttpMiddleware {
   const tracer = opts.tracer ?? trace.getTracer(TRACER_NAME);
-  const redaction = opts.redaction ?? defaultRedaction;
   const makeName = opts.spanName ?? ((ctx) => `${ctx.method} ${redactUrl(ctx.url)}`);
 
   return {
@@ -85,8 +84,6 @@ export function tracingMiddleware(opts: TracingOptions = {}): HttpMiddleware {
         },
       });
       spanByContext.set(ctx, span);
-      // touch redaction so it's considered used even if no custom headers set
-      void redaction;
     },
     onResponse: (ctx) => {
       const span = spanByContext.get(ctx);
@@ -143,7 +140,7 @@ export interface TracingTransportOptions extends TracingOptions {
  * Wraps an `HttpTransport` and injects W3C `traceparent` / `tracestate`
  * headers so downstream services join the same trace. The span itself is
  * started by `tracingMiddleware` on the client side (which runs before
- * the transport).
+ * the transport); when both are used, the injected parent is that span.
  *
  * Use this together with `tracingMiddleware` for spans + propagation;
  * use middleware alone if you only want local spans.
@@ -152,15 +149,25 @@ export class TracingFetchTransport implements HttpTransport {
   constructor(private readonly opts: TracingTransportOptions = {}) {}
 
   execute(options: HttpRequestOptions): Eff<Response, Throws<HttpClientError>> {
-    const inner = this.opts.inner ?? defaultTransport;
-    const carrier: Record<string, string> = { ...options.headers };
-    // Inject the current OTel context's trace headers into the outgoing request
-    propagation.inject(otelContext.active(), carrier, {
-      set: (h, k, v) => {
-        h[k] = String(v);
-      },
+    // Work out the headers when the request runs, not when the effect is
+    // built: the client builds it before the middleware has started the
+    // request's span.
+    return suspend(() => {
+      const inner = this.opts.inner ?? defaultTransport;
+      const carrier: Record<string, string> = { ...options.headers };
+      // The downstream service's parent should be this request's client span
+      // (started by tracingMiddleware). Without it we would send the caller's
+      // span, and the trace would skip the HTTP call.
+      const span = options.context === undefined ? undefined : spanByContext.get(options.context);
+      const parent =
+        span === undefined ? otelContext.active() : trace.setSpan(otelContext.active(), span);
+      propagation.inject(parent, carrier, {
+        set: (h, k, v) => {
+          h[k] = String(v);
+        },
+      });
+      return inner.execute({ ...options, headers: carrier });
     });
-    return inner.execute({ ...options, headers: carrier });
   }
 }
 
