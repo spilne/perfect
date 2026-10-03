@@ -47,6 +47,8 @@ export class PgRateLimiter implements RateLimiter<Throws<PostgresError>> {
   private readonly limit: number;
   private readonly windowMs: number;
   private readonly table: string;
+  // The quoted table name, ready to put in a query.
+  private readonly tableSql: ReturnType<typeof sql.identifier>;
   private setupPromise: Promise<void> | null = null;
 
   constructor(config: PgRateLimiterConfig) {
@@ -55,6 +57,7 @@ export class PgRateLimiter implements RateLimiter<Throws<PostgresError>> {
     this.limit = config.limit;
     this.windowMs = config.windowMs;
     this.table = config.table ?? "perfect_rate_limit";
+    this.tableSql = sql.identifier(this.table);
     this.setupPromise = this._setup();
     this.setupPromise.catch(() => {});
   }
@@ -67,18 +70,15 @@ export class PgRateLimiter implements RateLimiter<Throws<PostgresError>> {
   }
 
   private async _setup(): Promise<void> {
+    await this.db.execute(sql`
+      CREATE TABLE IF NOT EXISTS ${this.tableSql} (
+        key TEXT NOT NULL,
+        ts BIGINT NOT NULL
+      )
+    `);
+    const indexName = sql.identifier(`${this.table}_key_ts_idx`);
     await this.db.execute(
-      sql.raw(`
-        CREATE TABLE IF NOT EXISTS ${this.table} (
-          key TEXT NOT NULL,
-          ts BIGINT NOT NULL
-        )
-      `),
-    );
-    await this.db.execute(
-      sql.raw(`
-        CREATE INDEX IF NOT EXISTS ${this.table}_key_ts_idx ON ${this.table} (key, ts)
-      `),
+      sql`CREATE INDEX IF NOT EXISTS ${indexName} ON ${this.tableSql} (key, ts)`,
     );
   }
 
@@ -89,61 +89,64 @@ export class PgRateLimiter implements RateLimiter<Throws<PostgresError>> {
     }
   }
 
-  /** Try to acquire once. Returns 0 if granted, or ms to wait until a slot opens. */
+  /**
+   * Try to acquire once. Returns 0 if granted, or ms to wait until a slot
+   * opens.
+   *
+   * The whole check runs in one transaction that first takes a lock on this
+   * key. Without the lock, two callers could both count "4 of 5 used" and
+   * both insert, letting more through than the limit. All times come from
+   * the database clock, read after the lock, so app servers with slightly
+   * different clocks still agree.
+   */
   private async _tryAcquireOnce(): Promise<number> {
     await this._ensureReady();
-    const table = this.table;
+    const table = this.tableSql;
     const key = this.key;
     const limit = this.limit;
     const windowMs = this.windowMs;
 
-    let decision = { granted: false, retryAfterMs: 0 };
-
-    await this.db.transaction(async (tx) => {
+    return this.db.transaction(async (tx) => {
       const db = tx as DrizzleDb;
 
-      // Delete expired entries
+      // Held until the transaction ends. Only callers for the same table and
+      // key wait for each other.
       await db.execute(
-        sql`DELETE FROM ${sql.raw(table)} WHERE key = ${key} AND ts <= (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT - ${windowMs}`,
+        sql`SELECT pg_advisory_xact_lock(hashtextextended(${`${this.table}:${key}`}, 0))`,
       );
 
-      // Count active entries
-      const countRows = await execRaw(
+      const [clock] = await execRaw(
         db,
-        sql`SELECT COUNT(*) AS cnt FROM ${sql.raw(table)} WHERE key = ${key}`,
+        sql`SELECT (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT AS now`,
       );
-      const count = Number(countRows[0]?.cnt ?? 0);
+      const now = Number(clock?.now);
 
-      if (count < limit) {
-        await execRaw(
-          db,
-          sql`INSERT INTO ${sql.raw(table)} (key, ts) VALUES (${key}, (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT)`,
-        );
-        decision = { granted: true, retryAfterMs: 0 };
-      } else {
-        const oldestRows = await execRaw(
-          db,
-          sql`SELECT MIN(ts) AS oldest FROM ${sql.raw(table)} WHERE key = ${key}`,
-        );
-        const oldest = oldestRows[0]?.oldest != null ? Number(oldestRows[0].oldest) : null;
-        decision = slidingWindowDecision({
-          count,
-          oldestTs: oldest,
-          now: Date.now(),
-          limit,
-          windowMs,
-        });
+      await db.execute(sql`DELETE FROM ${table} WHERE key = ${key} AND ts <= ${now - windowMs}`);
+
+      const [stats] = await execRaw(
+        db,
+        sql`SELECT COUNT(*) AS cnt, MIN(ts) AS oldest FROM ${table} WHERE key = ${key}`,
+      );
+      const decision = slidingWindowDecision({
+        count: Number(stats?.cnt ?? 0),
+        oldestTs: stats?.oldest != null ? Number(stats.oldest) : null,
+        now,
+        limit,
+        windowMs,
+      });
+
+      if (decision.granted) {
+        await db.execute(sql`INSERT INTO ${table} (key, ts) VALUES (${key}, ${now})`);
       }
+      return decision.granted ? 0 : decision.retryAfterMs;
     });
-
-    return decision.granted ? 0 : decision.retryAfterMs;
   }
 
   private async _activeStats(): Promise<{ count: number; oldest: number | null }> {
     await this._ensureReady();
     const rows = await execRaw(
       this.db,
-      sql`SELECT COUNT(*) AS cnt, MIN(ts) AS oldest FROM ${sql.raw(this.table)} WHERE key = ${this.key} AND ts > (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT - ${this.windowMs}`,
+      sql`SELECT COUNT(*) AS cnt, MIN(ts) AS oldest FROM ${this.tableSql} WHERE key = ${this.key} AND ts > (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT - ${this.windowMs}`,
     );
     return {
       count: Number(rows[0]?.cnt ?? 0),

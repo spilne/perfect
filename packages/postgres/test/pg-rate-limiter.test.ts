@@ -46,23 +46,29 @@ describe("slidingWindowDecision", () => {
 // ---------------------------------------------------------------------------
 
 describe("PgRateLimiter (fake db)", () => {
-  it("tryAcquire grants and inserts a slot when under the limit", async () => {
+  it("tryAcquire locks the key, then grants and inserts a slot when under the limit", async () => {
     const { db, fake } = fakeDb((sql) => {
-      if (sql.includes("COUNT(*)")) return [{ cnt: "1" }];
+      if (sql.includes("clock_timestamp")) return [{ now: "10000" }];
+      if (sql.includes("COUNT(*)")) return [{ cnt: "1", oldest: "9990" }];
       return [];
     });
     const rl = new PgRateLimiter({ db, key: "api", limit: 2, windowMs: 100 });
 
     const granted = await run(rl.tryAcquire);
     expect(granted).toBe(true);
-    expect(fake.allSql).toContain("INSERT INTO perfect_rate_limit");
+    // The lock comes first, so two callers can't both see room for one more.
+    expect(fake.queries.findIndex((q) => q.sql.includes("pg_advisory_xact_lock"))).toBeLessThan(
+      fake.queries.findIndex((q) => q.sql.includes("COUNT(*)")),
+    );
+    const insert = fake.queries.find((q) => q.sql.includes("INSERT INTO"))!;
+    expect(insert.sql).toContain('INSERT INTO "perfect_rate_limit"');
+    expect(insert.params).toEqual(["api", 10000]);
   });
 
-  it("acquire fails with typed RateLimitExceeded when at the limit", async () => {
-    const oldest = Date.now() - 40;
+  it("acquire fails with typed RateLimitExceeded when at the limit, using the db clock", async () => {
     const { db, fake } = fakeDb((sql) => {
-      if (sql.includes("COUNT(*)")) return [{ cnt: "2" }];
-      if (sql.includes("MIN(ts)")) return [{ oldest: String(oldest) }];
+      if (sql.includes("clock_timestamp")) return [{ now: "10000" }];
+      if (sql.includes("COUNT(*)")) return [{ cnt: "2", oldest: "9960" }];
       return [];
     });
     const rl = new PgRateLimiter({ db, key: "api", limit: 2, windowMs: 100 });
@@ -71,11 +77,11 @@ describe("PgRateLimiter (fake db)", () => {
     expect(exit._tag).toBe("Left");
     if (exit._tag === "Left") {
       expect(exit.left._tag).toBe("RateLimitExceeded");
-      expect(exit.left.retryAfterMs).toBeGreaterThanOrEqual(1);
-      expect(exit.left.retryAfterMs).toBeLessThanOrEqual(100);
+      // oldest (9960) + window (100) - now (10000), all from the database
+      expect(exit.left.retryAfterMs).toBe(60);
     }
     // Rejected — no slot row inserted
-    expect(fake.allSql).not.toContain("INSERT INTO perfect_rate_limit (key, ts) VALUES");
+    expect(fake.allSql).not.toContain("INSERT INTO");
   });
 
   it("remaining subtracts active slots from the limit", async () => {
