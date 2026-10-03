@@ -106,6 +106,10 @@ const DONE: Step<any> = { _tag: "Done" };
 // How many chunks a background producer (groupWithin, debounce) may get
 // ahead of its consumer.
 const SLOTS_AHEAD = 16;
+
+// Biggest chunk a lazy source (fromIterable, unfold) builds in one step.
+const MAX_SOURCE_BATCH = 4096;
+
 // Waits until interrupted.
 const NEVER: Eff<never, never> = async<never>(() => {}) as Eff<never, never>;
 
@@ -127,12 +131,13 @@ function fuseStep<A, S>(
     if (s._tag === "Done") return DONE;
     let out: Chunk<A>;
     if (hasFilter) {
-      // Use the underlying array directly — avoids per-element method-call overhead.
-      const src = s.chunk.toArray();
-      const len = src.length;
+      // Read straight from the chunk; copying it first (toArray) cost a
+      // whole extra pass over every chunk.
+      const chunk = s.chunk;
+      const len = chunk.length;
       const arr: any[] = [];
       for (let i = 0; i < len; i++) {
-        const v = compiled(src[i]);
+        const v = compiled(chunk.get(i));
         if (v !== SKIP) arr.push(v);
       }
       out = Chunk.fromArray(arr);
@@ -221,8 +226,49 @@ export class Stream<A, S = never> {
     return Stream.fromChunk(Chunk.fromArray(arr));
   }
 
+  /**
+   * Stream the values of any iterable. Arrays are used as they are. Other
+   * iterables (a generator, a custom iterator, ...) are read lazily, a batch at a time,
+   * so an infinite generator works, and stopping early calls the
+   * iterator's return() so the generator can clean up.
+   */
   static fromIterable<A>(iter: Iterable<A>): Stream<A, never> {
-    return Stream.fromArray(Array.from(iter));
+    if (Array.isArray(iter)) return Stream.fromArray(iter);
+    // A Set or Map is finite and reading it has no side effects, so copying
+    // it in one go is safe and faster than reading it in batches.
+    if (iter instanceof Set || iter instanceof Map) {
+      return Stream.suspend(() => Stream.fromArray(Array.from(iter)));
+    }
+    return Stream.suspend(() => {
+      const iterator = iter[Symbol.iterator]();
+      let done = false;
+      // Start with small batches so `take(1)` reads one value, then grow,
+      // so long iterables still move in big chunks.
+      const pull = (batch: number): Stream<A, never> =>
+        new Stream(
+          sync(() => {
+            const values: A[] = [];
+            while (values.length < batch) {
+              const result = iterator.next();
+              if (result.done === true) {
+                done = true;
+                break;
+              }
+              values.push(result.value);
+            }
+            if (values.length === 0) return DONE;
+            const next = done ? Stream.empty<A>() : pull(Math.min(batch * 2, MAX_SOURCE_BATCH));
+            return emit(Chunk.fromArray(values), next);
+          }),
+        );
+      return pull(1)._withFinalizer(
+        sync(() => {
+          if (done) return;
+          done = true;
+          iterator.return?.();
+        }),
+      );
+    });
   }
 
   static fromAsyncIterable<A, E>(
@@ -239,24 +285,34 @@ export class Stream<A, S = never> {
     let iterator: AsyncIterator<A> | null = null;
     let completed = false;
 
+    // Ask the iterator for the next value. Errors thrown right away (when
+    // getting the iterator, or by next() itself) and rejected promises both
+    // go through onError. Calling next() directly here, instead of inside an
+    // extra Promise.then, saves one promise hop per value.
+    const pullOne = async<IteratorResult<A>, E>((resume) => {
+      let pending: Promise<IteratorResult<A>>;
+      try {
+        iterator ??= iterable[Symbol.asyncIterator]();
+        pending = Promise.resolve(iterator.next());
+      } catch (error) {
+        resume(fail(onError(error)) as any);
+        return;
+      }
+      pending.then(
+        (result) => resume(succeed(result) as any),
+        (error) => resume(fail(onError(error)) as any),
+      );
+    });
+
     const next = (): Stream<A, Throws<E>> =>
       new Stream(
-        suspend(() => {
-          return fromPromise(
-            () =>
-              Promise.resolve().then(() => {
-                iterator ??= iterable[Symbol.asyncIterator]();
-                return iterator.next();
-              }),
-            onError,
-          ).map((result) => {
-            if (result.done) {
-              completed = true;
-              return DONE;
-            }
-            return emit(Chunk.single(result.value), next());
-          });
-        }),
+        pullOne.map((result) => {
+          if (result.done) {
+            completed = true;
+            return DONE;
+          }
+          return emit(Chunk.single(result.value), next());
+        }) as any,
       );
 
     return next().onFinalize(
@@ -293,18 +349,34 @@ export class Stream<A, S = never> {
     );
   }
 
+  /**
+   * Build a stream from a seed: `f(seed)` returns `[value, nextSeed]`, or
+   * null to stop.
+   *
+   * Values are made a batch at a time (1, then 2, 4, ... up to 4096), so a
+   * long stream doesn't pay a whole stream step per value. This means `f`
+   * can run a few times more than the values you end up taking, so keep it
+   * free of side effects (use unfoldEffect for effects).
+   */
   static unfold<A, B>(seed: B, f: (b: B) => [A, B] | null): Stream<A, never> {
-    function go(s: B): Stream<A, never> {
+    function go(s: B, batch: number): Stream<A, never> {
       return new Stream(
         sync(() => {
-          const result = f(s);
-          if (result === null) return DONE;
-          const [value, next] = result;
-          return emit(Chunk.single(value), go(next));
+          const values: A[] = [];
+          let state = s;
+          while (values.length < batch) {
+            const result = f(state);
+            if (result === null) {
+              return values.length === 0 ? DONE : emit(Chunk.fromArray(values), Stream.empty());
+            }
+            values.push(result[0]);
+            state = result[1];
+          }
+          return emit(Chunk.fromArray(values), go(state, Math.min(batch * 2, MAX_SOURCE_BATCH)));
         }),
       );
     }
-    return go(seed);
+    return go(seed, 1);
   }
 
   static unfoldEffect<A, B, S>(seed: B, f: (b: B) => Eff<[A, B] | null, S>): Stream<A, S> {
@@ -764,7 +836,7 @@ export class Stream<A, S = never> {
           (outer.step as any).flatMap((step: Step<A>) =>
             step._tag === "Done"
               ? events.offer({ _tag: "outerEnd" })
-              : offerOuterChunk(Array.from(step.chunk), 0, step.next),
+              : offerOuterChunk(step.chunk.toArray(), 0, step.next),
           );
 
         const drainInner = (inner: Stream<B, any>, innerGeneration: number): Eff<void, any> =>
@@ -956,15 +1028,11 @@ export class Stream<A, S = never> {
   drop(n: number): Stream<A, S> {
     if (n <= 0) return this;
     return new Stream(
-      (this.step as any)
-        .map((s: Step<A>) => {
-          if (s._tag === "Done") return DONE;
-          if (n >= s.chunk.length) {
-            return s.next.drop(n - s.chunk.length).step;
-          }
-          return emit(s.chunk.drop(n), s.next);
-        })
-        .flatMap((r: any) => (r instanceof Suspend ? r : succeed(r))),
+      (this.step as any).flatMap((s: Step<A>) => {
+        if (s._tag === "Done") return succeed(DONE);
+        if (n >= s.chunk.length) return s.next.drop(n - s.chunk.length).step;
+        return succeed(emit(s.chunk.drop(n), s.next));
+      }),
       this._finalizer,
     );
   }
@@ -973,12 +1041,12 @@ export class Stream<A, S = never> {
     return new Stream(
       (this.step as any).map((s: Step<A>) => {
         if (s._tag === "Done") return DONE;
-        const taken: A[] = [];
-        for (const item of s.chunk) {
-          if (!p(item)) return emit(Chunk.fromArray(taken), Stream.empty());
-          taken.push(item);
+        // Find the first value that fails, and slice the chunk there (no copy).
+        const chunk = s.chunk;
+        for (let i = 0; i < chunk.length; i++) {
+          if (!p(chunk.get(i))) return emit(chunk.take(i), Stream.empty());
         }
-        return emit(Chunk.fromArray(taken), s.next.takeWhile(p));
+        return emit(chunk, s.next.takeWhile(p));
       }),
       this._finalizer,
     );
@@ -1081,20 +1149,14 @@ export class Stream<A, S = never> {
 
   dropWhile(p: (a: A) => boolean): Stream<A, S> {
     return new Stream(
-      (this.step as any)
-        .map((s: Step<A>) => {
-          if (s._tag === "Done") return DONE;
-          let dropCount = 0;
-          for (const item of s.chunk) {
-            if (!p(item)) break;
-            dropCount++;
-          }
-          if (dropCount === s.chunk.length) {
-            return s.next.dropWhile(p).step;
-          }
-          return emit(s.chunk.drop(dropCount), s.next);
-        })
-        .flatMap((r: any) => (r instanceof Suspend ? r : succeed(r))),
+      (this.step as any).flatMap((s: Step<A>) => {
+        if (s._tag === "Done") return succeed(DONE);
+        const chunk = s.chunk;
+        let dropCount = 0;
+        while (dropCount < chunk.length && p(chunk.get(dropCount))) dropCount++;
+        if (dropCount === chunk.length) return s.next.dropWhile(p).step;
+        return succeed(emit(chunk.drop(dropCount), s.next));
+      }),
       this._finalizer,
     );
   }
@@ -1104,11 +1166,12 @@ export class Stream<A, S = never> {
       return new Stream(
         (stream.step as any).map((s: Step<A>) => {
           if (s._tag === "Done") return DONE;
-          const results: B[] = [];
+          const chunk = s.chunk;
+          const results = new Array<B>(chunk.length);
           let current = acc;
-          for (const item of s.chunk) {
-            current = f(current, item);
-            results.push(current);
+          for (let i = 0; i < chunk.length; i++) {
+            current = f(current, chunk.get(i));
+            results[i] = current;
           }
           return emit(Chunk.fromArray(results), go(current, s.next));
         }),
@@ -1158,12 +1221,13 @@ export class Stream<A, S = never> {
       return new Stream(
         (stream.step as any).map((s: Step<A>) => {
           if (s._tag === "Done") return DONE;
-          const out: B[] = [];
+          const chunk = s.chunk;
+          const out = new Array<B>(chunk.length);
           let current = state;
-          for (const item of s.chunk) {
-            const [next, b] = f(current, item);
-            current = next;
-            out.push(b);
+          for (let i = 0; i < chunk.length; i++) {
+            const pair = f(current, chunk.get(i));
+            current = pair[0];
+            out[i] = pair[1];
           }
           return emit(Chunk.fromArray(out), go(current, s.next));
         }),
@@ -1267,28 +1331,35 @@ export class Stream<A, S = never> {
       throw new RangeError("grouped: size must be a positive integer");
     function go(buffer: A[], stream: Stream<A, any>): Stream<Chunk<A>, any> {
       return new Stream(
-        (stream.step as any)
-          .map((s: Step<A>) => {
-            if (s._tag === "Done") {
-              if (buffer.length > 0) {
-                return emit(Chunk.single(Chunk.fromArray(buffer)), Stream.empty());
-              }
-              return DONE;
+        (stream.step as any).flatMap((s: Step<A>) => {
+          if (s._tag === "Done") {
+            if (buffer.length === 0) return succeed(DONE);
+            return succeed(emit(Chunk.single(Chunk.fromArray(buffer)), Stream.empty()));
+          }
+          const chunk = s.chunk;
+          const groups: Chunk<A>[] = [];
+          let current = buffer;
+          let i = 0;
+          // First finish the group left over from the previous chunk.
+          if (current.length > 0) {
+            const take = Math.min(size - current.length, chunk.length);
+            current = current.concat(chunk.take(take).toArray());
+            i = take;
+            if (current.length === size) {
+              groups.push(Chunk.fromArray(current));
+              current = [];
             }
-            const groups: Chunk<A>[] = [];
-            let current = buffer;
-            for (const item of s.chunk) {
-              current.push(item);
-              if (current.length === size) {
-                groups.push(Chunk.fromArray(current));
-                current = [];
-              }
-            }
-            const next = go(current, s.next);
-            if (groups.length === 0) return next.step;
-            return emit(Chunk.fromArray(groups), next);
-          })
-          .flatMap((r: any) => (r instanceof Suspend ? r : succeed(r))),
+          }
+          // Full groups inside this chunk are slices of it, so no copying.
+          while (chunk.length - i >= size) {
+            groups.push(chunk.drop(i).take(size));
+            i += size;
+          }
+          if (i < chunk.length) current = current.concat(chunk.drop(i).toArray());
+          const next = go(current, s.next);
+          if (groups.length === 0) return next.step;
+          return succeed(emit(Chunk.fromArray(groups), next));
+        }),
         stream._finalizer,
       );
     }
@@ -1313,33 +1384,32 @@ export class Stream<A, S = never> {
     const st = requireCount({ operator: "sliding", name: "step", value: step });
     function go(buffer: A[], skip: number, stream: Stream<A, any>): Stream<Chunk<A>, any> {
       return new Stream(
-        (stream.step as any)
-          .map((s: Step<A>) => {
-            if (s._tag === "Done") return DONE;
-            const windows: Chunk<A>[] = [];
-            let buf = buffer.slice();
-            let toSkip = skip;
-            for (const item of s.chunk) {
-              if (toSkip > 0) {
-                toSkip--;
-                continue;
-              }
-              buf.push(item);
-              if (buf.length === sz) {
-                windows.push(Chunk.fromArray(buf));
-                if (st >= sz) {
-                  toSkip = st - sz;
-                  buf = [];
-                } else {
-                  buf = buf.slice(st);
-                }
+        (stream.step as any).flatMap((s: Step<A>) => {
+          if (s._tag === "Done") return succeed(DONE);
+          const windows: Chunk<A>[] = [];
+          let buf = buffer.slice();
+          let toSkip = skip;
+          const chunk = s.chunk;
+          for (let i = 0; i < chunk.length; i++) {
+            if (toSkip > 0) {
+              toSkip--;
+              continue;
+            }
+            buf.push(chunk.get(i));
+            if (buf.length === sz) {
+              windows.push(Chunk.fromArray(buf));
+              if (st >= sz) {
+                toSkip = st - sz;
+                buf = [];
+              } else {
+                buf = buf.slice(st);
               }
             }
-            const next = go(buf, toSkip, s.next);
-            if (windows.length === 0) return next.step;
-            return emit(Chunk.fromArray(windows), next);
-          })
-          .flatMap((r: any) => (r instanceof Suspend ? r : succeed(r))),
+          }
+          const next = go(buf, toSkip, s.next);
+          if (windows.length === 0) return next.step;
+          return succeed(emit(Chunk.fromArray(windows), next));
+        }),
         stream._finalizer,
       );
     }
