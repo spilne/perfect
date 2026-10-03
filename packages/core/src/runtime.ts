@@ -31,12 +31,10 @@ if (!emptyContext.has(Tracer.key)) emptyContext.set(Tracer.key, noopTracer);
 if (!emptyContext.has(CURRENT_SPAN_KEY)) emptyContext.set(CURRENT_SPAN_KEY, NO_SPAN);
 if (!emptyContext.has(Metrics.key)) emptyContext.set(Metrics.key, defaultMetricsRegistry);
 
-type Resolve = (value: any) => void;
 type ExitFinalizer = (
   exit: Exit<unknown, unknown>,
   fiber: Fiber<any> | undefined,
 ) => Suspend | null;
-type Reject = (cause: Cause) => void;
 
 function succeedAfterFinalizer(finalizer: Suspend, value: any): Suspend {
   return new Suspend(
@@ -79,16 +77,6 @@ function enterUninterruptible(fiber: Fiber<any>, k: Cont | null): Cont {
 
 function withInterrupt(cause: Cause): Cause {
   return Cause.hasInterrupt(cause) ? cause : Cause.then(cause, Cause.interrupt());
-}
-
-// The fiber-level scope closes like a finalizer region around the whole body:
-// an interrupt that arrives while it closes is raised once it has closed, as
-// leaving the region of `ensuring` or `scoped` raises it.
-function interruptedWhileClosing(fiber: Fiber<any>): boolean {
-  if (!fiber.interruptible || !(fiber.interruptPending || fiber.interrupting)) return false;
-  fiber.interruptPending = false;
-  fiber.interrupting = true;
-  return true;
 }
 
 // The cause that continues past an error handler an interrupting fiber
@@ -136,40 +124,14 @@ function exitFinalizer(
   }
 }
 
-// Owns resumable execution: saves the continuation on suspension, honors
-// interruption, and yields through the scheduler for cooperative fairness.
-// Keep opcode handling aligned with stepInline, whose finalization contract
-// deliberately excludes normal fiber scheduling and completion.
+// The interpreter. Owns resumable execution: saves the continuation on
+// suspension, honors interruption, and yields through the scheduler for
+// cooperative fairness. Finalizers and scope cleanup run here too (there used
+// to be a second, smaller loop just for closing the fiber-level scope).
 //
 // Every run starts from a Ready fiber and consumes that state. A run that
 // finds the fiber in any other state is a duplicate (see Fiber.interrupt) and
 // does nothing.
-// The fiber's body failed with `cause`. A fiber-level scope (from an
-// acquireRelease outside any `scoped`) is closed first, and the fiber
-// completes once that is done.
-function failFiber(fiber: Fiber<any>, cause: Cause, context: Context): void {
-  if (fiber.scope && !fiber.scope.isClosed) {
-    const closer = fiber.scope.close();
-    stepInline(
-      closer as unknown as Suspend,
-      context,
-      null,
-      () => {
-        const failure = interruptedWhileClosing(fiber) ? withInterrupt(cause) : cause;
-        fiber.complete({ ok: false, cause: failure });
-      },
-      (closeCause) => {
-        const closed = Cause.then(cause, closeCause);
-        const failure = interruptedWhileClosing(fiber) ? withInterrupt(closed) : closed;
-        fiber.complete({ ok: false, cause: failure });
-      },
-      fiber,
-    );
-    return;
-  }
-  fiber.complete({ ok: false, cause });
-}
-
 function runFiberLoop(fiber: Fiber<any>): void {
   if (fiber.state !== FiberState.Ready) return;
   fiber.state = FiberState.Running;
@@ -279,28 +241,16 @@ function runFiberLoop(fiber: Fiber<any>): void {
           }
         }
       }
-      // close scope on success
-      if (fiber.scope && !fiber.scope.isClosed) {
-        const val = cur;
-        const closer = fiber.scope.close();
-        stepInline(
-          closer as unknown as Suspend,
-          context,
-          null,
-          () => {
-            if (interruptedWhileClosing(fiber))
-              fiber.complete({ ok: false, cause: Cause.interrupt() });
-            else fiber.complete({ ok: true, value: val });
-          },
-          (closeCause) =>
-            failFiber(
-              fiber,
-              interruptedWhileClosing(fiber) ? withInterrupt(closeCause) : closeCause,
-              context,
-            ),
-          fiber,
-        );
-        return;
+      // The fiber-level scope (resources acquired outside any `scoped`)
+      // closes like any finalizer region around the whole body: here in the
+      // same loop, with interrupts masked, and an interrupt that arrives
+      // while it closes is raised once it has closed.
+      const scope = fiber.scope;
+      if (scope !== null && !scope.isClosed) {
+        fiber.scope = null;
+        k = enterUninterruptible(fiber, null);
+        cur = succeedAfterFinalizer(scope.close() as unknown as Suspend, cur);
+        continue loop;
       }
       fiber.complete({ ok: true, value: cur });
       return;
@@ -391,7 +341,15 @@ function runFiberLoop(fiber: Fiber<any>): void {
             continue loop;
           }
         }
-        failFiber(fiber, cause, context);
+        // Same as on success: close the fiber-level scope first.
+        const scope = fiber.scope;
+        if (scope !== null && !scope.isClosed) {
+          fiber.scope = null;
+          k = enterUninterruptible(fiber, null);
+          cur = failAfterFinalizer(scope.close() as unknown as Suspend, cause);
+          continue loop;
+        }
+        fiber.complete({ ok: false, cause });
         return;
       }
 
@@ -1034,266 +992,6 @@ class ChildGroup {
   }
 }
 
-// Drives cleanup through resolve/reject callbacks without completing the
-// original fiber again. Runs supported opcodes inline; Async resumes here,
-// while other opcodes delegate to a detached fiber with the same context.
-// parentFiber supplies scheduler/interruption state, not child ownership.
-// The separate loop keeps cleanup out of the normal completion path; changes
-// to shared opcode semantics must be checked in both interpreters.
-function stepInline(
-  node: Suspend,
-  ctx: Context,
-  stack: Cont | null,
-  resolve: Resolve,
-  reject: Reject,
-  parentFiber?: Fiber,
-): void {
-  let cur: any = node;
-  let context = ctx;
-  let k: Cont | null = stack;
-
-  loop: while (true) {
-    if (!(cur instanceof Suspend)) {
-      while (k !== null) {
-        const frame = k;
-        k = frame.next;
-        switch (frame.op) {
-          case Op.FlatMap: {
-            // a throwing continuation (user callback in .map/.flatMap) is a
-            // defect, not an interpreter crash
-            try {
-              cur = (frame.fn as any)(cur);
-            } catch (e) {
-              cur = new Suspend(Op.Fail, Cause.die(e), null);
-            }
-            continue loop;
-          }
-          case Op.Catch:
-          case Op.CatchAll: {
-            continue;
-          }
-          case Op.Provide: {
-            context = frame.fn as Context;
-            continue;
-          }
-          case Op.SetInterruptible: {
-            if (parentFiber) parentFiber.interruptible = frame.fn as unknown as boolean;
-            continue;
-          }
-          case Op.EnsuringFrame: {
-            const value = cur;
-            const finalizer =
-              typeof frame.fn === "function"
-                ? exitFinalizer(frame.fn, { _tag: "Success", value }, parentFiber)
-                : (frame.fn as Suspend);
-            if (finalizer === null) continue;
-            cur = succeedAfterFinalizer(finalizer, value);
-            continue loop;
-          }
-          case Op.ScopeFrame: {
-            const { scope, oldScope } = frame.fn as { scope: Scope; oldScope: Scope | null };
-            if (parentFiber) parentFiber.scope = oldScope;
-            const value = cur;
-            cur = succeedAfterFinalizer(scope.close() as unknown as Suspend, value);
-            continue loop;
-          }
-        }
-      }
-      resolve(cur);
-      return;
-    }
-
-    switch (cur.op) {
-      case Op.Succeed: {
-        cur = cur.a;
-        continue loop;
-      }
-      case Op.Sync: {
-        try {
-          cur = (cur.a as any)();
-        } catch (e) {
-          cur = new Suspend(Op.Fail, Cause.die(e), null);
-        }
-        continue loop;
-      }
-      case Op.Fail: {
-        const cause = cur.a as Cause;
-        while (k !== null) {
-          const frame = k;
-          k = frame.next;
-          if (frame.op === Op.Catch) {
-            const f = Cause.firstFail(cause);
-            if (f) {
-              try {
-                cur = (frame.fn as any)(f.value);
-              } catch (e) {
-                cur = new Suspend(Op.Fail, Cause.die(e), null);
-              }
-              continue loop;
-            }
-          }
-          if (frame.op === Op.CatchAll) {
-            try {
-              cur = (frame.fn as any)(cause);
-            } catch (e) {
-              cur = new Suspend(Op.Fail, Cause.die(e), null);
-            }
-            continue loop;
-          }
-          if (frame.op === Op.Provide) context = frame.fn as Context;
-          if (frame.op === Op.SetInterruptible && parentFiber) {
-            parentFiber.interruptible = frame.fn as unknown as boolean;
-          }
-          if (frame.op === Op.EnsuringFrame) {
-            const finalizer =
-              typeof frame.fn === "function"
-                ? exitFinalizer(frame.fn, { _tag: "Failure", cause }, parentFiber)
-                : (frame.fn as Suspend);
-            if (finalizer === null) continue;
-            cur = failAfterFinalizer(finalizer, cause);
-            continue loop;
-          }
-          if (frame.op === Op.ScopeFrame) {
-            const { scope, oldScope } = frame.fn as { scope: Scope; oldScope: Scope | null };
-            if (parentFiber) parentFiber.scope = oldScope;
-            cur = failAfterFinalizer(scope.close() as unknown as Suspend, cause);
-            continue loop;
-          }
-        }
-        reject(cause);
-        return;
-      }
-      case Op.FlatMap: {
-        k = new Cont(Op.FlatMap, cur.b, k);
-        cur = cur.a;
-        continue loop;
-      }
-      case Op.Catch: {
-        k = new Cont(Op.Catch, cur.b, k);
-        cur = cur.a;
-        continue loop;
-      }
-      case Op.CatchAll: {
-        k = new Cont(Op.CatchAll, cur.b, k);
-        cur = cur.a;
-        continue loop;
-      }
-      case Op.Ensuring: {
-        const body = cur.a as Suspend;
-        const finalizer = cur.b;
-        const finalizerFor = (exit: Exit<unknown, unknown>): Suspend =>
-          typeof finalizer === "function"
-            ? (exitFinalizer(finalizer, exit, parentFiber) ??
-              new Suspend(Op.Succeed, undefined, null))
-            : (finalizer as Suspend);
-        stepInline(
-          body,
-          context,
-          null,
-          (val) => {
-            stepInline(
-              finalizerFor({ _tag: "Success", value: val }),
-              context,
-              null,
-              () => {
-                stepInline(
-                  new Suspend(Op.Succeed, val, null),
-                  context,
-                  k,
-                  resolve,
-                  reject,
-                  parentFiber,
-                );
-              },
-              (finalizerCause) => {
-                stepInline(
-                  new Suspend(Op.Fail, finalizerCause, null),
-                  context,
-                  k,
-                  resolve,
-                  reject,
-                  parentFiber,
-                );
-              },
-              parentFiber,
-            );
-          },
-          (cause) => {
-            stepInline(
-              finalizerFor({ _tag: "Failure", cause }),
-              context,
-              null,
-              () => {
-                stepInline(
-                  new Suspend(Op.Fail, cause, null),
-                  context,
-                  k,
-                  resolve,
-                  reject,
-                  parentFiber,
-                );
-              },
-              (finalizerCause) => {
-                stepInline(
-                  new Suspend(Op.Fail, Cause.then(cause, finalizerCause), null),
-                  context,
-                  k,
-                  resolve,
-                  reject,
-                  parentFiber,
-                );
-              },
-              parentFiber,
-            );
-          },
-          parentFiber,
-        );
-        return;
-      }
-      case Op.Async: {
-        // async in finalizer context — still need to handle it
-        const register = cur.a as (resume: (value: any) => void) => unknown;
-        register((value: any) => {
-          stepInline(
-            value instanceof Suspend ? value : new Suspend(Op.Succeed, value, null),
-            context,
-            k,
-            resolve,
-            reject,
-            parentFiber,
-          );
-        });
-        return;
-      }
-      default: {
-        // Ops we can't inline (Fork, All, etc.) — delegate to the fiber runtime.
-        // No structured parent relationship here; the fiber is orphan.
-        const child = bootstrapFiber<any>(cur as Eff<any, any>, parentFiber?.scheduler);
-        child.context = context;
-        // stepInline only runs cleanup. Keep the delegated fiber in the state a
-        // finalizer runs in on the owner itself: uninterruptible, and
-        // interrupting if the owner was interrupted.
-        child.interruptible = false;
-        if (parentFiber) child.interrupting = parentFiber.interrupting;
-        child.onComplete((result) => {
-          stepInline(
-            result.ok
-              ? new Suspend(Op.Succeed, result.value, null)
-              : new Suspend(Op.Fail, result.cause, null),
-            context,
-            k,
-            resolve,
-            reject,
-            parentFiber,
-          );
-        });
-        child.scheduleRun();
-        return;
-      }
-    }
-  }
-}
-
 // ── Public API ─────────────────────────────────��───────────────────
 
 // Allocate + bootstrap a fiber ready to be scheduled. Shared by every runner.
@@ -1325,7 +1023,7 @@ function bootstrapFiber<A>(eff: Eff<A, any>, scheduler?: Scheduler): Fiber<A> {
 }
 
 // Create a child fiber — used by every op that spawns (All, Fork, Race,
-// ForkDaemon, stepInline fallback). Doesn't schedule; caller attaches
+// ForkDaemon). Doesn't schedule; caller attaches
 // onComplete/scope/etc., then calls runChild(child).
 function makeChild(parent: Fiber<any>, eff: any, context: Context, structured = true): Fiber<any> {
   const child = new Fiber();
