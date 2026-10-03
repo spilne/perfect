@@ -8,8 +8,50 @@
 // optional LRU eviction via `maxSize`, and introspection methods.
 
 import { type Eff } from "./eff.js";
-import { succeed, sync } from "./constructors.js";
+import { failCause, onExit, succeed, suspend, sync } from "./constructors.js";
 import { Clock } from "./clock.js";
+import { Cause } from "./cause.js";
+import { InProcessDeferred } from "./deferred.js";
+import type { Exit } from "./exit.js";
+
+// ── In-flight sharing ──────────────────────────────────────────────
+//
+// When the cache is empty and several fibers ask at the same time, only
+// the first one (the "leader") runs the source. The others wait for the
+// leader and get the same result. Before, every caller ran the source,
+// which is exactly what a cache is supposed to prevent.
+//
+// If the leader was interrupted, the waiting callers don't fail with that
+// interrupt (it wasn't theirs). They try again, and one of them becomes
+// the new leader.
+class InFlight<K> {
+  private readonly flights = new Map<K, InProcessDeferred<Exit<unknown, unknown>>>();
+
+  run<A, S>(key: K, compute: Eff<A, S>, tryAgain: () => Eff<A, S>): Eff<A, S> {
+    return suspend(() => {
+      const existing = this.flights.get(key);
+      if (existing !== undefined) {
+        return (existing.await as Eff<Exit<unknown, A>, never>).flatMap((exit) =>
+          replay(exit, tryAgain),
+        );
+      }
+      const flight = new InProcessDeferred<Exit<unknown, unknown>>();
+      this.flights.set(key, flight);
+      return onExit(compute, (exit) =>
+        suspend(() => {
+          if (this.flights.get(key) === flight) this.flights.delete(key);
+          return flight.succeed(exit).map(() => undefined);
+        }),
+      );
+    }) as Eff<A, S>;
+  }
+}
+
+function replay<A, S>(exit: Exit<unknown, A>, tryAgain: () => Eff<A, S>): Eff<A, S> {
+  if (exit._tag === "Success") return succeed(exit.value);
+  if (Cause.isInterruptedOnly(exit.cause)) return tryAgain();
+  return failCause(exit.cause) as unknown as Eff<A, S>;
+}
 
 // ── cached: single-entry, optional TTL ─────────────────────────────
 
@@ -42,14 +84,16 @@ export function cached<A, S>(eff: Eff<A, S>, opts: { ttlMs?: number } = {}): Cac
     sync(() => c.now()),
   ) as Eff<number, never>;
 
+  const inFlight = new InFlight<"value">();
   const getOrCompute: Eff<A, S> = (nowEff as any).flatMap((t: number) => {
     if (entry !== null && entry.expiresAt > t) return succeed(entry.value);
     if (entry !== null) entry = null; // expired
-    return (eff as any).flatMap((value: A) => {
+    const compute = (eff as any).flatMap((value: A) => {
       const expiresAt = ttlMs === Infinity ? Infinity : t + ttlMs;
       entry = { value, expiresAt };
       return succeed(value);
     });
+    return inFlight.run("value", compute, () => getOrCompute);
   }) as Eff<A, S>;
 
   const invalidate: Eff<void, never> = sync(() => {
@@ -96,7 +140,10 @@ export interface KeyedCache<K, A, S> {
  *   for things like OAuth tokens that know their own expiry. Default: Infinity.
  * @param opts.maxSize upper bound on live entries. Oldest-inserted is evicted
  *   when full (FIFO; Map iteration order is insertion order). Default: Infinity.
- * @param opts.keyFn how to hash compound keys (default: String(key))
+ * @param opts.keyFn turns a key into a string. Default: String(key), which
+ *   only works for primitive keys. Object keys need a keyFn, otherwise every
+ *   object would become "[object Object]" and share one entry, so we fail
+ *   instead.
  */
 export function cachedBy<K, A, S>(
   build: (key: K) => Eff<A, S>,
@@ -106,7 +153,7 @@ export function cachedBy<K, A, S>(
     keyFn?: (key: K) => string;
   } = {},
 ): KeyedCache<K, A, S> {
-  const { ttlMs, maxSize = Infinity, keyFn = (k: K) => String(k) } = opts;
+  const { ttlMs, maxSize = Infinity, keyFn = defaultKeyFn } = opts;
   const resolveTtl =
     typeof ttlMs === "function" ? ttlMs : () => (ttlMs === undefined ? Infinity : ttlMs);
 
@@ -118,9 +165,22 @@ export function cachedBy<K, A, S>(
     sync(() => c.now()),
   ) as Eff<number, never>;
 
-  const get = (key: K): Eff<A, S> => {
-    const hash = keyFn(key);
-    return (nowEff as any).flatMap((t: number) => {
+  const inFlight = new InFlight<string>();
+
+  // Expired entries are only removed when read, so with no maxSize a cache
+  // of short-lived keys would grow forever. Every time the store doubles in
+  // size we walk it once and drop what has expired. That keeps the cost
+  // small on average.
+  let sweepAt = 64;
+  const sweep = (now: number): void => {
+    if (store.size < sweepAt) return;
+    for (const [hash, entry] of store) if (entry.expiresAt <= now) store.delete(hash);
+    sweepAt = Math.max(64, store.size * 2);
+  };
+
+  const get = (key: K): Eff<A, S> =>
+    (nowEff as any).flatMap((t: number) => {
+      const hash = keyFn(key);
       const entry = store.get(hash);
       if (entry !== undefined && entry.expiresAt > t) {
         // move-to-end for LRU
@@ -129,9 +189,10 @@ export function cachedBy<K, A, S>(
         return succeed(entry.value);
       }
       if (entry !== undefined) store.delete(hash); // expired
-      return (build(key) as any).flatMap((value: A) => {
+      const compute = (build(key) as any).flatMap((value: A) => {
         const entryTtl = resolveTtl(value);
         const expiresAt = entryTtl === Infinity ? Infinity : t + entryTtl;
+        sweep(t);
         // evict oldest if full
         if (store.size >= maxSize) {
           const firstKey = store.keys().next().value;
@@ -140,8 +201,8 @@ export function cachedBy<K, A, S>(
         store.set(hash, { value, expiresAt });
         return succeed(value);
       });
+      return inFlight.run(hash, compute, () => get(key));
     }) as Eff<A, S>;
-  };
 
   const invalidate = (key: K): Eff<void, never> =>
     sync(() => {
@@ -161,4 +222,11 @@ export function cachedBy<K, A, S>(
   const size: Eff<number, never> = sync(() => store.size);
 
   return { get, invalidate, invalidateAll, has, size };
+}
+
+function defaultKeyFn(key: unknown): string {
+  if (typeof key === "object" && key !== null) {
+    throw new TypeError("cachedBy: object keys need a keyFn, e.g. keyFn: (k) => k.id");
+  }
+  return String(key);
 }

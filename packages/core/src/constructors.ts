@@ -102,12 +102,13 @@ export function forkDaemon<A, S>(eff: Eff<A, S>): Eff<Fiber<A>, Exclude<S, Throw
 }
 
 export function join<A>(fiber: Fiber<A>): Eff<A, Throws<Cause>> {
-  return async<A, Cause>((resume) => {
+  return async<A, Cause>((resume) =>
+    // Returning the remover means a join that gives up stops listening.
     fiber.onComplete((result) => {
       if (result.ok) resume(succeed(result.value) as any);
       else resume(fail(result.cause) as any);
-    });
-  }) as any;
+    }),
+  ) as any;
 }
 
 export function interrupt(fiber: Fiber): Eff<void, never> {
@@ -116,13 +117,13 @@ export function interrupt(fiber: Fiber): Eff<void, never> {
 
 // Wait for a fiber and get its Exit, never failing.
 export function awaitFiber<A>(fiber: Fiber<A>): Eff<Exit<unknown, A>, never> {
-  return async<Exit<unknown, A>>((resume) => {
+  return async<Exit<unknown, A>>((resume) =>
     fiber.onComplete((result) => {
       resume(
         succeed(result.ok ? ExitNS.succeed(result.value) : ExitNS.failure(result.cause)) as any,
       );
-    });
-  }) as any;
+    }),
+  ) as any;
 }
 
 // ── Interruption masking ───────────────────────────────────────────
@@ -191,6 +192,37 @@ export function race<E extends Eff<unknown, unknown>[]>(
 ): Eff<InferValue<E[number]>, InferEffects<E[number]>> {
   return new Suspend(Op.Race, effects, null) as any;
 }
+
+/**
+ * Run the effects at the same time and return the first one that SUCCEEDS.
+ * The rest are interrupted.
+ *
+ * A failure does not end the race (that is the difference from `race`,
+ * where the first effect to finish wins even if it failed). Only when every
+ * effect has failed does this fail, with all the failures combined.
+ */
+export function raceSuccess<E extends Eff<unknown, unknown>[]>(
+  effects: [...E],
+): Eff<InferValue<E[number]>, InferEffects<E[number]>> {
+  if (effects.length === 0) return die(new Error("raceSuccess: empty input")) as any;
+  return suspend(() => {
+    let remaining = effects.length;
+    let failures: Cause | null = null;
+    const contenders = effects.map(
+      (effect) =>
+        new Suspend(Op.CatchAll, effect, (cause: Cause) => {
+          failures = failures === null ? cause : Cause.both(failures, cause);
+          remaining--;
+          // Others are still running: stay in the race without winning it.
+          if (remaining > 0) return NEVER;
+          return new Suspend(Op.Fail, failures, null);
+        }),
+    );
+    return new Suspend(Op.Race, contenders, null) as Eff<unknown, unknown>;
+  }) as any;
+}
+
+const NEVER: Eff<never, never> = new Suspend(Op.Async, () => {}, null) as any;
 
 // Alias for race — named for symmetry with raceAll.
 export function raceFirst<E extends Eff<unknown, unknown>[]>(

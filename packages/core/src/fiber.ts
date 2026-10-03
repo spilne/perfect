@@ -60,6 +60,8 @@ function notify(fn: (supervisor: FiberSupervisor) => void): void {
 // out and its continuation. Sharing the field keeps Fiber objects small.
 export const VALUE_IN_FLIGHT = (): void => {};
 
+const NOOP = (): void => {};
+
 // Stands in for the interrupt handle while a wait's registration or its
 // canceler runs. An interrupt() that re-enters then leaves completing the
 // fiber to its loop, so the callback's own error can still join the cause.
@@ -83,7 +85,7 @@ function interruptCause(pending: unknown): Cause {
 export class Fiber<A = unknown> {
   state = FiberState.Ready;
   result: FiberResult<A> | null = null;
-  private listeners: Array<(result: FiberResult<A>) => void> = [];
+  private listeners: Array<(result: FiberResult<A>) => void> | null = null;
   interruptHandle: (() => void) | null = null;
   // Fiber<any>: see FiberSupervisor note — Fiber is invariant in A, so a
   // heterogeneous parent/child tree needs `any`.
@@ -136,16 +138,29 @@ export class Fiber<A = unknown> {
     for (const child of this.children) child.interrupt();
     this.children.clear();
     notify((supervisor) => supervisor.onEnd?.(this, result));
-    for (const listener of this.listeners) listener(result);
-    this.listeners.length = 0;
+    const listeners = this.listeners;
+    this.listeners = null;
+    if (listeners !== null) for (const listener of listeners) listener(result);
   }
 
-  onComplete(listener: (result: FiberResult<A>) => void): void {
+  /**
+   * Call `listener` when the fiber finishes (right away if it already has).
+   * Returns a function that unregisters the listener. Waiters that give up,
+   * like a join under a timeout, must call it, or a long-lived fiber would
+   * keep every one of them.
+   */
+  onComplete(listener: (result: FiberResult<A>) => void): () => void {
     if (this.result !== null) {
       listener(this.result);
-    } else {
-      this.listeners.push(listener);
+      return NOOP;
     }
+    (this.listeners ??= []).push(listener);
+    return () => {
+      const listeners = this.listeners;
+      if (listeners === null) return;
+      const index = listeners.indexOf(listener);
+      if (index !== -1) listeners.splice(index, 1);
+    };
   }
 
   interrupt(): void {

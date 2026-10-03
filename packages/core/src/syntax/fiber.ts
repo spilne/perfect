@@ -63,10 +63,11 @@ declare module "../eff.js" {
     retry<A, S>(this: Eff<A, S>, policy: RetryPolicy | RetryConfig): Eff<A, S>;
     retryAllBy<A, S, E = ErrorsOf<S>>(this: Eff<A, S>, options: RetryAllByOptions<A, E>): Eff<A, S>;
     repeat<A, S>(this: Eff<A, S>, schedule: Schedule<A>): Eff<A, S>;
+    /** See the standalone `retryWith`: also retries defects; `while` filters. */
     retryWith<A, S, In = unknown, Out = unknown>(
       this: Eff<A, S>,
       schedule: Schedule<In, Out>,
-      opts?: { while?: (e: unknown) => boolean },
+      opts?: { while?: (error: unknown) => boolean },
     ): Eff<A, S>;
     /**
      * Re-run until `until(value)` returns true. Fixed interval between

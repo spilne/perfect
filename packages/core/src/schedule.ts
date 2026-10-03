@@ -1,5 +1,5 @@
 import { type Eff, Suspend, Op } from "./eff.js";
-import type { Cause } from "./cause.js";
+import { Cause } from "./cause.js";
 import { succeed, sleep, suspend } from "./constructors.js";
 
 // A Schedule<In, Out> decides whether to continue and what delay to use.
@@ -245,20 +245,31 @@ export interface RetryDetails<In = unknown, Out = unknown> {
   readonly givingUp: boolean;
 }
 
+/**
+ * Run `eff` again when it fails, as long as `schedule` says to continue.
+ *
+ * Unlike `retry`, this also retries defects (a throw inside `sync`). It
+ * never retries an interrupt. Use `while` to retry only some errors: it
+ * gets the typed error, or the thrown value for a defect.
+ */
 export function retryWith<A, S, In, Out = unknown>(
   eff: Eff<A, S>,
   schedule: Schedule<In, Out>,
   opts: {
     toInput?: (cause: Cause) => In;
+    while?: (error: unknown) => boolean;
     onRetry?: (details: RetryDetails<In, Out>) => Eff<void, unknown>;
   } = {},
 ): Eff<A, S> {
   const { toInput, onRetry } = opts;
+  const shouldRetry = opts.while;
   function loop(state: any, attempts: number): Eff<A, S> {
-    return new Suspend(Op.CatchAll, eff, (cause: any) => {
-      const input = toInput
-        ? toInput(cause)
-        : ((cause._tag === "Fail" ? cause.error : cause) as any);
+    return new Suspend(Op.CatchAll, eff, (cause: Cause) => {
+      const error = Cause.firstFail(cause)?.value ?? Cause.firstDie(cause)?.value ?? cause;
+      if (shouldRetry !== undefined && !shouldRetry(error)) {
+        return new Suspend(Op.Fail, cause, null);
+      }
+      const input = toInput ? toInput(cause) : (error as In);
       const decision = schedule.step(input, state);
       if (decision._tag === "Done") {
         if (onRetry) {

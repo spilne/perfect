@@ -2,6 +2,9 @@
 //
 //   Closed → Open: after `failureThreshold` consecutive failures
 //   Open → HalfOpen: after `resetTimeoutMs` elapses
+//   HalfOpen: exactly one call (the "probe") is let through to test the
+//             dependency; other calls are rejected with CircuitOpen until
+//             the probe finishes
 //   HalfOpen → Closed: on first success
 //   HalfOpen → Open: on failure; resets the timer
 //
@@ -15,7 +18,7 @@
 // they implement the same interface and are a drop-in swap.
 
 import { type Eff, type Throws } from "./eff.js";
-import { fail, sync } from "./constructors.js";
+import { ensuring, fail, sync } from "./constructors.js";
 import { Clock } from "./clock.js";
 
 export type CircuitState = "closed" | "open" | "half-open";
@@ -76,6 +79,11 @@ class InProcessCircuitBreaker<E> implements CircuitBreaker<E> {
   // back to wall time before the first protect().
   private nowFn: () => number = () => Date.now();
 
+  // True while the one half-open test call is running. Without this, every
+  // call that arrived while half-open went through at once, so a dependency
+  // that was just recovering got hit by the whole backlog.
+  private probeInFlight = false;
+
   constructor(private readonly opts: CircuitBreakerOptions<E>) {}
 
   get state(): Eff<CircuitState, never> {
@@ -94,17 +102,33 @@ class InProcessCircuitBreaker<E> implements CircuitBreaker<E> {
       this.nowFn = () => clock.now();
       const openErr = this.checkOpen(clock.now());
       if (openErr !== null) return fail(openErr) as any;
-      return (eff as any)
+      const isProbe = this.internal.state === "half-open";
+      if (isProbe) {
+        if (this.probeInFlight) return fail(this.openError()) as any;
+        this.probeInFlight = true;
+      }
+      const guarded = (eff as any)
         .flatMap((value: A) => sync(() => this.recordSuccess()).map(() => value))
         .catch((e: E) =>
           sync(() => this.recordFailure(e, clock.now())).flatMap(() => fail(e) as any),
         );
+      // However the probe ends (success, failure, defect, interrupt), the
+      // next call may probe again if we are still half-open.
+      return isProbe
+        ? ensuring(
+            guarded,
+            sync(() => {
+              this.probeInFlight = false;
+            }),
+          )
+        : guarded;
     }) as any;
   }
 
   reset(): Eff<void, never> {
     return sync(() => {
       this.internal = { state: "closed", consecutiveFailures: 0, openedAt: 0 };
+      this.probeInFlight = false;
     });
   }
 
@@ -117,14 +141,15 @@ class InProcessCircuitBreaker<E> implements CircuitBreaker<E> {
 
   private checkOpen(now: number): CircuitOpen | null {
     this.maybeTransitionToHalfOpen(now);
-    if (this.internal.state === "open") {
-      return {
-        _tag: "CircuitOpen",
-        openedAt: this.internal.openedAt,
-        resetAtMs: this.internal.openedAt + this.opts.resetTimeoutMs,
-      };
-    }
-    return null;
+    return this.internal.state === "open" ? this.openError() : null;
+  }
+
+  private openError(): CircuitOpen {
+    return {
+      _tag: "CircuitOpen",
+      openedAt: this.internal.openedAt,
+      resetAtMs: this.internal.openedAt + this.opts.resetTimeoutMs,
+    };
   }
 
   private recordSuccess(): void {

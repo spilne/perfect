@@ -188,12 +188,14 @@ export class WorkerPool {
   }
 
   execute<A, B>(fn: (arg: A) => B | Promise<B>, arg: A): Eff<B, Throws<WorkerError>> {
-    if (this._shutdown) return fail(new WorkerError("Pool is shut down")) as any;
-    // Once a thread has failed the remaining ones are not trustworthy either,
-    // and round-robin would keep handing tasks to a dead worker.
-    if (this.failure !== undefined) return fail(new WorkerError(this.failure)) as any;
-
     return async<B, WorkerError>((resume) => {
+      // Checked when the task runs, not when execute() is called, so a
+      // retried or reused task sees a pool that was shut down in between.
+      if (this._shutdown) return resume(fail(new WorkerError("Pool is shut down")) as any);
+      // Once a thread has failed the remaining ones are not trustworthy either,
+      // and round-robin would keep handing tasks to a dead worker.
+      if (this.failure !== undefined) return resume(fail(new WorkerError(this.failure)) as any);
+
       const id = this.nextId++;
       const worker = this.workers[this.roundRobin % this.size]!;
       this.roundRobin++;

@@ -8,7 +8,7 @@
 
 import type { Eff, Throws } from "./eff.js";
 import { Suspend, Op } from "./eff.js";
-import { sync, tryPromise } from "./constructors.js";
+import { suspend, sync, tryPromise } from "./constructors.js";
 import { service, type ServiceTag } from "./service.js";
 import { Stream } from "./stream/index.js";
 import { TaggedError } from "./tagged-error.js";
@@ -223,15 +223,23 @@ export class TestFileSystem implements FileSystem {
   }
 
   readFile(path: string): Eff<string, Throws<FileSystemError>> {
-    const bytes = this.files.get(path);
-    if (bytes === undefined) return this.fail("readFile", path);
-    return sync(() => this.decoder.decode(bytes)) as any;
+    // Read the files when the effect runs, not when it is built, so a
+    // retried or reused effect sees files written in between.
+    return suspend(() => {
+      const bytes = this.files.get(path);
+      if (bytes === undefined) return this.fail("readFile", path);
+      return sync(() => this.decoder.decode(bytes)) as any;
+    }) as any;
   }
 
   readFileBytes(path: string): Eff<Uint8Array, Throws<FileSystemError>> {
-    const bytes = this.files.get(path);
-    if (bytes === undefined) return this.fail("readFile", path);
-    return sync(() => bytes) as any;
+    // Read the files when the effect runs, not when it is built, so a
+    // retried or reused effect sees files written in between.
+    return suspend(() => {
+      const bytes = this.files.get(path);
+      if (bytes === undefined) return this.fail("readFile", path);
+      return sync(() => bytes) as any;
+    }) as any;
   }
 
   writeFile(path: string, contents: string | Uint8Array): Eff<void, Throws<FileSystemError>> {
@@ -288,32 +296,40 @@ export class TestFileSystem implements FileSystem {
   }
 
   readDir(path: string): Eff<string[], Throws<FileSystemError>> {
-    const prefix = path.endsWith("/") ? path : `${path}/`;
-    const entries = new Set<string>();
-    for (const key of [...this.files.keys(), ...this.dirs]) {
-      if (!key.startsWith(prefix)) continue;
-      const rest = key.slice(prefix.length);
-      if (rest.length === 0) continue;
-      entries.add(rest.split("/")[0]!);
-    }
-    if (entries.size === 0 && !this.dirs.has(path)) return this.fail("readDir", path);
-    return sync(() => [...entries].sort()) as any;
+    // Read the files when the effect runs, not when it is built, so a
+    // retried or reused effect sees files written in between.
+    return suspend(() => {
+      const prefix = path.endsWith("/") ? path : `${path}/`;
+      const entries = new Set<string>();
+      for (const key of [...this.files.keys(), ...this.dirs]) {
+        if (!key.startsWith(prefix)) continue;
+        const rest = key.slice(prefix.length);
+        if (rest.length === 0) continue;
+        entries.add(rest.split("/")[0]!);
+      }
+      if (entries.size === 0 && !this.dirs.has(path)) return this.fail("readDir", path);
+      return sync(() => [...entries].sort()) as any;
+    }) as any;
   }
 
   stat(path: string): Eff<FileStat, Throws<FileSystemError>> {
-    const bytes = this.files.get(path);
-    if (bytes !== undefined) {
-      return sync(() => ({
-        size: bytes.length,
-        isFile: true,
-        isDirectory: false,
-        modifiedAt: this.times.get(path) ?? 0,
-      })) as any;
-    }
-    if (this.dirs.has(path)) {
-      return sync(() => ({ size: 0, isFile: false, isDirectory: true, modifiedAt: 0 })) as any;
-    }
-    return this.fail("stat", path);
+    // Read the files when the effect runs, not when it is built, so a
+    // retried or reused effect sees files written in between.
+    return suspend(() => {
+      const bytes = this.files.get(path);
+      if (bytes !== undefined) {
+        return sync(() => ({
+          size: bytes.length,
+          isFile: true,
+          isDirectory: false,
+          modifiedAt: this.times.get(path) ?? 0,
+        })) as any;
+      }
+      if (this.dirs.has(path)) {
+        return sync(() => ({ size: 0, isFile: false, isDirectory: true, modifiedAt: 0 })) as any;
+      }
+      return this.fail("stat", path);
+    }) as any;
   }
 
   watch(path: string, options: { recursive?: boolean } = {}): Stream<FileEvent, never> {
