@@ -43,6 +43,8 @@ export function addFiberSupervisor(supervisor: FiberSupervisor): () => void {
   };
 }
 
+// Callers check `supervisors.size` first, so a program without supervisors
+// doesn't even allocate the callback.
 function notify(fn: (supervisor: FiberSupervisor) => void): void {
   for (const supervisor of supervisors) {
     try {
@@ -68,7 +70,7 @@ const NOOP = (): void => {};
 export const IN_CALLBACK = (): void => {};
 
 export function notifyFiberStart(fiber: Fiber<any>): void {
-  notify((supervisor) => supervisor.onStart?.(fiber));
+  if (supervisors.size !== 0) notify((supervisor) => supervisor.onStart?.(fiber));
 }
 
 // The cause a Ready fiber is interrupted with. A failure it was about to raise
@@ -89,7 +91,8 @@ export class Fiber<A = unknown> {
   interruptHandle: (() => void) | null = null;
   // Fiber<any>: see FiberSupervisor note — Fiber is invariant in A, so a
   // heterogeneous parent/child tree needs `any`.
-  private children = new Set<Fiber<any>>();
+  // Created on the first fork: most fibers never fork.
+  private children: Set<Fiber<any>> | null = null;
   parent: Fiber<any> | null = null;
   scope: Scope | null = null;
 
@@ -131,13 +134,14 @@ export class Fiber<A = unknown> {
     this.result = result;
     this.interruptHandle = null;
     if (this.parent) {
-      this.parent.children.delete(this);
+      this.parent.children?.delete(this);
       this.parent = null;
     }
     // interrupt children on completion
-    for (const child of this.children) child.interrupt();
-    this.children.clear();
-    notify((supervisor) => supervisor.onEnd?.(this, result));
+    const children = this.children;
+    this.children = null;
+    if (children !== null) for (const child of children) child.interrupt();
+    if (supervisors.size !== 0) notify((supervisor) => supervisor.onEnd?.(this, result));
     const listeners = this.listeners;
     this.listeners = null;
     if (listeners !== null) for (const listener of listeners) listener(result);
@@ -165,7 +169,7 @@ export class Fiber<A = unknown> {
 
   interrupt(): void {
     if (this.state === FiberState.Done) return;
-    notify((supervisor) => supervisor.onInterrupt?.(this));
+    if (supervisors.size !== 0) notify((supervisor) => supervisor.onInterrupt?.(this));
     // A running loop checks interruptPending before its next op; acting here
     // would read a continuation stack the loop has not saved.
     if (!this.interruptible || this.state === FiberState.Running) {
@@ -177,7 +181,7 @@ export class Fiber<A = unknown> {
     // one; runFiberLoop ignores a duplicate.
     if (this.state === FiberState.Ready && this.handoffDiscard === VALUE_IN_FLIGHT) {
       this.interruptPending = true;
-      this.scheduler.schedule(() => this._resume?.());
+      this.scheduleRun();
       return;
     }
     // Only a Ready fiber's current is the effect it runs next; a suspended
@@ -233,7 +237,7 @@ export class Fiber<A = unknown> {
       this.state = FiberState.Ready;
       // Avoid a circular import on runtime.ts by going through the scheduler;
       // bootstrapFiber installs a `_resume` callback that wraps runFiberLoop.
-      this.scheduler.schedule(() => this._resume?.());
+      this.scheduleRun();
       if (discard !== null) this.runDiscard(discard);
       return;
     }
@@ -269,13 +273,19 @@ export class Fiber<A = unknown> {
   }
 
   // Set by bootstrapFiber to point at runFiberLoop(this); avoids a fiber.ts ⇄
-  // runtime.ts circular import.
+  // runtime.ts circular import. Created once per fiber and reused for every
+  // run we queue, instead of a new closure each time.
   _resume?: () => void;
 
+  /** Queue a run of this fiber's loop on its scheduler. */
+  scheduleRun(): void {
+    if (this._resume !== undefined) this.scheduler.schedule(this._resume);
+  }
+
   addChild(child: Fiber<any>): void {
-    this.children.add(child);
+    (this.children ??= new Set()).add(child);
     child.parent = this;
-    notify((supervisor) => supervisor.onFork?.(this, child));
+    if (supervisors.size !== 0) notify((supervisor) => supervisor.onFork?.(this, child));
   }
 
   get status(): FiberStatus {
@@ -299,11 +309,11 @@ export class Fiber<A = unknown> {
   }
 
   get childCount(): number {
-    return this.children.size;
+    return this.children?.size ?? 0;
   }
 
   childrenSnapshot(): readonly Fiber<any>[] {
-    return Array.from(this.children);
+    return this.children === null ? [] : Array.from(this.children);
   }
 
   snapshot(): FiberSnapshot {

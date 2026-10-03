@@ -12,7 +12,7 @@
 import { Suspend, Op } from "../eff.js";
 import { Cause } from "../cause.js";
 import { run } from "../runtime.js";
-import { PROMISE_THUNK, PROMISE_ON_REJECT } from "../constructors.js";
+import { PROMISE_SOURCES } from "../constructors.js";
 
 declare module "../eff.js" {
   interface Suspend {
@@ -34,10 +34,10 @@ Suspend.prototype.then = function (this: Suspend, onFulfilled?: any, onRejected?
   // Saves ~500 ns vs run() for promise bridging in the no-composition case.
   // Only fires when this Suspend IS the tryPromise leaf (no surrounding
   // FlatMap/Catch/Provide/etc. — those Suspends won't carry the markers).
-  const thunk = (this as any)[PROMISE_THUNK];
-  if (thunk !== undefined) {
-    const onReject = (this as any)[PROMISE_ON_REJECT];
-    return (thunk() as Promise<any>).then(
+  const source = PROMISE_SOURCES.get(this);
+  if (source !== undefined) {
+    const onReject = source.onReject;
+    return (source.promise() as Promise<any>).then(
       (v) => (onFulfilled ? onFulfilled(v) : v),
       (e) => {
         const mapped = onReject ? onReject(e) : e;
