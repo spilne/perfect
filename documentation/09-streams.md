@@ -606,6 +606,33 @@ stream step, which lets batch-oriented drivers avoid per-element scheduling.
 A value emitted to a pull that is interrupted before it runs goes back to the
 head of the buffer for the next pull.
 
+### When the consumer is slower than the producer
+
+Values wait in a buffer until the consumer pulls them. The buffer holds 1024
+items by default (for `asyncChunks`, 1024 chunks). You can change both the
+size and what happens when it is full:
+
+```ts
+Stream.async<Message, never>(
+  (emit, close) => sync(() => subscribe(async (msg) => {
+    // emit() returns a Promise when the buffer is full. Awaiting it makes the
+    // producer wait for the consumer instead of piling up messages.
+    await emit(msg);
+  })),
+  { bufferSize: 256, overflow: "backpressure" },
+);
+```
+
+| `overflow` | when the buffer is full |
+| --- | --- |
+| `"backpressure"` (default) | keep the value; `emit()` returns a Promise that resolves once there is room |
+| `"dropNewest"` | throw the new value away |
+| `"dropOldest"` | throw the oldest buffered value away |
+
+Nothing is ever dropped unless you ask for it. If the producer can't wait
+(an event emitter, a `LISTEN` callback), values keep buffering, so pick a
+drop mode when memory matters more than every value.
+
 `Stream.fromAsyncIterable` acquires its iterator lazily, maps both synchronous
 iterator acquisition failures and rejected pulls through `onError`, pulls one
 item at a time, and calls `iterator.return()` when downstream stops early.
