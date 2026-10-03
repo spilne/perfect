@@ -18,12 +18,15 @@ interface BufferedItem<T> {
 export class JoinBuffer<L, R> {
   private leftBuffer = new Map<string, BufferedItem<L>[]>();
   private rightBuffer = new Map<string, BufferedItem<R>[]>();
+  // When we last cleaned expired items out of every key (see sweep).
+  private lastSweep = -Infinity;
 
   constructor(private readonly windowMs: number) {}
 
   /** Add a left item. Returns any matches with buffered right items. */
   addLeft(key: string, value: L, timestamp: number): JoinedPair<L, R>[] {
     this.evict(key, timestamp);
+    this.sweep(timestamp);
 
     const entry: BufferedItem<L> = { value, timestamp };
     const existing = this.leftBuffer.get(key) ?? [];
@@ -40,6 +43,7 @@ export class JoinBuffer<L, R> {
   /** Add a right item. Returns any matches with buffered left items. */
   addRight(key: string, value: R, timestamp: number): JoinedPair<L, R>[] {
     this.evict(key, timestamp);
+    this.sweep(timestamp);
 
     const entry: BufferedItem<R> = { value, timestamp };
     const existing = this.rightBuffer.get(key) ?? [];
@@ -69,6 +73,20 @@ export class JoinBuffer<L, R> {
       const filtered = rightItems.filter((item) => item.timestamp > cutoff);
       if (filtered.length === 0) this.rightBuffer.delete(key);
       else this.rightBuffer.set(key, filtered);
+    }
+  }
+
+  /**
+   * Adding an item only cleans up its own key, so a key that stopped
+   * receiving items kept its old items forever. Once per window length we
+   * also clean up every key. That is one pass over the keys per window, so
+   * it stays cheap.
+   */
+  private sweep(currentTime: number): void {
+    if (currentTime - this.lastSweep < this.windowMs) return;
+    this.lastSweep = currentTime;
+    for (const key of new Set([...this.leftBuffer.keys(), ...this.rightBuffer.keys()])) {
+      this.evict(key, currentTime);
     }
   }
 
