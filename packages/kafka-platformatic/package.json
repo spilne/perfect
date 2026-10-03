@@ -45,9 +45,9 @@
     "@spilne/perfect-kafka": "^0.2.0"
   },
   "devDependencies": {
-    "@platformatic/kafka": "^2.9.0"
+    "@platformatic/kafka": "^2.12.1"
   },
   "peerDependencies": {
-    "@platformatic/kafka": "^2.9.0"
+    "@platformatic/kafka": "^2.12.1"
   }
 }
