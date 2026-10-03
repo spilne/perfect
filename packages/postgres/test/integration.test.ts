@@ -333,6 +333,14 @@ describe.skipIf(!dockerAvailable)("integration — postgres:17-alpine", () => {
     expect(await run(rl.remaining)).toBe(0);
   }, 20_000);
 
+  it("rate limiter: many callers at once never get more than the limit", async () => {
+    const rl = await PgRateLimiter.create({ db, key: "burst", limit: 5, windowMs: 60_000 });
+
+    const results = await Promise.all(Array.from({ length: 30 }, () => run(rl.tryAcquire)));
+
+    expect(results.filter(Boolean)).toHaveLength(5);
+  }, 20_000);
+
   it("pg-ref: transactional modify is atomic across concurrent updates", async () => {
     const ref = await PgRef.make<number>({ db, name: "counter", initial: 0 });
 
