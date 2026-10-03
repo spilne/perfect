@@ -166,7 +166,7 @@ export type { PoolOptions } from "./pool.js";
 export { Schedule, retryWith, repeat } from "./schedule.js";
 export type { Scheduler } from "./scheduler.js";
 export { AsyncScheduler, BunScheduler, SyncScheduler, setDefaultScheduler } from "./scheduler.js";
-export { WorkerPool } from "./worker/index.js";
+export { WorkerError, WorkerPool, type WorkerPoolOptions } from "./worker/index.js";
 export {
   Chunk,
   Pipe,
