@@ -95,7 +95,8 @@ Each is also a fluent method: `program.run()`, `.runSync()`, `.runExit()`, `.run
   Interrupt | composites), `Exit`, `TaggedError`
 - **Services + Layers** — `service`, `provide`, `Layer` for memoized,
   dependency-ordered wiring
-- **Concurrency** — `fork` / `forkDaemon`, `join`, `race` / `raceAll`,
+- **Concurrency** — `fork` / `forkDaemon`, `join`, `race` / `raceSuccess` /
+  `allSettled`,
   `all`, bounded `forEachPar`, `timeout`, structured interruption with
   `uninterruptible` / `uninterruptibleMask`, `Fiber` supervision
 - **Resources** — `acquireRelease`, `scoped`, `ensuring`, `onExit`,

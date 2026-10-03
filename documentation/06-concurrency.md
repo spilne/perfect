@@ -73,8 +73,12 @@ A failure that settles first wins too:
 `race([sleep(1).flatMap(() => fail("E")), sleep(5).map(() => "ok")])` fails
 with `"E"`. A failure raised while a loser is torn down, such as a finalizer
 that fails, fails the race even when the winner succeeded (see
-[Structured teardown](#structured-teardown)). `raceFirst` is an alias of
-`race`.
+[Structured teardown](#structured-teardown)). `raceFirst` is a deprecated
+alias of `race`.
+
+`raceSuccess(effects[])` is the variant where a failure doesn't end the race:
+the first effect to **succeed** wins, and it fails only when every effect has
+failed. `hedged` is built on it.
 
 ## Parallel collection — `all`
 
@@ -173,7 +177,7 @@ To cap a list of effects you already have, map with the identity function:
 
 ## Structured teardown
 
-`all`, `race`, `forEachPar` and the combinators built on them (`raceAll`,
+`all`, `race`, `forEachPar` and the combinators built on them (`allSettled`,
 `raceEither`, `validate`, `timeoutOption`, `timeoutFail`/`timeout`, `hedged`,
 `parZip`) do not return while one of their children is still running. When a
 child fails, when a race has its first result, or when the combinator itself is
@@ -371,7 +375,8 @@ Available fiber diagnostics:
 | `interrupt(fiber)` | cancel a fiber |
 | `awaitFiber(fiber)` | await Exit (never throws) |
 | `race(effects[])` / `a.race(b)` | first to settle wins, success or failure; losers are interrupted and awaited |
-| `raceFirst(effects[])` / `a.raceFirst(b)` | alias of `race` |
+| `raceSuccess(effects[])` | first to **succeed** wins; fails only when all fail |
+| `allSettled(effects[])` | run all, collect every `Exit`; never fails (was `raceAll`) |
 | `raceEither([a, b])` / `a.raceEither(b)` | returns `Either<A, B>` |
 | `all(effects[])` | parallel + collect tuple |
 | `all({ a, b })` | parallel + collect record |

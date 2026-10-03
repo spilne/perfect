@@ -64,9 +64,7 @@ const RESUME_N = 1_000;
 function asyncResumeChain(n: number): Eff<number, never> {
   let eff: Eff<number, never> = succeed(0);
   for (let i = 0; i < n; i++) {
-    eff = eff.flatMap(
-      (x) => async<number>((resume) => resume(succeed(x + 1))) as Eff<number, never>,
-    );
+    eff = eff.flatMap((x) => async<number>((resume) => resume(succeed(x + 1))));
   }
   return eff;
 }

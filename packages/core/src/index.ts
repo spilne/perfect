@@ -40,6 +40,7 @@ export {
   raceSuccess,
   raceEither,
   raceAll,
+  allSettled,
   timeout,
   timeoutFail,
   timeoutOption,

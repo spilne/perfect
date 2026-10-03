@@ -1,4 +1,5 @@
 import { Cause } from "./cause.js";
+import type { WithError } from "./either.js";
 import { type Eff, type Throws, type InferValue, type InferEffects, Suspend, Op } from "./eff.js";
 import { Fiber } from "./fiber.js";
 import { type Exit, Exit as ExitNS } from "./exit.js";
@@ -55,7 +56,7 @@ export function async<A, E = never>(
   register: (
     resume: (value: Eff<A, Throws<E>>, onDiscard?: () => void) => void,
   ) => (() => void) | void,
-): Eff<A, Throws<E>> {
+): Eff<A, WithError<never, E>> {
   return new Suspend(Op.Async, register, null) as any;
 }
 
@@ -229,7 +230,7 @@ export function raceSuccess<E extends Eff<unknown, unknown>[]>(
 
 const NEVER: Eff<never, never> = new Suspend(Op.Async, () => {}, null) as any;
 
-// Alias for race — named for symmetry with raceAll.
+/** @deprecated Same as {@link race}. Use `race`. */
 export function raceFirst<E extends Eff<unknown, unknown>[]>(
   effects: [...E],
 ): Eff<InferValue<E[number]>, InferEffects<E[number]>> {
@@ -254,8 +255,12 @@ export function raceEither(...args: any[]): any {
   ]) as any;
 }
 
-// Run all in parallel and collect their Exits — never fails, never interrupts siblings on failure.
-export function raceAll<A, S>(
+/**
+ * Run all effects at the same time and collect how each one ended (its
+ * Exit), in input order. Never fails, and one failure doesn't stop the
+ * others — like `Promise.allSettled`.
+ */
+export function allSettled<A, S>(
   effects: Eff<A, S>[],
 ): Eff<Exit<unknown, A>[], Exclude<S, Throws<unknown>>> {
   const wrapped = effects.map(
@@ -268,6 +273,12 @@ export function raceAll<A, S>(
   );
   return new Suspend(Op.All, wrapped, null) as any;
 }
+
+/**
+ * @deprecated The name was misleading: nothing races, every effect runs to
+ * the end. Use {@link allSettled}, which is the same function.
+ */
+export const raceAll: typeof allSettled = allSettled;
 
 export function timeoutOption<A, S>(eff: Eff<A, S>, ms: number): Eff<A | undefined, S> {
   return race([

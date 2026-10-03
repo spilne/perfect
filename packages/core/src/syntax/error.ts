@@ -111,7 +111,7 @@ declare module "../eff.js" {
 
     // ── Cats-flavored aliases (for users migrating from cats-effect / promin) ──
 
-    /** alias: catch — total handler returning an Eff for any error. */
+    /** @deprecated Same as `.catch` (the cats-effect name). Use `.catch`. */
     handleErrorWith<A, S, B, S2>(
       this: Eff<A, S>,
       handler: (error: ErrorsOf<S>) => Eff<B, S2>,

@@ -13,7 +13,7 @@ export class QueueClosed {
   readonly _tag = "QueueClosed" as const;
 }
 
-/** Backwards-compat alias. Prefer `QueueClosed`. */
+/** @deprecated Old name of {@link QueueClosed}. */
 export const QueueShutdown = QueueClosed;
 export type QueueShutdown = QueueClosed;
 
@@ -55,15 +55,15 @@ export interface Queue<A, S = never> {
   readonly size: Eff<number, S>;
   /** Has close() been called? */
   readonly isClosed: Eff<boolean, S>;
-  /** Backwards-compat alias for `isClosed`. */
+  /** @deprecated Old name of `isClosed`. */
   readonly isShutdown: Eff<boolean, S>;
   /** Signal "no more values" — wakes pending takers/offerers with QueueClosed. */
   close(): Eff<void, S>;
-  /** Backwards-compat alias for `close`. */
+  /** @deprecated Old name of `close`. */
   shutdown(): Eff<void, S>;
   /** Block until close() is called. */
   readonly awaitClose: Eff<void, S>;
-  /** Backwards-compat alias for `awaitClose`. */
+  /** @deprecated Old name of `awaitClose`. */
   readonly awaitShutdown: Eff<void, S>;
 }
 

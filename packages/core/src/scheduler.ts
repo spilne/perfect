@@ -101,7 +101,7 @@ export class AsyncScheduler implements Scheduler {
   }
 }
 
-// keep BunScheduler as alias for backwards compat
+/** @deprecated Old name of {@link AsyncScheduler}. */
 export const BunScheduler = AsyncScheduler;
 
 export class SyncScheduler implements Scheduler {
