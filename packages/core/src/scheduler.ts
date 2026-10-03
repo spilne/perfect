@@ -29,6 +29,8 @@ const scheduleAsync: (fn: () => void) => void =
         })()
       : (fn: () => void) => setTimeout(fn, 0); // Fallback
 
+// How many times in a row we run queued work as a microtask before we give
+// the event loop a turn (see request()).
 const MICRO_DRAIN_BUDGET = 64;
 
 export class AsyncScheduler implements Scheduler {
@@ -45,9 +47,11 @@ export class AsyncScheduler implements Scheduler {
     }
   }
 
-  // Drain on microtasks: a resume then costs a microtask instead of an event
-  // loop turn. Every MICRO_DRAIN_BUDGET drains in a row the next one goes
-  // through a macrotask, so I/O and timers still get a turn under load.
+  // We run queued fibers as a microtask because it is much faster than
+  // waiting for the next event loop turn (setImmediate). But microtasks
+  // run before timers and I/O, so if we only used microtasks, a busy
+  // program could block timers and I/O forever. So every 64 runs in a row,
+  // we use setImmediate once to let the event loop catch up.
   private request(): void {
     if (this.microDrains < MICRO_DRAIN_BUDGET) {
       this.microDrains++;
@@ -72,8 +76,9 @@ export class AsyncScheduler implements Scheduler {
     }
   };
 
-  // Tasks scheduled while a batch runs go to the other buffer and wait for
-  // the next drain, so one drain is bounded by what was queued when it began.
+  // We keep two arrays and swap them. Tasks added while a batch is running
+  // go into the other array and run next time, so one batch can't grow
+  // forever. Swapping also means we don't create a new array every time.
   private runBatch(): void {
     const batch = this.queue;
     this.queue = this.spare;
@@ -101,8 +106,9 @@ export const BunScheduler = AsyncScheduler;
 
 export class SyncScheduler implements Scheduler {
   private queue: Array<() => void> = [];
-  // A field, not a local, so a flush re-entered from a task continues where
-  // the outer one is instead of running tasks again.
+  // Position of the next task to run. It's a field (not a local variable)
+  // so that if a task calls flush() again, that inner flush continues from
+  // the same spot instead of running the same tasks twice.
   private head = 0;
 
   schedule(task: () => void): void {
