@@ -18,8 +18,10 @@ describe("WorkerPool queue", () => {
       // One slow task, then fast ones. With round-robin, every other fast
       // task would land behind the slow one.
       await run(all([task(300), task(5), task(5), task(5), task(5)]));
+      // A fast task stuck behind the slow one would finish after it (300 ms
+      // or more). Finishing earlier is the proof, however busy the machine.
       const fast = finished.slice(0, 4);
-      expect(Math.max(...fast)).toBeLessThan(250);
+      expect(Math.max(...fast)).toBeLessThan(300);
     } finally {
       await run(pool.shutdown());
     }
@@ -36,7 +38,7 @@ describe("WorkerPool queue", () => {
       const started = Date.now();
       expect(await run(pool.execute(busyFor, 1))).toBe(1);
       // If the abandoned 1000 ms task had run, this would have waited for it.
-      expect(Date.now() - started).toBeLessThan(500);
+      expect(Date.now() - started).toBeLessThan(1_000);
     } finally {
       await run(pool.shutdown());
     }

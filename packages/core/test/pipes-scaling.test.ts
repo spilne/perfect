@@ -33,21 +33,24 @@ describe("pipes start fresh on every run", () => {
   });
 });
 
+// Sizes are picked so the old, quadratic code takes seconds and the linear
+// code a few milliseconds; the 1 s limit sits far from both, so a busy
+// machine doesn't make these flaky.
 describe("pipes stay linear on long inputs", () => {
   test("a line split over many chunks", async () => {
-    const pieces = Array.from({ length: 20_000 }, () => "x");
+    const pieces = Array.from({ length: 100_000 }, () => "x");
     const started = performance.now();
     const out = await run(
       Stream.fromArray([...pieces, "\n"])
         .through(Pipes.lines)
         .toArray(),
     );
-    expect(out[0]).toHaveLength(20_000);
-    expect(performance.now() - started).toBeLessThan(500);
+    expect(out[0]).toHaveLength(100_000);
+    expect(performance.now() - started).toBeLessThan(1_000);
   });
 
   test("many frames in one chunk, and one big frame over many chunks", async () => {
-    const frames = Array.from({ length: 30_000 }, (_, i) => frame(new Uint8Array([i & 0xff])));
+    const frames = Array.from({ length: 100_000 }, (_, i) => frame(new Uint8Array([i & 0xff])));
     const joined = new Uint8Array(frames.reduce((n, f) => n + f.length, 0));
     let offset = 0;
     for (const f of frames) {
@@ -55,8 +58,8 @@ describe("pipes stay linear on long inputs", () => {
       offset += f.length;
     }
     let started = performance.now();
-    expect(await run(Stream.of(joined).through(Pipes.lengthPrefixed()).count())).toBe(30_000);
-    expect(performance.now() - started).toBeLessThan(500);
+    expect(await run(Stream.of(joined).through(Pipes.lengthPrefixed()).count())).toBe(100_000);
+    expect(performance.now() - started).toBeLessThan(1_000);
 
     const big = frame(new Uint8Array(200_000).fill(7));
     const slices = Array.from({ length: Math.ceil(big.length / 10) }, (_, i) =>
@@ -65,7 +68,7 @@ describe("pipes stay linear on long inputs", () => {
     started = performance.now();
     const [message] = await run(Stream.fromArray(slices).through(Pipes.lengthPrefixed()).toArray());
     expect(message!.length).toBe(200_000);
-    expect(performance.now() - started).toBeLessThan(500);
+    expect(performance.now() - started).toBeLessThan(1_000);
   });
 });
 

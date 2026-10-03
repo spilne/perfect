@@ -1032,7 +1032,11 @@ describe("Pool handoff", () => {
 
   test("a waiter still sees PoolClosed after shutdown", async () => {
     const pool = makePool({ size: 1 });
-    const holder = await run(forkDaemon(pool.use(() => sleep(20))));
+    // The holder keeps the only resource until the test lets go. (It used to
+    // hold it for a 20 ms sleep, and on a busy machine the steps below took
+    // longer, so the waiter got the resource before the shutdown.)
+    const hold = manualWait<void>();
+    const holder = await run(forkDaemon(pool.use(() => hold.wait)));
     await run(sleep(1));
     const waiting = run(pool.use(succeed));
     await run(sleep(1));
