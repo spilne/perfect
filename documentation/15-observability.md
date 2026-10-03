@@ -95,8 +95,10 @@ bun add @spilne/perfect-otel @opentelemetry/api
 ```
 
 - `OtelTracer` implements the core `Tracer` interface with an OTel tracer.
-- `OtelMetricsExporter` exports registry snapshots; counters and histograms
-  use deltas between exports, while gauges remain absolute.
+- `OtelMetricsExporter` exports counters (as deltas between `export()` calls)
+  and gauges (absolute). Histogram values are forwarded to OTel as they are
+  recorded, with the same bucket boundaries, so OTel percentiles are exact.
+  Call `close()` to stop forwarding.
 - `@spilne/perfect-http-otel` separately supplies HTTP client spans and W3C
   `traceparent` propagation.
 

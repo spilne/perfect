@@ -121,6 +121,7 @@ export {
   DEFAULT_BUCKETS,
   type Labels,
   type MetricsSnapshot,
+  type HistogramRecordListener,
 } from "./metrics.js";
 export {
   type Eq,

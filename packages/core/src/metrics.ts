@@ -65,6 +65,9 @@ export class Gauge {
 
 export const DEFAULT_BUCKETS = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10] as const;
 
+/** Called with every value a histogram records (see onHistogramRecord). */
+export type HistogramRecordListener = (histogram: Histogram, value: number) => void;
+
 export class Histogram {
   private _counts: number[];
   private _sum = 0;
@@ -74,6 +77,8 @@ export class Histogram {
     readonly name: string,
     readonly buckets: readonly number[] = DEFAULT_BUCKETS,
     readonly labels?: Labels,
+    // Set by the registry, so exporters can see each value as it arrives.
+    private readonly onRecord?: HistogramRecordListener,
   ) {
     this._counts = new Array(buckets.length + 1).fill(0); // +1 for +Inf
   }
@@ -81,13 +86,10 @@ export class Histogram {
   record(value: number): void {
     this._sum += value;
     this._count++;
-    for (let i = 0; i < this.buckets.length; i++) {
-      if (value <= this.buckets[i]!) {
-        this._counts[i]!++;
-        return;
-      }
-    }
-    this._counts[this.buckets.length]!++; // +Inf bucket
+    let bucket = 0;
+    while (bucket < this.buckets.length && value > this.buckets[bucket]!) bucket++;
+    this._counts[bucket]!++; // the last slot is the +Inf bucket
+    this.onRecord?.(this, value);
   }
 
   get sum(): number {
@@ -122,6 +124,21 @@ export class MetricsRegistry {
   private counters = new Map<string, Counter>();
   private gauges = new Map<string, Gauge>();
   private histograms = new Map<string, Histogram>();
+  private readonly recordListeners = new Set<HistogramRecordListener>();
+  private readonly notifyRecord: HistogramRecordListener = (histogram, value) => {
+    for (const listener of this.recordListeners) listener(histogram, value);
+  };
+
+  /**
+   * Get every value any histogram in this registry records, as it is
+   * recorded. Returns a function that stops it. Exporters that need exact
+   * values (like OpenTelemetry, whose histograms take one value at a time)
+   * use this instead of rebuilding values from snapshots.
+   */
+  onHistogramRecord(listener: HistogramRecordListener): () => void {
+    this.recordListeners.add(listener);
+    return () => this.recordListeners.delete(listener);
+  }
 
   counter(name: string, labels?: Labels): Counter {
     const key = labelKey(name, labels);
@@ -147,7 +164,7 @@ export class MetricsRegistry {
     const key = labelKey(name, opts?.labels);
     let h = this.histograms.get(key);
     if (!h) {
-      h = new Histogram(name, opts?.buckets ?? DEFAULT_BUCKETS, opts?.labels);
+      h = new Histogram(name, opts?.buckets ?? DEFAULT_BUCKETS, opts?.labels, this.notifyRecord);
       this.histograms.set(key, h);
     }
     return h;
