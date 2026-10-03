@@ -1,3 +1,78 @@
+## 0.3.0 (2026-10-03)
+
+### 🚀 Features
+
+- **core:** add rethrow, the inverse of either/exit ([011c775](https://github.com/spilne/perfect/commit/011c775))
+- ⚠️  **core:** make awaiting an effect opt-in ([761968c](https://github.com/spilne/perfect/commit/761968c))
+- ⚠️  **core:** give fibers an error type and make join re-raise failures as they were ([7387bbe](https://github.com/spilne/perfect/commit/7387bbe))
+
+### 🩹 Fixes
+
+- **core:** create stream and sink state per run, not per description ([3dd3c3b](https://github.com/spilne/perfect/commit/3dd3c3b))
+- **core:** remove waiters that give up from Queue, Semaphore and Pool ([b00f8ca](https://github.com/spilne/perfect/commit/b00f8ca))
+- **core:** close each side of concat as soon as it ends ([a8a91d1](https://github.com/spilne/perfect/commit/a8a91d1))
+- **core:** stop push streams from silently dropping values ([c7e79c2](https://github.com/spilne/perfect/commit/c7e79c2))
+- **core:** correct hedged, retryWith, join, the circuit breaker and caches ([e006561](https://github.com/spilne/perfect/commit/e006561))
+- **core:** per-run throttle state, collision-free metric keys, no stale offsets ([b62219e](https://github.com/spilne/perfect/commit/b62219e))
+- **http:** don't cut off long-lived streams, and add an idle timeout ([cd69195](https://github.com/spilne/perfect/commit/cd69195))
+- **http-otel:** propagate the request's own client span to downstream services ([2fe9091](https://github.com/spilne/perfect/commit/2fe9091))
+- **kafka:** commit and read offsets for every partition, and stop leaking clients ([7bd31b7](https://github.com/spilne/perfect/commit/7bd31b7))
+- **kafka:** share one assignment tracker that survives a failing listener ([1a813cf](https://github.com/spilne/perfect/commit/1a813cf))
+- **otel:** export exact histogram values and reuse instruments ([ef2945c](https://github.com/spilne/perfect/commit/ef2945c))
+- **postgres:** redeliver, dead-letter and parameterize PgQueue ([5a55060](https://github.com/spilne/perfect/commit/5a55060))
+- **postgres:** make PgRateLimiter hold its limit under concurrency ([1d05777](https://github.com/spilne/perfect/commit/1d05777))
+- **postgres:** stop PgChangeStream skipping rows and growing forever ([795f40c](https://github.com/spilne/perfect/commit/795f40c))
+- **topology:** store windows per key and stop join state growing forever ([d245069](https://github.com/spilne/perfect/commit/d245069))
+- **topology:** let processed-record dedupe expire everywhere ([50c8b71](https://github.com/spilne/perfect/commit/50c8b71))
+- **transform:** one plugin for every entry point, and a linear-time rewriter ([2778021](https://github.com/spilne/perfect/commit/2778021))
+
+### 🔥 Performance
+
+- **core:** drain the scheduler on microtasks ([8acf511](https://github.com/spilne/perfect/commit/8acf511))
+- **core:** make Pipes.lines and lengthPrefixed linear ([b41d33e](https://github.com/spilne/perfect/commit/b41d33e))
+- **core:** move whole chunks through buffer, observe, groupWithin, debounce ([e904fb2](https://github.com/spilne/perfect/commit/e904fb2))
+- **core:** cut allocations in the fiber runtime ([e06fcbc](https://github.com/spilne/perfect/commit/e06fcbc))
+- **core:** faster chunk loops and lazier sources ([b1db2d1](https://github.com/spilne/perfect/commit/b1db2d1))
+- **core:** let WorkerPool hand tasks to workers as they free up ([3852f0f](https://github.com/spilne/perfect/commit/3852f0f))
+- **http:** parse SSE and NDJSON without a stream per line ([6d10477](https://github.com/spilne/perfect/commit/6d10477))
+- **postgres:** send pgmq batches in one call and stop building a stream per message ([b6dc0e3](https://github.com/spilne/perfect/commit/b6dc0e3))
+- **redis:** reuse connections for blocking commands ([ed6528a](https://github.com/spilne/perfect/commit/ed6528a))
+- **redis:** stop recreating the stream group and batch recovery calls ([7339d17](https://github.com/spilne/perfect/commit/7339d17))
+- **redis:** share one subscriber connection across RedisPubSub subscriptions ([e212532](https://github.com/spilne/perfect/commit/e212532))
+
+### ⚠️  Breaking Changes
+
+- **core:** give fibers an error type and make join re-raise failures as they were  ([7387bbe](https://github.com/spilne/perfect/commit/7387bbe))
+  join no longer fails with Throws<Cause>. A child's
+  typed error arrives as itself, and defects and interrupts are no
+  longer catchable typed errors."
+  M	documentation/06-concurrency.md
+  M	packages/core/src/constructors.ts
+  M	packages/core/src/fiber.ts
+  M	packages/core/src/runtime.ts
+  M	packages/core/src/syntax/fiber.ts
+  M	packages/core/test/type-errors.ts
+  A	packages/core/test/typed-join.test.ts
+- **core:** make awaiting an effect opt-in  ([761968c](https://github.com/spilne/perfect/commit/761968c))
+  `await eff` no longer runs the effect unless
+  "@spilne/perfect-core/thenable" has been imported."
+  M	documentation/01-getting-started.md
+  M	documentation/03-syntax.md
+  M	packages/core/package.json
+  M	packages/core/src/syntax/index.ts
+  A	packages/core/src/thenable.ts
+  M	packages/core/test/thenable.test.ts
+  M	packages/integration/src/adapter-suite.ts
+  M	packages/integration/test/kafka.test.ts
+  M	packages/kafka/test/kafka-topic.test.ts
+  M	packages/postgres/test/integration.test.ts
+  M	packages/postgres/test/pg-queue.test.ts
+  M	packages/postgres/test/pgmq-queue.test.ts
+  M	packages/redis/test/integration.test.ts
+  M	packages/redis/test/redis-channel.test.ts
+  M	packages/redis/test/redis-stream.test.ts
+  M	scripts/smoke-package-exports.ts
+
 ## 0.2.0 (2026-09-18)
 
 ### 🚀 Features
