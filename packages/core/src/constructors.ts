@@ -63,12 +63,14 @@ export function async<A, E = never>(
 export const fromPromise: typeof tryPromise = (...args: any[]) => (tryPromise as any)(...args);
 
 /**
- * Marker tagged on the Suspend returned by tryPromise/fromPromise so the
+ * The promise behind each effect made by tryPromise/fromPromise, so the
  * thenable shim can detect "this is just a Promise wrapper" and skip the
  * fiber spawn — directly awaiting the underlying Promise instead.
  */
-export const PROMISE_THUNK: unique symbol = Symbol.for("spilne/promise-thunk");
-export const PROMISE_ON_REJECT: unique symbol = Symbol.for("spilne/promise-onReject");
+export const PROMISE_SOURCES = new WeakMap<
+  object,
+  { readonly promise: () => Promise<unknown>; readonly onReject: (e: unknown) => unknown }
+>();
 
 export function tryPromise<A, E>(
   promise: () => Promise<A>,
@@ -80,12 +82,15 @@ export function tryPromise<A, E>(
       (e) => resume(fail(onReject(e)) as any),
     );
   }) as any;
-  // Tag for the thenable fast-path. Going through run() costs ~500 ns
-  // (Suspend alloc + fiber spawn + register/resume cycle) on top of the
-  // underlying Promise. For the bare `await tryPromise(p)` case (no further
-  // Eff composition), skip that and await the Promise directly.
-  eff[PROMISE_THUNK] = promise;
-  eff[PROMISE_ON_REJECT] = onReject;
+  // Remember the promise for the thenable fast path. Going through run()
+  // costs ~500 ns (fiber spawn + register/resume cycle) on top of the
+  // promise. For a bare `await tryPromise(p)` (no further composition) the
+  // shim awaits the promise directly instead.
+  //
+  // This lives in a WeakMap rather than as extra properties on the node:
+  // extra properties would give these nodes a different shape from every
+  // other effect node, which slows down the interpreter's hot loop.
+  PROMISE_SOURCES.set(eff, { promise, onReject });
   return eff;
 }
 

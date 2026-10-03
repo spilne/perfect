@@ -144,6 +144,32 @@ function exitFinalizer(
 // Every run starts from a Ready fiber and consumes that state. A run that
 // finds the fiber in any other state is a duplicate (see Fiber.interrupt) and
 // does nothing.
+// The fiber's body failed with `cause`. A fiber-level scope (from an
+// acquireRelease outside any `scoped`) is closed first, and the fiber
+// completes once that is done.
+function failFiber(fiber: Fiber<any>, cause: Cause, context: Context): void {
+  if (fiber.scope && !fiber.scope.isClosed) {
+    const closer = fiber.scope.close();
+    stepInline(
+      closer as unknown as Suspend,
+      context,
+      null,
+      () => {
+        const failure = interruptedWhileClosing(fiber) ? withInterrupt(cause) : cause;
+        fiber.complete({ ok: false, cause: failure });
+      },
+      (closeCause) => {
+        const closed = Cause.then(cause, closeCause);
+        const failure = interruptedWhileClosing(fiber) ? withInterrupt(closed) : closed;
+        fiber.complete({ ok: false, cause: failure });
+      },
+      fiber,
+    );
+    return;
+  }
+  fiber.complete({ ok: false, cause });
+}
+
 function runFiberLoop(fiber: Fiber<any>): void {
   if (fiber.state !== FiberState.Ready) return;
   fiber.state = FiberState.Running;
@@ -155,33 +181,6 @@ function runFiberLoop(fiber: Fiber<any>): void {
   let k: Cont | null = fiber.stack;
   let context: Context = fiber.context!;
   const budget = DEFAULT_BUDGET;
-
-  const resolve: Resolve = (value) => {
-    fiber.complete({ ok: true, value });
-  };
-  const reject: Reject = (cause) => {
-    // close scope if present
-    if (fiber.scope && !fiber.scope.isClosed) {
-      const closer = fiber.scope.close();
-      stepInline(
-        closer as unknown as Suspend,
-        context,
-        null,
-        () => {
-          const failure = interruptedWhileClosing(fiber) ? withInterrupt(cause) : cause;
-          fiber.complete({ ok: false, cause: failure });
-        },
-        (closeCause) => {
-          const closed = Cause.then(cause, closeCause);
-          const failure = interruptedWhileClosing(fiber) ? withInterrupt(closed) : closed;
-          fiber.complete({ ok: false, cause: failure });
-        },
-        fiber,
-      );
-      return;
-    }
-    fiber.complete({ ok: false, cause });
-  };
 
   loop: while (true) {
     // check interruption
@@ -217,7 +216,7 @@ function runFiberLoop(fiber: Fiber<any>): void {
       fiber.state = FiberState.Ready;
       if (!(cur instanceof Suspend) || cur.op === Op.Succeed)
         fiber.handoffDiscard = VALUE_IN_FLIGHT;
-      fiber.scheduler.schedule(() => runFiberLoop(fiber));
+      fiber.scheduleRun();
       return;
     }
 
@@ -291,15 +290,19 @@ function runFiberLoop(fiber: Fiber<any>): void {
           () => {
             if (interruptedWhileClosing(fiber))
               fiber.complete({ ok: false, cause: Cause.interrupt() });
-            else resolve(val);
+            else fiber.complete({ ok: true, value: val });
           },
           (closeCause) =>
-            reject(interruptedWhileClosing(fiber) ? withInterrupt(closeCause) : closeCause),
+            failFiber(
+              fiber,
+              interruptedWhileClosing(fiber) ? withInterrupt(closeCause) : closeCause,
+              context,
+            ),
           fiber,
         );
         return;
       }
-      resolve(cur);
+      fiber.complete({ ok: true, value: cur });
       return;
     }
 
@@ -388,7 +391,7 @@ function runFiberLoop(fiber: Fiber<any>): void {
             continue loop;
           }
         }
-        reject(cause);
+        failFiber(fiber, cause, context);
         return;
       }
 
@@ -436,7 +439,7 @@ function runFiberLoop(fiber: Fiber<any>): void {
             fiber.current = value;
             fiber.handoffDiscard = typeof onDiscard === "function" ? onDiscard : null;
             fiber.state = FiberState.Ready;
-            fiber.scheduler.schedule(() => runFiberLoop(fiber));
+            fiber.scheduleRun();
           });
           if (fiber.interruptHandle === IN_CALLBACK) fiber.interruptHandle = null;
           if (cancel && !resumed) {
@@ -656,7 +659,7 @@ function runFiberLoop(fiber: Fiber<any>): void {
         fiber.stack = k;
         fiber.context = context;
         fiber.state = FiberState.Ready;
-        fiber.scheduler.schedule(() => runFiberLoop(fiber));
+        fiber.scheduleRun();
         return;
       }
 
@@ -968,7 +971,7 @@ class ChildGroup {
     fiber.interruptHandle = null;
     fiber.current = value;
     fiber.state = FiberState.Ready;
-    fiber.scheduler.schedule(() => runFiberLoop(fiber));
+    fiber.scheduleRun();
   }
 
   fail(first: Cause | null): void {
@@ -1284,7 +1287,7 @@ function stepInline(
             parentFiber,
           );
         });
-        child.scheduler.schedule(() => runFiberLoop(child));
+        child.scheduleRun();
         return;
       }
     }
@@ -1337,7 +1340,7 @@ function makeChild(parent: Fiber<any>, eff: any, context: Context, structured = 
 function runChild(child: Fiber): void {
   child.state = FiberState.Ready;
   notifyFiberStart(child);
-  child.scheduler.schedule(() => runFiberLoop(child));
+  child.scheduleRun();
 }
 
 // Start a bootstrapped fiber and wrap its completion in a Promise. Callers
@@ -1392,7 +1395,7 @@ export function runSync<A>(eff: Eff<A, never>): A {
     if (r.ok) result = r.value;
     else error = r.cause;
   });
-  scheduler.schedule(() => runFiberLoop(fiber));
+  fiber.scheduleRun();
   scheduler.flush();
 
   if (!done) throw new Error("runSync: effect did not complete synchronously");
@@ -1403,7 +1406,7 @@ export function runSync<A>(eff: Eff<A, never>): A {
 export function runFiber<A, S>(eff: Eff<A, S> & EffectCheck<S>, scheduler?: Scheduler): Fiber<A> {
   const fiber = bootstrapFiber<A>(eff as Eff<A, any>, scheduler);
   notifyFiberStart(fiber);
-  fiber.scheduler.schedule(() => runFiberLoop(fiber));
+  fiber.scheduleRun();
   return fiber;
 }
 

@@ -58,7 +58,9 @@ export class Cont {
 
 // ── Suspend node (the runtime representation of an effect) ─────────
 export class Suspend {
-  readonly [EFF_TAG] = true as const;
+  // The brand lives on the prototype (set below), not on each node: one
+  // field less on every effect the program allocates.
+  declare readonly [EFF_TAG]: true;
   // NOTE: no phantom fields here. Declaring `_A: never` on the class made
   // the Eff intersection compute `never & A = never` for every A — all
   // Eff<A, S> types collapsed to one structural type and any Eff was
@@ -73,6 +75,8 @@ export class Suspend {
     public readonly b: unknown,
   ) {}
 }
+
+(Suspend.prototype as { [EFF_TAG]: true })[EFF_TAG] = true;
 
 // ── The Eff type ───────────────────────────────────────────────────
 // At the type level: Eff<A, S> is a Suspend node plus phantom readonly
