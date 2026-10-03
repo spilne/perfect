@@ -1641,10 +1641,14 @@ export class Stream<A, S = never> {
   // ── Combination ──────────────────────────────────────────────────
 
   /**
-   * Emit this stream, then `that`. Each side's finalizer runs as soon as that
-   * side ends, before the next one is pulled. Nested concats flatten into one
-   * list of segments, so a long chain costs one step per chunk, not one per
-   * level.
+   * Emit everything from this stream, then everything from `that`.
+   *
+   * When one part ends we clean it up (run its finalizer) right away, before
+   * we start the next part. So a.concat(b).concat(c) only ever has one part
+   * open at a time.
+   *
+   * a.concat(b).concat(c) is stored as one flat list [a, b, c], not as
+   * concat(concat(a, b), c). That keeps long chains fast.
    */
   concat<S2>(that: Stream<A, S2>): Stream<A, S | S2> {
     return concatSegments<A>([
@@ -3103,12 +3107,15 @@ export class Stream<A, S = never> {
   }
 }
 
-// The segments a concat stream emits in order, kept so that concatenating it
-// again extends the list instead of nesting another layer.
+// For each stream made by concat, the list of parts it plays in order. When
+// you concat that stream again, we add to this list instead of wrapping it
+// in one more layer (more layers = every chunk passes through more code).
 const CONCAT_SEGMENTS = new WeakMap<Stream<any, any>, readonly Stream<any, any>[]>();
 
 function concatSegments<A>(segments: readonly Stream<A, any>[]): Stream<A, unknown> {
   const stream = Stream.suspend(() => {
+    // Cleanup for the part we are reading right now. We clear it before
+    // running it, so it can never run twice.
     let active: Eff<void, unknown> | null = null;
     const release = (): Eff<void, unknown> => {
       const finalizer = active;
