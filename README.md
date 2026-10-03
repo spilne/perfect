@@ -1,22 +1,13 @@
 # Performance history
 
-Last 20 run(s) of 27 recorded. Medians in each benchmark's own unit (ns/op or ns/item). Absolute values are only comparable within a runner class — the trend is the signal, not the number.
-
-## core/all x100 run
-
-latest **18.93** · window min 18.93 / max 18.93 · drift across window +0.0%
-
-| run | commit | median |
-|---:|---|---:|
-| 2026-09-05 | `bf81003e` | 18.93 |
+Last 20 run(s) of 28 recorded. Medians in each benchmark's own unit (ns/op or ns/item). Absolute values are only comparable within a runner class — the trend is the signal, not the number.
 
 ## core/all(succeed) x100 fast path
 
-latest **14.77** · window min 8.26 / max 17.85 · drift across window +1.0%
+latest **14.81** · window min 8.26 / max 17.85 · drift across window +1.2%
 
 | run | commit | median |
 |---:|---|---:|
-| 2026-09-18 | `328c07bc` | 15.14 |
 | 2026-09-18 | `64fd4404` | 8.26 |
 | 2026-09-23 | `66e58e18` | 16.00 |
 | 2026-10-03 | `7cbb582c` | 15.03 |
@@ -26,14 +17,14 @@ latest **14.77** · window min 8.26 / max 17.85 · drift across window +1.0%
 | 2026-10-03 | `3dce1aad` | 17.25 |
 | 2026-10-03 | `e904fb2c` | 17.64 |
 | 2026-10-03 | `b1db2d1e` | 14.77 |
+| 2026-10-03 | `795f40c6` | 14.81 |
 
 ## core/all(sync) x100 fibers
 
-latest **208.21** · window min 208.21 / max 771.36 · drift across window -64.3%
+latest **204.18** · window min 204.18 / max 771.36 · drift across window -64.9%
 
 | run | commit | median |
 |---:|---|---:|
-| 2026-09-18 | `328c07bc` | 704.01 |
 | 2026-09-18 | `64fd4404` | 394.50 |
 | 2026-09-23 | `66e58e18` | 742.50 |
 | 2026-10-03 | `7cbb582c` | 738.78 |
@@ -43,14 +34,14 @@ latest **208.21** · window min 208.21 / max 771.36 · drift across window -64.3
 | 2026-10-03 | `3dce1aad` | 288.81 |
 | 2026-10-03 | `e904fb2c` | 305.73 |
 | 2026-10-03 | `b1db2d1e` | 208.21 |
+| 2026-10-03 | `795f40c6` | 204.18 |
 
 ## core/all(yieldNow) x100 fibers
 
-latest **275.67** · window min 250.58 / max 903.49 · drift across window -41.4%
+latest **272.49** · window min 250.58 / max 903.49 · drift across window -42.1%
 
 | run | commit | median |
 |---:|---|---:|
-| 2026-09-18 | `328c07bc` | 827.84 |
 | 2026-09-18 | `64fd4404` | 250.58 |
 | 2026-09-23 | `66e58e18` | 786.78 |
 | 2026-10-03 | `7cbb582c` | 903.49 |
@@ -60,10 +51,11 @@ latest **275.67** · window min 250.58 / max 903.49 · drift across window -41.4
 | 2026-10-03 | `3dce1aad` | 371.37 |
 | 2026-10-03 | `e904fb2c` | 390.72 |
 | 2026-10-03 | `b1db2d1e` | 275.67 |
+| 2026-10-03 | `795f40c6` | 272.49 |
 
 ## core/async resume chain x1000
 
-latest **514.70** · window min 514.70 / max 812.10 · drift across window -36.6%
+latest **525.42** · window min 514.70 / max 812.10 · drift across window -35.3%
 
 | run | commit | median |
 |---:|---|---:|
@@ -71,14 +63,14 @@ latest **514.70** · window min 514.70 / max 812.10 · drift across window -36.6
 | 2026-10-03 | `3dce1aad` | 607.34 |
 | 2026-10-03 | `e904fb2c` | 620.36 |
 | 2026-10-03 | `b1db2d1e` | 514.70 |
+| 2026-10-03 | `795f40c6` | 525.42 |
 
 ## core/deferred waiter cancellation x1000
 
-latest **210.24** · window min 146.65 / max 317.11 · drift across window -16.6%
+latest **249.86** · window min 146.65 / max 317.11 · drift across window -0.9%
 
 | run | commit | median |
 |---:|---|---:|
-| 2026-09-18 | `328c07bc` | 264.67 |
 | 2026-09-18 | `64fd4404` | 146.65 |
 | 2026-09-23 | `66e58e18` | 270.82 |
 | 2026-10-03 | `7cbb582c` | 263.93 |
@@ -88,14 +80,14 @@ latest **210.24** · window min 146.65 / max 317.11 · drift across window -16.6
 | 2026-10-03 | `3dce1aad` | 317.11 |
 | 2026-10-03 | `e904fb2c` | 310.69 |
 | 2026-10-03 | `b1db2d1e` | 210.24 |
+| 2026-10-03 | `795f40c6` | 249.86 |
 
 ## core/deferred waiter cancellation x8000
 
-latest **249.84** · window min 165.37 / max 366.09 · drift across window -15.4%
+latest **301.36** · window min 165.37 / max 366.09 · drift across window +2.1%
 
 | run | commit | median |
 |---:|---|---:|
-| 2026-09-18 | `328c07bc` | 302.06 |
 | 2026-09-18 | `64fd4404` | 165.37 |
 | 2026-09-23 | `66e58e18` | 320.79 |
 | 2026-10-03 | `7cbb582c` | 314.76 |
@@ -105,14 +97,14 @@ latest **249.84** · window min 165.37 / max 366.09 · drift across window -15.4
 | 2026-10-03 | `3dce1aad` | 350.75 |
 | 2026-10-03 | `e904fb2c` | 366.09 |
 | 2026-10-03 | `b1db2d1e` | 249.84 |
+| 2026-10-03 | `795f40c6` | 301.36 |
 
 ## core/fiber reverse completion x1000
 
-latest **91.02** · window min 63.68 / max 139.93 · drift across window -8.1%
+latest **94.98** · window min 63.68 / max 139.93 · drift across window -4.1%
 
 | run | commit | median |
 |---:|---|---:|
-| 2026-09-18 | `328c07bc` | 130.34 |
 | 2026-09-18 | `64fd4404` | 63.68 |
 | 2026-09-23 | `66e58e18` | 107.46 |
 | 2026-10-03 | `7cbb582c` | 101.75 |
@@ -122,14 +114,14 @@ latest **91.02** · window min 63.68 / max 139.93 · drift across window -8.1%
 | 2026-10-03 | `3dce1aad` | 89.05 |
 | 2026-10-03 | `e904fb2c` | 97.57 |
 | 2026-10-03 | `b1db2d1e` | 91.02 |
+| 2026-10-03 | `795f40c6` | 94.98 |
 
 ## core/fiber reverse completion x8000
 
-latest **82.11** · window min 63.98 / max 127.12 · drift across window -20.5%
+latest **76.23** · window min 63.98 / max 127.12 · drift across window -26.2%
 
 | run | commit | median |
 |---:|---|---:|
-| 2026-09-18 | `328c07bc` | 118.37 |
 | 2026-09-18 | `64fd4404` | 63.98 |
 | 2026-09-23 | `66e58e18` | 119.77 |
 | 2026-10-03 | `7cbb582c` | 119.52 |
@@ -139,14 +131,14 @@ latest **82.11** · window min 63.98 / max 127.12 · drift across window -20.5%
 | 2026-10-03 | `3dce1aad` | 98.49 |
 | 2026-10-03 | `e904fb2c` | 109.51 |
 | 2026-10-03 | `b1db2d1e` | 82.11 |
+| 2026-10-03 | `795f40c6` | 76.23 |
 
 ## core/flatMap chain x10k runSync
 
-latest **32.19** · window min 21.78 / max 48.49 · drift across window +35.5%
+latest **42.11** · window min 21.78 / max 48.49 · drift across window +53.8%
 
 | run | commit | median |
 |---:|---|---:|
-| 2026-09-18 | `328c07bc` | 42.69 |
 | 2026-09-18 | `64fd4404` | 22.34 |
 | 2026-09-23 | `66e58e18` | 42.80 |
 | 2026-10-03 | `7cbb582c` | 41.55 |
@@ -156,10 +148,11 @@ latest **32.19** · window min 21.78 / max 48.49 · drift across window +35.5%
 | 2026-10-03 | `3dce1aad` | 40.65 |
 | 2026-10-03 | `e904fb2c` | 40.95 |
 | 2026-10-03 | `b1db2d1e` | 32.19 |
+| 2026-10-03 | `795f40c6` | 42.11 |
 
 ## core/fork+join chain x1000
 
-latest **1052.54** · window min 627.03 / max 1488.25 · drift across window +67.9%
+latest **533.39** · window min 533.39 / max 1488.25 · drift across window -14.9%
 
 | run | commit | median |
 |---:|---|---:|
@@ -167,14 +160,14 @@ latest **1052.54** · window min 627.03 / max 1488.25 · drift across window +67
 | 2026-10-03 | `3dce1aad` | 1136.62 |
 | 2026-10-03 | `e904fb2c` | 1488.25 |
 | 2026-10-03 | `b1db2d1e` | 1052.54 |
+| 2026-10-03 | `795f40c6` | 533.39 |
 
 ## core/group singleton chunks x1000
 
-latest **15.36** · window min 15.36 / max 273.63 · drift across window -91.2%
+latest **14.31** · window min 14.31 / max 273.63 · drift across window -91.8%
 
 | run | commit | median |
 |---:|---|---:|
-| 2026-09-18 | `328c07bc` | 199.00 |
 | 2026-09-18 | `64fd4404` | 121.54 |
 | 2026-09-23 | `66e58e18` | 214.64 |
 | 2026-10-03 | `7cbb582c` | 187.64 |
@@ -184,14 +177,14 @@ latest **15.36** · window min 15.36 / max 273.63 · drift across window -91.2%
 | 2026-10-03 | `3dce1aad` | 250.78 |
 | 2026-10-03 | `e904fb2c` | 248.38 |
 | 2026-10-03 | `b1db2d1e` | 15.36 |
+| 2026-10-03 | `795f40c6` | 14.31 |
 
 ## core/group singleton chunks x8000
 
-latest **11.31** · window min 11.31 / max 452.56 · drift across window -96.7%
+latest **13.46** · window min 11.31 / max 452.56 · drift across window -96.0%
 
 | run | commit | median |
 |---:|---|---:|
-| 2026-09-18 | `328c07bc` | 358.21 |
 | 2026-09-18 | `64fd4404` | 226.73 |
 | 2026-09-23 | `66e58e18` | 415.84 |
 | 2026-10-03 | `7cbb582c` | 330.80 |
@@ -201,14 +194,14 @@ latest **11.31** · window min 11.31 / max 452.56 · drift across window -96.7%
 | 2026-10-03 | `3dce1aad` | 417.00 |
 | 2026-10-03 | `e904fb2c` | 437.49 |
 | 2026-10-03 | `b1db2d1e` | 11.31 |
+| 2026-10-03 | `795f40c6` | 13.46 |
 
 ## core/range construction x10000
 
-latest **32.87** · window min 27.73 / max 37.83 · drift across window +5.0%
+latest **30.56** · window min 27.73 / max 37.83 · drift across window -2.3%
 
 | run | commit | median |
 |---:|---|---:|
-| 2026-09-18 | `328c07bc` | 31.81 |
 | 2026-09-18 | `64fd4404` | 28.33 |
 | 2026-09-23 | `66e58e18` | 32.42 |
 | 2026-10-03 | `7cbb582c` | 31.26 |
@@ -218,14 +211,14 @@ latest **32.87** · window min 27.73 / max 37.83 · drift across window +5.0%
 | 2026-10-03 | `3dce1aad` | 31.34 |
 | 2026-10-03 | `e904fb2c` | 30.15 |
 | 2026-10-03 | `b1db2d1e` | 32.87 |
+| 2026-10-03 | `795f40c6` | 30.56 |
 
 ## core/range construction x1000000
 
-latest **29.33** · window min 22.97 / max 40.53 · drift across window -1.9%
+latest **28.00** · window min 22.97 / max 40.53 · drift across window -6.4%
 
 | run | commit | median |
 |---:|---|---:|
-| 2026-09-18 | `328c07bc` | 28.07 |
 | 2026-09-18 | `64fd4404` | 22.97 |
 | 2026-09-23 | `66e58e18` | 33.41 |
 | 2026-10-03 | `7cbb582c` | 28.40 |
@@ -235,14 +228,14 @@ latest **29.33** · window min 22.97 / max 40.53 · drift across window -1.9%
 | 2026-10-03 | `3dce1aad` | 29.47 |
 | 2026-10-03 | `e904fb2c` | 28.53 |
 | 2026-10-03 | `b1db2d1e` | 29.33 |
+| 2026-10-03 | `795f40c6` | 28.00 |
 
 ## core/range take(1) x10000
 
-latest **6526.56** · window min 3288.90 / max 7318.34 · drift across window +14.3%
+latest **6439.78** · window min 3288.90 / max 7318.34 · drift across window +12.8%
 
 | run | commit | median |
 |---:|---|---:|
-| 2026-09-18 | `328c07bc` | 7167.93 |
 | 2026-09-18 | `64fd4404` | 3288.90 |
 | 2026-09-23 | `66e58e18` | 6673.43 |
 | 2026-10-03 | `7cbb582c` | 6523.23 |
@@ -252,14 +245,14 @@ latest **6526.56** · window min 3288.90 / max 7318.34 · drift across window +1
 | 2026-10-03 | `3dce1aad` | 7318.34 |
 | 2026-10-03 | `e904fb2c` | 6417.75 |
 | 2026-10-03 | `b1db2d1e` | 6526.56 |
+| 2026-10-03 | `795f40c6` | 6439.78 |
 
 ## core/range take(1) x1000000
 
-latest **6625.70** · window min 3378.44 / max 7396.20 · drift across window +16.1%
+latest **6444.97** · window min 3378.44 / max 7396.20 · drift across window +13.0%
 
 | run | commit | median |
 |---:|---|---:|
-| 2026-09-18 | `328c07bc` | 7330.74 |
 | 2026-09-18 | `64fd4404` | 3378.44 |
 | 2026-09-23 | `66e58e18` | 6578.45 |
 | 2026-10-03 | `7cbb582c` | 6470.72 |
@@ -269,14 +262,14 @@ latest **6625.70** · window min 3378.44 / max 7396.20 · drift across window +1
 | 2026-10-03 | `3dce1aad` | 7396.20 |
 | 2026-10-03 | `e904fb2c` | 6235.83 |
 | 2026-10-03 | `b1db2d1e` | 6625.70 |
+| 2026-10-03 | `795f40c6` | 6444.97 |
 
 ## core/run(sync)
 
-latest **318.61** · window min 181.79 / max 384.21 · drift across window -14.4%
+latest **268.84** · window min 181.79 / max 384.21 · drift across window -4.3%
 
 | run | commit | median |
 |---:|---|---:|
-| 2026-09-18 | `328c07bc` | 314.96 |
 | 2026-09-18 | `64fd4404` | 191.08 |
 | 2026-09-23 | `66e58e18` | 297.21 |
 | 2026-10-03 | `7cbb582c` | 320.51 |
@@ -286,14 +279,14 @@ latest **318.61** · window min 181.79 / max 384.21 · drift across window -14.4
 | 2026-10-03 | `3dce1aad` | 384.21 |
 | 2026-10-03 | `e904fb2c` | 287.96 |
 | 2026-10-03 | `b1db2d1e` | 318.61 |
+| 2026-10-03 | `795f40c6` | 268.84 |
 
 ## core/runSync(succeed)
 
-latest **14.15** · window min 11.48 / max 27.53 · drift across window -48.6%
+latest **15.43** · window min 11.48 / max 23.09 · drift across window -29.5%
 
 | run | commit | median |
 |---:|---|---:|
-| 2026-09-18 | `328c07bc` | 11.48 |
 | 2026-09-18 | `64fd4404` | 12.51 |
 | 2026-09-23 | `66e58e18` | 11.50 |
 | 2026-10-03 | `7cbb582c` | 22.23 |
@@ -303,14 +296,14 @@ latest **14.15** · window min 11.48 / max 27.53 · drift across window -48.6%
 | 2026-10-03 | `3dce1aad` | 14.20 |
 | 2026-10-03 | `e904fb2c` | 11.84 |
 | 2026-10-03 | `b1db2d1e` | 14.15 |
+| 2026-10-03 | `795f40c6` | 15.43 |
 
 ## core/sliding window fill x1000
 
-latest **482.49** · window min 216.49 / max 664.27 · drift across window +6.7%
+latest **1362.30** · window min 216.49 / max 1362.30 · drift across window +201.4%
 
 | run | commit | median |
 |---:|---|---:|
-| 2026-09-18 | `328c07bc` | 467.44 |
 | 2026-09-18 | `64fd4404` | 216.49 |
 | 2026-09-23 | `66e58e18` | 493.81 |
 | 2026-10-03 | `7cbb582c` | 480.24 |
@@ -320,14 +313,14 @@ latest **482.49** · window min 216.49 / max 664.27 · drift across window +6.7%
 | 2026-10-03 | `3dce1aad` | 664.27 |
 | 2026-10-03 | `e904fb2c` | 562.14 |
 | 2026-10-03 | `b1db2d1e` | 482.49 |
+| 2026-10-03 | `795f40c6` | 1362.30 |
 
 ## core/sliding window fill x8000
 
-latest **523.47** · window min 252.62 / max 747.92 · drift across window +11.0%
+latest **579.30** · window min 252.62 / max 747.92 · drift across window +22.9%
 
 | run | commit | median |
 |---:|---|---:|
-| 2026-09-18 | `328c07bc` | 485.54 |
 | 2026-09-18 | `64fd4404` | 252.62 |
 | 2026-09-23 | `66e58e18` | 519.46 |
 | 2026-10-03 | `7cbb582c` | 481.91 |
@@ -337,14 +330,14 @@ latest **523.47** · window min 252.62 / max 747.92 · drift across window +11.0
 | 2026-10-03 | `3dce1aad` | 747.92 |
 | 2026-10-03 | `e904fb2c` | 643.43 |
 | 2026-10-03 | `b1db2d1e` | 523.47 |
+| 2026-10-03 | `795f40c6` | 579.30 |
 
 ## core/stream evalMap single chunk x10000
 
-latest **10.12** · window min 8.38 / max 159.31 · drift across window -89.6%
+latest **8.39** · window min 8.38 / max 159.31 · drift across window -91.4%
 
 | run | commit | median |
 |---:|---|---:|
-| 2026-09-18 | `328c07bc` | 111.92 |
 | 2026-09-18 | `64fd4404` | 78.53 |
 | 2026-09-23 | `66e58e18` | 123.08 |
 | 2026-10-03 | `7cbb582c` | 154.62 |
@@ -354,14 +347,14 @@ latest **10.12** · window min 8.38 / max 159.31 · drift across window -89.6%
 | 2026-10-03 | `3dce1aad` | 8.56 |
 | 2026-10-03 | `e904fb2c` | 8.38 |
 | 2026-10-03 | `b1db2d1e` | 10.12 |
+| 2026-10-03 | `795f40c6` | 8.39 |
 
 ## core/stream evalMap single chunk x256
 
-latest **13.23** · window min 13.10 / max 128.63 · drift across window -83.5%
+latest **12.47** · window min 12.47 / max 128.63 · drift across window -84.5%
 
 | run | commit | median |
 |---:|---|---:|
-| 2026-09-18 | `328c07bc` | 109.07 |
 | 2026-09-18 | `64fd4404` | 59.11 |
 | 2026-09-23 | `66e58e18` | 117.29 |
 | 2026-10-03 | `7cbb582c` | 114.84 |
@@ -371,14 +364,14 @@ latest **13.23** · window min 13.10 / max 128.63 · drift across window -83.5%
 | 2026-10-03 | `3dce1aad` | 13.28 |
 | 2026-10-03 | `e904fb2c` | 14.20 |
 | 2026-10-03 | `b1db2d1e` | 13.23 |
+| 2026-10-03 | `795f40c6` | 12.47 |
 
 ## core/stream forEach single chunk x10000
 
-latest **45.73** · window min 34.85 / max 166.83 · drift across window -5.3%
+latest **44.23** · window min 34.85 / max 166.83 · drift across window -8.4%
 
 | run | commit | median |
 |---:|---|---:|
-| 2026-09-18 | `328c07bc` | 82.76 |
 | 2026-09-18 | `64fd4404` | 34.85 |
 | 2026-09-23 | `66e58e18` | 66.47 |
 | 2026-10-03 | `7cbb582c` | 64.95 |
@@ -388,14 +381,14 @@ latest **45.73** · window min 34.85 / max 166.83 · drift across window -5.3%
 | 2026-10-03 | `3dce1aad` | 45.81 |
 | 2026-10-03 | `e904fb2c` | 166.83 |
 | 2026-10-03 | `b1db2d1e` | 45.73 |
+| 2026-10-03 | `795f40c6` | 44.23 |
 
 ## core/stream forEach single chunk x256
 
-latest **54.94** · window min 31.59 / max 70.89 · drift across window +26.6%
+latest **53.15** · window min 31.59 / max 70.89 · drift across window +22.5%
 
 | run | commit | median |
 |---:|---|---:|
-| 2026-09-18 | `328c07bc` | 60.55 |
 | 2026-09-18 | `64fd4404` | 31.59 |
 | 2026-09-23 | `66e58e18` | 63.03 |
 | 2026-10-03 | `7cbb582c` | 61.23 |
@@ -405,14 +398,14 @@ latest **54.94** · window min 31.59 / max 70.89 · drift across window +26.6%
 | 2026-10-03 | `3dce1aad` | 54.60 |
 | 2026-10-03 | `e904fb2c` | 57.85 |
 | 2026-10-03 | `b1db2d1e` | 54.94 |
+| 2026-10-03 | `795f40c6` | 53.15 |
 
 ## core/stream map/filter full traversal
 
-latest **8.41** · window min 4.07 / max 14.88 · drift across window -4.6%
+latest **8.50** · window min 4.07 / max 14.88 · drift across window -3.5%
 
 | run | commit | median |
 |---:|---|---:|
-| 2026-09-18 | `328c07bc` | 8.02 |
 | 2026-09-18 | `64fd4404` | 4.07 |
 | 2026-09-23 | `66e58e18` | 8.15 |
 | 2026-10-03 | `7cbb582c` | 8.05 |
@@ -422,22 +415,14 @@ latest **8.41** · window min 4.07 / max 14.88 · drift across window -4.6%
 | 2026-10-03 | `3dce1aad` | 14.88 |
 | 2026-10-03 | `e904fb2c` | 8.08 |
 | 2026-10-03 | `b1db2d1e` | 8.41 |
-
-## core/stream map/filter/take
-
-latest **6.36** · window min 6.36 / max 6.36 · drift across window +0.0%
-
-| run | commit | median |
-|---:|---|---:|
-| 2026-09-05 | `bf81003e` | 6.36 |
+| 2026-10-03 | `795f40c6` | 8.50 |
 
 ## core/stream map/filter/take end-to-end
 
-latest **78668.00** · window min 19347.78 / max 125435.00 · drift across window +8.4%
+latest **124503.00** · window min 19347.78 / max 125435.00 · drift across window +71.6%
 
 | run | commit | median |
 |---:|---|---:|
-| 2026-09-18 | `328c07bc` | 89317.00 |
 | 2026-09-18 | `64fd4404` | 19347.78 |
 | 2026-09-23 | `66e58e18` | 95940.00 |
 | 2026-10-03 | `7cbb582c` | 93515.00 |
@@ -447,14 +432,14 @@ latest **78668.00** · window min 19347.78 / max 125435.00 · drift across windo
 | 2026-10-03 | `3dce1aad` | 91342.00 |
 | 2026-10-03 | `e904fb2c` | 83486.00 |
 | 2026-10-03 | `b1db2d1e` | 78668.00 |
+| 2026-10-03 | `795f40c6` | 124503.00 |
 
 ## http/GET @spilne/perfect-http client
 
-latest **159080.00** · window min 70627.00 / max 193432.00 · drift across window +14.4%
+latest **149900.00** · window min 70627.00 / max 193432.00 · drift across window -20.4%
 
 | run | commit | median |
 |---:|---|---:|
-| 2026-09-18 | `328c07bc` | 164106.00 |
 | 2026-09-18 | `64fd4404` | 70627.00 |
 | 2026-09-23 | `66e58e18` | 193432.00 |
 | 2026-10-03 | `7cbb582c` | 167703.00 |
@@ -464,14 +449,14 @@ latest **159080.00** · window min 70627.00 / max 193432.00 · drift across wind
 | 2026-10-03 | `3dce1aad` | 177023.00 |
 | 2026-10-03 | `e904fb2c` | 185254.00 |
 | 2026-10-03 | `b1db2d1e` | 159080.00 |
+| 2026-10-03 | `795f40c6` | 149900.00 |
 
 ## http/GET @spilne/perfect-http httpRequestJson
 
-latest **174589.00** · window min 64607.76 / max 187751.00 · drift across window +19.4%
+latest **165089.00** · window min 64607.76 / max 187751.00 · drift across window -4.2%
 
 | run | commit | median |
 |---:|---|---:|
-| 2026-09-18 | `328c07bc` | 176980.00 |
 | 2026-09-18 | `64fd4404` | 64607.76 |
 | 2026-09-23 | `66e58e18` | 187751.00 |
 | 2026-10-03 | `7cbb582c` | 185246.00 |
@@ -481,14 +466,14 @@ latest **174589.00** · window min 64607.76 / max 187751.00 · drift across wind
 | 2026-10-03 | `3dce1aad` | 163839.00 |
 | 2026-10-03 | `e904fb2c` | 162773.00 |
 | 2026-10-03 | `b1db2d1e` | 174589.00 |
+| 2026-10-03 | `795f40c6` | 165089.00 |
 
 ## http/GET axios
 
-latest **409913.00** · window min 270459.00 / max 458138.00 · drift across window +5.1%
+latest **382126.00** · window min 270459.00 / max 458138.00 · drift across window -6.7%
 
 | run | commit | median |
 |---:|---|---:|
-| 2026-09-18 | `328c07bc` | 421315.00 |
 | 2026-09-18 | `64fd4404` | 270459.00 |
 | 2026-09-23 | `66e58e18` | 378920.00 |
 | 2026-10-03 | `7cbb582c` | 394426.00 |
@@ -498,14 +483,14 @@ latest **409913.00** · window min 270459.00 / max 458138.00 · drift across win
 | 2026-10-03 | `3dce1aad` | 368033.00 |
 | 2026-10-03 | `e904fb2c` | 384897.00 |
 | 2026-10-03 | `b1db2d1e` | 409913.00 |
+| 2026-10-03 | `795f40c6` | 382126.00 |
 
 ## http/GET fetch (baseline)
 
-latest **146336.00** · window min 52672.95 / max 146336.00 · drift across window +68.0%
+latest **130865.00** · window min 52672.95 / max 146336.00 · drift across window +8.1%
 
 | run | commit | median |
 |---:|---|---:|
-| 2026-09-18 | `328c07bc` | 144810.00 |
 | 2026-09-18 | `64fd4404` | 52672.95 |
 | 2026-09-23 | `66e58e18` | 125134.00 |
 | 2026-10-03 | `7cbb582c` | 112400.00 |
@@ -515,14 +500,14 @@ latest **146336.00** · window min 52672.95 / max 146336.00 · drift across wind
 | 2026-10-03 | `3dce1aad` | 142338.00 |
 | 2026-10-03 | `e904fb2c` | 111537.00 |
 | 2026-10-03 | `b1db2d1e` | 146336.00 |
+| 2026-10-03 | `795f40c6` | 130865.00 |
 
 ## http/GET node-fetch
 
-latest **137689.00** · window min 53633.04 / max 161723.00 · drift across window +29.4%
+latest **130885.00** · window min 53633.04 / max 161723.00 · drift across window -14.8%
 
 | run | commit | median |
 |---:|---|---:|
-| 2026-09-18 | `328c07bc` | 133379.00 |
 | 2026-09-18 | `64fd4404` | 53633.04 |
 | 2026-09-23 | `66e58e18` | 156853.00 |
 | 2026-10-03 | `7cbb582c` | 154729.00 |
@@ -532,14 +517,14 @@ latest **137689.00** · window min 53633.04 / max 161723.00 · drift across wind
 | 2026-10-03 | `3dce1aad` | 154190.00 |
 | 2026-10-03 | `e904fb2c` | 154127.00 |
 | 2026-10-03 | `b1db2d1e` | 137689.00 |
+| 2026-10-03 | `795f40c6` | 130885.00 |
 
 ## http/GET undici.request
 
-latest **147879.00** · window min 55258.29 / max 164840.00 · drift across window +0.5%
+latest **139862.00** · window min 55258.29 / max 164840.00 · drift across window +13.5%
 
 | run | commit | median |
 |---:|---|---:|
-| 2026-09-18 | `328c07bc` | 162633.00 |
 | 2026-09-18 | `64fd4404` | 55258.29 |
 | 2026-09-23 | `66e58e18` | 155401.00 |
 | 2026-10-03 | `7cbb582c` | 139480.00 |
@@ -549,14 +534,14 @@ latest **147879.00** · window min 55258.29 / max 164840.00 · drift across wind
 | 2026-10-03 | `3dce1aad` | 164840.00 |
 | 2026-10-03 | `e904fb2c` | 138367.00 |
 | 2026-10-03 | `b1db2d1e` | 147879.00 |
+| 2026-10-03 | `795f40c6` | 139862.00 |
 
 ## http/POST @spilne/perfect-http client
 
-latest **187253.00** · window min 80651.00 / max 204032.00 · drift across window +36.9%
+latest **162755.00** · window min 80651.00 / max 204032.00 · drift across window -6.1%
 
 | run | commit | median |
 |---:|---|---:|
-| 2026-09-18 | `328c07bc` | 200875.00 |
 | 2026-09-18 | `64fd4404` | 80651.00 |
 | 2026-09-23 | `66e58e18` | 202109.00 |
 | 2026-10-03 | `7cbb582c` | 204032.00 |
@@ -566,14 +551,14 @@ latest **187253.00** · window min 80651.00 / max 204032.00 · drift across wind
 | 2026-10-03 | `3dce1aad` | 155803.00 |
 | 2026-10-03 | `e904fb2c` | 156922.00 |
 | 2026-10-03 | `b1db2d1e` | 187253.00 |
+| 2026-10-03 | `795f40c6` | 162755.00 |
 
 ## http/POST axios
 
-latest **407307.00** · window min 231800.00 / max 480939.00 · drift across window -8.4%
+latest **397304.00** · window min 231800.00 / max 480939.00 · drift across window -10.3%
 
 | run | commit | median |
 |---:|---|---:|
-| 2026-09-18 | `328c07bc` | 446702.00 |
 | 2026-09-18 | `64fd4404` | 231800.00 |
 | 2026-09-23 | `66e58e18` | 402804.00 |
 | 2026-10-03 | `7cbb582c` | 435152.00 |
@@ -583,14 +568,14 @@ latest **407307.00** · window min 231800.00 / max 480939.00 · drift across win
 | 2026-10-03 | `3dce1aad` | 457481.00 |
 | 2026-10-03 | `e904fb2c` | 403781.00 |
 | 2026-10-03 | `b1db2d1e` | 407307.00 |
+| 2026-10-03 | `795f40c6` | 397304.00 |
 
 ## http/POST fetch (baseline)
 
-latest **162285.00** · window min 57036.58 / max 162285.00 · drift across window +80.9%
+latest **120675.00** · window min 57036.58 / max 162285.00 · drift across window -0.8%
 
 | run | commit | median |
 |---:|---|---:|
-| 2026-09-18 | `328c07bc` | 134421.00 |
 | 2026-09-18 | `64fd4404` | 57036.58 |
 | 2026-09-23 | `66e58e18` | 161102.00 |
 | 2026-10-03 | `7cbb582c` | 124693.00 |
@@ -600,4 +585,5 @@ latest **162285.00** · window min 57036.58 / max 162285.00 · drift across wind
 | 2026-10-03 | `3dce1aad` | 133120.00 |
 | 2026-10-03 | `e904fb2c` | 123951.00 |
 | 2026-10-03 | `b1db2d1e` | 162285.00 |
+| 2026-10-03 | `795f40c6` | 120675.00 |
 
