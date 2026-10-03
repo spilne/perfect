@@ -12,7 +12,16 @@
 // The 4 named wrappers (httpStreamText / Lines / NDJSON / SSE) are kept for
 // ergonomics — they just inline the pipe chain above.
 
-import { type Throws, type Pipe, Stream, sync, Pipes } from "@spilne/perfect-core";
+import {
+  type Eff,
+  type Throws,
+  type Pipe,
+  Stream,
+  fail,
+  succeed,
+  sync,
+  Pipes,
+} from "@spilne/perfect-core";
 import {
   type HttpClientError,
   HttpParseError,
@@ -42,6 +51,11 @@ type StreamOptions = HttpRequestOptions &
  * Execute the request and yield the response body as a byte stream.
  * Cancellation (via take / interrupt) cancels the underlying reader so
  * the TCP connection closes immediately.
+ *
+ * `timeoutMs` (default 30 s) covers the whole response, including reading
+ * the body. For a long-lived stream such as Server-Sent Events, pass a
+ * timeout as long as you want to keep listening, or the stream fails with
+ * HttpTimeoutError when it runs out.
  */
 export function httpStream(opts: StreamOptions): Stream<Uint8Array, Throws<HttpClientError>> {
   return Stream.fromEffect(httpFetchOk(opts)).flatMap((response) =>
@@ -101,32 +115,32 @@ export function parseNDJSON<T>(
   schema: ResponseParser<T>,
   urlHint = "<ndjson>",
 ): Pipe<string, T, Throws<HttpClientError>> {
-  return (input) =>
-    input.flatMap((line) => {
-      const trimmed = line.trim();
-      if (trimmed.length === 0) return Stream.empty();
-      let data: unknown;
-      try {
-        data = JSON.parse(trimmed);
-      } catch (cause) {
-        return Stream.fail(
-          new HttpParseError({
-            url: urlHint,
-            cause,
-            message: `NDJSON parse failed at line: ${trimmed.slice(0, 80)}`,
-          }),
-        );
-      }
-      const result = schema.safeParse(data);
-      if (result.success) return Stream.of(result.data);
-      return Stream.fail(
+  // One step per line, without building a stream for each line.
+  const parseLine = (line: string): Eff<T, Throws<HttpClientError>> => {
+    const trimmed = line.trim();
+    let data: unknown;
+    try {
+      data = JSON.parse(trimmed);
+    } catch (cause) {
+      return fail(
         new HttpParseError({
           url: urlHint,
-          cause: result.error,
-          message: `NDJSON line doesn't match schema`,
+          cause,
+          message: `NDJSON parse failed at line: ${trimmed.slice(0, 80)}`,
         }),
       );
-    });
+    }
+    const result = schema.safeParse(data);
+    if (result.success) return succeed(result.data);
+    return fail(
+      new HttpParseError({
+        url: urlHint,
+        cause: result.error,
+        message: `NDJSON line doesn't match schema`,
+      }),
+    );
+  };
+  return (input) => input.filter((line) => line.trim().length > 0).evalMap(parseLine);
 }
 
 /**
@@ -135,69 +149,69 @@ export function parseNDJSON<T>(
  * lines (starting with `:`) are ignored. An in-progress event at stream
  * close is flushed.
  */
-export const parseSSE: Pipe<string, SSEvent> = (input) => {
-  let event = "message";
-  let data = "";
-  let id: string | undefined;
-  let retry: number | undefined;
-  let hasFields = false;
+export const parseSSE: Pipe<string, SSEvent> = (input) =>
+  // The parser state is created per run, so running the same stream again
+  // doesn't start in the middle of the previous run's event.
+  Stream.suspend(() => {
+    let event = "message";
+    let data = "";
+    let id: string | undefined;
+    let retry: number | undefined;
+    let hasFields = false;
 
-  const consume = (line: string): SSEvent | null => {
-    if (line === "") {
-      if (!hasFields) return null;
-      const ev: SSEvent = {
-        event,
-        data,
-        ...(id !== undefined ? { id } : {}),
-        ...(retry !== undefined ? { retry } : {}),
-      };
-      event = "message";
-      data = "";
-      id = undefined;
-      retry = undefined;
-      hasFields = false;
-      return ev;
-    }
-    if (line.startsWith(":")) return null; // comment
-    const colon = line.indexOf(":");
-    const field = colon === -1 ? line : line.slice(0, colon);
-    let val = colon === -1 ? "" : line.slice(colon + 1);
-    if (val.startsWith(" ")) val = val.slice(1);
-    hasFields = true;
-    switch (field) {
-      case "event":
-        event = val;
-        break;
-      case "data":
-        data = data.length === 0 ? val : `${data}\n${val}`;
-        break;
-      case "id":
-        id = val;
-        break;
-      case "retry": {
-        const r = parseInt(val, 10);
-        if (!Number.isNaN(r)) retry = r;
-        break;
+    const consume = (line: string): SSEvent | null => {
+      if (line === "") {
+        if (!hasFields) return null;
+        const ev: SSEvent = {
+          event,
+          data,
+          ...(id !== undefined ? { id } : {}),
+          ...(retry !== undefined ? { retry } : {}),
+        };
+        event = "message";
+        data = "";
+        id = undefined;
+        retry = undefined;
+        hasFields = false;
+        return ev;
       }
-      default:
-        break;
-    }
-    return null;
-  };
+      if (line.startsWith(":")) return null; // comment
+      const colon = line.indexOf(":");
+      const field = colon === -1 ? line : line.slice(0, colon);
+      let val = colon === -1 ? "" : line.slice(colon + 1);
+      if (val.startsWith(" ")) val = val.slice(1);
+      hasFields = true;
+      switch (field) {
+        case "event":
+          event = val;
+          break;
+        case "data":
+          data = data.length === 0 ? val : `${data}\n${val}`;
+          break;
+        case "id":
+          id = val;
+          break;
+        case "retry": {
+          const r = parseInt(val, 10);
+          if (!Number.isNaN(r)) retry = r;
+          break;
+        }
+        default:
+          break;
+      }
+      return null;
+    };
 
-  return input
-    .flatMap((line) => {
-      const out = consume(line);
-      return out === null ? Stream.empty() : Stream.of(out);
-    })
-    .concat(
-      Stream.suspend(() => {
-        // Flush any in-progress event on close (no trailing blank line)
-        const ev = consume("");
-        return ev ? Stream.of(ev) : Stream.empty();
-      }),
-    );
-};
+    return input
+      .filterMap((line) => consume(line) ?? undefined)
+      .concat(
+        Stream.suspend(() => {
+          // Flush any in-progress event on close (no trailing blank line)
+          const ev = consume("");
+          return ev ? Stream.of(ev) : Stream.empty();
+        }),
+      );
+  });
 
 // ── Thin convenience wrappers ────────────────────────────────────
 
