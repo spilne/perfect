@@ -10,11 +10,17 @@
 // The poll-based fallback ensures at-least-once delivery by periodically
 // checking for rows newer than the last seen timestamp.
 //
-// Ported from promin (Effect-TS StreamPipeline → perfect Stream): the merged
-// LISTEN+poll stream is deduped globally by JSON key — promin's `dedupe()`
-// (consecutive-only, reference equality) could not actually drop the
-// poll-side copy of a notified object. Memory grows with distinct events;
-// scope a subscription's lifetime accordingly.
+// The same event usually arrives twice (once from LISTEN, once from the
+// poll), so the merged stream drops values it has seen recently. "Recently"
+// is a bounded window (`dedupeWindow`, default 10 000 events), so memory
+// stays flat on a long-running subscription.
+//
+// The poll keeps a (timestamp, sequence) cursor and asks for rows strictly
+// after it, ordered the same way. That way rows that share a timestamp, or
+// whose sequence order differs from their timestamp order, are not skipped.
+// A row committed late with an older timestamp than rows already read can
+// still be missed; use a commit-ordered column for the timestamp if that
+// matters.
 // ---------------------------------------------------------------------------
 
 import { async as asyncEff, fail, succeed, type Throws } from "@spilne/perfect-core";
@@ -28,7 +34,7 @@ import type {
   Codec,
   ConsumerGroup,
 } from "@spilne/perfect-core/connect";
-import type { DrizzleDb } from "./drizzle-db.js";
+import { type DrizzleDb, execRaw } from "./drizzle-db.js";
 import { pollStream } from "./poll-stream.js";
 import { PostgresError, toPostgresError } from "./postgres-error.js";
 import type postgres from "postgres";
@@ -61,7 +67,13 @@ export interface PgChangeStreamConfig<T> {
   pollIntervalMs?: number;
   /** Max rows per poll batch. Default: 100. */
   pollBatchSize?: number;
+  /** How many recent events to remember for dropping duplicates. Default: 10 000. */
+  dedupeWindow?: number;
 }
+
+// Channel names end up inside a trigger function body, where we can't use
+// query parameters, so we only accept plain identifier names.
+const CHANNEL_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /** Map a connect Offset to the poll cursor timestamp. Pure — exported for tests. */
 export function offsetToDate(offset: Offset): Date {
@@ -95,8 +107,14 @@ export class PgChangeStream<T>
   private readonly payloadColumn: string | undefined;
   private readonly pollIntervalMs: number;
   private readonly pollBatchSize: number;
+  private readonly dedupeWindow: number;
 
   constructor(config: PgChangeStreamConfig<T>) {
+    if (!CHANNEL_NAME.test(config.channel)) {
+      throw new RangeError(
+        `PgChangeStream: channel must be a plain name (letters, digits, _), got ${JSON.stringify(config.channel)}`,
+      );
+    }
     this.db = config.db;
     this.sqlClient = config.sql;
     this.channel = config.channel;
@@ -107,6 +125,7 @@ export class PgChangeStream<T>
     this.codec = config.codec ?? (JsonCodec as Codec<T>);
     this.pollIntervalMs = config.pollIntervalMs ?? 5000;
     this.pollBatchSize = config.pollBatchSize ?? 100;
+    this.dedupeWindow = config.dedupeWindow ?? 10_000;
   }
 
   // ---------------------------------------------------------------------------
@@ -129,7 +148,11 @@ export class PgChangeStream<T>
     const pollStream = this.createPollStream(params.offset);
 
     // Merge both sources — LISTEN for low latency, poll for reliability
-    return listenStream.merge(pollStream).dedupe((v) => JSON.stringify(v));
+    const window = this.dedupeWindow;
+    return Stream.suspend(() => {
+      const recent = new RecentKeys(window);
+      return listenStream.merge(pollStream).filter((v) => recent.add(JSON.stringify(v)));
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -183,43 +206,54 @@ export class PgChangeStream<T>
   // ---------------------------------------------------------------------------
 
   private createPollStream(offset: Offset): Stream<T, Throws<PostgresError>> {
-    let cursor = offsetToDate(offset);
+    return Stream.suspend(() => {
+      // Where the next poll starts. `ts` is kept as the text Postgres gave
+      // us: a JS Date would drop the microseconds, and the poll would keep
+      // re-reading its own last row.
+      let cursor: PollCursor = { ts: offsetToDate(offset).toISOString(), seq: null };
 
-    return pollStream(
-      async () => {
-        const rows = await this.pollSince(cursor);
-        if (rows.length > 0) {
-          // Advance cursor to latest row's timestamp
-          const lastRow = rows[rows.length - 1]!;
-          cursor = new Date(lastRow.ts.getTime() + 1);
-        }
-        return rows.map((r) => r.value);
-      },
-      this.pollIntervalMs,
-      "changeStream.poll",
-    );
+      return pollStream(
+        async () => {
+          const rows = await this.pollAfter(cursor);
+          const last = rows.at(-1);
+          if (last !== undefined) cursor = { ts: last.ts, seq: last.seq };
+          return rows.map((r) => r.value);
+        },
+        this.pollIntervalMs,
+        "changeStream.poll",
+      );
+    });
   }
 
-  private async pollSince(since: Date): Promise<{ value: T; ts: Date }[]> {
-    const tsCol = this.timestampColumn;
-    const seqCol = this.sequenceColumn;
-    const table = this.table;
-    const limit = this.pollBatchSize;
-    const payloadExpr = this.payloadColumn ? `${this.payloadColumn}` : `row_to_json(t)`;
+  private async pollAfter(cursor: PollCursor): Promise<{ value: T; ts: string; seq: unknown }[]> {
+    const ts = sql.identifier(this.timestampColumn);
+    const seq = sql.identifier(this.sequenceColumn);
+    const table = sql.identifier(this.table);
+    const payload = this.payloadColumn
+      ? sql`t.${sql.identifier(this.payloadColumn)}`
+      : sql`row_to_json(t)`;
+    // First poll: everything from the offset's time. After that: strictly
+    // after the last row we read, in (timestamp, sequence) order.
+    const after =
+      cursor.seq === null
+        ? sql`t.${ts} >= ${cursor.ts}::timestamptz`
+        : sql`(t.${ts}, t.${seq}) > (${cursor.ts}::timestamptz, ${cursor.seq})`;
 
-    const rows = (await this.db.execute(
-      sql.raw(`
-        SELECT ${payloadExpr} as payload, "${tsCol}" as ts
-        FROM "${table}" t
-        WHERE "${tsCol}" >= '${since.toISOString()}'
-        ORDER BY "${seqCol}" ASC
-        LIMIT ${limit}
-      `),
-    )) as any[];
+    const rows = await execRaw(
+      this.db,
+      sql`
+        SELECT ${payload} AS payload, t.${ts}::text AS ts, t.${seq} AS seq
+        FROM ${table} t
+        WHERE ${after}
+        ORDER BY t.${ts} ASC, t.${seq} ASC
+        LIMIT ${this.pollBatchSize}
+      `,
+    );
 
-    return rows.map((r: any) => ({
+    return rows.map((r) => ({
       value: this.codec.decode(r.payload),
-      ts: r.ts instanceof Date ? r.ts : new Date(r.ts),
+      ts: String(r.ts),
+      seq: r.seq,
     }));
   }
 
@@ -245,43 +279,65 @@ export class PgChangeStream<T>
    * The trigger sends the payload column (or row JSON) as the notification payload.
    */
   async installTrigger(): Promise<void> {
-    const fnName = `notify_${this.channel}`;
-    const triggerName = `trg_notify_${this.channel}`;
-    const payloadExpr = this.payloadColumn
-      ? `NEW."${this.payloadColumn}"::text`
-      : `row_to_json(NEW)::text`;
+    const fn = sql.identifier(`notify_${this.channel}`);
+    const trigger = sql.identifier(`trg_notify_${this.channel}`);
+    const table = sql.identifier(this.table);
+    const payload = this.payloadColumn
+      ? sql`NEW.${sql.identifier(this.payloadColumn)}::text`
+      : sql`row_to_json(NEW)::text`;
+    // The channel name was checked in the constructor, so it is safe to put
+    // inside the function body as a literal.
+    const channel = sql.raw(`'${this.channel}'`);
 
-    await this.db.execute(
-      sql.raw(`
-      CREATE OR REPLACE FUNCTION ${fnName}() RETURNS trigger AS $$
+    await this.db.execute(sql`
+      CREATE OR REPLACE FUNCTION ${fn}() RETURNS trigger AS $$
       BEGIN
-        PERFORM pg_notify('${this.channel}', ${payloadExpr});
+        PERFORM pg_notify(${channel}, ${payload});
         RETURN NEW;
       END;
-      $$ LANGUAGE plpgsql;
-    `),
-    );
-
-    await this.db.execute(
-      sql.raw(`
-      DROP TRIGGER IF EXISTS ${triggerName} ON "${this.table}";
-      CREATE TRIGGER ${triggerName}
-        AFTER INSERT ON "${this.table}"
-        FOR EACH ROW EXECUTE FUNCTION ${fnName}();
-    `),
-    );
+      $$ LANGUAGE plpgsql
+    `);
+    await this.db.execute(sql`DROP TRIGGER IF EXISTS ${trigger} ON ${table}`);
+    await this.db.execute(sql`
+      CREATE TRIGGER ${trigger}
+        AFTER INSERT ON ${table}
+        FOR EACH ROW EXECUTE FUNCTION ${fn}()
+    `);
   }
 
   /** Remove the auto-NOTIFY trigger from the table. */
   async removeTrigger(): Promise<void> {
-    const fnName = `notify_${this.channel}`;
-    const triggerName = `trg_notify_${this.channel}`;
+    const fn = sql.identifier(`notify_${this.channel}`);
+    const trigger = sql.identifier(`trg_notify_${this.channel}`);
+    await this.db.execute(sql`DROP TRIGGER IF EXISTS ${trigger} ON ${sql.identifier(this.table)}`);
+    await this.db.execute(sql`DROP FUNCTION IF EXISTS ${fn}()`);
+  }
+}
 
-    await this.db.execute(
-      sql.raw(`
-      DROP TRIGGER IF EXISTS ${triggerName} ON "${this.table}";
-      DROP FUNCTION IF EXISTS ${fnName}();
-    `),
-    );
+interface PollCursor {
+  /** Timestamp of the last row read, as Postgres text (full precision). */
+  readonly ts: string;
+  /** Sequence of the last row read; null before the first row. */
+  readonly seq: unknown;
+}
+
+/**
+ * Remembers the last `size` keys. add() returns true for a key it hasn't
+ * seen (or has forgotten), false for a duplicate.
+ */
+class RecentKeys {
+  private readonly seen = new Set<string>();
+
+  constructor(private readonly size: number) {}
+
+  add(key: string): boolean {
+    if (this.seen.has(key)) return false;
+    this.seen.add(key);
+    // A Set remembers insertion order, so the first key is the oldest.
+    if (this.seen.size > this.size) {
+      const oldest = this.seen.values().next().value as string;
+      this.seen.delete(oldest);
+    }
+    return true;
   }
 }

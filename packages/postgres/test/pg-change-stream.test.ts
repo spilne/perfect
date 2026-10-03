@@ -64,3 +64,17 @@ describe("PgChangeStream LISTEN setup", () => {
     expect(unlistened).toBe(1);
   });
 });
+
+describe("PgChangeStream channel names", () => {
+  it("rejects a channel name that isn't a plain identifier", () => {
+    expect(
+      () =>
+        new PgChangeStream<unknown>({
+          db: {} as never,
+          sql: {} as never,
+          channel: "x'); DROP TABLE users; --",
+          table: "events",
+        }),
+    ).toThrow(RangeError);
+  });
+});
