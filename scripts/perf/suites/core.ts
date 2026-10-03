@@ -35,7 +35,18 @@
 // the renamed early-termination case now reports time per entire run.
 
 import { do_not_optimize } from "mitata";
-import { all, run, runSync, Stream, succeed, sync, yieldNow } from "../../../packages/core/src";
+import {
+  all,
+  async,
+  fork,
+  join,
+  run,
+  runSync,
+  Stream,
+  succeed,
+  sync,
+  yieldNow,
+} from "../../../packages/core/src";
 import {
   cancelDeferredWaiters,
   completeChildren,
@@ -48,6 +59,28 @@ import type { BenchCase, Suite } from "./types";
 const FLATMAP_N = 10_000;
 const ALL_N = 100;
 const STREAM_N = 20_000;
+const RESUME_N = 1_000;
+
+function asyncResumeChain(n: number): Eff<number, never> {
+  let eff: Eff<number, never> = succeed(0);
+  for (let i = 0; i < n; i++) {
+    eff = eff.flatMap(
+      (x) => async<number>((resume) => resume(succeed(x + 1))) as Eff<number, never>,
+    );
+  }
+  return eff;
+}
+
+function forkJoinChain(n: number): Eff<number, never> {
+  let eff: Eff<number, never> = succeed(0);
+  for (let i = 0; i < n; i++) {
+    eff = eff.flatMap((x) => fork(succeed(x + 1)).flatMap((fiber) => join(fiber))) as Eff<
+      number,
+      never
+    >;
+  }
+  return eff;
+}
 
 function flatMapChain(n: number): Eff<number, never> {
   let eff: Eff<number, never> = succeed(0);
@@ -133,6 +166,20 @@ export const coreSuite: Suite = {
             ),
           ),
       })),
+      {
+        name: `async resume chain x${RESUME_N}`,
+        unit: "ns/item",
+        divisor: RESUME_N,
+        threshold: 20_000,
+        run: async () => do_not_optimize(await run(asyncResumeChain(RESUME_N))),
+      },
+      {
+        name: `fork+join chain x${RESUME_N}`,
+        unit: "ns/item",
+        divisor: RESUME_N,
+        threshold: 40_000,
+        run: async () => do_not_optimize(await run(forkJoinChain(RESUME_N))),
+      },
       {
         name: "stream map/filter full traversal",
         unit: "ns/item",

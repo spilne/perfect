@@ -29,35 +29,64 @@ const scheduleAsync: (fn: () => void) => void =
         })()
       : (fn: () => void) => setTimeout(fn, 0); // Fallback
 
+const MICRO_DRAIN_BUDGET = 64;
+
 export class AsyncScheduler implements Scheduler {
   private queue: Array<() => void> = [];
+  private spare: Array<() => void> = [];
   private scheduled = false;
+  private microDrains = 0;
 
   schedule(task: () => void): void {
     this.queue.push(task);
     if (!this.scheduled) {
       this.scheduled = true;
-      scheduleAsync(this.drain);
+      this.request();
     }
   }
 
+  // Drain on microtasks: a resume then costs a microtask instead of an event
+  // loop turn. Every MICRO_DRAIN_BUDGET drains in a row the next one goes
+  // through a macrotask, so I/O and timers still get a turn under load.
+  private request(): void {
+    if (this.microDrains < MICRO_DRAIN_BUDGET) {
+      this.microDrains++;
+      queueMicrotask(this.drain);
+    } else {
+      this.microDrains = 0;
+      scheduleAsync(this.macroDrain);
+    }
+  }
+
+  private readonly macroDrain = (): void => {
+    this.microDrains = 0;
+    this.drain();
+  };
+
   private readonly drain = (): void => {
     this.scheduled = false;
-    const batch = this.queue.splice(0);
-    for (let i = 0; i < batch.length; i++) {
-      batch[i]!();
-    }
+    this.runBatch();
     if (this.queue.length > 0 && !this.scheduled) {
       this.scheduled = true;
-      scheduleAsync(this.drain);
+      this.request();
     }
   };
 
-  flush(): void {
-    while (this.queue.length > 0) {
-      const batch = this.queue.splice(0);
+  // Tasks scheduled while a batch runs go to the other buffer and wait for
+  // the next drain, so one drain is bounded by what was queued when it began.
+  private runBatch(): void {
+    const batch = this.queue;
+    this.queue = this.spare;
+    try {
       for (let i = 0; i < batch.length; i++) batch[i]!();
+    } finally {
+      batch.length = 0;
+      this.spare = batch;
     }
+  }
+
+  flush(): void {
+    while (this.queue.length > 0) this.runBatch();
     this.scheduled = false;
   }
 
@@ -72,19 +101,23 @@ export const BunScheduler = AsyncScheduler;
 
 export class SyncScheduler implements Scheduler {
   private queue: Array<() => void> = [];
+  // A field, not a local, so a flush re-entered from a task continues where
+  // the outer one is instead of running tasks again.
+  private head = 0;
 
   schedule(task: () => void): void {
     this.queue.push(task);
   }
 
   flush(): void {
-    while (this.queue.length > 0) {
-      this.queue.shift()!();
-    }
+    while (this.head < this.queue.length) this.queue[this.head++]!();
+    this.queue.length = 0;
+    this.head = 0;
   }
 
   shutdown(): void {
     this.queue.length = 0;
+    this.head = 0;
   }
 }
 
