@@ -3,6 +3,7 @@ import {
   CircuitBreaker,
   succeed,
   fail,
+  die,
   sync,
   sleep,
   all,
@@ -160,25 +161,35 @@ describe("CircuitBreaker", () => {
     expect((rejected as any).caught._tag).toBe("CircuitOpen");
   });
 
-  test("half-open: only one probe at a time (mostly — others see open)", async () => {
+  test("half-open: only one probe at a time, the others see open", async () => {
     const cb = CircuitBreaker.make<string>({ failureThreshold: 1, resetTimeoutMs: 20 });
     await expect(run(cb.protect(fail("trip") as any) as any)).rejects.toBe("trip");
     expect(runSync(cb.state)).toBe("open");
 
-    // Wait past reset; breaker should now be half-open. Fire 10 concurrent
-    // .protect calls — the slow probe should succeed for the one(s) that
-    // squeezed in before transition closes the breaker; the rest see closed.
     await new Promise((r) => setTimeout(r, 25));
     expect(runSync(cb.state)).toBe("half-open");
 
+    // 10 calls arrive together. One is let through to test the dependency;
+    // the other 9 are rejected right away instead of piling onto it.
     const probe = sleep(10).flatMap(() => succeed("probe-ok"));
-    const all10 = await run(all(Array.from({ length: 10 }, () => cb.protect(probe))));
-    // After concurrent probes, breaker should be closed (success closes it)
+    const results = await run(
+      all(
+        Array.from({ length: 10 }, () =>
+          cb.protect(probe).catch((e) => succeed((e as { _tag: string })._tag)),
+        ),
+      ),
+    );
+    expect(results.filter((r) => r === "probe-ok")).toHaveLength(1);
+    expect(results.filter((r) => r === "CircuitOpen")).toHaveLength(9);
     expect(runSync(cb.state)).toBe("closed");
-    // All 10 succeeded — half-open lets concurrent calls through; the first
-    // success closes, subsequent calls run in closed state. (Promin's design
-    // doesn't enforce single-probe — it's eventually consistent.)
-    expect(all10.every((r) => r === "probe-ok")).toBe(true);
+  });
+
+  test("half-open: a probe that dies lets the next call probe", async () => {
+    const cb = CircuitBreaker.make<string>({ failureThreshold: 1, resetTimeoutMs: 0 });
+    await expect(run(cb.protect(fail("trip") as any) as any)).rejects.toBe("trip");
+    await expect(run(cb.protect(die("boom")) as any)).rejects.toBe("boom");
+    expect(await run(cb.protect(succeed("ok")))).toBe("ok");
+    expect(runSync(cb.state)).toBe("closed");
   });
 
   test("validates options at make time", () => {

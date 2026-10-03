@@ -3,7 +3,7 @@
 
 import { type Eff, type Throws, type ErrorsOf, Suspend, Op } from "./eff.js";
 import { Cause } from "./cause.js";
-import { succeed, fail, sleep, die, retry } from "./constructors.js";
+import { succeed, fail, sleep, die, retry, raceSuccess } from "./constructors.js";
 import { clockNow } from "./clock.js";
 import { all as allParallel } from "./combinators.js";
 import { RetryAttempt } from "./retry-attempt.js";
@@ -82,7 +82,9 @@ export function validate<const T extends readonly Eff<unknown, unknown>[]>(
 // ── hedged ─────────────────────────────────────────────────────────
 //
 // Race the same effect N times with a stagger delay between starts. The first
-// to succeed wins; losers are interrupted. Useful for latency-sensitive IO
+// to SUCCEED wins; the others are interrupted. A replica that fails does not
+// stop the others, so a fast failure still gets the backup requests. If all
+// replicas fail, the result fails with all their errors. Useful for latency-sensitive IO
 // where the P99 is much higher than the P50 (a delayed duplicate can save you
 // a tail-latency spike).
 
@@ -103,7 +105,7 @@ export function hedged<A, S>(
       variants.push(new Suspend(Op.FlatMap, sleep(d), () => eff) as any);
     }
   }
-  return new Suspend(Op.Race, variants, null) as any;
+  return raceSuccess(variants) as any;
 }
 
 // ── retryAllCause ──────────────────────────────────────────────────

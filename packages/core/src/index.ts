@@ -37,6 +37,7 @@ export {
   delay,
   race,
   raceFirst,
+  raceSuccess,
   raceEither,
   raceAll,
   timeout,
