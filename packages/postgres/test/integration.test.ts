@@ -445,6 +445,49 @@ describe.skipIf(!dockerAvailable)("integration — pgmq (ghcr.io/pgmq/pg17-pgmq)
     expect(m.queueLength).toBe(0);
   }, 60_000);
 
+  it("sendBatch sends a whole batch in one call, with and without headers", async () => {
+    await pgmq.createQueue(db, "batched");
+    const ids = await pgmq.sendBatch(db, "batched", [
+      { data: { n: 1 } },
+      { data: { n: 2 }, headers: { "x-pgmq-group": "g" } },
+      { data: { n: 3 } },
+    ]);
+    expect(ids).toHaveLength(3);
+    expect(new Set(ids).size).toBe(3);
+
+    const records = await pgmq.read<{ n: number }>(db, "batched", {
+      _tag: "standard",
+      vt: 30,
+      qty: 10,
+    });
+    expect(records.map((r) => r.message.n)).toEqual([1, 2, 3]);
+    expect(records[1]!.headers).toEqual({ "x-pgmq-group": "g" });
+
+    const plain = await pgmq.sendBatch(db, "batched", [{ data: { n: 4 } }, { data: { n: 5 } }]);
+    expect(plain).toHaveLength(2);
+  }, 60_000);
+
+  it("publishBatch + subscribe skips messages that fail the schema", async () => {
+    const queue = await PgmqQueue.create<{ n: number }>(db, "validated", {
+      defaultPollIntervalMs: 20,
+      schema: {
+        safeParse: (data: unknown) =>
+          typeof (data as { n?: unknown })?.n === "number"
+            ? { success: true as const, data: data as { n: number } }
+            : { success: false as const, error: "no n" },
+      },
+      onSchemaError: "skip",
+    });
+    await pgmq.sendBatch(db, "validated", [
+      { data: { n: 1 } },
+      { data: { bad: true } },
+      { data: { n: 3 } },
+    ]);
+
+    const values = await run(queue.subscribe().take(2).toArray().orDie());
+    expect(values).toEqual([{ n: 1 }, { n: 3 }]);
+  }, 60_000);
+
   it("low-level send/read/deleteMessage round-trip", async () => {
     await pgmq.createQueue(db, "lowlevel");
     const msgId = await pgmq.send(db, "lowlevel", { data: { n: 42 } });

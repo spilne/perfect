@@ -7,7 +7,7 @@
 // batch); database and schema failures remain in the Stream effect channel.
 // ---------------------------------------------------------------------------
 
-import { fromPromise, type Eff, type Throws } from "@spilne/perfect-core";
+import { fromPromise, succeed, type Eff, type Throws } from "@spilne/perfect-core";
 import { Stream, type SchemaParser } from "@spilne/perfect-core/stream";
 import { JsonCodec } from "@spilne/perfect-core/connect";
 import type {
@@ -22,8 +22,12 @@ import type {
 import type { DrizzleDb } from "../lib/drizzle-db.js";
 import { pollStream } from "../lib/poll-stream.js";
 import { PostgresError, toPostgresError } from "../lib/postgres-error.js";
-import type { ReadMode, AckMode } from "./types.js";
+import type { ReadMode, AckMode, PgmqRecord } from "./types.js";
 import * as pgmq from "./pgmq.js";
+
+// Stands in for a message that failed its schema and was handled (skipped,
+// sent to the DLQ). Filtered out before values reach the consumer.
+const SKIPPED: unique symbol = Symbol("pgmq/skipped");
 
 // ---------------------------------------------------------------------------
 // Schema errors
@@ -282,27 +286,23 @@ export class PgmqQueue<T>
       () => pgmq.pop<unknown>(this.db, this.queue, this.defaultQty),
       this.defaultPollIntervalMs,
       "pgmq.pop",
-    ).flatMap((record) =>
-      // Per-record effect that emits 0 values on schema failure (after
-      // routing per onSchemaError) and 1 value on success.
-      Stream.fromEffect(
-        fromPromise(
-          async () => {
-            const res = this.decodeAndValidate(record.message);
-            if (res.ok) return [res.value];
-            // pop() already removed the message — no delete needed.
-            await this.handleSchemaError({
+    )
+      .evalMap((record): Eff<T | typeof SKIPPED, Throws<PgmqQueueError>> => {
+        const res = this.decodeAndValidate(record.message);
+        if (res.ok) return succeed(res.value);
+        // pop() already removed the message — no delete needed.
+        return fromPromise(
+          () =>
+            this.handleSchemaError({
               msgId: record.msgId,
               rawMessage: record.message,
               error: res.error,
               deleteOriginal: false,
-            });
-            return [];
-          },
+            }),
           (cause) => toPgmqQueueError("pgmq.decode", cause),
-        ),
-      ).flatMap((values) => Stream.fromArray(values)),
-    );
+        ).map(() => SKIPPED);
+      })
+      .filter((value): value is T => value !== SKIPPED);
   }
 
   // ---------------------------------------------------------------------------
@@ -333,60 +333,56 @@ export class PgmqQueue<T>
       }
     };
 
-    return pollStream(() => pgmq.read<unknown>(db, queue, readMode), pollMs, "pgmq.read").flatMap(
-      (record) =>
-        Stream.fromEffect(
-          fromPromise(
-            async () => {
-              const res = this.decodeAndValidate(record.message);
-              if (res.ok) {
-                const envelope: PgmqEnvelope<T> = {
-                  value: res.value,
-                  transactionDomain: this.transactionDomain,
-                  ack: () =>
-                    fromPromise(
-                      () => ack(db, record.msgId),
-                      (cause) => toPgmqQueueError("pgmq.ack", cause),
-                    ),
-                  ackInTransaction: (transaction) => ack(transaction, record.msgId),
-                  nack: () =>
-                    fromPromise(
-                      () => pgmq.setVt(db, queue, record.msgId, 1).then(() => {}),
-                      (cause) => toPgmqQueueError("pgmq.nack", cause),
-                    ),
-                  extendVisibility: (vtSeconds) =>
-                    fromPromise(
-                      () => pgmq.setVt(db, queue, record.msgId, vtSeconds).then(() => {}),
-                      (cause) => toPgmqQueueError("pgmq.extendVisibility", cause),
-                    ),
-                  metadata: {
-                    topic: queue,
-                    partition: 0,
-                    offset: String(record.msgId),
-                    msgId: record.msgId,
-                    readCt: record.readCt,
-                    enqueuedAt: record.enqueuedAt,
-                    headers: record.headers,
-                  },
-                };
-                return [envelope];
-              }
-              // read() kept the message in the queue (locked via vt) — we
-              // delete it ourselves for skip/dlq so it doesn't retry after
-              // vt expires. For "throw", leave the lock to expire naturally
-              // (the error surfaces again on retry, which is the point).
-              await this.handleSchemaError({
-                msgId: record.msgId,
-                rawMessage: record.message,
-                error: res.error,
-                deleteOriginal: true,
-              });
-              return [];
-            },
-            (cause) => toPgmqQueueError("pgmq.decode", cause),
-          ),
-        ).flatMap((envelopes) => Stream.fromArray(envelopes)),
-    );
+    const envelopeFor = (record: PgmqRecord<unknown>, value: T): PgmqEnvelope<T> => ({
+      value,
+      transactionDomain: this.transactionDomain,
+      ack: () =>
+        fromPromise(
+          () => ack(db, record.msgId),
+          (cause) => toPgmqQueueError("pgmq.ack", cause),
+        ),
+      ackInTransaction: (transaction) => ack(transaction, record.msgId),
+      nack: () =>
+        fromPromise(
+          () => pgmq.setVt(db, queue, record.msgId, 1).then(() => {}),
+          (cause) => toPgmqQueueError("pgmq.nack", cause),
+        ),
+      extendVisibility: (vtSeconds) =>
+        fromPromise(
+          () => pgmq.setVt(db, queue, record.msgId, vtSeconds).then(() => {}),
+          (cause) => toPgmqQueueError("pgmq.extendVisibility", cause),
+        ),
+      metadata: {
+        topic: queue,
+        partition: 0,
+        offset: String(record.msgId),
+        msgId: record.msgId,
+        readCt: record.readCt,
+        enqueuedAt: record.enqueuedAt,
+        headers: record.headers,
+      },
+    });
+
+    return pollStream(() => pgmq.read<unknown>(db, queue, readMode), pollMs, "pgmq.read")
+      .evalMap((record): Eff<PgmqEnvelope<T> | typeof SKIPPED, Throws<PgmqQueueError>> => {
+        const res = this.decodeAndValidate(record.message);
+        if (res.ok) return succeed(envelopeFor(record, res.value));
+        // read() kept the message in the queue (locked via vt) — we delete
+        // it ourselves for skip/dlq so it doesn't retry after vt expires.
+        // For "throw", leave the lock to expire naturally (the error
+        // surfaces again on retry, which is the point).
+        return fromPromise(
+          () =>
+            this.handleSchemaError({
+              msgId: record.msgId,
+              rawMessage: record.message,
+              error: res.error,
+              deleteOriginal: true,
+            }),
+          (cause) => toPgmqQueueError("pgmq.decode", cause),
+        ).map(() => SKIPPED);
+      })
+      .filter((envelope): envelope is PgmqEnvelope<T> => envelope !== SKIPPED);
   }
 
   // ---------------------------------------------------------------------------
