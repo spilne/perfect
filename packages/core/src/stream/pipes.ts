@@ -2,27 +2,103 @@
 
 import { Stream } from "./stream.js";
 import { Chunk } from "./chunk.js";
-import type { Pipe } from "./stream.js";
+import type { Pipe, Step } from "./stream.js";
 import type { Throws } from "../eff.js";
+import type { WithError } from "../either.js";
 import { succeed, fail } from "../constructors.js";
 import { TaggedError } from "../tagged-error.js";
 
 const stripCR = (s: string): string => (s.endsWith("\r") ? s.slice(0, -1) : s);
 
-export const lines: Pipe<string, string> = (input) => {
-  let buffer = "";
-  return input
-    .flatMap((chunk) => {
-      buffer += chunk;
-      const parts = buffer.split("\n");
-      buffer = parts.pop() ?? "";
-      if (parts.length === 0) return Stream.empty();
-      return Stream.fromArray(parts.map(stripCR));
-    })
-    .concat(
-      Stream.suspend(() => (buffer.length > 0 ? Stream.succeed(stripCR(buffer)) : Stream.empty())),
-    );
-};
+// ── Stateful chunk transforms ──────────────────────────────────────
+//
+// Most pipes here are small parsers: they keep some state (a half-read
+// line, a half-read frame) and turn each incoming chunk into zero or more
+// outputs. This helper runs such a parser one chunk at a time.
+//
+// `make` is called once per run, so running the same stream twice starts
+// with fresh state. (Before, the state lived in the pipe, so a second run
+// started with leftovers from the first.)
+
+/** Returned by a parser to fail the stream with a typed error. */
+class PipeFailure<E> {
+  constructor(readonly error: E) {}
+}
+
+interface ChunkParser<A, B, E> {
+  /** Turn one chunk into outputs, or fail. */
+  step(chunk: Chunk<A>): B[] | PipeFailure<E>;
+  /** Called once when the input ends: emit whatever is left. */
+  end(): B[] | PipeFailure<E>;
+}
+
+function parseChunks<A, B, S, E = never>(
+  input: Stream<A, S>,
+  make: () => ChunkParser<A, B, E>,
+): Stream<B, WithError<S, E>> {
+  return Stream.suspend(() => {
+    const parser = make();
+    const go = (stream: Stream<A, any>): Stream<B, any> =>
+      new Stream(
+        (stream.step as any).flatMap((s: Step<A>) => {
+          if (s._tag === "Done") {
+            const rest = parser.end();
+            if (rest instanceof PipeFailure) return fail(rest.error);
+            if (rest.length === 0) return succeed({ _tag: "Done" });
+            return succeed({ _tag: "Emit", chunk: Chunk.fromArray(rest), next: Stream.empty() });
+          }
+          const out = parser.step(s.chunk);
+          if (out instanceof PipeFailure) return fail(out.error);
+          return succeed({ _tag: "Emit", chunk: Chunk.fromArray(out), next: go(s.next) });
+        }),
+        stream._finalizer,
+      );
+    return go(input);
+  }) as Stream<B, WithError<S, E>>;
+}
+
+/**
+ * Split text into lines. Handles "\n" and "\r\n", and lines that are split
+ * across chunks.
+ *
+ * A line that arrives in many small pieces is joined once, when its end
+ * shows up. (The old version re-split the whole buffered text on every
+ * chunk, which got very slow for long lines.)
+ */
+export const lines: Pipe<string, string> = (input) =>
+  parseChunks(input, () => {
+    // Pieces of the line we are in the middle of.
+    let partial: string[] = [];
+    return {
+      step(chunk) {
+        const out: string[] = [];
+        for (let i = 0; i < chunk.length; i++) {
+          const text = chunk.get(i);
+          let start = 0;
+          let newline = text.indexOf("\n");
+          while (newline !== -1) {
+            let line = text.slice(start, newline);
+            if (partial.length > 0) {
+              partial.push(line);
+              line = partial.join("");
+              partial = [];
+            }
+            out.push(stripCR(line));
+            start = newline + 1;
+            newline = text.indexOf("\n", start);
+          }
+          if (start < text.length) partial.push(start === 0 ? text : text.slice(start));
+        }
+        return out;
+      },
+      end() {
+        if (partial.length === 0) return [];
+        const line = partial.join("");
+        partial = [];
+        return [stripCR(line)];
+      },
+    };
+  });
 
 export interface CsvOptions {
   /** Use the first record as object keys. Default: false. */
@@ -42,123 +118,140 @@ function csvPipe(options: CsvOptions): Pipe<string, string[] | Record<string, st
   if (quote.length !== 1) throw new RangeError("csv quote must be one character");
   if (separator === quote) throw new RangeError("csv separator and quote must differ");
 
-  return (input) => {
-    let field = "";
-    let row: string[] = [];
-    let inQuotes = false;
-    let pendingQuote = false;
-    let skipLf = false;
-    let headers: string[] | null = null;
+  return (input) =>
+    parseChunks(input, () => {
+      let field = "";
+      let row: string[] = [];
+      let inQuotes = false;
+      let pendingQuote = false;
+      let skipLf = false;
+      let headers: string[] | null = null;
 
-    const finishField = () => {
-      row.push(options.trim ? field.trim() : field);
-      field = "";
-    };
+      const finishField = () => {
+        row.push(options.trim ? field.trim() : field);
+        field = "";
+      };
 
-    const finishRow = (rows: string[][]) => {
-      finishField();
-      rows.push(row);
-      row = [];
-    };
+      const finishRow = (rows: string[][]) => {
+        finishField();
+        rows.push(row);
+        row = [];
+      };
 
-    const parseChunk = (chunk: string): string[][] => {
-      const rows: string[][] = [];
-      let index = 0;
+      const parseChunk = (chunk: string): string[][] => {
+        const rows: string[][] = [];
+        let index = 0;
 
-      while (index < chunk.length) {
-        const char = chunk[index]!;
+        while (index < chunk.length) {
+          const char = chunk[index]!;
 
-        if (skipLf) {
-          skipLf = false;
+          if (skipLf) {
+            skipLf = false;
+            if (char === "\n") {
+              index++;
+              continue;
+            }
+          }
+
+          if (pendingQuote) {
+            pendingQuote = false;
+            if (char === quote) {
+              field += quote;
+              index++;
+              continue;
+            }
+            inQuotes = false;
+            continue;
+          }
+
+          if (inQuotes) {
+            if (char !== quote) {
+              field += char;
+              index++;
+              continue;
+            }
+            if (index + 1 >= chunk.length) {
+              pendingQuote = true;
+              index++;
+              continue;
+            }
+            if (chunk[index + 1] === quote) {
+              field += quote;
+              index += 2;
+              continue;
+            }
+            inQuotes = false;
+            index++;
+            continue;
+          }
+
+          if (char === quote && field.length === 0) {
+            inQuotes = true;
+            index++;
+            continue;
+          }
+          if (char === separator) {
+            finishField();
+            index++;
+            continue;
+          }
           if (char === "\n") {
+            finishRow(rows);
             index++;
             continue;
           }
-        }
-
-        if (pendingQuote) {
-          pendingQuote = false;
-          if (char === quote) {
-            field += quote;
+          if (char === "\r") {
+            finishRow(rows);
+            skipLf = true;
             index++;
             continue;
           }
-          inQuotes = false;
-          continue;
+          field += char;
+          index++;
         }
 
-        if (inQuotes) {
-          if (char !== quote) {
-            field += char;
-            index++;
+        return rows;
+      };
+
+      const finish = (): string[][] => {
+        const hasRecord = pendingQuote || inQuotes || field.length > 0 || row.length > 0;
+        pendingQuote = false;
+        inQuotes = false;
+        if (!hasRecord) return [];
+        const rows: string[][] = [];
+        finishRow(rows);
+        return rows;
+      };
+
+      // With `header`, the first row names the columns and every later row
+      // becomes an object.
+      const shape = (rows: string[][]): Array<string[] | Record<string, string>> => {
+        if (!options.header) return rows;
+        const records: Array<Record<string, string>> = [];
+        for (const values of rows) {
+          if (headers === null) {
+            headers = values;
             continue;
           }
-          if (index + 1 >= chunk.length) {
-            pendingQuote = true;
-            index++;
-            continue;
+          const names = headers;
+          records.push(Object.fromEntries(names.map((name, index) => [name, values[index] ?? ""])));
+        }
+        return records;
+      };
+
+      return {
+        step(chunk) {
+          const rows: string[][] = [];
+          for (let i = 0; i < chunk.length; i++) {
+            for (const row of parseChunk(chunk.get(i))) rows.push(row);
           }
-          if (chunk[index + 1] === quote) {
-            field += quote;
-            index += 2;
-            continue;
-          }
-          inQuotes = false;
-          index++;
-          continue;
-        }
-
-        if (char === quote && field.length === 0) {
-          inQuotes = true;
-          index++;
-          continue;
-        }
-        if (char === separator) {
-          finishField();
-          index++;
-          continue;
-        }
-        if (char === "\n") {
-          finishRow(rows);
-          index++;
-          continue;
-        }
-        if (char === "\r") {
-          finishRow(rows);
-          skipLf = true;
-          index++;
-          continue;
-        }
-        field += char;
-        index++;
-      }
-
-      return rows;
-    };
-
-    const finish = (): string[][] => {
-      const hasRecord = pendingQuote || inQuotes || field.length > 0 || row.length > 0;
-      pendingQuote = false;
-      inQuotes = false;
-      if (!hasRecord) return [];
-      const rows: string[][] = [];
-      finishRow(rows);
-      return rows;
-    };
-
-    const parsed = input
-      .flatMap((chunk) => Stream.fromArray(parseChunk(chunk)))
-      .concat(Stream.suspend(() => Stream.fromArray(finish())));
-
-    if (!options.header) return parsed;
-    return parsed.filterMap((values) => {
-      if (headers === null) {
-        headers = values;
-        return undefined;
-      }
-      return Object.fromEntries(headers.map((name, index) => [name, values[index] ?? ""]));
+          return shape(rows);
+        },
+        end() {
+          return shape(finish());
+        },
+      };
     });
-  };
 }
 
 /** Parse CSV text chunks directly. Passing the function to `through` keeps
@@ -327,8 +420,12 @@ export const utf8Decode: Pipe<Uint8Array, string> = (input) => {
     );
 };
 
+// One encoder for everyone: it has no state, and creating one per value
+// was a noticeable cost on streams of many small strings.
+const textEncoder = new TextEncoder();
+
 export const utf8Encode: Pipe<string, Uint8Array> = (input) =>
-  input.map((str) => new TextEncoder().encode(str));
+  input.map((str) => textEncoder.encode(str));
 
 function encodeBase64(bytes: Uint8Array): string {
   let binary = "";
@@ -392,7 +489,20 @@ export interface LengthPrefixedOptions {
   /** Read the header as little-endian. Default: false (big-endian — the
    *  protobuf/gRPC streaming convention). */
   littleEndian?: boolean;
+  /**
+   * Largest frame we accept, in bytes. A bigger header fails the stream
+   * with {@link FrameTooLargeError}. Without a limit, one corrupt header can
+   * make the pipe wait for (and buffer) up to 4 GB. Default: no limit.
+   */
+  maxFrameBytes?: number;
 }
+
+/** Typed failure from {@link lengthPrefixed} when a header announces a frame
+ *  bigger than `maxFrameBytes`. */
+export class FrameTooLargeError extends TaggedError("FrameTooLargeError")<{
+  readonly frameBytes: number;
+  readonly maxFrameBytes: number;
+}>() {}
 
 /**
  * Re-frame a binary stream into length-prefixed messages: each message is
@@ -401,33 +511,81 @@ export interface LengthPrefixedOptions {
  * a trailing incomplete frame is dropped when the stream ends. Combine with
  * {@link binaryDecode} to decode each frame.
  */
-export function lengthPrefixed(options?: LengthPrefixedOptions): Pipe<Uint8Array, Uint8Array> {
+export function lengthPrefixed(
+  options: LengthPrefixedOptions & { maxFrameBytes: number },
+): Pipe<Uint8Array, Uint8Array, Throws<FrameTooLargeError>>;
+export function lengthPrefixed(options?: LengthPrefixedOptions): Pipe<Uint8Array, Uint8Array>;
+export function lengthPrefixed(
+  options?: LengthPrefixedOptions,
+): Pipe<Uint8Array, Uint8Array, Throws<FrameTooLargeError>> {
   const headerBytes = options?.headerBytes ?? 4;
   const littleEndian = options?.littleEndian ?? false;
-  return (input) => {
-    let buffer = new Uint8Array(0);
-    return input.flatMap((chunk) => {
-      const combined = new Uint8Array(buffer.length + chunk.length);
-      combined.set(buffer);
-      combined.set(chunk, buffer.length);
-      buffer = combined;
+  const maxFrameBytes = options?.maxFrameBytes ?? Infinity;
 
-      const messages: Uint8Array[] = [];
-      while (buffer.length >= headerBytes) {
-        const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
-        const msgLen =
-          headerBytes === 4
-            ? view.getUint32(0, littleEndian)
-            : headerBytes === 2
-              ? view.getUint16(0, littleEndian)
-              : view.getUint8(0);
-        if (buffer.length < headerBytes + msgLen) break;
-        messages.push(buffer.slice(headerBytes, headerBytes + msgLen));
-        buffer = buffer.slice(headerBytes + msgLen);
-      }
-      return Stream.fromArray(messages);
-    });
+  const readLength = (bytes: Uint8Array): number => {
+    if (headerBytes === 1) return bytes[0]!;
+    if (headerBytes === 2) {
+      return littleEndian ? bytes[0]! | (bytes[1]! << 8) : (bytes[0]! << 8) | bytes[1]!;
+    }
+    return littleEndian
+      ? (bytes[0]! | (bytes[1]! << 8) | (bytes[2]! << 16) | (bytes[3]! << 24)) >>> 0
+      : ((bytes[0]! << 24) | (bytes[1]! << 16) | (bytes[2]! << 8) | bytes[3]!) >>> 0;
   };
+
+  return ((input: Stream<Uint8Array, unknown>) =>
+    parseChunks(input, () => {
+      // Bytes we have but can't use yet, kept as the pieces they arrived in.
+      // We only join pieces once a whole frame is there, so a big frame that
+      // arrives in many small chunks is copied once, not once per chunk.
+      let pieces: Uint8Array[] = [];
+      let pendingBytes = 0;
+
+      const joinPieces = (): Uint8Array => {
+        if (pieces.length === 1) return pieces[0]!;
+        const joined = new Uint8Array(pendingBytes);
+        let offset = 0;
+        for (const piece of pieces) {
+          joined.set(piece, offset);
+          offset += piece.length;
+        }
+        pieces = [joined];
+        return joined;
+      };
+
+      return {
+        step(chunk) {
+          const frames: Uint8Array[] = [];
+          for (let i = 0; i < chunk.length; i++) {
+            const piece = chunk.get(i);
+            if (piece.length === 0) continue;
+            pieces.push(piece);
+            pendingBytes += piece.length;
+            while (pendingBytes >= headerBytes) {
+              // The header itself can be split across pieces.
+              const head = pieces[0]!.length >= headerBytes ? pieces[0]! : joinPieces();
+              const frameBytes = readLength(head);
+              if (frameBytes > maxFrameBytes) {
+                return new PipeFailure(new FrameTooLargeError({ frameBytes, maxFrameBytes }));
+              }
+              const needed = headerBytes + frameBytes;
+              if (pendingBytes < needed) break;
+              const buffer = pieces[0]!.length >= needed ? pieces[0]! : joinPieces();
+              frames.push(buffer.slice(headerBytes, needed));
+              pendingBytes -= needed;
+              if (buffer.length === needed) pieces.shift();
+              else pieces[0] = buffer.subarray(needed);
+            }
+          }
+          return frames;
+        },
+        end() {
+          // A trailing incomplete frame is dropped (documented above).
+          pieces = [];
+          pendingBytes = 0;
+          return [];
+        },
+      };
+    })) as Pipe<Uint8Array, Uint8Array, Throws<FrameTooLargeError>>;
 }
 
 /**
