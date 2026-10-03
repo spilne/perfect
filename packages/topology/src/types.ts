@@ -60,6 +60,14 @@ export interface TopologyConfig {
   maxItemsPerSecond?: number;
   /** Max entries in the dedup seen-set before oldest are evicted. Default: 100_000. */
   maxDedupeSize?: number;
+  /**
+   * How long (ms) to remember which source records were already processed,
+   * to drop redelivered duplicates. Applies when the runner keeps state
+   * itself: the default in-memory state, or a plain `stateBackend`. (A
+   * `partitionedStateBackend` takes its own `processedRetentionMs`.)
+   * Default: forever, which grows without bound on a long-running topology.
+   */
+  processedRetentionMs?: number;
   /** Called when backpressure is applied (buffer full). */
   onBackpressure?: (stats: BackpressureStats) => void;
   /** Ack every N items instead of per-item. Default: 100. Set to 1 for per-item ack. */
