@@ -197,9 +197,10 @@ jobs:
 
       - run: bun install --frozen-lockfile
 
-      # Informational: the mitata report against effect-ts. Kept from the
-      # previous job shape; never fatal, since it gates nothing.
+      # Informational: the mitata report against effect-ts. It gates nothing,
+      # so it runs on main, on the schedule and on demand, not on every PR.
       - name: Comparative report vs effect-ts
+        if: github.event_name != 'pull_request'
         continue-on-error: true
         run: bun run perf:report
 
@@ -208,9 +209,6 @@ jobs:
       # clear failure rather than a strange benchmark result.
       - name: Perf harness unit tests
         run: bun run test:perf
-
-      - name: Absolute gate (catastrophic floor)
-        run: bun run perf:gate
 
       - name: Resolve baseline commit
         id: baseline
@@ -233,6 +231,18 @@ jobs:
       - name: Baseline comparison
         if: steps.baseline.outputs.skip == 'false'
         run: bun run perf:compare --baseline "${{ steps.baseline.outputs.ref }}" --rounds 3
+
+      # The absolute floor checks numbers the comparison already measured for
+      # this commit, instead of running the whole suite once more. Without a
+      # baseline (nothing to compare against) it measures by itself.
+      - name: Absolute gate (catastrophic floor)
+        if: always()
+        run: |
+          if [ -f .perf/current-1.json ]; then
+            bun run perf:gate --results .perf/current-1.json
+          else
+            bun run perf:gate
+          fi
 
       - name: Comment the comparison on the PR
         # Fork PRs get a read-only token, so skip rather than fail. Never fatal:
