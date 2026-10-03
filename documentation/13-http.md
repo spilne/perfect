@@ -24,7 +24,7 @@ tiers compose: pick the level of automation you need.
 The default transport owns cancellation until response headers arrive. After
 that, the caller owns the body stream; finishing the fetch effect does not
 abort it. The request timeout and an external abort signal still apply during
-body consumption. Consume or cancel a raw `Response` body when you are done.
+body consumption (the streaming helpers below time only the headers). Consume or cancel a raw `Response` body when you are done.
 
 ### Tier 1 — `httpFetch` (raw Response)
 
@@ -432,6 +432,11 @@ Every other helper is a composition of this base + composable `Pipe`s
 | `httpStreamLines(opts)` | bytes → `utf8Decode` → `lines` |
 | `httpStreamNDJSON(opts, schema)` | lines → `parseNDJSON(schema)` |
 | `httpStreamSSE(opts)` | lines → `parseSSE` |
+
+A stream can stay open as long as you listen, so its timeouts differ from a
+normal request: `timeoutMs` (default 30 s) only covers waiting for the
+response headers, and `idleTimeoutMs` (default: none) fails the stream with
+`HttpTimeoutError` when no data arrives for that long.
 
 <!-- @embed packages/http/examples/06-streaming.ts#stream-lines -->
 

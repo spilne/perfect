@@ -47,6 +47,13 @@ export interface HttpRequestOptions {
   readonly body?: string | ArrayBuffer | ReadableStream | Blob | FormData;
   /** Per-request timeout in ms. Defaults to 30 000. */
   readonly timeoutMs?: number;
+  /**
+   * When true, `timeoutMs` only covers waiting for the response headers;
+   * reading the body afterwards isn't timed. httpStream uses this, so a
+   * long-lived stream (Server-Sent Events) isn't cut off. Default: false,
+   * the timeout covers the whole response.
+   */
+  readonly timeoutUntilHeaders?: boolean;
   /** External abort signal combined with the timeout signal. */
   readonly signal?: AbortSignal;
   /** Proxy for this request. */
@@ -87,6 +94,7 @@ export class FetchTransport implements HttpTransport {
       json,
       body,
       timeoutMs = DEFAULT_TIMEOUT_MS,
+      timeoutUntilHeaders = false,
       signal,
       proxy,
     } = options;
@@ -117,8 +125,17 @@ export class FetchTransport implements HttpTransport {
         )
         .flatMap((state) => {
           const controller = state.controller;
+          // Our own timer instead of AbortSignal.timeout, so it can be
+          // stopped once the headers are in (timeoutUntilHeaders).
+          const timeout = new AbortController();
+          const timer = setTimeout(
+            () => timeout.abort(new DOMException("request timed out", "TimeoutError")),
+            timeoutMs,
+          );
+          // Don't keep the process alive just for this timer.
+          (timer as { unref?: () => void }).unref?.();
           // Combine: our controller + timeout + optional external signal
-          const signals: AbortSignal[] = [controller.signal, AbortSignal.timeout(timeoutMs)];
+          const signals: AbortSignal[] = [controller.signal, timeout.signal];
           if (signal) signals.push(signal);
 
           // Bun supports `proxy` + `tls` in fetch; Node fetch does not (safely ignored there).
@@ -139,11 +156,13 @@ export class FetchTransport implements HttpTransport {
                 (response) => {
                   // Headers are in and the body stream belongs to the caller.
                   state.settled = true;
+                  if (timeoutUntilHeaders) clearTimeout(timer);
                   return response;
                 },
                 (cause) => {
                   // Nothing left to abort on the failure path either.
                   state.settled = true;
+                  clearTimeout(timer);
                   throw cause;
                 },
               ),
