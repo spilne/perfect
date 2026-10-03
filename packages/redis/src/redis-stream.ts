@@ -98,6 +98,21 @@ export class RedisStream<T>
     return redisEff("stream.ensureGroup", () => this.ensureGroupPromise(params));
   }
 
+  // Groups we already created (or found existing). Recovery runs on every
+  // poll, and it used to send XGROUP CREATE (and get BUSYGROUP back) each time.
+  private readonly knownGroups = new Map<string, Promise<void>>();
+
+  private ensureGroupOnce(group: string): Promise<void> {
+    let known = this.knownGroups.get(group);
+    if (known === undefined) {
+      known = this.ensureGroupPromise({ group });
+      this.knownGroups.set(group, known);
+      // A failed attempt is forgotten, so the next poll tries again.
+      known.catch(() => this.knownGroups.delete(group));
+    }
+    return known;
+  }
+
   private async ensureGroupPromise(params?: { group?: string; offset?: Offset }): Promise<void> {
     const group = params?.group ?? this.group;
     const start = this.toRedisOffset(params?.offset);
@@ -344,7 +359,7 @@ export class RedisStream<T>
     entries: Array<{ entry: RedisStreamEntry; deliveries: number }>;
     deadLetteredIds: string[];
   }> {
-    await this.ensureGroupPromise({ group });
+    await this.ensureGroupOnce(group);
     const count = config.count ?? this.count;
     let nextStart = "0-0";
     let entries: RedisStreamEntry[];
@@ -374,39 +389,61 @@ export class RedisStream<T>
       );
     }
 
-    const retained: Array<{ entry: RedisStreamEntry; deliveries: number }> = [];
-    const deadLetteredIds: string[] = [];
-    for (const entry of entries) {
-      const deliveries = await this.deliveryCount(group, entry.id);
-      if (
-        config.deadLetterStream &&
-        config.maxDeliveries !== undefined &&
-        deliveries >= config.maxDeliveries
-      ) {
-        await this.redis.xadd(
-          config.deadLetterStream,
-          "*",
-          ...entry.fields,
-          "source-stream",
-          this.stream,
-          "source-group",
-          group,
-          "source-id",
-          entry.id,
-          "deliveries",
-          deliveries,
-        );
-        await this.redis.xack(this.stream, group, entry.id);
-        if (config.deleteAfterDeadLetter && this.redis.xdel) {
-          await this.redis.xdel(this.stream, entry.id);
-        }
-        deadLetteredIds.push(entry.id);
-      } else {
-        retained.push({ entry, deliveries });
-      }
-    }
+    // Ask for every entry's delivery count at once. The commands go out
+    // together, so this costs about one round trip instead of one per entry.
+    const deliveries = await Promise.all(
+      entries.map((entry) => this.deliveryCount(group, entry.id)),
+    );
 
-    return { nextStart, entries: retained, deadLetteredIds };
+    const retained: Array<{ entry: RedisStreamEntry; deliveries: number }> = [];
+    const toDeadLetter: Array<{ entry: RedisStreamEntry; deliveries: number }> = [];
+    entries.forEach((entry, i) => {
+      const tooMany =
+        config.deadLetterStream !== undefined &&
+        config.maxDeliveries !== undefined &&
+        deliveries[i]! >= config.maxDeliveries;
+      (tooMany ? toDeadLetter : retained).push({ entry, deliveries: deliveries[i]! });
+    });
+
+    // Entries are independent, so they are dead-lettered side by side. For
+    // each one the order matters: copy it out before acking it, so a crash
+    // in between can't lose it.
+    await Promise.all(
+      toDeadLetter.map(({ entry, deliveries: count }) =>
+        this.deadLetter(group, entry, count, config),
+      ),
+    );
+
+    return {
+      nextStart,
+      entries: retained,
+      deadLetteredIds: toDeadLetter.map(({ entry }) => entry.id),
+    };
+  }
+
+  private async deadLetter(
+    group: string,
+    entry: RedisStreamEntry,
+    deliveries: number,
+    config: RedisStreamRecoveryConfig,
+  ): Promise<void> {
+    await this.redis.xadd(
+      config.deadLetterStream!,
+      "*",
+      ...entry.fields,
+      "source-stream",
+      this.stream,
+      "source-group",
+      group,
+      "source-id",
+      entry.id,
+      "deliveries",
+      deliveries,
+    );
+    await this.redis.xack(this.stream, group, entry.id);
+    if (config.deleteAfterDeadLetter && this.redis.xdel) {
+      await this.redis.xdel(this.stream, entry.id);
+    }
   }
 
   private async deliveryCount(group: string, id: string): Promise<number> {
