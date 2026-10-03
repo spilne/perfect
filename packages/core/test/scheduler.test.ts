@@ -50,6 +50,43 @@ describe("AsyncScheduler", () => {
     expect(ran).toEqual([1, 2, 3]);
   });
 
+  test("a resume costs a microtask, not an event loop turn", async () => {
+    const s = new AsyncScheduler();
+    let ran = false;
+    s.schedule(() => {
+      ran = true;
+    });
+    await Promise.resolve();
+    expect(ran).toBe(true);
+  });
+
+  test("a task that keeps rescheduling itself does not starve timers", async () => {
+    const s = new AsyncScheduler();
+    let spins = 0;
+    let stop = false;
+    const spin = (): void => {
+      spins++;
+      if (!stop) s.schedule(spin);
+    };
+    s.schedule(spin);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    stop = true;
+    expect(spins).toBeGreaterThan(64);
+  });
+
+  test("a throwing task leaves the queue usable", async () => {
+    const s = new AsyncScheduler();
+    const ran: number[] = [];
+    s.schedule(() => {
+      throw new Error("boom");
+    });
+    expect(() => s.flush()).toThrow("boom");
+    s.schedule(() => ran.push(1));
+    s.schedule(() => ran.push(2));
+    s.flush();
+    expect(ran).toEqual([1, 2]);
+  });
+
   test("shutdown drops queued tasks", async () => {
     const s = new AsyncScheduler();
     const ran: number[] = [];
@@ -114,5 +151,20 @@ describe("default scheduler", () => {
       setDefaultScheduler(original);
     }
     expect(getDefaultScheduler()).toBe(original);
+  });
+});
+
+describe("SyncScheduler re-entrancy", () => {
+  test("a flush re-entered from a task runs each task once", () => {
+    const s = new SyncScheduler();
+    const ran: number[] = [];
+    s.schedule(() => {
+      ran.push(1);
+      s.schedule(() => ran.push(3));
+      s.flush();
+    });
+    s.schedule(() => ran.push(2));
+    s.flush();
+    expect(ran).toEqual([1, 2, 3]);
   });
 });
