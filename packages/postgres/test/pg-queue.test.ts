@@ -2,6 +2,8 @@ import { describe, it, expect } from "bun:test";
 import { run } from "@spilne/perfect-core";
 import { PgQueue } from "../src/lib/pg-queue";
 import { fakeDb } from "./fake-db";
+// These tests await effects directly (await queue.publish(x)).
+import "@spilne/perfect-core/thenable";
 
 const claimRow = (id: string, attemptCount = 1) => ({
   id,

@@ -5,6 +5,8 @@ import type { Stream } from "@spilne/perfect-core/stream";
 import { RedisError } from "../src/redis-error";
 import { RedisStream } from "../src/redis-stream";
 import type { RedisClient } from "../src/redis-client";
+// These tests await effects directly (await queue.publish(x)).
+import "@spilne/perfect-core/thenable";
 
 interface FakeStreamState {
   readonly acknowledgements: string[][];

@@ -127,8 +127,9 @@ runSync(two); // 20
 
 ## Pitfalls
 
-- **Don't `await effect` in a hot loop** — every `await` pays a microtask.
-  See the `await eff per step` row in the bench.
+- **Don't `await effect` in a hot loop** (with the opt-in
+  `@spilne/perfect-core/thenable`) — every `await` pays a microtask. See the
+  `await eff per step` row in the bench.
 - **`yield*` not `yield`** — `yield effect` yields the effect to the driver,
   but you usually want the value, which requires `yield*`. (`yield*` calls
   the effect's `[Symbol.iterator]`, threads the value back through.)

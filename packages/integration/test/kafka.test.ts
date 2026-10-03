@@ -5,6 +5,8 @@
 // ---------------------------------------------------------------------------
 
 import { describe, it, expect, setDefaultTimeout } from "bun:test";
+// These tests await effects directly (await queue.publish(x)).
+import "@spilne/perfect-core/thenable";
 // Kafka operations (consumer group join, rebalancing, commits) need generous timeouts
 setDefaultTimeout(300_000);
 

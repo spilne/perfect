@@ -1,5 +1,21 @@
 import { describe, test, expect } from "bun:test";
 import { succeed, fail, sync, sleep, Clock, TestClock, provide, type Eff } from "../src";
+import "../src/thenable";
+
+describe("thenable is opt-in", () => {
+  test("without the import, effects are not awaitable", () => {
+    // A separate process: in this one the import above has already run.
+    const check = Bun.spawnSync({
+      cmd: [
+        "bun",
+        "-e",
+        `const { succeed } = await import(${JSON.stringify(`${import.meta.dir}/../src/index.ts`)});
+         console.log(typeof succeed(1).then);`,
+      ],
+    });
+    expect(check.stdout.toString().trim()).toBe("undefined");
+  });
+});
 
 describe("thenable — await eff", () => {
   test("await succeed(x) resolves to x", async () => {
