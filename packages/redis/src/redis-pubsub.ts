@@ -12,14 +12,25 @@ type SubscriptionEvent<A> =
   | { readonly _tag: "Error"; readonly error: RedisError };
 
 interface Subscription<A> {
-  readonly client: RedisClient;
   readonly buffer: SubscriptionBuffer<A>;
-  readonly onMessage: (...args: any[]) => void;
-  readonly onError: (...args: any[]) => void;
-  readonly onClose: (...args: any[]) => void;
   readonly target: string;
   readonly pattern: boolean;
   closed: boolean;
+}
+
+// All subscriptions of one RedisPubSub share one subscriber connection.
+// (Each used to open its own.) Redis subscribes a connection, not a caller,
+// so each channel or pattern is subscribed once, when its first subscriber
+// arrives, and unsubscribed when its last one leaves.
+interface SharedConnection<A> {
+  readonly client: RedisClient;
+  // Subscriptions by channel, and by pattern.
+  readonly channels: Map<string, Set<Subscription<A>>>;
+  readonly patterns: Map<string, Set<Subscription<A>>>;
+  // The SUBSCRIBE / PSUBSCRIBE in flight or done, by target. Later
+  // subscribers wait for the same one.
+  readonly ready: Map<string, Promise<unknown>>;
+  readonly detach: () => void;
 }
 
 interface SubscriptionBuffer<A> {
@@ -40,6 +51,8 @@ export class RedisPubSub<A> implements PubSub<A, Throws<RedisError>> {
   private readonly subscriptions = new Set<Subscription<A>>();
   private readonly bufferCapacity: number;
   private stopped = false;
+  // The shared subscriber connection, opened on first use.
+  private connection: Promise<SharedConnection<A>> | null = null;
 
   constructor(
     private readonly redis: RedisClient,
@@ -94,58 +107,135 @@ export class RedisPubSub<A> implements PubSub<A, Throws<RedisError>> {
       }
 
       return redisEff("pubsub.subscribe", async () => {
-        const client = await this.redis.duplicate();
-        const onMessage = (...args: any[]) => {
-          const raw = params.pattern ? args[2] : args[1];
-          if (typeof raw !== "string") return;
-          try {
-            const value = decode(this.codec, raw);
-            this.offerEvent(buffer, { _tag: "Value", value });
-          } catch (cause) {
-            this.offerEvent(buffer, {
-              _tag: "Error",
-              error: toRedisError("pubsub.decode", cause),
-            });
-          }
-        };
-        const onError = (cause: unknown) => {
-          this.offerEvent(buffer, {
-            _tag: "Error",
-            error: toRedisError("pubsub.subscription", cause),
-          });
-        };
-        const onClose = () => {
-          this.closeBuffer(buffer);
-        };
-
-        client.on(params.pattern ? "pmessage" : "message", onMessage);
-        client.on("error", onError);
-        client.on("close", onClose);
-        try {
-          if (params.pattern) await client.psubscribe(params.target);
-          else await client.subscribe(params.target);
-        } catch (cause) {
-          this.removeListeners(client, onMessage, onError, onClose, params.pattern);
-          closeRedisClient(client);
-          throw cause;
-        }
-
         const subscription: Subscription<A> = {
-          client,
           buffer,
-          onMessage,
-          onError,
-          onClose,
           target: params.target,
           pattern: params.pattern,
           closed: false,
         };
+        const shared = await this.sharedConnection();
+        const byTarget = params.pattern ? shared.patterns : shared.channels;
+        const key = this.readyKey(params);
+        let group = byTarget.get(params.target);
+        if (group === undefined) {
+          group = new Set();
+          byTarget.set(params.target, group);
+          shared.ready.set(
+            key,
+            params.pattern
+              ? shared.client.psubscribe(params.target)
+              : shared.client.subscribe(params.target),
+          );
+        }
+        group.add(subscription);
         this.subscriptions.add(subscription);
+        try {
+          await shared.ready.get(key);
+        } catch (cause) {
+          // The subscribe failed: undo this subscription.
+          await this.leave(subscription).catch(() => {});
+          throw cause;
+        }
         return subscription;
       }).map((subscription) =>
         this.subscriptionStream(buffer).onFinalize(this.closeSubscription(subscription)),
       );
     });
+  }
+
+  private readyKey(params: { target: string; pattern: boolean }): string {
+    return `${params.pattern ? "pattern" : "channel"}:${params.target}`;
+  }
+
+  // Open the shared connection once; concurrent callers wait for the same one.
+  private sharedConnection(): Promise<SharedConnection<A>> {
+    if (this.connection === null) {
+      const opening = this.openConnection();
+      this.connection = opening;
+      // A failed open is forgotten, so the next subscriber tries again.
+      opening.catch(() => {
+        if (this.connection === opening) this.connection = null;
+      });
+    }
+    return this.connection;
+  }
+
+  private async openConnection(): Promise<SharedConnection<A>> {
+    const client = await this.redis.duplicate();
+    const channels = new Map<string, Set<Subscription<A>>>();
+    const patterns = new Map<string, Set<Subscription<A>>>();
+
+    const deliver = (subscribers: Set<Subscription<A>> | undefined, raw: unknown) => {
+      if (subscribers === undefined || typeof raw !== "string") return;
+      let event: SubscriptionEvent<A>;
+      try {
+        event = { _tag: "Value", value: decode(this.codec, raw) };
+      } catch (cause) {
+        event = { _tag: "Error", error: toRedisError("pubsub.decode", cause) };
+      }
+      for (const subscription of subscribers) this.offerEvent(subscription.buffer, event);
+    };
+    const onMessage = (channel: string, raw: unknown) => deliver(channels.get(channel), raw);
+    const onPatternMessage = (pattern: string, _channel: string, raw: unknown) =>
+      deliver(patterns.get(pattern), raw);
+    // The connection broke: every subscription on it fails, and the next
+    // subscriber opens a new connection.
+    const failAll = (event: SubscriptionEvent<A> | null) => {
+      if (this.connection !== null) this.connection = null;
+      for (const group of [...channels.values(), ...patterns.values()]) {
+        for (const subscription of group) {
+          if (event === null) this.closeBuffer(subscription.buffer);
+          else this.offerEvent(subscription.buffer, event);
+        }
+      }
+      channels.clear();
+      patterns.clear();
+    };
+    const onError = (cause: unknown) =>
+      failAll({ _tag: "Error", error: toRedisError("pubsub.subscription", cause) });
+    const onClose = () => failAll(null);
+
+    client.on("message", onMessage);
+    client.on("pmessage", onPatternMessage);
+    client.on("error", onError);
+    client.on("close", onClose);
+    const detach = () => {
+      const remove = client.off?.bind(client) ?? client.removeListener?.bind(client);
+      remove?.("message", onMessage);
+      remove?.("pmessage", onPatternMessage);
+      remove?.("error", onError);
+      remove?.("close", onClose);
+    };
+    return { client, channels, patterns, ready: new Map(), detach };
+  }
+
+  // Remove a subscription. The last subscriber of a target unsubscribes it,
+  // and the last subscription overall closes the shared connection.
+  private async leave(subscription: Subscription<A>): Promise<void> {
+    this.subscriptions.delete(subscription);
+    const connection = this.connection;
+    if (connection === null) return;
+    const shared = await connection;
+    const byTarget = subscription.pattern ? shared.patterns : shared.channels;
+    const group = byTarget.get(subscription.target);
+    if (group === undefined || !group.delete(subscription) || group.size > 0) return;
+    byTarget.delete(subscription.target);
+    shared.ready.delete(this.readyKey(subscription));
+    try {
+      if (subscription.pattern) await shared.client.punsubscribe(subscription.target);
+      else await shared.client.unsubscribe(subscription.target);
+    } finally {
+      // Nobody subscribed any more (and nobody arrived meanwhile): close it.
+      if (
+        shared.channels.size === 0 &&
+        shared.patterns.size === 0 &&
+        this.connection === connection
+      ) {
+        this.connection = null;
+        shared.detach();
+        closeRedisClient(shared.client);
+      }
+    }
   }
 
   private subscriptionStream(buffer: SubscriptionBuffer<A>): Stream<A, Throws<RedisError>> {
@@ -222,38 +312,12 @@ export class RedisPubSub<A> implements PubSub<A, Throws<RedisError>> {
     return sync(() => {
       if (subscription.closed) return false;
       subscription.closed = true;
-      this.subscriptions.delete(subscription);
-      this.removeListeners(
-        subscription.client,
-        subscription.onMessage,
-        subscription.onError,
-        subscription.onClose,
-        subscription.pattern,
-      );
       return true;
     }).flatMap((shouldClose) => {
       if (!shouldClose) return succeed(undefined);
-      return redisEff("pubsub.unsubscribe", async () => {
-        try {
-          if (subscription.pattern) await subscription.client.punsubscribe(subscription.target);
-          else await subscription.client.unsubscribe(subscription.target);
-        } finally {
-          closeRedisClient(subscription.client);
-        }
-      }).ensuring(subscription.buffer.queue.close());
+      return redisEff("pubsub.unsubscribe", () => this.leave(subscription)).ensuring(
+        subscription.buffer.queue.close(),
+      );
     });
-  }
-
-  private removeListeners(
-    client: RedisClient,
-    onMessage: (...args: any[]) => void,
-    onError: (...args: any[]) => void,
-    onClose: (...args: any[]) => void,
-    pattern: boolean,
-  ): void {
-    const remove = client.off?.bind(client) ?? client.removeListener?.bind(client);
-    remove?.(pattern ? "pmessage" : "message", onMessage);
-    remove?.("error", onError);
-    remove?.("close", onClose);
   }
 }
