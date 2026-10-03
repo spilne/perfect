@@ -60,7 +60,10 @@ export function httpStream(opts: StreamOptions): Stream<Uint8Array, Throws<HttpC
                 close();
                 return;
               }
-              emit(value);
+              // If the stream's buffer is full, wait before reading more,
+              // so a slow consumer slows down the download.
+              const wait = emit(value);
+              if (wait) await wait;
             }
           } catch (cause) {
             const url = String(opts.url);

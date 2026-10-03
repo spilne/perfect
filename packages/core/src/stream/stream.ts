@@ -75,6 +75,7 @@ import {
 import { mergeStreams } from "./merge.js";
 import { streamToAsyncIterable } from "./async-iterable.js";
 import { parJoinStreams } from "./par-join.js";
+import { type EmitResult, type PushOptions, pushOptions, pushStream } from "./push-source.js";
 import { Chunk } from "./chunk.js";
 import { type FusibleOp, compileFused, hasFilterOps, SKIP } from "./fusion.js";
 
@@ -492,89 +493,22 @@ export class Stream<A, S = never> {
    *   a cleanup function that fires when the stream terminates.
    * @param bufferSize how many queued items to hold before dropping (default: 1024).
    */
+  /**
+   * Bridge a callback API into a stream. `register` gets `emit` and `close`
+   * and may return a cleanup function, which runs when the stream ends.
+   *
+   * `emit` returns a Promise when the buffer is full (see PushOptions).
+   * Await it if you can, so the producer slows down instead of piling up
+   * values in memory.
+   */
   static fromCallback<A>(
-    register: (emit: (value: A) => void, close: () => void) => (() => void) | void,
-    bufferSize = 1024,
+    register: (emit: (value: A) => EmitResult, close: () => void) => (() => void) | void,
+    options?: number | PushOptions,
   ): Stream<A, never> {
-    return Stream.suspend(() => {
-      const buffer: A[] = [];
-      let closed = false;
-      let cleanup: (() => void) | void;
-      let cleaned = false;
-      let waiter: ((step: Step<A>, onDiscard?: () => void) => void) | null = null;
-
-      const cleanupOnce = (): void => {
-        if (cleaned) return;
-        cleaned = true;
-        if (cleanup) cleanup();
-      };
-
-      // Values given back by a pull interrupted before it ran go to the next
-      // waiting pull, or back to the head of the buffer.
-      const giveBack = (values: A[]): void => {
-        if (waiter !== null) {
-          const w = waiter;
-          waiter = null;
-          w(emit(Chunk.fromArray(values), next()), () => giveBack(values));
-          return;
-        }
-        buffer.unshift(...values);
-      };
-
-      const pushEmit = (value: A): void => {
-        if (closed) return;
-        if (waiter !== null) {
-          const w = waiter;
-          waiter = null;
-          w(emit(Chunk.single(value), next()), () => giveBack([value]));
-          return;
-        }
-        if (buffer.length < bufferSize) buffer.push(value);
-        // else drop
-      };
-      const pushClose = (): void => {
-        if (closed) return;
-        closed = true;
-        if (waiter !== null && buffer.length === 0) {
-          const w = waiter;
-          waiter = null;
-          cleanupOnce();
-          w(DONE);
-        }
-      };
-
-      cleanup = register(pushEmit, pushClose) ?? undefined;
-
-      function next(): Stream<A, never> {
-        return new Stream(
-          new Suspend(
-            Op.Async,
-            (resume: (eff: any, onDiscard?: () => void) => void) => {
-              if (buffer.length > 0) {
-                const chunkArr: A[] = buffer.splice(0, buffer.length);
-                resume(succeed(emit(Chunk.fromArray(chunkArr), next())), () => giveBack(chunkArr));
-                return;
-              }
-              if (closed) {
-                cleanupOnce();
-                resume(succeed(DONE));
-                return;
-              }
-              waiter = (step, onDiscard) => resume(succeed(step), onDiscard);
-              // interrupt handle: drop the waiter so a late emit doesn't call into nothing
-              return () => {
-                closed = true;
-                buffer.length = 0;
-                waiter = null;
-                cleanupOnce();
-              };
-            },
-            null,
-          ) as any,
-        );
-      }
-
-      return next()._withFinalizer(sync(cleanupOnce));
+    return pushStream<A, A, never>({
+      chunked: false,
+      options: pushOptions(options),
+      register: (emit, close) => sync(() => register(emit, close)),
     });
   }
 
@@ -592,7 +526,7 @@ export class Stream<A, S = never> {
       removeListener?(event: string, listener: (...args: any[]) => void): unknown;
     },
     event: string,
-    bufferSize = 1024,
+    options?: number | PushOptions,
   ): Stream<A, never> {
     const removeListener = (ev: string, l: (...args: any[]) => void) => {
       if (typeof emitter.off === "function") emitter.off(ev, l);
@@ -613,268 +547,40 @@ export class Stream<A, S = never> {
         removeListener("close", onEnd);
         removeListener("finish", onEnd);
       };
-    }, bufferSize);
+    }, options);
   }
 
   /**
    * Like fromCallback, but the registration itself is an effect — useful when
    * setting up the push source requires IO (opening a socket, subscribing).
-   * The cleanup effect runs when the stream terminates.
+   * The cleanup function runs when the stream ends. `failStream` fails the
+   * stream after the values already buffered.
    */
   static async<A, S>(
     register: (
-      emit: (value: A) => void,
+      emit: (value: A) => EmitResult,
       close: () => void,
       failStream: (error: unknown) => void,
     ) => Eff<(() => void) | void, S>,
-    bufferSize = 1024,
+    options?: number | PushOptions,
   ): Stream<A, S> {
-    // the finalizer lives on the OUTER stream (via onFinalize below) so
-    // terminals run it on normal completion too — inner `next()` streams'
-    // step effects would silently drop it
-    let activeCleanup: (() => void) | null = null;
-
-    const source = new Stream(
-      (succeed(null) as any).flatMap(() => {
-        const buffer: A[] = [];
-        let closed = false;
-        let failure: { readonly error: unknown } | null = null;
-        let waiter: ((effect: Eff<Step<A>, unknown>, onDiscard?: () => void) => void) | null = null;
-        let cleanup: (() => void) | void;
-        let cleaned = false;
-
-        const cleanupOnce = (): void => {
-          if (cleaned) return;
-          cleaned = true;
-          if (cleanup) cleanup();
-        };
-        activeCleanup = cleanupOnce;
-
-        // Values given back by a pull interrupted before it ran go to the next
-        // waiting pull, or back to the head of the buffer.
-        const giveBack = (values: A[]): void => {
-          if (waiter !== null) {
-            const w = waiter;
-            waiter = null;
-            w(succeed(emit(Chunk.fromArray(values), next())), () => giveBack(values));
-            return;
-          }
-          buffer.unshift(...values);
-        };
-
-        const pushEmit = (value: A) => {
-          if (closed) return;
-          if (waiter !== null) {
-            const w = waiter;
-            waiter = null;
-            w(succeed(emit(Chunk.single(value), next())), () => giveBack([value]));
-            return;
-          }
-          if (buffer.length < bufferSize) buffer.push(value);
-        };
-        const pushClose = () => {
-          if (closed) return;
-          closed = true;
-          if (waiter !== null && buffer.length === 0) {
-            const w = waiter;
-            waiter = null;
-            cleanupOnce();
-            w(succeed(DONE));
-          }
-        };
-
-        const pushFail = (error: unknown) => {
-          if (closed) return;
-          closed = true;
-          failure = { error };
-          if (waiter !== null && buffer.length === 0) {
-            const w = waiter;
-            waiter = null;
-            cleanupOnce();
-            w(fail(error));
-          }
-        };
-
-        function next(): Stream<A, S> {
-          return new Stream(
-            new Suspend(
-              Op.Async,
-              (resume: (eff: any, onDiscard?: () => void) => void) => {
-                if (buffer.length > 0) {
-                  const chunkArr: A[] = buffer.splice(0, buffer.length);
-                  resume(succeed(emit(Chunk.fromArray(chunkArr), next())), () =>
-                    giveBack(chunkArr),
-                  );
-                  return;
-                }
-                if (failure !== null) {
-                  cleanupOnce();
-                  resume(fail(failure.error));
-                  return;
-                }
-                if (closed) {
-                  cleanupOnce();
-                  resume(succeed(DONE));
-                  return;
-                }
-                waiter = (effect, onDiscard) => resume(effect, onDiscard);
-                return () => {
-                  closed = true;
-                  buffer.length = 0;
-                  waiter = null;
-                  cleanupOnce();
-                };
-              },
-              null,
-            ) as any,
-          );
-        }
-
-        return (register(pushEmit, pushClose, pushFail) as any)
-          .map((c: (() => void) | void) => {
-            cleanup = c ?? undefined;
-            return next().step;
-          })
-          .flatMap((s: any) => s);
-      }),
-    );
-
-    return source.onFinalize(
-      suspend(() =>
-        sync(() => {
-          activeCleanup?.();
-          activeCleanup = null;
-        }),
-      ) as any,
-    ) as any;
+    return pushStream<A, A, S>({ chunked: false, options: pushOptions(options), register });
   }
 
   /**
-   * Chunk-preserving variant of {@link Stream.async}. Each emitted chunk
-   * remains one stream step, allowing callback-based batch sources to retain
-   * their native batch boundaries.
+   * Like {@link Stream.async}, but `emit` takes a whole chunk, and each
+   * chunk stays one stream step. Good for sources that already deliver
+   * batches (a Kafka fetch, a database page). `bufferSize` counts chunks.
    */
   static asyncChunks<A, S>(
     register: (
-      emit: (chunk: Chunk<A>) => void,
+      emit: (chunk: Chunk<A>) => EmitResult,
       close: () => void,
       failStream: (error: unknown) => void,
     ) => Eff<(() => void) | void, S>,
-    bufferSize = 1024,
+    options?: number | PushOptions,
   ): Stream<A, S> {
-    let activeCleanup: (() => void) | null = null;
-
-    const source = new Stream(
-      (succeed(null) as any).flatMap(() => {
-        const buffer: Chunk<A>[] = [];
-        let closed = false;
-        let failure: { readonly error: unknown } | null = null;
-        let waiter: ((effect: Eff<Step<A>, unknown>, onDiscard?: () => void) => void) | null = null;
-        let cleanup: (() => void) | void;
-        let cleaned = false;
-
-        const cleanupOnce = (): void => {
-          if (cleaned) return;
-          cleaned = true;
-          if (cleanup) cleanup();
-        };
-        activeCleanup = cleanupOnce;
-
-        // A chunk given back by a pull interrupted before it ran goes to the
-        // next waiting pull, or back to the head of the buffer.
-        const giveBack = (chunk: Chunk<A>): void => {
-          if (waiter !== null) {
-            const w = waiter;
-            waiter = null;
-            w(succeed(emit(chunk, next())), () => giveBack(chunk));
-            return;
-          }
-          buffer.unshift(chunk);
-        };
-
-        const pushEmit = (chunk: Chunk<A>) => {
-          if (closed || chunk.isEmpty) return;
-          if (waiter !== null) {
-            const w = waiter;
-            waiter = null;
-            w(succeed(emit(chunk, next())), () => giveBack(chunk));
-            return;
-          }
-          if (buffer.length < bufferSize) buffer.push(chunk);
-        };
-        const pushClose = () => {
-          if (closed) return;
-          closed = true;
-          if (waiter !== null && buffer.length === 0) {
-            const w = waiter;
-            waiter = null;
-            cleanupOnce();
-            w(succeed(DONE));
-          }
-        };
-
-        const pushFail = (error: unknown) => {
-          if (closed) return;
-          closed = true;
-          failure = { error };
-          if (waiter !== null && buffer.length === 0) {
-            const w = waiter;
-            waiter = null;
-            cleanupOnce();
-            w(fail(error));
-          }
-        };
-
-        function next(): Stream<A, S> {
-          return new Stream(
-            new Suspend(
-              Op.Async,
-              (resume: (eff: any, onDiscard?: () => void) => void) => {
-                const chunk = buffer.shift();
-                if (chunk) {
-                  resume(succeed(emit(chunk, next())), () => giveBack(chunk));
-                  return;
-                }
-                if (failure !== null) {
-                  cleanupOnce();
-                  resume(fail(failure.error));
-                  return;
-                }
-                if (closed) {
-                  cleanupOnce();
-                  resume(succeed(DONE));
-                  return;
-                }
-                waiter = (effect, onDiscard) => resume(effect, onDiscard);
-                return () => {
-                  closed = true;
-                  buffer.length = 0;
-                  waiter = null;
-                  cleanupOnce();
-                };
-              },
-              null,
-            ) as any,
-          );
-        }
-
-        return (register(pushEmit, pushClose, pushFail) as any)
-          .map((c: (() => void) | void) => {
-            cleanup = c ?? undefined;
-            return next().step;
-          })
-          .flatMap((s: any) => s);
-      }),
-    );
-
-    return source.onFinalize(
-      suspend(() =>
-        sync(() => {
-          activeCleanup?.();
-          activeCleanup = null;
-        }),
-      ) as any,
-    ) as any;
+    return pushStream<A, Chunk<A>, S>({ chunked: true, options: pushOptions(options), register });
   }
 
   static bracket<A, S>(acquire: Eff<A, S>, release: (a: A) => Eff<void, never>): Stream<A, S> {

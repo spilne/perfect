@@ -39,14 +39,25 @@ describe("Stream.fromCallback", () => {
     expect(await run(s.toArray() as any)).toEqual([]);
   });
 
-  test("overflow past bufferSize silently drops", async () => {
-    // emit 10 items synchronously with a 3-item buffer; consumer sees first 3
+  test("a full buffer keeps every value by default", async () => {
     const s = Stream.fromCallback<number>((emit, close) => {
       for (let i = 1; i <= 10; i++) emit(i);
       close();
     }, 3);
-    const result = await run(s.toArray() as any);
-    expect(result).toEqual([1, 2, 3]);
+    expect(await run(s.toArray() as any)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  });
+
+  test("dropNewest and dropOldest are opt-in", async () => {
+    const source = (overflow: "dropNewest" | "dropOldest") =>
+      Stream.fromCallback<number>(
+        (emit, close) => {
+          for (let i = 1; i <= 10; i++) emit(i);
+          close();
+        },
+        { bufferSize: 3, overflow },
+      );
+    expect(await run(source("dropNewest").toArray() as any)).toEqual([1, 2, 3]);
+    expect(await run(source("dropOldest").toArray() as any)).toEqual([8, 9, 10]);
   });
 
   test("cleanup fires when close() is called", async () => {

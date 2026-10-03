@@ -14,7 +14,7 @@
 
 import { fromPromise, succeed, sync } from "@spilne/perfect-core";
 import type { Eff, Throws } from "@spilne/perfect-core";
-import { Chunk, Stream } from "@spilne/perfect-core/stream";
+import { Chunk, type EmitResult, Stream } from "@spilne/perfect-core/stream";
 import { JsonCodec } from "@spilne/perfect-core/connect";
 import type {
   KeyedSinkable,
@@ -254,7 +254,7 @@ export class KafkaTopic<T>
     };
 
     const register = (
-      emitBatch: (batch: Envelope<T, Throws<KafkaError>>[]) => void,
+      emitBatch: (batch: Envelope<T, Throws<KafkaError>>[]) => EmitResult,
       closeStream: () => void,
       failStream: (error: unknown) => void,
     ) => {
@@ -272,7 +272,10 @@ export class KafkaTopic<T>
           await this.seekConsumer(consumer, offset);
           for await (const msg of consumer.stream()) {
             if (lifecycle.stopped) break;
-            emitBatch([makeEnvelope(msg)]);
+            // Wait while the stream's buffer is full, so we stop reading
+            // from Kafka until the consumer catches up.
+            const wait = emitBatch([makeEnvelope(msg)]);
+            if (wait) await wait;
           }
         } else if (consumer.run) {
           if (batchEmit) {
@@ -282,7 +285,9 @@ export class KafkaTopic<T>
               autoCommit: false,
               onBatch: async ({ batch }) => {
                 if (lifecycle.stopped || batch.messages.length === 0) return;
-                emitBatch(
+                // kafkajs waits for this promise before it fetches more, so
+                // returning the backpressure promise slows Kafka down.
+                await emitBatch(
                   batch.messages.map((message) =>
                     makeEnvelope({ topic: batch.topic, partition: batch.partition, message }),
                   ),
@@ -296,7 +301,7 @@ export class KafkaTopic<T>
               autoCommit: false,
               onMessage: async (msg) => {
                 if (lifecycle.stopped) return;
-                emitBatch([makeEnvelope(msg)]);
+                await emitBatch([makeEnvelope(msg)]);
               },
             });
           }
@@ -323,7 +328,9 @@ export class KafkaTopic<T>
           (emit, closeStream, failStream) =>
             register(
               (batch) => {
-                for (const envelope of batch) emit(envelope);
+                let wait: EmitResult = undefined;
+                for (const envelope of batch) wait = emit(envelope) ?? wait;
+                return wait;
               },
               closeStream,
               failStream,
@@ -481,7 +488,7 @@ export class KafkaTopic<T>
     const consumerOptions = this.consumerOptions;
 
     const register = (
-      emitBatch: (batch: T[]) => void,
+      emitBatch: (batch: T[]) => EmitResult,
       closeStream: () => void,
       failStream: (error: unknown) => void,
     ) => {
@@ -506,7 +513,8 @@ export class KafkaTopic<T>
           await this.seekConsumer(consumer, offset);
           for await (const msg of consumer.stream()) {
             if (stopped) break;
-            emitBatch([decodeMessage(msg)]);
+            const wait = emitBatch([decodeMessage(msg)]);
+            if (wait) await wait;
           }
         } else if (consumer.run) {
           if (batchEmit) {
@@ -515,7 +523,7 @@ export class KafkaTopic<T>
               offset,
               onBatch: async ({ batch }) => {
                 if (stopped || batch.messages.length === 0) return;
-                emitBatch(
+                await emitBatch(
                   batch.messages.map((message) =>
                     decodeMessage({ topic: batch.topic, partition: batch.partition, message }),
                   ),
@@ -528,7 +536,7 @@ export class KafkaTopic<T>
               offset,
               onMessage: async (msg) => {
                 if (stopped) return;
-                emitBatch([decodeMessage(msg)]);
+                await emitBatch([decodeMessage(msg)]);
               },
             });
           }
@@ -561,7 +569,9 @@ export class KafkaTopic<T>
       : Stream.async<T, Throws<KafkaError>>((emit, closeStream, failStream) =>
           register(
             (batch) => {
-              for (const value of batch) emit(value);
+              let wait: EmitResult = undefined;
+              for (const value of batch) wait = emit(value) ?? wait;
+              return wait;
             },
             closeStream,
             failStream,

@@ -177,7 +177,14 @@ export {
   Pipes,
   Sinks,
 } from "./stream/index.js";
-export type { CsvOptions, SchemaParser, StatefulMapOptions } from "./stream/index.js";
+export type {
+  CsvOptions,
+  EmitResult,
+  PushOptions,
+  PushOverflow,
+  SchemaParser,
+  StatefulMapOptions,
+} from "./stream/index.js";
 
 export { eff } from "./syntax/index.js";
 import "./syntax/index.js";
