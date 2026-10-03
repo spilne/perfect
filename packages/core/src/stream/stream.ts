@@ -1344,20 +1344,21 @@ export class Stream<A, S = never> {
 
   // ── Combination ──────────────────────────────────────────────────
 
+  /**
+   * Emit everything from this stream, then everything from `that`.
+   *
+   * When one part ends we clean it up (run its finalizer) right away, before
+   * we start the next part. So a.concat(b).concat(c) only ever has one part
+   * open at a time.
+   *
+   * a.concat(b).concat(c) is stored as one flat list [a, b, c], not as
+   * concat(concat(a, b), c). That keeps long chains fast.
+   */
   concat<S2>(that: Stream<A, S2>): Stream<A, S | S2> {
-    return new Stream(
-      (this.step as any)
-        .map((s: Step<A>) => {
-          if (s._tag === "Done") return that.step;
-          return emit(s.chunk, s.next.concat(that));
-        })
-        .flatMap((r: any) => (r instanceof Suspend ? r : succeed(r))),
-      this._finalizer === null
-        ? that._finalizer
-        : that._finalizer === null
-          ? this._finalizer
-          : (new Suspend(Op.Ensuring, this._finalizer, that._finalizer) as any),
-    );
+    return concatSegments<A>([
+      ...(CONCAT_SEGMENTS.get(this) ?? [this]),
+      ...(CONCAT_SEGMENTS.get(that) ?? [that]),
+    ]) as Stream<A, S | S2>;
   }
 
   zip<B, S2>(that: Stream<B, S2>): Stream<[A, B], S | S2> {
@@ -2844,6 +2845,41 @@ export class Stream<A, S = never> {
   toAsyncIterable(this: Stream<A, S> & EffectCheck<S>): AsyncIterable<A> {
     return streamToAsyncIterable(this as Stream<A, unknown>);
   }
+}
+
+// For each stream made by concat, the list of parts it plays in order. When
+// you concat that stream again, we add to this list instead of wrapping it
+// in one more layer (more layers = every chunk passes through more code).
+const CONCAT_SEGMENTS = new WeakMap<Stream<any, any>, readonly Stream<any, any>[]>();
+
+function concatSegments<A>(segments: readonly Stream<A, any>[]): Stream<A, unknown> {
+  const stream = Stream.suspend(() => {
+    // Cleanup for the part we are reading right now. We clear it before
+    // running it, so it can never run twice.
+    let active: Eff<void, unknown> | null = null;
+    const release = (): Eff<void, unknown> => {
+      const finalizer = active;
+      active = null;
+      return finalizer === null ? succeed(undefined) : uninterruptible(finalizer);
+    };
+    const drain = (current: Stream<A, any>, index: number): Stream<A, unknown> =>
+      new Stream(
+        (current.step as any).flatMap((s: Step<A>) =>
+          s._tag === "Done"
+            ? release().flatMap(() => segment(index + 1).step)
+            : succeed(emit(s.chunk, drain(s.next, index))),
+        ),
+      );
+    const segment = (index: number): Stream<A, unknown> => {
+      if (index >= segments.length) return Stream.empty();
+      const current = segments[index]!;
+      active = current._finalizer;
+      return drain(current, index);
+    };
+    return new Stream(segment(0).step, suspend(release));
+  });
+  CONCAT_SEGMENTS.set(stream, segments);
+  return stream;
 }
 
 // ── Pipe type ──────────────────────────────────────────────────────
