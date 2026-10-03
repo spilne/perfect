@@ -17,9 +17,12 @@
 // - All scanning happens against a MASK of the source (string literals and
 //   comments blanked to spaces, same length) so code-looking text inside
 //   strings is never rewritten. Original text is sliced for output.
-// - Regions are rewritten one at a time with a full restart between splices —
-//   no offset bookkeeping. Nested regions are handled by recursively
-//   rewriting a region's body text before parsing it.
+// - Regions are rewritten one at a time. After each splice the mask is
+//   patched (old prefix + mask of the replacement + old suffix) instead of
+//   re-masking the whole file, and the search continues from the splice
+//   point, since everything before it is already done. That keeps a file
+//   with many comprehensions linear-ish instead of quadratic. Nested regions
+//   are handled by recursively rewriting a region's body text first.
 // - Anything involving `$` that the rewriter cannot compile THROWS a
 //   RewriteError instead of silently emitting code with a dangling `$`.
 
@@ -30,26 +33,50 @@ export class RewriteError extends Error {
   }
 }
 
-const MAX_PASSES = 200;
-
 // ── Main entry ─────────────────────────────────────────────────────
 
 export function rewriteEffBlocks(source: string): string {
-  let result = source;
-  for (let pass = 0; pass < MAX_PASSES; pass++) {
-    const afterFor = rewriteOneForComprehension(result);
-    if (afterFor !== null) {
-      result = afterFor;
-      continue;
+  // Every splice rewrites one comprehension, so a file can't need more
+  // splices than it has `<-` arrows and `eff(` calls. (A fixed limit of 200
+  // made big generated files fail even though they were fine.) Going past
+  // this number means the rewriter is stuck, which is a bug.
+  const maxSplices = countOccurrences(source, "<-") + countOccurrences(source, "eff(") + 1;
+  let splices = 0;
+  let text = source;
+  let mask = maskCode(source);
+
+  // First every `for { … } yield …`, then every `eff(($) => { … })`. A
+  // rewrite never produces new syntax of either kind, so this order gives
+  // the same result as trying both after every splice.
+  for (const findNext of [findForComprehension, findDollarBlock]) {
+    let from = 0;
+    for (;;) {
+      const splice = findNext(text, mask, from);
+      if (splice === null) break;
+      if (++splices > maxSplices) {
+        throw new RewriteError("rewrite did not converge — nesting too deep or internal bug");
+      }
+      text = text.slice(0, splice.start) + splice.replacement + text.slice(splice.end);
+      mask = mask.slice(0, splice.start) + maskCode(splice.replacement) + mask.slice(splice.end);
+      from = splice.start;
     }
-    const afterDollar = rewriteOneDollarBlock(result);
-    if (afterDollar !== null) {
-      result = afterDollar;
-      continue;
-    }
-    return result;
   }
-  throw new RewriteError("rewrite did not converge — nesting too deep or internal bug");
+  return text;
+}
+
+/** Replace `text.slice(start, end)` with `replacement`. */
+interface Splice {
+  readonly start: number;
+  readonly end: number;
+  readonly replacement: string;
+}
+
+function countOccurrences(text: string, needle: string): number {
+  let count = 0;
+  for (let at = text.indexOf(needle); at !== -1; at = text.indexOf(needle, at + needle.length)) {
+    count++;
+  }
+  return count;
 }
 
 // ── Masking ────────────────────────────────────────────────────────
@@ -166,9 +193,9 @@ type ForStmt =
   | { kind: "let"; varName: string; expr: string };
 
 // Rewrite the FIRST for-comprehension region found; null if none.
-function rewriteOneForComprehension(source: string): string | null {
-  const mask = maskCode(source);
+function findForComprehension(source: string, mask: string, from: number): Splice | null {
   const pattern = /\bfor\s*\{/g;
+  pattern.lastIndex = from;
   let match: RegExpExecArray | null;
 
   while ((match = pattern.exec(mask)) !== null) {
@@ -196,7 +223,7 @@ function rewriteOneForComprehension(source: string): string | null {
     const desugared = desugarForStatements(stmts, rewriteEffBlocks(yieldExpr.trim()));
     if (!desugared) continue;
 
-    return source.slice(0, match.index) + desugared + source.slice(fullEnd);
+    return { start: match.index, end: fullEnd, replacement: desugared };
   }
 
   return null;
@@ -343,9 +370,9 @@ type DollarStmt =
   | { kind: "raw"; code: string };
 
 // Rewrite the FIRST eff(($) => { … }) region found; null if none.
-function rewriteOneDollarBlock(source: string): string | null {
-  const mask = maskCode(source);
+function findDollarBlock(source: string, mask: string, from: number): Splice | null {
   const pattern = /\beff\s*\(\s*\(\s*\$\s*\)\s*=>\s*\{/g;
+  pattern.lastIndex = from;
   let match: RegExpExecArray | null;
 
   while ((match = pattern.exec(mask)) !== null) {
@@ -373,7 +400,7 @@ function rewriteOneDollarBlock(source: string): string | null {
     const desugared = desugarDollarStatements(stmts);
     if (!desugared) continue;
 
-    return source.slice(0, match.index) + desugared + source.slice(fullEnd);
+    return { start: match.index, end: fullEnd, replacement: desugared };
   }
 
   return null;
