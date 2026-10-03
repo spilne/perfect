@@ -13,6 +13,7 @@ import {
   yieldNow,
   raceEither,
   raceAll,
+  allSettled,
   timeoutFail,
   timeoutOption,
   onExit,
@@ -230,8 +231,9 @@ describe("race variants", () => {
     expect(r.right).toBe(99);
   });
 
-  test("raceAll collects all Exits without killing siblings", async () => {
-    const eff = raceAll([sleep(5).flatMap(() => succeed("a")), fail("b"), succeed("c")]);
+  test("allSettled collects all Exits without killing siblings (raceAll is the old name)", async () => {
+    expect(raceAll).toBe(allSettled);
+    const eff = allSettled([sleep(5).flatMap(() => succeed("a")), fail("b"), succeed("c")]);
     const exits = (await run(eff as any)) as Exit[];
     expect(exits.length).toBe(3);
     expect(exits[0]).toEqual({ _tag: "Success", value: "a" });

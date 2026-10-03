@@ -9,6 +9,15 @@ export interface ServiceTag<T, Name extends string = string> {
   readonly get: Eff<T, Needs<T, Name>>;
 }
 
+/**
+ * Define a service tag: `service<Db>()("Db")`.
+ *
+ * Tags are identified by their name: two tags with the same name are the
+ * same service, even across copies of this package (that is how the
+ * built-in Clock, Logger, ... are shared). So give library services a
+ * namespaced name, like "my-lib/Db", to avoid clashing with someone else's
+ * "Db".
+ */
 export function service<T>(): <const Name extends string>(name: Name) => ServiceTag<T, Name> {
   return (name) => {
     const key = Symbol.for(`spilne/svc/${name}`);

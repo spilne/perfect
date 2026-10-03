@@ -21,6 +21,7 @@ import {
   type PoolClosed,
   QueueClosed,
   succeed,
+  async,
   fail,
   acquireRelease,
   service,
@@ -603,4 +604,9 @@ const _err8 = run(
   const _numbers: Stream<number, never> = mixed.filter((v): v is number => typeof v === "number");
   // @ts-expect-error — a plain boolean predicate does not narrow
   const _notNarrowed: Stream<number, never> = mixed.filter((v) => String(v).length > 0);
+}
+
+// async<A> with no error type has no error channel.
+{
+  const _noErrors: Eff<number, never> = async<number>((resume) => resume(succeed(1)));
 }

@@ -43,6 +43,7 @@ declare module "../eff.js" {
     timeoutFail<A, S, E>(this: Eff<A, S>, ms: number, onTimeout: () => E): Eff<A, S | Throws<E>>;
     timeoutOption<A, S>(this: Eff<A, S>, ms: number): Eff<A | undefined, S>;
     race<A, S1, B, S2>(this: Eff<A, S1>, that: Eff<B, S2>): Eff<A | B, S1 | S2>;
+    /** @deprecated Same as `.race`. */
     raceFirst<A, S1, B, S2>(this: Eff<A, S1>, that: Eff<B, S2>): Eff<A | B, S1 | S2>;
     raceEither<A, S1, B, S2>(
       this: Eff<A, S1>,
