@@ -1,23 +1,4 @@
 import { plugin } from "bun";
-import { rewriteEffBlocks } from "./rewrite.js";
-import { ensureCoreImports } from "./auto-import.js";
+import { createTransformPlugin } from "./transform-plugin.js";
 
-plugin({
-  name: "spilne-eff-transform",
-  setup(build) {
-    build.onLoad({ filter: /\.ts$/ }, async (args) => {
-      const source = await Bun.file(args.path).text();
-
-      // only transform files that use eff($)
-      if (!source.includes("eff(($)") && !source.includes("eff( ($)")) {
-        return undefined;
-      }
-
-      const transformed = ensureCoreImports(source, rewriteEffBlocks(source));
-      return {
-        contents: transformed,
-        loader: "ts",
-      };
-    });
-  },
-});
+plugin(createTransformPlugin("spilne-eff-transform"));
