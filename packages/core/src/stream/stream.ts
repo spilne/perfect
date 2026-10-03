@@ -708,6 +708,8 @@ export class Stream<A, S = never> {
    * @param p predicate
    * @param action "keep" (default) keeps matches; "drop" inverts.
    */
+  filter<B extends A>(p: (a: A) => a is B): Stream<B, S>;
+  filter(p: (a: A) => boolean, action?: "keep" | "drop"): Stream<A, S>;
   filter(p: (a: A) => boolean, action: "keep" | "drop" = "keep"): Stream<A, S> {
     const fn: (a: A) => boolean = action === "drop" ? (a) => !p(a) : p;
     return this._withOp({ _tag: "filter", fn: fn as any }) as Stream<A, S>;

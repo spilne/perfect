@@ -94,12 +94,34 @@ export async function sendBatch<T>(
   queue: string,
   messages: PgmqMessage<T>[],
 ): Promise<number[]> {
-  // Use individual sends for simplicity — pgmq.send_batch requires SQL array literals
-  const ids: number[] = [];
-  for (const msg of messages) {
-    ids.push(await send(db, queue, msg));
+  if (messages.length === 0) return [];
+  // pgmq.send_batch takes one delay for the whole batch. When the messages
+  // don't agree on it, send them one by one instead.
+  const delay = messages[0]!.delay ?? 0;
+  if (messages.some((msg) => (msg.delay ?? 0) !== delay)) {
+    const ids: number[] = [];
+    for (const msg of messages) ids.push(await send(db, queue, msg));
+    return ids;
   }
-  return ids;
+
+  // One round trip for the whole batch. The arrays go in as one JSON
+  // parameter each and are turned into jsonb[] in SQL.
+  const bodies = sql`(SELECT array_agg(m) FROM jsonb_array_elements(${JSON.stringify(
+    messages.map((msg) => msg.data),
+  )}::jsonb) AS m)`;
+  const hasHeaders = messages.some((msg) => msg.headers !== undefined);
+  const rows = hasHeaders
+    ? await exec(
+        db,
+        sql`SELECT * FROM pgmq.send_batch(${queue}::text, ${bodies}, (SELECT array_agg(h) FROM jsonb_array_elements(${JSON.stringify(
+          messages.map((msg) => msg.headers ?? null),
+        )}::jsonb) AS h), ${delay}::integer)`,
+      )
+    : await exec(
+        db,
+        sql`SELECT * FROM pgmq.send_batch(${queue}::text, ${bodies}, ${delay}::integer)`,
+      );
+  return rows.map((row: any) => Number(row.send_batch ?? row.msg_id));
 }
 
 // ---------------------------------------------------------------------------

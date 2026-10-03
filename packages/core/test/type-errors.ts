@@ -596,3 +596,11 @@ const _err8 = run(
   const _notNever: Eff<number, never> = afterTag;
   void [_keepsB];
 }
+
+// Stream.filter with a type guard narrows the element type.
+{
+  const mixed = null as unknown as Stream<number | string, never>;
+  const _numbers: Stream<number, never> = mixed.filter((v): v is number => typeof v === "number");
+  // @ts-expect-error — a plain boolean predicate does not narrow
+  const _notNarrowed: Stream<number, never> = mixed.filter((v) => String(v).length > 0);
+}
