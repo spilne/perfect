@@ -6,7 +6,8 @@
     "noEmit": false,
     "emitDeclarationOnly": true,
     "rootDir": "src",
-    "declarationDir": "dist/types"
+    "declarationDir": "dist/types",
+    "stripInternal": true
   },
   "include": ["src"]
 }

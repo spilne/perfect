@@ -85,49 +85,63 @@ function interruptCause(pending: unknown): Cause {
 }
 
 export class Fiber<A = unknown> {
+  /** @internal Runtime bookkeeping; not part of the public API. */
   state = FiberState.Ready;
   result: FiberResult<A> | null = null;
   private listeners: Array<(result: FiberResult<A>) => void> | null = null;
+  /** @internal Runtime bookkeeping; not part of the public API. */
   interruptHandle: (() => void) | null = null;
   // Fiber<any>: see FiberSupervisor note — Fiber is invariant in A, so a
   // heterogeneous parent/child tree needs `any`.
   // Created on the first fork: most fibers never fork.
   private children: Set<Fiber<any>> | null = null;
   parent: Fiber<any> | null = null;
+  /** @internal Runtime bookkeeping; not part of the public API. */
   scope: Scope | null = null;
 
   // interpreter state — saved when yielding. `unknown`, not `any`: the
   // interpreter casts at the use site.
+  /** @internal Runtime bookkeeping; not part of the public API. */
   current: unknown = undefined;
+  /** @internal Runtime bookkeeping; not part of the public API. */
   stack: Cont | null = null;
+  /** @internal Runtime bookkeeping; not part of the public API. */
   context: Context | null = null;
+  /** @internal Runtime bookkeeping; not part of the public API. */
   opCount = 0;
+  /** @internal Runtime bookkeeping; not part of the public API. */
   scheduler: Scheduler = getDefaultScheduler();
 
   // interruption masking — true when the fiber will honor interrupts immediately.
   // Starts true. Flipped by Op.SetInterruptible frames on the continuation stack.
+  /** @internal Runtime bookkeeping; not part of the public API. */
   interruptible = true;
   // Set when interrupt() arrives while !interruptible or while the loop is
   // running; processed on the next boundary.
+  /** @internal Runtime bookkeeping; not part of the public API. */
   interruptPending = false;
   // Identifies the wait the fiber is suspended in. Async, All and Race take a
   // fresh value when they suspend and resume the fiber only while it is still
   // current; interrupt() advances it. A callback that cannot be cancelled (a
   // promise settling late, a child finishing after its parent moved on) is
   // then ignored instead of resuming whatever the fiber waits on next.
+  /** @internal Runtime bookkeeping; not part of the public API. */
   asyncToken = 0;
   // Set once an interrupt is delivered while the fiber is interruptible, and
   // never cleared. From then on, whenever the fiber is interruptible, error
   // handlers are bypassed and the interrupt is raised again on leaving an
   // uninterruptible region, so the fiber can only run finalizers and fail.
+  /** @internal Runtime bookkeeping; not part of the public API. */
   interrupting = false;
   // Set while the fiber is Ready with a value an async resume handed over
   // (an item, a permit) and cleared when a loop run starts from it. If
   // interrupt() replaces that value first, it calls this so the value goes
   // back to where it came from. VALUE_IN_FLIGHT after an op-budget pause on a
   // value.
+  /** @internal Runtime bookkeeping; not part of the public API. */
   handoffDiscard: (() => void) | null = null;
 
+  /** @internal Runtime bookkeeping; not part of the public API. */
   complete(result: FiberResult<A>): void {
     if (this.state === FiberState.Done) return;
     this.state = FiberState.Done;
@@ -248,6 +262,7 @@ export class Fiber<A = unknown> {
   // interrupted this fiber, or by a discard giving a value back. As in
   // interrupt(), it becomes a defect after the interrupt the fiber is about
   // to raise.
+  /** @internal Runtime bookkeeping; not part of the public API. */
   failInterruptedWait(error: unknown): void {
     const next = this.current;
     if (this.state === FiberState.Ready && next instanceof Suspend && next.op === Op.Fail) {
@@ -275,13 +290,16 @@ export class Fiber<A = unknown> {
   // Set by bootstrapFiber to point at runFiberLoop(this); avoids a fiber.ts ⇄
   // runtime.ts circular import. Created once per fiber and reused for every
   // run we queue, instead of a new closure each time.
+  /** @internal Runtime bookkeeping; not part of the public API. */
   _resume?: () => void;
 
   /** Queue a run of this fiber's loop on its scheduler. */
+  /** @internal Runtime bookkeeping; not part of the public API. */
   scheduleRun(): void {
     if (this._resume !== undefined) this.scheduler.schedule(this._resume);
   }
 
+  /** @internal Runtime bookkeeping; not part of the public API. */
   addChild(child: Fiber<any>): void {
     (this.children ??= new Set()).add(child);
     child.parent = this;
