@@ -63,6 +63,16 @@ describe("syntax/error", () => {
     const result = runSync(fail("boom").either());
     expect(result).toEqual({ _tag: "Left", left: "boom" });
   });
+
+  test("rethrow inverts either and exit", () => {
+    expect(runSync(succeed(42).either().rethrow())).toBe(42);
+    expect(runSync(succeed(42).exit().rethrow())).toBe(42);
+    expect(runSync(fail("boom").either().rethrow().either())).toEqual({
+      _tag: "Left",
+      left: "boom",
+    });
+    expect(runSync(fail("boom").exit().rethrow().either())).toEqual({ _tag: "Left", left: "boom" });
+  });
 });
 
 describe("syntax/applicative", () => {

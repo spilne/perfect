@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Cause, Stream, TaggedError, die, fail, run, runExit, sync } from "../src";
+import { Cause, Either, Stream, TaggedError, die, fail, run, runExit, sync } from "../src";
 
 class SourceError extends TaggedError("SourceError")<{
   readonly message: string;
@@ -101,6 +101,56 @@ describe("Stream error algebra", () => {
     expect(exits[0]?._tag).toBe("Failure");
     expect(attempts[0]?._tag).toBe("Failure");
     if (exits[0]?._tag === "Failure") expect(Cause.firstDie(exits[0].cause)?.value).toBe("boom");
+  });
+
+  test("rethrow emits values before the first Left, then fails with it", async () => {
+    const pulled: number[] = [];
+    const source = Stream.fromArray([1, 2, 3, 4])
+      .tap((n) => pulled.push(n))
+      .map((n) => (n === 3 ? Either.left(new SourceError({ message: "three" })) : Either.right(n)));
+    const seen: number[] = [];
+    const exit = await runExit(
+      source
+        .rethrow()
+        .tap((n) => seen.push(n))
+        .drain(),
+    );
+
+    expect(seen).toEqual([1, 2]);
+    expect(exit._tag).toBe("Failure");
+    if (exit._tag === "Failure") {
+      expect(Cause.firstFail(exit.cause)?.value).toEqual(new SourceError({ message: "three" }));
+    }
+  });
+
+  test("rethrow fails on a Left that opens a chunk", async () => {
+    const exit = await runExit(
+      Stream.of(Either.left("first"), Either.right(1)).rethrow().toArray(),
+    );
+    expect(exit._tag === "Failure" && Cause.firstFail(exit.cause)?.value).toBe("first");
+  });
+
+  test("rethrow inverts either and exit across chunks", async () => {
+    const source = Stream.fromArray([1, 2]).concat(Stream.fromArray([3]));
+    expect(await run(source.either().rethrow().toArray())).toEqual([1, 2, 3]);
+    expect(await run(source.exit().rethrow().toArray())).toEqual([1, 2, 3]);
+  });
+
+  test("rethrow keeps a Failure's whole cause", async () => {
+    const exit = await runExit(Stream.fromEffect(die("boom")).exit().rethrow().drain());
+    expect(exit._tag === "Failure" && Cause.firstDie(exit.cause)?.value).toBe("boom");
+  });
+
+  test("rethrow runs the source finalizer when it fails", async () => {
+    let finalized = 0;
+    const exit = await runExit(
+      Stream.of(Either.right(1), Either.left("stop"))
+        .onFinalize(sync(() => void finalized++))
+        .rethrow()
+        .drain(),
+    );
+    expect(exit._tag).toBe("Failure");
+    expect(finalized).toBe(1);
   });
 
   test("catchSome leaves unhandled failures intact", async () => {

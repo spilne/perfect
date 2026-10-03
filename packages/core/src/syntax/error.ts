@@ -1,11 +1,8 @@
 import { type Eff, type Throws, type ErrorsOf, type ExcludeTags, Suspend, Op } from "../eff.js";
 import { Cause } from "../cause.js";
 import { type Exit, Exit as ExitNS } from "../exit.js";
-import { succeed, fail, die } from "../constructors.js";
-
-type Either<E, A> =
-  | { readonly _tag: "Left"; readonly left: E }
-  | { readonly _tag: "Right"; readonly right: A };
+import { succeed, fail, failCause, die } from "../constructors.js";
+import type { Either, WithError } from "../either.js";
 
 declare module "../eff.js" {
   interface Suspend {
@@ -37,6 +34,13 @@ declare module "../eff.js" {
     option<A, S>(this: Eff<A, S>): Eff<A | undefined, Exclude<S, Throws<unknown>>>;
 
     either<A, S>(this: Eff<A, S>): Eff<Either<ErrorsOf<S>, A>, Exclude<S, Throws<unknown>>>;
+
+    /**
+     * Inverse of `either()` / `exit()`: a Left fails with its
+     * value, a Failure with its whole cause, keeping defects and interrupts.
+     */
+    rethrow<E, A, S>(this: Eff<Either<E, A>, S>): Eff<A, WithError<S, E>>;
+    rethrow<E, A, S>(this: Eff<Exit<E, A>, S>): Eff<A, WithError<S, E>>;
 
     mapError<A, S, E2>(
       this: Eff<A, S>,
@@ -188,6 +192,25 @@ Suspend.prototype.either = function () {
     .map((a: any) => ({ _tag: "Right" as const, right: a }))
     .catch((e: any) => succeed({ _tag: "Left" as const, left: e }));
 };
+
+Suspend.prototype.rethrow = function () {
+  return new Suspend(Op.FlatMap, this, rethrowOutcome) as any;
+};
+
+function rethrowOutcome(
+  outcome: Either<unknown, unknown> | Exit<unknown, unknown>,
+): Eff<unknown, unknown> {
+  switch (outcome._tag) {
+    case "Right":
+      return succeed(outcome.right);
+    case "Success":
+      return succeed(outcome.value);
+    case "Left":
+      return fail(outcome.left);
+    case "Failure":
+      return failCause(outcome.cause);
+  }
+}
 
 Suspend.prototype.mapError = function (f: any) {
   return new Suspend(Op.Catch, this, (e: any) => fail(f(e))) as any;
