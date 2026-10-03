@@ -189,3 +189,20 @@ describe("OtelMetricsExporter", () => {
     expect(created).toBe(1);
   });
 });
+
+describe("label keys with special characters", () => {
+  test("a value with ',' and '=' stays one label", () => {
+    const registry = new MetricsRegistry();
+    const { meter, counters } = makeFakeMeter();
+    const exporter = new OtelMetricsExporter(meter, registry);
+
+    registry.counter("reqs", { a: "x,b=y" }).inc();
+    registry.counter("reqs", { a: "x", b: "y" }).inc(2);
+    exporter.export();
+
+    const recorded = counters.get("reqs")!;
+    expect(recorded).toHaveLength(2);
+    expect(recorded.map((r) => r.labels)).toContainEqual({ a: "x,b=y" });
+    expect(recorded.map((r) => r.labels)).toContainEqual({ a: "x", b: "y" });
+  });
+});
