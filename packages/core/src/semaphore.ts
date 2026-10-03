@@ -3,6 +3,16 @@
 
 import { type Eff } from "./eff.js";
 import { succeed, sync, async, ensuring } from "./constructors.js";
+import { Waiter, WaiterList } from "./internal/waiter-list.js";
+
+class PermitWaiter extends Waiter {
+  constructor(
+    readonly n: number,
+    readonly grant: () => void,
+  ) {
+    super();
+  }
+}
 
 export interface Semaphore<S = never> {
   /** Take one permit, blocking until available. */
@@ -22,7 +32,7 @@ class InProcessSemaphore implements Semaphore {
   // FIFO queue; each waiter wants `n` permits, granted atomically. New
   // acquirers queue behind existing waiters even when permits are free, so
   // a large request can't be starved by a stream of small ones.
-  private waiters: Array<{ n: number; done: boolean; resume: () => void }> = [];
+  private waiters = new WaiterList<PermitWaiter>();
 
   constructor(permits: number) {
     this.permits = permits;
@@ -39,18 +49,13 @@ class InProcessSemaphore implements Semaphore {
         resume(succeed(undefined) as any, giveBack);
         return;
       }
-      const waiter = {
-        n,
-        done: false,
-        resume: () => {
-          if (waiter.done) return;
-          waiter.done = true;
-          resume(succeed(undefined) as any, giveBack);
-        },
-      };
-      this.waiters.push(waiter);
+      const node = this.waiters.push(
+        new PermitWaiter(n, () => resume(succeed(undefined) as any, giveBack)),
+      );
+      // If this waiter was first in line and wanted many permits, the ones
+      // behind it might fit now, so check again.
       return () => {
-        waiter.done = true;
+        this.waiters.remove(node);
         this.releaseMany(0);
       };
     }) as any;
@@ -58,16 +63,12 @@ class InProcessSemaphore implements Semaphore {
 
   private releaseMany(n: number): void {
     this.permits += n;
-    while (this.waiters.length > 0) {
-      const head = this.waiters[0]!;
-      if (head.done) {
-        this.waiters.shift();
-        continue;
-      }
-      if (this.permits < head.n) break;
+    let head = this.waiters.peek();
+    while (head !== undefined && this.permits >= head.n) {
       this.waiters.shift();
       this.permits -= head.n;
-      head.resume();
+      head.grant();
+      head = this.waiters.peek();
     }
   }
 
