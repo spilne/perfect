@@ -57,9 +57,14 @@ const exporter = new OtelMetricsExporter(metrics.getMeter("my-app"), defaultMetr
 exporter.export();
 ```
 
-Counters and histograms are exported as deltas between calls, so repeated
-exports don't double-count; gauges are absolute. `export()` is safe to call
-repeatedly and returns the snapshot it exported.
+Counters are exported as deltas between calls, so repeated exports don't
+double-count; gauges are absolute. `export()` is safe to call repeatedly and
+returns the snapshot it exported.
+
+Histogram values don't wait for `export()`: each value is forwarded to OTel
+as it is recorded, with the same bucket boundaries, so OTel sees the real
+distribution. Values recorded before the exporter existed are not forwarded.
+Call `exporter.close()` to stop.
 
 ## Features
 
@@ -67,7 +72,7 @@ repeatedly and returns the snapshot it exported.
   tracer; parentage, error status, exception recording, interruption marking
 - `OtelMetricsExporter` — `Counter` / `Gauge` / `Histogram` from core's
   `MetricsRegistry` mapped to OTel instruments, labels preserved,
-  delta-correct on repeat export
+  delta-correct on repeat export, exact histogram values
 
 ## Links
 

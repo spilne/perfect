@@ -142,18 +142,50 @@ describe("OtelMetricsExporter", () => {
     expect(gauges.get("pool")!.map((r) => r.value)).toEqual([7, 4]);
   });
 
-  test("histograms export delta means", () => {
+  test("histograms forward every recorded value, exactly", () => {
+    const registry = new MetricsRegistry();
+    const { meter, histograms } = makeFakeMeter();
+    new OtelMetricsExporter(meter, registry);
+
+    const h = registry.histogram("lat", { buckets: [10, 100], labels: { route: "/a" } });
+    h.record(10);
+    h.record(20);
+
+    const recorded = histograms.get("lat")!;
+    expect(recorded.map((r) => r.value)).toEqual([10, 20]);
+    expect(recorded[0]!.labels).toEqual({ route: "/a" });
+  });
+
+  test("close stops forwarding histogram values", () => {
     const registry = new MetricsRegistry();
     const { meter, histograms } = makeFakeMeter();
     const exporter = new OtelMetricsExporter(meter, registry);
 
-    const h = registry.histogram("lat", { buckets: [10, 100] });
-    h.record(10);
-    h.record(20);
-    exporter.export();
+    const h = registry.histogram("lat");
+    h.record(1);
+    exporter.close();
+    h.record(2);
 
-    const recorded = histograms.get("lat")!;
-    expect(recorded.length).toBe(2);
-    expect(recorded[0]!.value).toBe(15); // delta mean
+    expect(histograms.get("lat")!.map((r) => r.value)).toEqual([1]);
+  });
+
+  test("instruments are created once per metric", () => {
+    const registry = new MetricsRegistry();
+    const { meter } = makeFakeMeter();
+    let created = 0;
+    const counting = {
+      ...meter,
+      createCounter: (...args: Parameters<typeof meter.createCounter>) => {
+        created++;
+        return meter.createCounter(...args);
+      },
+    } as typeof meter;
+    const exporter = new OtelMetricsExporter(counting, registry);
+
+    for (let i = 0; i < 5; i++) {
+      registry.counter("reqs").inc();
+      exporter.export();
+    }
+    expect(created).toBe(1);
   });
 });
