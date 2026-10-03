@@ -7,12 +7,7 @@
   },
   "targetDefaults": {
     "build": {
-      "executor": "nx:run-commands",
       "dependsOn": ["^build"],
-      "options": {
-        "commands": ["bun run build"],
-        "cwd": "{projectRoot}"
-      },
       "outputs": ["{projectRoot}/dist"]
     },
     "typecheck": {
