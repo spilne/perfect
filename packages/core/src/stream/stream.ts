@@ -1640,20 +1640,17 @@ export class Stream<A, S = never> {
 
   // ── Combination ──────────────────────────────────────────────────
 
+  /**
+   * Emit this stream, then `that`. Each side's finalizer runs as soon as that
+   * side ends, before the next one is pulled. Nested concats flatten into one
+   * list of segments, so a long chain costs one step per chunk, not one per
+   * level.
+   */
   concat<S2>(that: Stream<A, S2>): Stream<A, S | S2> {
-    return new Stream(
-      (this.step as any)
-        .map((s: Step<A>) => {
-          if (s._tag === "Done") return that.step;
-          return emit(s.chunk, s.next.concat(that));
-        })
-        .flatMap((r: any) => (r instanceof Suspend ? r : succeed(r))),
-      this._finalizer === null
-        ? that._finalizer
-        : that._finalizer === null
-          ? this._finalizer
-          : (new Suspend(Op.Ensuring, this._finalizer, that._finalizer) as any),
-    );
+    return concatSegments<A>([
+      ...(CONCAT_SEGMENTS.get(this) ?? [this]),
+      ...(CONCAT_SEGMENTS.get(that) ?? [that]),
+    ]) as Stream<A, S | S2>;
   }
 
   zip<B, S2>(that: Stream<B, S2>): Stream<[A, B], S | S2> {
@@ -3104,6 +3101,38 @@ export class Stream<A, S = never> {
   toAsyncIterable(this: Stream<A, S> & EffectCheck<S>): AsyncIterable<A> {
     return streamToAsyncIterable(this as Stream<A, unknown>);
   }
+}
+
+// The segments a concat stream emits in order, kept so that concatenating it
+// again extends the list instead of nesting another layer.
+const CONCAT_SEGMENTS = new WeakMap<Stream<any, any>, readonly Stream<any, any>[]>();
+
+function concatSegments<A>(segments: readonly Stream<A, any>[]): Stream<A, unknown> {
+  const stream = Stream.suspend(() => {
+    let active: Eff<void, unknown> | null = null;
+    const release = (): Eff<void, unknown> => {
+      const finalizer = active;
+      active = null;
+      return finalizer === null ? succeed(undefined) : uninterruptible(finalizer);
+    };
+    const drain = (current: Stream<A, any>, index: number): Stream<A, unknown> =>
+      new Stream(
+        (current.step as any).flatMap((s: Step<A>) =>
+          s._tag === "Done"
+            ? release().flatMap(() => segment(index + 1).step)
+            : succeed(emit(s.chunk, drain(s.next, index))),
+        ),
+      );
+    const segment = (index: number): Stream<A, unknown> => {
+      if (index >= segments.length) return Stream.empty();
+      const current = segments[index]!;
+      active = current._finalizer;
+      return drain(current, index);
+    };
+    return new Stream(segment(0).step, suspend(release));
+  });
+  CONCAT_SEGMENTS.set(stream, segments);
+  return stream;
 }
 
 // ── Pipe type ──────────────────────────────────────────────────────
