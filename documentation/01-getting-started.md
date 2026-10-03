@@ -145,6 +145,22 @@ const value = await succeed(21)
 `eff.run()`, `.runSync()`, `.runExit()`, and `.runFiber()` are exactly equivalent
 to the free functions — pick whichever reads better at the call site.
 
+### `await` on an effect (opt-in)
+
+An effect is not a promise: `await succeed(1)` gives you back the effect
+itself, not `1`. If you want `await eff` to run it, opt in once:
+
+```ts
+import "@spilne/perfect-core/thenable";
+
+const value = await succeed(21).map((x) => x * 2); // → 42
+```
+
+It is off by default because it makes effects easy to run by accident —
+returning one from an `async` function, or passing it to `Promise.resolve` or
+`Promise.all`, runs it too, and it skips `run`'s check that every error is
+handled.
+
 ## Next
 
 - [Effects](./02-effects.md) — `succeed`, `fail`, `sync`, `async`, `Throws`, `Needs`

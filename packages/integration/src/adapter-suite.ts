@@ -39,6 +39,8 @@ import {
   type KafkaError,
   type KafkaClient,
 } from "@spilne/perfect-kafka";
+// These tests await effects directly (await queue.publish(x)).
+import "@spilne/perfect-core/thenable";
 
 // ---------------------------------------------------------------------------
 // Capabilities — optional members of the port

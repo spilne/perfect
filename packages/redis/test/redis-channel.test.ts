@@ -5,6 +5,8 @@ import type { Stream } from "@spilne/perfect-core/stream";
 import { RedisChannel } from "../src/redis-channel";
 import type { RedisClient } from "../src/redis-client";
 import { RedisError } from "../src/redis-error";
+// These tests await effects directly (await queue.publish(x)).
+import "@spilne/perfect-core/thenable";
 
 test("RedisChannel bridges Redis Pub/Sub to the connect contracts", async () => {
   const listeners = new Set<(...args: any[]) => void>();

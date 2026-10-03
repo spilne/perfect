@@ -31,6 +31,8 @@ import { PgRef } from "../src/lib/pg-ref";
 import { PgSingleflight } from "../src/lib/pg-singleflight";
 import { PgmqQueue } from "../src/pgmq/pgmq-queue";
 import * as pgmq from "../src/pgmq/pgmq";
+// These tests await effects directly (await queue.publish(x)).
+import "@spilne/perfect-core/thenable";
 
 const dockerAvailable = (() => {
   try {

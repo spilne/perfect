@@ -18,6 +18,8 @@ import type {
   KafkaProducer,
 } from "../src/kafka-types";
 import { TopicName, GroupId, PartitionId, KafkaOffset } from "../src/brands";
+// These tests await effects directly (await queue.publish(x)).
+import "@spilne/perfect-core/thenable";
 
 /**
  * Fake client that simulates a kafkajs-style consumer. The consumer's

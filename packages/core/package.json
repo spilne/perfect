@@ -58,6 +58,10 @@
       "types": "./dist/types/syntax/*.d.ts",
       "default": "./dist/syntax/*.js"
     },
+    "./thenable": {
+      "types": "./dist/types/thenable.d.ts",
+      "default": "./dist/thenable.js"
+    },
     "./worker": {
       "types": "./dist/types/worker/index.d.ts",
       "default": "./dist/worker/index.js"

@@ -11,6 +11,7 @@ const packages = [
       "dist/index.js",
       "dist/worker/index.js",
       "dist/syntax/index.js",
+      "dist/thenable.js",
     ],
   },
   { dir: "packages/http", imports: ["dist/index.js"] },

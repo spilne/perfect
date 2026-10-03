@@ -31,6 +31,8 @@ import {
   RedisThrottle,
   type RedisClient,
 } from "../src";
+// These tests await effects directly (await queue.publish(x)).
+import "@spilne/perfect-core/thenable";
 
 const dockerAvailable = (() => {
   try {

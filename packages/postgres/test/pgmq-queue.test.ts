@@ -4,6 +4,8 @@ import type { Stream } from "@spilne/perfect-core/stream";
 import { PgmqQueue, PgmqSchemaValidationError, type PgmqQueueError } from "../src/pgmq/pgmq-queue";
 import { PostgresError } from "../src/lib/postgres-error";
 import { fakeDb } from "./fake-db";
+// These tests await effects directly (await queue.publish(x)).
+import "@spilne/perfect-core/thenable";
 
 describe("PgmqQueue errors", () => {
   test("exposes driver failures as PostgresError", async () => {
