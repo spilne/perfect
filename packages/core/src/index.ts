@@ -172,6 +172,7 @@ export {
   Stream,
   StreamDeadlineError,
   StreamTimeoutError,
+  FrameTooLargeError,
   SchemaParseError,
   Sink,
   Pipes,
