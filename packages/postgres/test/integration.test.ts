@@ -196,6 +196,39 @@ describe.skipIf(!dockerAvailable)("integration — postgres:17-alpine", () => {
     expect(await received).toEqual([{ type: "hello" }]);
   }, 20_000);
 
+  it("change-stream: rows that share a timestamp are not skipped between polls", async () => {
+    await db.execute(
+      sql.raw(`
+      CREATE TABLE same_time_events (
+        id BIGSERIAL PRIMARY KEY,
+        payload JSONB NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL
+      );
+      INSERT INTO same_time_events (payload, created_at)
+      SELECT jsonb_build_object('n', n), '2026-01-01T00:00:00.123456Z'
+      FROM generate_series(1, 5) AS n;
+    `),
+    );
+    const stream = new PgChangeStream<{ n: number }>({
+      db,
+      sql: sqlClient,
+      channel: "same_time_events",
+      table: "same_time_events",
+      payloadColumn: "payload",
+      pollIntervalMs: 20,
+      pollBatchSize: 2,
+    });
+
+    const values = await run(
+      stream
+        .subscribeFrom({ offset: { type: "earliest" } })
+        .take(5)
+        .toArray()
+        .orDie(),
+    );
+    expect(values.map((v) => v.n)).toEqual([1, 2, 3, 4, 5]);
+  }, 20_000);
+
   it("change-stream: poll fallback replays rows from an offset", async () => {
     await db.execute(
       sql.raw(`
