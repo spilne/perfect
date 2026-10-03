@@ -188,6 +188,7 @@ use `.retryAllBy(...)` or a `RetryPolicy.whenCause(...)` policy to opt in.
 | `.tapError(f)` | observe failure, re-fail |
 | `.option()` | turn `Eff<A, Throws<E>>` into `Eff<A | undefined, never>` |
 | `.either()` | turn `Eff<A, Throws<E>>` into `Eff<Either<E, A>, never>` |
+| `.rethrow()` | inverse of `.either()` / `.exit()`: a `Left` or `Failure` becomes the error again |
 | `.mapError(f)` | transform the error type |
 
 ## Pitfalls

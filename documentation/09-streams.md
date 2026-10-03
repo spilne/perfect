@@ -283,6 +283,7 @@ requirements such as `Needs<Service>`:
 | `.trapError(...classes)` | move matching defects into the typed error channel |
 | `.either()` / `.attempt()` | emit `Right` values and a terminal `Left` typed error |
 | `.exit()` / `.attemptCause()` | emit `Exit.Success` values or a terminal full `Cause` |
+| `.rethrow()` | inverse of the two above: emit the values, fail at the first `Left` / `Failure` |
 | `.orDie()` | turn typed errors into defects before a runner boundary |
 
 Recovery retains values emitted before failure and finalizes both the failed

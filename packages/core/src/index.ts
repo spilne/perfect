@@ -12,6 +12,8 @@ export { Cause } from "./cause.js";
 export type { Cause as CauseT } from "./cause.js";
 export { Exit } from "./exit.js";
 export type { Exit as ExitT } from "./exit.js";
+export { Either } from "./either.js";
+export type { Either as EitherT } from "./either.js";
 export {
   succeed,
   fail,

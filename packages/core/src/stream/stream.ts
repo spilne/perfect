@@ -48,6 +48,7 @@ import { Semaphore } from "../semaphore.js";
 import { Cause } from "../cause.js";
 import { clockNow } from "../clock.js";
 import { Exit } from "../exit.js";
+import type { Either, WithError } from "../either.js";
 import type { Fiber } from "../fiber.js";
 import type { StateBackend } from "../connect/state-backend.js";
 
@@ -63,9 +64,6 @@ type StreamEffects<T> = T extends Stream<any, infer S> ? S : never;
 type DefectClass = abstract new (...args: any[]) => unknown;
 type DefectInstances<Classes extends readonly DefectClass[]> =
   Classes[number] extends abstract new (...args: any[]) => infer E ? E : never;
-type Either<E, A> =
-  | { readonly _tag: "Left"; readonly left: E }
-  | { readonly _tag: "Right"; readonly right: A };
 
 import {
   combineFinalizers,
@@ -2930,6 +2928,42 @@ export class Stream<A, S = never> {
 
   attemptCause(): Stream<Exit<ErrorsOf<S>, A>, Exclude<S, Throws<unknown>>> {
     return this.exit();
+  }
+
+  /**
+   * Inverse of `either()` / `exit()`: emit the values up to
+   * the first Left or Failure, then fail with it. A Failure keeps its whole
+   * cause, defects and interrupts included.
+   */
+  rethrow<E, B>(this: Stream<Either<E, B>, S>): Stream<B, WithError<S, E>>;
+  rethrow<E, B>(this: Stream<Exit<E, B>, S>): Stream<B, WithError<S, E>>;
+  rethrow(): Stream<unknown, unknown> {
+    const self = this as Stream<Either<unknown, unknown> | Exit<unknown, unknown>, S>;
+    return new Stream(
+      (self.step as any).flatMap((s: Step<Either<unknown, unknown> | Exit<unknown, unknown>>) => {
+        if (s._tag === "Done") return succeed(DONE);
+        const chunk = s.chunk;
+        const length = chunk.length;
+        const values = new Array(length);
+        for (let i = 0; i < length; i++) {
+          const item = chunk.get(i);
+          switch (item._tag) {
+            case "Right":
+              values[i] = item.right;
+              continue;
+            case "Success":
+              values[i] = item.value;
+              continue;
+          }
+          const failed = item._tag === "Left" ? fail(item.left) : failCause(item.cause);
+          if (i === 0) return failed;
+          values.length = i;
+          return succeed(emit(Chunk.fromArray(values), new Stream(failed)));
+        }
+        return succeed(emit(Chunk.fromArray(values), (s.next as any).rethrow()));
+      }),
+      self._finalizer,
+    );
   }
 
   /**

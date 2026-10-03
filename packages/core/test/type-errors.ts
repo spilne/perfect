@@ -6,6 +6,7 @@ import {
   eff,
   type Eff,
   type Throws,
+  type ErrorsOf,
   type Needs,
   type Ref,
   type Deferred,
@@ -575,6 +576,10 @@ const _err8 = run(
 
   const _optStrips: Eff<number | undefined, never> = many.option();
   const _eitherStrips: Eff<unknown, never> = many.either();
+  const _rethrowRestores: Eff<number, Throws<ErrorsOf<Many>>> = many.either().rethrow();
+  const _rethrowExitRestores: Eff<number, Throws<ErrorsOf<Many>>> = many.exit().rethrow();
+  // @ts-expect-error — rethrow puts the typed errors back
+  const _rethrowNotTotal: Eff<number, never> = many.either().rethrow();
   const _redeemStrips: Eff<string, never> = many.redeem(
     () => "e",
     (n) => String(n),
