@@ -16,7 +16,9 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  BUN_VERSION: latest
+  # Same version as "packageManager" in package.json, so CI, perf history and
+  # local runs all use one runtime.
+  BUN_VERSION: "1.4.0"
   CARGO_TERM_COLOR: always
 
 jobs:
@@ -46,7 +48,7 @@ jobs:
 
       - run: bun run typecheck
 
-      - run: bun test --recursive packages/
+      # Runs the whole test suite once, with coverage.
       - run: bun run test:coverage
 
       - name: Upload Bun coverage
@@ -101,6 +103,33 @@ jobs:
           name: node-coverage-${{ matrix.node-version }}-${{ github.run_id }}
           path: coverage/node/${{ matrix.node-version }}
           if-no-files-found: ignore
+
+  # The cross-adapter suite (Kafka, Redis, Postgres in real containers).
+  # It skips itself in CI unless PERFECT_INTEGRATION=1, so without this job it
+  # never ran in CI.
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PERFECT_INTEGRATION: "1"
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Cache Bun install cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock', 'package.json', 'packages/*/package.json', 'templates/*/package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      - run: bun install --frozen-lockfile
+
+      - run: bun test packages/integration
 
   rust:
     runs-on: ubuntu-latest
