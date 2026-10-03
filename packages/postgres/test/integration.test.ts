@@ -114,6 +114,60 @@ describe.skipIf(!dockerAvailable)("integration — postgres:17-alpine", () => {
     expect((await queue.metrics()).total).toBe(0);
   }, 20_000);
 
+  it("pg-queue: a message whose consumer died is delivered again after its timeout", async () => {
+    const queue = await PgQueue.create<string>(db, "redelivery", { pollIntervalMs: 20 });
+    await queue.publish("retry-me");
+
+    // First consumer claims the message for 1 second and never acks.
+    const [first] = await run(queue.subscribeAck({ vtSeconds: 1 }).take(1).toArray().orDie());
+    expect(first!.metadata.attemptCount).toBe(1);
+
+    // Once the timeout runs out, a second consumer gets it.
+    const [second] = await run(queue.subscribeAck({ vtSeconds: 30 }).take(1).toArray().orDie());
+    expect(second!.value).toBe("retry-me");
+    expect(second!.metadata.attemptCount).toBe(2);
+
+    // The first consumer's late ack must not delete the second delivery.
+    await first!.ack();
+    expect((await queue.metrics()).processing).toBe(1);
+
+    await second!.ack();
+    expect((await queue.metrics()).total).toBe(0);
+  }, 20_000);
+
+  it("pg-queue: a message is marked dead after maxAttempts, and requeueDead brings it back", async () => {
+    const queue = await PgQueue.create<string>(db, "dead-letters", {
+      pollIntervalMs: 20,
+      maxAttempts: 2,
+    });
+    await queue.publish("poison");
+
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      const [envelope] = await run(queue.subscribeAck().take(1).toArray().orDie());
+      expect(envelope!.metadata.attemptCount).toBe(attempt);
+      await envelope!.nack();
+    }
+
+    let m = await queue.metrics();
+    expect(m.dead).toBe(1);
+    expect(m.pending).toBe(0);
+
+    expect(await queue.requeueDead()).toBe(1);
+    m = await queue.metrics();
+    expect(m.dead).toBe(0);
+    expect(m.pending).toBe(1);
+  }, 20_000);
+
+  it("pg-queue: works with a queue name that has capitals and dashes", async () => {
+    const queue = await PgQueue.create<{ n: number }>(db, "Order-Events", { pollIntervalMs: 20 });
+    await queue.publish({ n: 1 }, { headers: { "it's": "quoted" } });
+    const [envelope] = await run(queue.subscribeAck().take(1).toArray().orDie());
+    expect(envelope!.value).toEqual({ n: 1 });
+    expect(envelope!.metadata.headers).toEqual({ "it's": "quoted" });
+    await envelope!.ack();
+    await queue.drop();
+  }, 20_000);
+
   it("change-stream: NOTIFY round-trip reaches a live subscriber", async () => {
     await db.execute(
       sql.raw(`
