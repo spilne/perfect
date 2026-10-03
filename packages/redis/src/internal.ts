@@ -11,9 +11,62 @@ export function redisEff<A>(
   return fromPromise(thunk, (cause) => toRedisError(operation, cause));
 }
 
-// Runs a blocking command on a dedicated connection. `giveBack` puts back what
-// the command took (a list item, a wake-up token) when nobody receives it: the
-// waiter was interrupted as the command completed, before it ran.
+// ── Connections for blocking commands ──────────────────────────────
+//
+// A blocking command (BRPOP) ties up its connection until it returns, so it
+// can't share the main client. Opening a new connection for every wait was
+// expensive: an idle RedisQueue consumer polls every 100 ms and opened and
+// closed about ten connections a second.
+//
+// Instead, each client keeps a few idle blocking connections. A wait
+// borrows one and gives it back when the command finishes. A connection
+// that sits idle for IDLE_CLOSE_MS is closed, so a program that is done
+// with Redis can still exit.
+
+const MAX_IDLE_CONNECTIONS = 4;
+const IDLE_CLOSE_MS = 1_000;
+
+interface IdleConnection {
+  readonly client: RedisClient;
+  readonly closeTimer: ReturnType<typeof setTimeout>;
+}
+
+const idleConnections = new WeakMap<RedisClient, IdleConnection[]>();
+
+async function borrowConnection(redis: RedisClient): Promise<RedisClient> {
+  const idle = idleConnections.get(redis)?.pop();
+  if (idle !== undefined) {
+    clearTimeout(idle.closeTimer);
+    return idle.client;
+  }
+  return redis.duplicate();
+}
+
+function returnConnection(redis: RedisClient, client: RedisClient): void {
+  let idle = idleConnections.get(redis);
+  if (idle === undefined) {
+    idle = [];
+    idleConnections.set(redis, idle);
+  }
+  if (idle.length >= MAX_IDLE_CONNECTIONS) {
+    closeRedisClient(client);
+    return;
+  }
+  const list = idle;
+  const entry: IdleConnection = {
+    client,
+    closeTimer: setTimeout(() => {
+      const index = list.indexOf(entry);
+      if (index !== -1) list.splice(index, 1);
+      closeRedisClient(client);
+    }, IDLE_CLOSE_MS),
+  };
+  list.push(entry);
+}
+
+// Runs a blocking command on a connection of its own. `giveBack` puts back
+// what the command took (a list item, a wake-up token) when nobody receives
+// it: the waiter was interrupted as the command completed, before it ran.
 export function redisBlocking<A>(
   redis: RedisClient,
   operation: string,
@@ -25,17 +78,21 @@ export function redisBlocking<A>(
     let client: RedisClient | null = null;
     let canceled = false;
 
-    void Promise.resolve(redis.duplicate()).then(
-      async (duplicate) => {
-        client = duplicate;
+    void borrowConnection(redis).then(
+      async (borrowed) => {
+        client = borrowed;
+        let reusable = false;
         try {
-          const value = await run(duplicate);
+          const value = await run(borrowed);
+          // The command finished normally, so the connection is free again.
+          reusable = !canceled;
           if (canceled) giveBack?.(value);
           else resume(succeed(value), giveBack && (() => giveBack(value)));
         } catch (cause) {
           if (!canceled) resume(fail(toRedisError(operation, cause)));
         } finally {
-          closeRedisClient(duplicate);
+          if (reusable) returnConnection(redis, borrowed);
+          else closeRedisClient(borrowed);
         }
       },
       (cause) => {
@@ -43,6 +100,8 @@ export function redisBlocking<A>(
       },
     );
 
+    // Interrupted while the command is still blocked: the connection is busy
+    // with a command nobody waits for, so close it rather than reuse it.
     return () => {
       canceled = true;
       if (client) closeRedisClient(client);
