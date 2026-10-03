@@ -32,6 +32,7 @@ import type {
   Partition,
 } from "@spilne/perfect-core/connect";
 import type {
+  KafkaAdmin,
   KafkaClient,
   KafkaConsumer,
   KafkaConsumerOptions,
@@ -101,7 +102,9 @@ export class KafkaTopic<T>
   private readonly batchEmit: boolean;
   private readonly consumerOptions?: Omit<KafkaConsumerOptions, "groupId">;
 
-  private producer?: KafkaProducer;
+  // Connected once and shared. Kept as a promise so two publishes that
+  // start together wait for the same producer instead of making two.
+  private producer?: Promise<KafkaProducer>;
   private _partitions?: number;
 
   constructor(config: KafkaTopicConfig<T>) {
@@ -121,13 +124,25 @@ export class KafkaTopic<T>
   /** Fetch and cache the partition count from the broker. */
   async fetchPartitions(): Promise<number> {
     if (this._partitions) return this._partitions;
-    const admin = this.kafka.admin();
-    await admin.connect();
-    if (admin.fetchTopicPartitionCount) {
-      this._partitions = await admin.fetchTopicPartitionCount(this.topic);
-    }
-    await admin.disconnect();
+    await withAdmin(this.kafka, async (admin) => {
+      if (admin.fetchTopicPartitionCount) {
+        this._partitions = await admin.fetchTopicPartitionCount(this.topic);
+      }
+    });
     return this._partitions ?? 1;
+  }
+
+  private connectedProducer(): Promise<KafkaProducer> {
+    if (this.producer === undefined) {
+      const producer = this.kafka.producer();
+      const ready = producer.connect().then(() => producer);
+      this.producer = ready;
+      // A failed connect is forgotten, so the next publish tries again.
+      ready.catch(() => {
+        if (this.producer === ready) this.producer = undefined;
+      });
+    }
+    return this.producer;
   }
 
   // =========================================================================
@@ -137,13 +152,9 @@ export class KafkaTopic<T>
   publish(value: T, params?: { key: string }): Eff<void, Throws<KafkaError>> {
     return fromPromise(
       async () => {
-        if (!this.producer) {
-          this.producer = this.kafka.producer();
-          await this.producer.connect();
-        }
-
+        const producer = await this.connectedProducer();
         const encoded = this.codec.encode(value);
-        await this.producer.send({
+        await producer.send({
           topic: this.topic,
           messages: [
             {
@@ -160,12 +171,8 @@ export class KafkaTopic<T>
   publishBatch(messages: { value: T; key?: string }[]): Eff<void, Throws<KafkaError>> {
     return fromPromise(
       async () => {
-        if (!this.producer) {
-          this.producer = this.kafka.producer();
-          await this.producer.connect();
-        }
-
-        await this.producer.send({
+        const producer = await this.connectedProducer();
+        await producer.send({
           topic: this.topic,
           messages: messages.map((m) => ({
             key: m.key ?? null,
@@ -353,23 +360,72 @@ export class KafkaTopic<T>
   // Checkpointable — offset management
   // =========================================================================
 
+  //
+  // The Checkpointable contract stores a position as one string. For a
+  // topic with one partition that is just the offset ("42"). A topic with
+  // more partitions needs one offset per partition, written as
+  // "partition:offset" pairs: "0:42,1:17". (Before, both methods silently
+  // used partition 0 only.) commitOffsets / getCommittedOffsets take and
+  // return a { partition: offset } map directly.
+
   async commitOffset(params: { group: ConsumerGroup; offset: string }): Promise<void> {
-    const consumer = this.kafka.consumer({ groupId: params.group });
-    await consumer.connect();
-    await consumer.commitOffsets([
-      { topic: this.topic, partition: PartitionId(0), offset: KafkaOffset(params.offset) },
-    ]);
-    await consumer.disconnect();
+    const offsets = params.offset.includes(":")
+      ? parseOffsetMap(params.offset)
+      : await this.singlePartitionOffset(params.offset);
+    await this.commitOffsets({ group: params.group, offsets });
   }
 
   async getCommittedOffset(params: { group: ConsumerGroup }): Promise<string | null> {
-    const admin = this.kafka.admin();
-    await admin.connect();
-    const offsets = await admin.fetchOffsets({ groupId: params.group, topics: [this.topic] });
-    await admin.disconnect();
-    const topicOffset = offsets.find((o) => o.topic === this.topic);
-    if (!topicOffset || topicOffset.partitions.length === 0) return null;
-    return topicOffset.partitions[0]!.offset;
+    const offsets = await this.getCommittedOffsets(params);
+    const partitions = Object.keys(offsets);
+    if (partitions.length === 0) return null;
+    if (partitions.length === 1 && partitions[0] === "0") return offsets[0]!;
+    return formatOffsetMap(offsets);
+  }
+
+  /** Commit one offset per partition, e.g. `{ 0: "42", 1: "17" }`. */
+  async commitOffsets(params: {
+    group: ConsumerGroup;
+    offsets: Record<number, string>;
+  }): Promise<void> {
+    const consumer = this.kafka.consumer({ groupId: params.group });
+    await consumer.connect();
+    try {
+      await consumer.commitOffsets(
+        Object.entries(params.offsets).map(([partition, offset]) => ({
+          topic: this.topic,
+          partition: PartitionId(Number(partition)),
+          offset: KafkaOffset(offset),
+        })),
+      );
+    } finally {
+      await consumer.disconnect();
+    }
+  }
+
+  /** The committed offset of every partition that has one. */
+  async getCommittedOffsets(params: { group: ConsumerGroup }): Promise<Record<number, string>> {
+    const offsets = await withAdmin(this.kafka, (admin) =>
+      admin.fetchOffsets({ groupId: params.group, topics: [this.topic] }),
+    );
+    const result: Record<number, string> = {};
+    const topicOffsets = offsets.find((o) => o.topic === this.topic);
+    for (const { partition, offset } of topicOffsets?.partitions ?? []) {
+      // Kafka reports "-1" for a partition with nothing committed yet.
+      if (offset !== "-1") result[partition] = offset;
+    }
+    return result;
+  }
+
+  private async singlePartitionOffset(offset: string): Promise<Record<number, string>> {
+    const partitions = await this.fetchPartitions();
+    if (partitions > 1) {
+      throw new Error(
+        `Topic ${this.topic} has ${partitions} partitions. Pass one offset per partition ` +
+          `("0:42,1:17") or use commitOffsets.`,
+      );
+    }
+    return { 0: offset };
   }
 
   // =========================================================================
@@ -380,10 +436,9 @@ export class KafkaTopic<T>
     if (!offset || !consumer.seek) return;
 
     if (offset.type === "timestamp") {
-      const admin = this.kafka.admin();
-      await admin.connect();
-      const result = await admin.fetchTopicOffsetsByTimestamp(this.topic, offset.value);
-      await admin.disconnect();
+      const result = await withAdmin(this.kafka, (admin) =>
+        admin.fetchTopicOffsetsByTimestamp(this.topic, offset.value),
+      );
       for (const partition of result) {
         consumer.seek({
           topic: this.topic,
@@ -584,6 +639,43 @@ export class KafkaTopic<T>
   // =========================================================================
 
   async disconnect(): Promise<void> {
-    await this.producer?.disconnect();
+    const producer = this.producer;
+    this.producer = undefined;
+    if (producer !== undefined) await (await producer).disconnect();
   }
+}
+
+// Connect an admin client, use it, and always disconnect it, even when
+// `use` throws. (Before, a throw left the client connected.)
+async function withAdmin<A>(
+  kafka: KafkaClient,
+  use: (admin: KafkaAdmin) => Promise<A>,
+): Promise<A> {
+  const admin = kafka.admin();
+  await admin.connect();
+  try {
+    return await use(admin);
+  } finally {
+    await admin.disconnect();
+  }
+}
+
+/** "0:42,1:17" → { 0: "42", 1: "17" } */
+export function parseOffsetMap(text: string): Record<number, string> {
+  const offsets: Record<number, string> = {};
+  for (const pair of text.split(",")) {
+    const [partition, offset] = pair.split(":");
+    if (partition === undefined || offset === undefined || !/^\d+$/.test(partition.trim())) {
+      throw new Error(`Invalid Kafka offset "${text}"; expected "partition:offset" pairs`);
+    }
+    offsets[Number(partition)] = offset.trim();
+  }
+  return offsets;
+}
+
+/** { 0: "42", 1: "17" } → "0:42,1:17" */
+export function formatOffsetMap(offsets: Record<number, string>): string {
+  return Object.entries(offsets)
+    .map(([partition, offset]) => `${partition}:${offset}`)
+    .join(",");
 }
