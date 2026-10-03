@@ -26,6 +26,8 @@ const EXCLUDED_FROM_NODE_CI = new Set([
   // Uses Bun.serve/Bun.sleep to drive a slow response body; there is no
   // node equivalent in this harness.
   "packages/http/test/transport-body-lifetime.test.ts",
+  // Uses Bun.serve for a real streaming server.
+  "packages/http/test/stream-timeouts.test.ts",
   // Drives the Bun plugin API (and Bun.file / import.meta.path) directly.
   "packages/transform/test/transform-plugin.test.ts",
 ]);

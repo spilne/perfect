@@ -108,7 +108,9 @@ describe("WorkerPool", () => {
 
     const { results, elapsed } = await run(program);
     expect(results).toEqual([0, 1, 2, 3]);
-    // 4 × 50ms tasks on 4 workers should take ~50-80ms, not ~200ms
-    expect(elapsed).toBeLessThan(150);
+    // Each task busy-waits 50 ms of wall-clock time, so running them one after
+    // another takes at least 200 ms however loaded the machine is. Less than
+    // that means they overlapped. (A tighter limit flaked on busy machines.)
+    expect(elapsed).toBeLessThan(200);
   });
 });

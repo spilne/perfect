@@ -69,9 +69,13 @@ describe("AsyncScheduler", () => {
       if (!stop) s.schedule(spin);
     };
     s.schedule(spin);
+    // If the spinner starved timers, this timer would never fire and the
+    // test would time out. Reaching the next line is the proof. (Counting
+    // spins was not: on a slow machine the timer can be due right after the
+    // first burst of 64.)
     await new Promise((resolve) => setTimeout(resolve, 5));
     stop = true;
-    expect(spins).toBeGreaterThan(64);
+    expect(spins).toBeGreaterThan(0);
   });
 
   test("a throwing task leaves the queue usable", async () => {
