@@ -10,6 +10,7 @@ import {
   context as otelContext,
   trace,
   ROOT_CONTEXT,
+  propagation,
 } from "@opentelemetry/api";
 import {
   type Eff,
@@ -323,5 +324,85 @@ describe("TracingFetchTransport — W3C traceparent injection", () => {
     // that the call went through cleanly. Real propagator integration tests
     // live in apps that register @opentelemetry/core's W3CTraceContextPropagator.
     expect(inner.lastOptions?.url).toBe("/x");
+  });
+});
+
+describe("tracingMiddleware + TracingFetchTransport together", () => {
+  // A propagator that writes the parent span's id into a header, so the test
+  // can see which span the downstream service would attach to.
+  const spanIdPropagator = {
+    inject(ctx: any, carrier: any, setter: any) {
+      const span = trace.getSpan(ctx);
+      if (span) setter.set(carrier, "x-parent-span", span.spanContext().spanId);
+    },
+    extract: (ctx: any) => ctx,
+    fields: () => ["x-parent-span"],
+  };
+
+  // Spans with distinct ids, so we can tell them apart.
+  function idTracer(): { tracer: Tracer; ids: string[] } {
+    const ids: string[] = [];
+    const tracer = {
+      startSpan(name: string): Span {
+        const spanId = String(ids.length + 1).padStart(16, "0");
+        ids.push(spanId);
+        return {
+          setAttribute: () => undefined,
+          setAttributes: () => undefined,
+          setStatus: () => undefined,
+          recordException: () => undefined,
+          end: () => undefined,
+          spanContext: () => ({ traceId: "1".repeat(32), spanId, traceFlags: 1 }),
+          name,
+        } as unknown as Span;
+      },
+    } as unknown as Tracer;
+    return { tracer, ids };
+  }
+
+  test("the injected parent is the request's own client span", async () => {
+    propagation.setGlobalPropagator(spanIdPropagator as any);
+    try {
+      const { tracer, ids } = idTracer();
+      const inner = new StubTransport(() => json({ id: 1, name: "x" }));
+      const client = new DefaultHttpClient({
+        middleware: [tracingMiddleware({ tracer })],
+        transport: new TracingFetchTransport({ tracer, inner }),
+      });
+
+      await run(client.get("/users/1", UserParser));
+
+      expect(ids).toHaveLength(1);
+      expect(inner.lastOptions?.headers?.["x-parent-span"]).toBe(ids[0]);
+    } finally {
+      propagation.disable();
+    }
+  });
+
+  test("two runs of the same request effect get their own spans", async () => {
+    propagation.setGlobalPropagator(spanIdPropagator as any);
+    try {
+      const { tracer, ids } = idTracer();
+      const seen: string[] = [];
+      const inner: HttpTransport = {
+        execute: (options) =>
+          async<Response, never>((resume) => {
+            seen.push(options.headers?.["x-parent-span"] ?? "none");
+            setTimeout(() => resume(succeed(json({ id: 1, name: "x" }))), 5);
+          }) as any,
+      };
+      const client = new DefaultHttpClient({
+        middleware: [tracingMiddleware({ tracer })],
+        transport: new TracingFetchTransport({ tracer, inner }),
+      });
+      const request = client.get("/users/1", UserParser);
+
+      await Promise.all([run(request), run(request)]);
+
+      expect(ids).toHaveLength(2);
+      expect([...seen].sort()).toEqual([...ids].sort());
+    } finally {
+      propagation.disable();
+    }
   });
 });

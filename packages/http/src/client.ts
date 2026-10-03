@@ -365,20 +365,24 @@ export class DefaultHttpClient extends AbstractHttpClient {
       url,
       tag: params.tag,
     };
-    const eff = httpRequest<T, E>({
-      url,
-      method: params.method,
-      headers: this.mergeHeaders(params.headers),
-      json: params.json,
-      body: params.body,
-      timeoutMs: params.timeoutMs ?? this.config.timeoutMs,
-      schema: params.schema,
-      acceptStatus: params.acceptStatus,
-      errorSchema: (params.errorSchema ?? this.config.errorSchema) as ResponseParser<E> | undefined,
-      transport: this.config.transport,
-      proxy: this.config.proxy,
-    });
-    return this.instrument(eff, context);
+    return this.instrument(context, (runContext) =>
+      httpRequest<T, E>({
+        context: runContext,
+        url,
+        method: params.method,
+        headers: this.mergeHeaders(params.headers),
+        json: params.json,
+        body: params.body,
+        timeoutMs: params.timeoutMs ?? this.config.timeoutMs,
+        schema: params.schema,
+        acceptStatus: params.acceptStatus,
+        errorSchema: (params.errorSchema ?? this.config.errorSchema) as
+          | ResponseParser<E>
+          | undefined,
+        transport: this.config.transport,
+        proxy: this.config.proxy,
+      }),
+    );
   }
 
   getText<E = string>(
@@ -387,19 +391,21 @@ export class DefaultHttpClient extends AbstractHttpClient {
   ): Eff<string, Throws<HttpClientError>> {
     const url = this.resolveUrl(path);
     const context: HttpRequestContext = { method: "GET", url, tag: options?.tag };
-    const eff = httpRequestText<E>({
-      url,
-      method: "GET",
-      headers: this.mergeHeaders(options?.headers),
-      timeoutMs: options?.timeoutMs ?? this.config.timeoutMs,
-      acceptStatus: options?.acceptStatus,
-      errorSchema: (options?.errorSchema ?? this.config.errorSchema) as
-        | ResponseParser<E>
-        | undefined,
-      transport: this.config.transport,
-      proxy: this.config.proxy,
-    });
-    return this.instrument(eff, context);
+    return this.instrument(context, (runContext) =>
+      httpRequestText<E>({
+        context: runContext,
+        url,
+        method: "GET",
+        headers: this.mergeHeaders(options?.headers),
+        timeoutMs: options?.timeoutMs ?? this.config.timeoutMs,
+        acceptStatus: options?.acceptStatus,
+        errorSchema: (options?.errorSchema ?? this.config.errorSchema) as
+          | ResponseParser<E>
+          | undefined,
+        transport: this.config.transport,
+        proxy: this.config.proxy,
+      }),
+    );
   }
 
   getResponse<T = ReadableStream<Uint8Array>, E = string>(
@@ -409,43 +415,45 @@ export class DefaultHttpClient extends AbstractHttpClient {
     const decoder = options?.decoder ?? (binaryDecoder as unknown as ResponseDecoder<T>);
     const url = this.resolveUrl(path);
     const context: HttpRequestContext = { method: "GET", url, tag: options?.tag };
-    const inner = httpFetchOk<E>({
-      url,
-      method: "GET",
-      headers: this.mergeHeaders(options?.headers),
-      timeoutMs: options?.timeoutMs ?? this.config.timeoutMs,
-      acceptStatus: options?.acceptStatus,
-      errorSchema: (options?.errorSchema ?? this.config.errorSchema) as
-        | ResponseParser<E>
-        | undefined,
-      transport: this.config.transport,
-      proxy: this.config.proxy,
-    }).flatMap((response) =>
-      (
-        sync(() => ({
-          status: response.status,
-          headers: response.headers,
-          contentType: response.headers.get("content-type"),
-          contentLength: (() => {
-            const l = response.headers.get("content-length");
-            return l === null ? null : Number(l);
-          })(),
-          response,
-        })) as any
-      ).flatMap((meta: any) =>
-        // Decoder returns a Promise — bridge via tryPromise
-        succeed(null).flatMap(() => {
-          return decodeResponse(meta.response, decoder).map((body: T): HttpResponse<T> => ({
-            status: meta.status,
-            headers: meta.headers,
-            contentType: meta.contentType,
-            contentLength: meta.contentLength,
-            body,
-          }));
-        }),
-      ),
-    ) as Eff<HttpResponse<T>, Throws<HttpClientError>>;
-    return this.instrument(inner, context);
+    const inner = (runContext: HttpRequestContext) =>
+      httpFetchOk<E>({
+        context: runContext,
+        url,
+        method: "GET",
+        headers: this.mergeHeaders(options?.headers),
+        timeoutMs: options?.timeoutMs ?? this.config.timeoutMs,
+        acceptStatus: options?.acceptStatus,
+        errorSchema: (options?.errorSchema ?? this.config.errorSchema) as
+          | ResponseParser<E>
+          | undefined,
+        transport: this.config.transport,
+        proxy: this.config.proxy,
+      }).flatMap((response) =>
+        (
+          sync(() => ({
+            status: response.status,
+            headers: response.headers,
+            contentType: response.headers.get("content-type"),
+            contentLength: (() => {
+              const l = response.headers.get("content-length");
+              return l === null ? null : Number(l);
+            })(),
+            response,
+          })) as any
+        ).flatMap((meta: any) =>
+          // Decoder returns a Promise — bridge via tryPromise
+          succeed(null).flatMap(() => {
+            return decodeResponse(meta.response, decoder).map((body: T): HttpResponse<T> => ({
+              status: meta.status,
+              headers: meta.headers,
+              contentType: meta.contentType,
+              contentLength: meta.contentLength,
+              body,
+            }));
+          }),
+        ),
+      ) as Eff<HttpResponse<T>, Throws<HttpClientError>>;
+    return this.instrument(context, inner);
   }
 
   // ── Internals ───────────────────────────────────────────────────
@@ -476,20 +484,19 @@ export class DefaultHttpClient extends AbstractHttpClient {
    *  them fires for every request whose onRequest fired, interrupted or not.
    */
   private instrument<A, E extends HttpClientError>(
-    eff: Eff<A, Throws<E>>,
-    context: HttpRequestContext,
+    request: HttpRequestContext,
+    build: (context: HttpRequestContext) => Eff<A, Throws<E>>,
   ): Eff<A, Throws<E>> {
     const middleware = this.config.middleware;
-    if (!middleware || middleware.length === 0) return eff;
-    // Mutable twin of the context, shared across the lifecycle.
-    const mut = context as any as {
-      method: string;
-      url: string;
-      tag?: string;
-      durationMs: number;
-    };
+    if (!middleware || middleware.length === 0) return build(request);
     return suspend(() => {
-      // Per run: the same request effect may be retried or run concurrently.
+      // A new context for every run: the same request effect may be retried
+      // or run twice at once, and middleware keys per-request state (like a
+      // span) off this object. It is also handed to the transport.
+      const context: HttpRequestContext = { ...request };
+      const eff = build(context);
+      // Mutable twin of the context, shared across the lifecycle.
+      const mut = context as any as { durationMs: number };
       let start = -1;
       const started = sync(() => {
         for (const mw of middleware) mw.onRequest?.(context);

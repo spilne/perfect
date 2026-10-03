@@ -17,6 +17,7 @@
 //      INSIDE the transport. Higher layers only handle "I have a Response,
 //      what now?"
 
+import type { HttpRequestContext } from "./middleware.js";
 import { type Eff, type Throws, sync, tryPromise, scoped } from "@spilne/perfect-core";
 import { HttpNetworkError, HttpTimeoutError, type HttpClientError } from "./errors.js";
 
@@ -50,6 +51,12 @@ export interface HttpRequestOptions {
   readonly signal?: AbortSignal;
   /** Proxy for this request. */
   readonly proxy?: HttpProxyConfig;
+  /**
+   * The request as middleware sees it: the same object their hooks get for
+   * this run. Set by the HTTP client, so a transport can find state that
+   * middleware keeps per request (the tracing span, for example).
+   */
+  readonly context?: HttpRequestContext;
 }
 
 /**
