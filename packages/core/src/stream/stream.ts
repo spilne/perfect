@@ -3040,8 +3040,8 @@ export class Stream<A, S = never> {
   }
 
   /**
-   * Run `f` on each value until it returns false. The stream is not pulled
-   * any further, and its finalizers run.
+   * Run `f` on each value until it returns false. After that we stop
+   * reading the stream and run its cleanup (finalizers).
    */
   forEachWhile<S2>(f: (a: A) => Eff<boolean, S2>): Eff<void, S | S2> {
     function go(stream: Stream<A, any>): Eff<void, any> {
@@ -3216,15 +3216,20 @@ function trapDefects<E>(cause: Cause<E>, classes: readonly DefectClass[]): Cause
   }
 }
 
-// Index loops rather than a chain built over the whole chunk up front: an
-// element whose effect has already succeeded is consumed inline, and only an
-// effect that has work to do costs a FlatMap frame. Each loop walks a copy
-// taken before the first callback, because a chunk may share an array the
-// callbacks mutate.
+// These helpers run `f` on every item of a chunk with a plain loop.
+//
+// The old version built one big chain of flatMaps for the whole chunk
+// before running anything, which was slow and used a lot of memory. Now, if
+// `f` returns an effect that is already done (like succeed(x)), we just take
+// the value and move on. Only effects that really need to run get a flatMap.
+//
+// We copy the chunk first, because the chunk can share its array with user
+// code, and `f` might change that array while we loop.
 function evalMapChunk<A, B, S>(chunk: Chunk<A>, f: (a: A) => Eff<B, S>): Eff<Chunk<B>, S> {
   const length = chunk.length;
   if (length === 0) return succeed(Chunk.empty()) as any;
-  // Results overwrite the copy in place: slot i is read before it is written.
+  // We reuse the copy for the results: we always read item i before we
+  // write result i, so nothing gets overwritten too early.
   const items = chunk.toArray() as unknown[];
   const loop = (from: number): Eff<Chunk<B>, S> => {
     for (let i = from; i < length; i++) {
