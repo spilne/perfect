@@ -273,7 +273,7 @@ describe("Extension pattern — custom subclass", () => {
       return this.get(`/users/${id}`, UserParser);
     }
     override withOverrides(overrides: Partial<HttpClientConfig>): MyApiClient {
-      return new MyApiClient({ ...(this as any).config, ...overrides });
+      return new MyApiClient({ ...this.config, ...overrides });
     }
   }
 
