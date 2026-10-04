@@ -47,6 +47,7 @@ export type {
   TimeWindow,
   WindowType,
   WindowOptions,
+  StepOptions,
   AggregateSpec,
   ProcessSpec,
   JoinConfig,

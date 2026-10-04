@@ -24,6 +24,7 @@ import type {
   JoinConfig,
   CompiledTopology,
   WindowOptions,
+  StepOptions,
 } from "./types.js";
 
 // ---------------------------------------------------------------------------
@@ -161,16 +162,22 @@ export class KeyedTopology<K extends string, T> {
   }
 
   /** Deduplicate by a key derived from each item. */
-  dedupe(fn: (value: T) => string): KeyedTopology<K, T> {
-    return new KeyedTopology({ type: "dedupe", parent: this.node, keyFn: fn as any });
+  dedupe(fn: (value: T) => string, options: StepOptions = {}): KeyedTopology<K, T> {
+    return new KeyedTopology({
+      type: "dedupe",
+      parent: this.node,
+      keyFn: fn as any,
+      name: options.name,
+    });
   }
 
   /** Stateful per-key processing. Each key has its own state instance. */
-  process<S, U>(spec: ProcessSpec<S, T, U>): StreamTopology<U> {
+  process<S, U>(spec: ProcessSpec<S, T, U>, options: StepOptions = {}): StreamTopology<U> {
     return new StreamTopology({
       type: "process",
       parent: this.node,
       spec: spec as ProcessSpec<unknown, unknown, U>,
+      name: options.name,
     });
   }
 
@@ -181,17 +188,19 @@ export class KeyedTopology<K extends string, T> {
       parent: this.node,
       windowType: { type: "tumbling", windowMs },
       allowedLatenessMs: options.allowedLatenessMs,
+      name: options.name,
     });
   }
 
   /** Sliding window — fixed-size, overlapping. */
   sliding(params: { windowMs: number; slideMs: number } & WindowOptions): WindowedTopology<K, T> {
-    const { windowMs, slideMs, allowedLatenessMs } = params;
+    const { windowMs, slideMs, allowedLatenessMs, name } = params;
     return new WindowedTopology({
       type: "window",
       parent: this.node,
       windowType: { type: "sliding", windowMs, slideMs },
       allowedLatenessMs,
+      name,
     });
   }
 
@@ -202,6 +211,7 @@ export class KeyedTopology<K extends string, T> {
       parent: this.node,
       windowType: { type: "session", gapMs },
       allowedLatenessMs: options.allowedLatenessMs,
+      name: options.name,
     });
   }
 
