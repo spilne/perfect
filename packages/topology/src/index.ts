@@ -46,6 +46,7 @@ export type { ShuffleTransport } from "@spilne/perfect-core/connect";
 export type {
   TimeWindow,
   WindowType,
+  WindowOptions,
   AggregateSpec,
   ProcessSpec,
   JoinConfig,

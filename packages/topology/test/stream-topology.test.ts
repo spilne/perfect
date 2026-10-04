@@ -745,8 +745,10 @@ describe("WindowManager — session windows close after inactivity gap", () => {
     manager.add("u1", "products", 200);
     manager.add("u1", "cart", 400);
 
-    // Event at 1200 — gap of 800ms > 500ms, closes session 1 and starts session 2
-    const emitted = manager.add("u1", "checkout", 1200);
+    // Event at 1200 — gap of 800ms > 500ms, so it starts session 2, and the
+    // watermark at 1200 closes session 1.
+    manager.add("u1", "checkout", 1200);
+    const emitted = manager.close(1200);
 
     expect(emitted).toEqual([
       {

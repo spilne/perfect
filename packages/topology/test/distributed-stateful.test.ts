@@ -121,8 +121,13 @@ describe("DistributedRunner with state after shuffle()", () => {
         .to(out),
       "window-after-shuffle",
     );
-    // ann's click at 1500 closes ann's first window.
-    expect(out.items).toEqual([{ key: "ann", window: { start: 0, end: 1_000 }, count: 2 }]);
+    // The click at 1500 closes the first window of every user; the rest is
+    // emitted when the input ends.
+    expect(out.items).toEqual([
+      { key: "ann", window: { start: 0, end: 1_000 }, count: 2 },
+      { key: "bob", window: { start: 0, end: 1_000 }, count: 1 },
+      { key: "ann", window: { start: 1_000, end: 2_000 }, count: 1 },
+    ]);
   });
 
   test("process keeps per-key state after a shuffle", async () => {

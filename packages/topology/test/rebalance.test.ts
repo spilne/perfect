@@ -158,12 +158,15 @@ describe("partitions moving between instances", () => {
     // The partition comes back to A; a later click closes the window.
     a.assign();
     a.send(clickEnvelope({ key: "k", ts: 1_500 }, 3, acked));
-    await settle();
     a.end();
+    await runnerA.awaitExit();
     await runnerA.shutdown();
 
-    expect(outA.items).toEqual([{ key: "k", window: { start: 0, end: 1_000 }, count: 3 }]);
-    expect(outB.items).toEqual([]);
+    // B's source ends, so B emits the window it holds, including A's earlier
+    // click. When the partition comes back, A must not emit that window again
+    // from its own old copy (count 1); it only has the later window.
+    expect(outB.items).toEqual([{ key: "k", window: { start: 0, end: 1_000 }, count: 3 }]);
+    expect(outA.items).toEqual([{ key: "k", window: { start: 1_000, end: 2_000 }, count: 1 }]);
   });
 
   test("a record that arrives after its partition was taken away is left for the new owner", async () => {

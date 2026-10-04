@@ -107,17 +107,30 @@ Without `eventTime`, the time is read from the value: the first of `ts`,
 `timestamp` or `eventTime` that is a number, or `createdAt` as an ISO date
 string, and otherwise the current time.
 
-A key's windows close when **that key** gets a record whose time is past the
-window's end:
+### When windows close
 
-- A key that stops receiving records keeps its last windows open (and in
-  state) until it gets another record.
-- Windows still open when a finite source ends are not emitted.
-- A record older than windows that already closed opens them again, so they
-  can be emitted twice. Sources should deliver records roughly in time order
-  per key.
-- A session window gets one session per key; a record arriving after a gap
-  longer than `gapMs` closes the old session and starts a new one.
+Each partition keeps a **watermark**: the newest event time it has seen,
+minus the window's allowed lateness. A window closes, and its result is
+emitted, as soon as the watermark passes its end, whichever key moved it.
+So a user who goes quiet still gets their window emitted once other records
+move time on.
+
+- **Late records** are records for windows that already closed. They are
+  dropped and counted in `metrics().lateRecords`, so a window is never
+  emitted twice.
+- **Allowed lateness** keeps windows open for records that arrive out of
+  order: `.tumbling(60_000, { allowedLatenessMs: 5_000 })` waits until the
+  partition has seen a record 5 s past a window's end before closing it.
+  `sliding` and `session` take the same option.
+- **End of input:** when a finite source has no more records, every window
+  still open is emitted. (A source stopped by `shutdown()` is not "ended":
+  its windows stay in state for the next run.)
+- **Sessions:** a key's session ends after `gapMs` without records. A record
+  that lands between two sessions joins them into one; that needs the
+  aggregate's `merge` function, which `count()` and `sum()` have. A custom
+  `aggregate` without `merge` keeps the two sessions separate.
+- The watermark is saved with the state, so a restart doesn't reopen
+  windows that were already emitted.
 
 ## Stateful processing
 
