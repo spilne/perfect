@@ -91,7 +91,8 @@ describe("lengthPrefixed maxFrameBytes", () => {
     const out = await run(
       Stream.of(frame(new Uint8Array([5])))
         .through(Pipes.lengthPrefixed({ maxFrameBytes: 10 }))
-        .toArray(),
+        .toArray()
+        .orDie(),
     );
     expect(out.map((m) => [...m])).toEqual([[5]]);
   });

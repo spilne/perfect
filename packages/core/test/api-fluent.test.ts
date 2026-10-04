@@ -19,6 +19,7 @@ import {
   type Eff,
   type Throws,
 } from "../src";
+import { runUnchecked } from "./run-unchecked";
 
 describe("fluent API additions", () => {
   test(".provide(tag, impl) installs a service", () => {
@@ -41,7 +42,7 @@ describe("fluent API additions", () => {
       n < 3 ? (fail("transient") as Eff<never, Throws<string>>) : succeed("ok"),
     );
     calls = 0;
-    const result = await run(flakyTyped.retry(RetryPolicy.recurs(5)));
+    const result = await runUnchecked(flakyTyped.retry(RetryPolicy.recurs(5)));
     expect(result).toBe("ok");
     expect(calls).toBe(3);
   });
@@ -51,7 +52,7 @@ describe("fluent API additions", () => {
     const poller = sync(() => {
       calls++;
       return calls >= 3 ? "done" : "pending";
-    }) as any;
+    });
     const result = await run(
       poller.retryAllBy({
         baseDelayMs: 1,
@@ -59,7 +60,7 @@ describe("fluent API additions", () => {
           RetryAttempt.isSuccess(r) && r.value === "pending"
             ? RetryDecision.retry()
             : RetryDecision.stop(),
-      }) as any,
+      }),
     );
     expect(result).toBe("done");
     expect(calls).toBe(3);
@@ -67,7 +68,7 @@ describe("fluent API additions", () => {
 
   test(".timeout(ms, onTimeout) fluent variant", async () => {
     const slow = sleep(100).flatMap(() => succeed("late"));
-    const result = run(slow.timeout(10, () => "timeout"));
+    const result = runUnchecked(slow.timeout(10, () => "timeout"));
     await expect(result).rejects.toBe("timeout");
   });
 
@@ -116,6 +117,6 @@ describe("fluent API additions", () => {
       () => Promise.resolve(42),
       (e) => `err: ${e}`,
     );
-    expect(await run(p)).toBe(42);
+    expect(await runUnchecked(p)).toBe(42);
   });
 });

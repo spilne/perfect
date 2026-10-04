@@ -41,6 +41,7 @@ import {
   yieldNow,
 } from "../src";
 import { DEFAULT_BUDGET, type Scheduler } from "../src/scheduler";
+import { runFiberUnchecked } from "./run-unchecked";
 
 // Runs queued loop slices one at a time so a test can act between them.
 class StepScheduler implements Scheduler {
@@ -74,7 +75,7 @@ function gate(): { wait: Eff<void, never>; open: () => void } {
 }
 
 const waitForever = async<void>(() => () => {});
-const interrupted = { ok: false, cause: { _tag: "Interrupt" } };
+const interrupted = { ok: false, cause: { _tag: "Interrupt" } } as const;
 const macrotask = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 async function until(condition: () => boolean): Promise<void> {
@@ -110,7 +111,9 @@ describe("interruption hardening", () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
 
-    await run(interrupt(fiber));
+    // interrupt() takes a Fiber<unknown>, which rejects typed fibers because
+    // Fiber is invariant in its result type.
+    await run(interrupt(fiber as Fiber<any>));
     await fiber.await();
 
     expect(cancelled).toBe(1);
@@ -133,7 +136,7 @@ describe("interruption hardening", () => {
         ),
       );
 
-      await run(interrupt(fiber));
+      await run(interrupt(fiber as Fiber<any>));
       const exit = await fiber.await();
 
       expect(exit._tag).toBe("Failure");
@@ -223,7 +226,9 @@ describe("an interrupted fiber does not recover", () => {
     const children: Fiber<any>[] = [];
     const stop = addFiberSupervisor({ onFork: (_parent, child) => void children.push(child) });
     const fiber = runFiber(
-      ensuring(fail("E"), all([waitForever, waitForever])).catch(() => succeed("recovered")),
+      ensuring(fail("E"), all([waitForever, waitForever]).asVoid()).catch(() =>
+        succeed("recovered"),
+      ),
       scheduler,
     );
     scheduler.flush();
@@ -260,7 +265,7 @@ describe("an interrupted fiber does not recover", () => {
         let handled = false;
         let resumed = false;
         const { body, open } = setup();
-        const fiber = runFiber(
+        const fiber = runFiberUnchecked(
           recover(body.tapErrorCause(() => sync(() => void (handled = true)))).flatMap(() =>
             sync(() => void (resumed = true)),
           ),
@@ -319,7 +324,7 @@ describe("an interrupted fiber does not recover", () => {
   test("retry does not run an interrupted effect again", () => {
     const scheduler = new StepScheduler();
     let attempts = 0;
-    const fiber = runFiber(
+    const fiber = runFiberUnchecked(
       retry(
         ensuring(
           sync(() => void attempts++).flatMap(() => waitForever),
@@ -340,7 +345,7 @@ describe("an interrupted fiber does not recover", () => {
   test("a typed failure stays in the cause when no handler was bypassed", () => {
     const scheduler = new StepScheduler();
     const release = gate();
-    const fiber = runFiber(
+    const fiber = runFiberUnchecked(
       ensuring(
         succeed(1),
         release.wait.flatMap(() => fail("close failed")),
@@ -357,7 +362,7 @@ describe("an interrupted fiber does not recover", () => {
       left: { _tag: "Fail", error: "close failed" },
       right: { _tag: "Interrupt" },
     };
-    expect(fiber.result).toEqual({ ok: false, cause });
+    expect<unknown>(fiber.result).toEqual({ ok: false, cause });
     expect(Cause.squash(cause as Cause)).toBe("close failed");
   });
 });
@@ -392,13 +397,13 @@ describe("cleanup of an interrupted fiber", () => {
   test("singleflight releases the followers and the key", () => {
     const scheduler = new StepScheduler();
     const flights = Singleflight.make();
-    const leader = runFiber(flights.do("key", waitForever), scheduler);
+    const leader = runFiberUnchecked(flights.do("key", waitForever), scheduler);
     scheduler.flush();
-    const follower = runFiber(flights.do("key", succeed("unused")), scheduler);
+    const follower = runFiberUnchecked(flights.do("key", succeed("unused")), scheduler);
     scheduler.flush();
     leader.interrupt();
     scheduler.flush();
-    const next = runFiber(flights.do("key", succeed("fresh")), scheduler);
+    const next = runFiberUnchecked(flights.do("key", succeed("fresh")), scheduler);
     scheduler.flush();
 
     expect(leader.result).toEqual(interrupted);
@@ -441,7 +446,7 @@ describe("cleanup registered in the same step as the work it guards", () => {
       const flights = Singleflight.make();
       let body: Eff<void, never> = succeed(undefined);
       for (let i = 0; i < length; i++) body = body.flatMap(() => succeed(undefined));
-      const leader = runFiber(
+      const leader = runFiberUnchecked(
         body.flatMap(() => flights.do("key", waitForever)),
         scheduler,
       );
@@ -450,7 +455,7 @@ describe("cleanup registered in the same step as the work it guards", () => {
       windows++;
       leader.interrupt();
       scheduler.flush();
-      const next = runFiber(flights.do("key", succeed("fresh")), scheduler);
+      const next = runFiberUnchecked(flights.do("key", succeed("fresh")), scheduler);
       scheduler.flush();
 
       expect({ length, result: next.result }).toEqual({
@@ -593,7 +598,7 @@ describe("interrupt() edge cases", () => {
   test("a defect raised right after a self-interrupt stays in the cause", () => {
     const scheduler = new StepScheduler();
     const error = new Error("bug");
-    const fiber: Fiber<void> = runFiber(
+    const fiber: Fiber<never> = runFiber(
       sync(() => {
         fiber.interrupt();
         throw error;
@@ -977,7 +982,7 @@ describe("interrupting a fiber whose loop is queued or running", () => {
     let settle!: (value: number) => void;
     let ranAfter = false;
     let finalized = 0;
-    const fiber = runFiber(
+    const fiber = runFiberUnchecked(
       ensuring(
         tryPromise(
           () => new Promise<number>((resolve) => (settle = resolve)),
@@ -1013,7 +1018,7 @@ describe("interrupting a fiber whose loop is queued or running", () => {
   test("a fiber interrupting itself still runs the finalizer around it", () => {
     const scheduler = new StepScheduler();
     const log: string[] = [];
-    const fiber: Fiber<void> = runFiber(
+    const fiber: Fiber<undefined> = runFiber(
       ensuring(
         sync(() => fiber.interrupt()).flatMap(() => sync(() => void log.push("after interrupt"))),
         sync(() => void log.push("finalizer")),
@@ -1033,7 +1038,7 @@ describe("callbacks from a wait the fiber has left", () => {
     const log: string[] = [];
     let settle!: (value: number) => void;
     const release = gate();
-    const fiber = runFiber(
+    const fiber = runFiberUnchecked(
       ensuring(
         tryPromise(
           () => new Promise<number>((resolve) => (settle = resolve)),
@@ -1075,7 +1080,7 @@ describe("callbacks from a wait the fiber has left", () => {
         events.push("source cleanup done");
       }
     }
-    const fiber = runFiber(
+    const fiber = runFiberUnchecked(
       Stream.fromAsyncIterable(source(), (e) => e)
         .tap((n) => void events.push(`pulled ${n}`))
         .drain(),
@@ -1154,7 +1159,7 @@ describe("callbacks from a wait the fiber has left", () => {
     let cancelled = 0;
     let resumeLate: (() => void) | undefined;
     let ranAfter = false;
-    const fiber: Fiber<void> = runFiber(
+    const fiber: Fiber<undefined> = runFiber(
       async<void>((resume) => {
         resumeLate = () => resume(succeed(undefined) as any);
         fiber.interrupt();
@@ -1255,7 +1260,7 @@ describe("pending interrupts at finalizer boundaries", () => {
       scheduler.flush();
 
       expect(log).toEqual(["outer"]);
-      expect(fiber.result).toEqual({ ok: false, cause });
+      expect<unknown>(fiber.result).toEqual({ ok: false, cause });
     }
   });
 

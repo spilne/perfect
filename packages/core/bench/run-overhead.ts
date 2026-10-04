@@ -9,6 +9,7 @@
 import { group, bench, run as mitataRun } from "mitata";
 import { succeed, sync, run, runSync, tryPromise } from "../src";
 import { Effect } from "effect";
+import { runUnchecked } from "../test/run-unchecked";
 
 const N = 1000;
 
@@ -42,7 +43,7 @@ group(`run() — N small calls`, () => {
 
   bench("perfect run(tryPromise) × N (no shortcut)", async () => {
     for (let i = 0; i < N; i++)
-      await run(
+      await runUnchecked(
         tryPromise(
           () => Promise.resolve(i),
           () => "err",

@@ -13,6 +13,7 @@ import {
   type Eff,
   type Throws,
 } from "../src";
+import { runUnchecked } from "./run-unchecked";
 
 describe("constructors", () => {
   test("succeed", () => {
@@ -22,7 +23,7 @@ describe("constructors", () => {
 
   test("fail", async () => {
     const eff = fail("boom");
-    await expect(run(eff)).rejects.toBe("boom");
+    await expect(runUnchecked(eff)).rejects.toBe("boom");
   });
 
   test("sync", () => {
@@ -50,7 +51,7 @@ describe("constructors", () => {
       () => Promise.resolve("ok"),
       (e) => `failed: ${e}`,
     );
-    expect(await run(eff)).toBe("ok");
+    expect(await run(eff.orDie())).toBe("ok");
   });
 
   test("tryPromise failure", async () => {
@@ -58,7 +59,7 @@ describe("constructors", () => {
       () => Promise.reject("nope"),
       (e) => `caught: ${e}`,
     );
-    await expect(run(eff)).rejects.toBe("caught: nope");
+    await expect(runUnchecked(eff)).rejects.toBe("caught: nope");
   });
 });
 
@@ -122,13 +123,14 @@ describe("error handling", () => {
       readonly _tag = "Forbidden" as const;
     }
 
-    const eff: Eff<string, Throws<NotFound | Forbidden>> = fail(new NotFound()) as any;
+    const eff: Eff<string, Throws<NotFound | Forbidden>> = fail(new NotFound());
 
     const handled = eff.catchTag("NotFound", () => succeed("default"));
     // After catching NotFound, only Forbidden remains in the type
-    const _check: Eff<string, Throws<Forbidden>> = handled as any;
+    const _check: Eff<string, Throws<Forbidden>> = handled;
 
-    expect(runSync(handled)).toBe("default");
+    // eff only ever fails with NotFound, so the Forbidden left in the type never happens.
+    expect(runSync(handled as Eff<string>)).toBe("default");
   });
 
   test("catchTag passes through unmatched errors", async () => {
@@ -144,7 +146,7 @@ describe("error handling", () => {
       () => succeed("nope"),
     );
 
-    await expect(run(eff)).rejects.toEqual(new Forbidden());
+    await expect(runUnchecked(eff)).rejects.toEqual(new Forbidden());
   });
 });
 
@@ -182,7 +184,7 @@ describe("services", () => {
     const Db = service<Db>()("Db");
 
     const program = Db.get.map((db) => db.query());
-    await expect(run(program)).rejects.toBeInstanceOf(Error);
+    await expect(runUnchecked(program)).rejects.toBeInstanceOf(Error);
   });
 });
 
@@ -208,7 +210,7 @@ describe("all", () => {
 
   test("all fails fast", async () => {
     const eff = all([succeed(1), fail("oops"), succeed(3)]);
-    await expect(run(eff)).rejects.toBe("oops");
+    await expect(runUnchecked(eff)).rejects.toBe("oops");
   });
 });
 

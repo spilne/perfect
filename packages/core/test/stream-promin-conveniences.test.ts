@@ -148,9 +148,9 @@ describe("whole-stream deadline", () => {
 
   test("allows a stream that completes within the total deadline", async () => {
     const clock = new TestClock();
-    expect(await run(provide(Stream.of(1, 2).timeoutTotal(100).toArray(), Clock, clock))).toEqual([
-      1, 2,
-    ]);
+    expect(
+      await run(provide(Stream.of(1, 2).timeoutTotal(100).toArray(), Clock, clock).orDie()),
+    ).toEqual([1, 2]);
   });
 });
 

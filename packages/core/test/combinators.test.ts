@@ -1,49 +1,50 @@
 import { describe, test, expect } from "bun:test";
 import { succeed, fail, sync, sleep, run, Cause } from "../src";
+import { runUnchecked } from "./run-unchecked";
 
 describe("error combinators", () => {
   test("orDie turns a Fail into a defect", async () => {
-    const eff = (fail("boom") as any).orDie();
+    const eff = fail("boom").orDie();
     // defect propagates through run as a thrown value (not the Fail error directly — via squash it's the same)
-    await expect(run(eff)).rejects.toBe("boom");
+    await expect(runUnchecked(eff)).rejects.toBe("boom");
   });
 
   test("mapError transforms the error", async () => {
-    const eff = (fail("low") as any).mapError((e: string) => `HIGH:${e}`);
-    await expect(run(eff)).rejects.toBe("HIGH:low");
+    const eff = fail("low").mapError((e: string) => `HIGH:${e}`);
+    await expect(runUnchecked(eff)).rejects.toBe("HIGH:low");
   });
 
   test("tapError sees error without consuming it", async () => {
-    let seen: string | null = null;
-    const eff = (fail("oops") as any).tapError((e: string) =>
+    let seen = null as string | null;
+    const eff = fail("oops").tapError((e: string) =>
       sync(() => {
         seen = e;
       }),
     );
-    await expect(run(eff)).rejects.toBe("oops");
+    await expect(runUnchecked(eff)).rejects.toBe("oops");
     expect(seen).toBe("oops");
   });
 
   test("option collapses failure to undefined", async () => {
-    expect(await run((fail("x") as any).option())).toBe(undefined);
-    expect(await run((succeed(7) as any).option())).toBe(7);
+    expect(await run(fail("x").option())).toBe(undefined);
+    expect(await run(succeed(7).option())).toBe(7);
   });
 
   test("catchSome only catches when handler returns a value", async () => {
-    const eff = (fail("keep") as any).catchSome((e: string) =>
+    const eff = fail("keep").catchSome((e: string) =>
       e === "other" ? succeed("caught") : undefined,
     );
-    await expect(run(eff)).rejects.toBe("keep");
+    await expect(runUnchecked(eff)).rejects.toBe("keep");
 
-    const eff2 = (fail("other") as any).catchSome((e: string) =>
+    const eff2 = fail("other").catchSome((e: string) =>
       e === "other" ? succeed("caught") : undefined,
     );
-    expect(await run(eff2)).toBe("caught");
+    expect(await runUnchecked(eff2)).toBe("caught");
   });
 
   test("catchAllCause sees the full Cause", async () => {
-    let seenCause: Cause | null = null;
-    const eff = (fail("e") as any).catchAllCause((c: Cause) => {
+    let seenCause = null as Cause | null;
+    const eff = fail("e").catchAllCause((c: Cause) => {
       seenCause = c;
       return succeed("recovered");
     });
@@ -54,7 +55,7 @@ describe("error combinators", () => {
   test("tapBoth fires exactly the matching side", async () => {
     let okRan = 0,
       errRan = 0;
-    const success = (succeed(1) as any).tapBoth(
+    const success = succeed(1).tapBoth(
       () =>
         sync(() => {
           errRan++;
@@ -68,7 +69,7 @@ describe("error combinators", () => {
     expect(okRan).toBe(1);
     expect(errRan).toBe(0);
 
-    const failing = (fail("x") as any).tapBoth(
+    const failing = fail("x").tapBoth(
       () =>
         sync(() => {
           errRan++;
@@ -78,7 +79,7 @@ describe("error combinators", () => {
           okRan++;
         }),
     );
-    await expect(run(failing)).rejects.toBe("x");
+    await expect(runUnchecked(failing)).rejects.toBe("x");
     expect(okRan).toBe(1);
     expect(errRan).toBe(1);
   });
@@ -91,9 +92,9 @@ describe("control flow", () => {
       ran++;
       return "done";
     });
-    expect(await run((side as any).when(() => true))).toBe("done");
+    expect(await run(side.when(() => true))).toBe("done");
     expect(ran).toBe(1);
-    expect(await run((side as any).when(() => false))).toBe(undefined);
+    expect(await run(side.when(() => false))).toBe(undefined);
     expect(ran).toBe(1);
   });
 
@@ -102,9 +103,9 @@ describe("control flow", () => {
     const side = sync(() => {
       ran++;
     });
-    await run((side as any).unless(() => true));
+    await run(side.unless(() => true));
     expect(ran).toBe(0);
-    await run((side as any).unless(() => false));
+    await run(side.unless(() => false));
     expect(ran).toBe(1);
   });
 });
@@ -113,34 +114,33 @@ describe("fluent fiber combinators", () => {
   test(".race picks the faster effect", async () => {
     const fast = sleep(5).flatMap(() => succeed("fast"));
     const slow = sleep(50).flatMap(() => succeed("slow"));
-    expect(await run((fast as any).race(slow))).toBe("fast");
+    expect(await run(fast.race(slow))).toBe("fast");
   });
 
   test(".timeoutFail is fluent", async () => {
-    const eff = (sleep(100).flatMap(() => succeed("done")) as any).timeoutFail(
-      10,
-      () => "nope" as const,
-    );
-    await expect(run(eff)).rejects.toBe("nope");
+    const eff = sleep(100)
+      .flatMap(() => succeed("done"))
+      .timeoutFail(10, () => "nope" as const);
+    await expect(runUnchecked(eff)).rejects.toBe("nope");
   });
 
   test(".delay is fluent", async () => {
     const start = Date.now();
-    await run((succeed(1) as any).delay(20));
+    await run(succeed(1).delay(20));
     expect(Date.now() - start).toBeGreaterThanOrEqual(15);
   });
 
   test(".uninterruptible on a method call", async () => {
     let ran = 0;
-    const work = (
-      sleep(20).flatMap(() =>
+    const work = sleep(20)
+      .flatMap(() =>
         sync(() => {
           ran++;
           return 1;
         }),
-      ) as any
-    ).uninterruptible();
-    const eff = (work as any).fork().flatMap((f: any) =>
+      )
+      .uninterruptible();
+    const eff = work.fork().flatMap((f) =>
       sleep(2)
         .flatMap(() =>
           sync(() => {
@@ -148,7 +148,9 @@ describe("fluent fiber combinators", () => {
             return null;
           }),
         )
-        .flatMap(() => f.await()),
+        // f.await() is a Promise, not an effect: it comes out as the value
+        // and run() waits for it.
+        .map(() => f.await()),
     );
     await run(eff);
     // ran should be 1 because the uninterruptible body completed before the interrupt could take effect

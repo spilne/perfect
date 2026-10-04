@@ -285,17 +285,19 @@ group(`PubSub — publish to N subscribers × ${PS_N}`, () => {
         const ps = yield* PubSub.unbounded<number>();
         for (let i = 0; i < 5; i++) yield* ps.subscribe;
         for (let i = 0; i < PS_N; i++) yield* ps.publish(i);
-      }) as any,
+      }),
     );
   });
 
   bench("effect PubSub.publish (5 subscribers)", async () => {
     await Effect.runPromise(
-      Effect.gen(function* () {
-        const ps = yield* EffPubSub.unbounded<number>();
-        for (let i = 0; i < 5; i++) yield* EffPubSub.subscribe(ps);
-        for (let i = 0; i < PS_N; i++) yield* EffPubSub.publish(ps, i);
-      }),
+      Effect.scoped(
+        Effect.gen(function* () {
+          const ps = yield* EffPubSub.unbounded<number>();
+          for (let i = 0; i < 5; i++) yield* EffPubSub.subscribe(ps);
+          for (let i = 0; i < PS_N; i++) yield* EffPubSub.publish(ps, i);
+        }),
+      ),
     );
   });
 

@@ -1,5 +1,16 @@
 import { describe, test, expect } from "bun:test";
-import { eff, succeed, sleep, fork, join, all, run, RateLimiter } from "../src";
+import {
+  eff,
+  succeed,
+  sleep,
+  fork,
+  join,
+  all,
+  run,
+  RateLimiter,
+  type RateLimitExceeded,
+} from "../src";
+import { runUnchecked } from "./run-unchecked";
 
 describe("RateLimiter — sliding-window", () => {
   test("allows up to limit, then rejects with retryAfterMs", async () => {
@@ -118,7 +129,7 @@ describe("RateLimiter — wait mode (subsumes throttle)", () => {
       const v = yield* rl.withLimitWaiting(succeed(2));
       return [v, Date.now() - start >= 20];
     });
-    expect(await run(program as any)).toEqual([2, true]);
+    expect(await run(program.orDie())).toEqual([2, true]);
   });
 });
 
@@ -130,7 +141,7 @@ describe("RateLimiter — concurrent / slow-path coverage", () => {
         const attempts = yield* all(Array.from({ length: 100 }, () => rl.tryAcquire));
         const granted = attempts.filter((b: boolean) => b).length;
         return { granted, denied: attempts.length - granted };
-      }) as any,
+      }),
     );
     expect(result.granted).toBe(30);
     expect(result.denied).toBe(70);
@@ -183,7 +194,9 @@ describe("RateLimiter — concurrent / slow-path coverage", () => {
         return e;
       }
     });
-    const err = await run(program as any);
+    // The catch above turns the failure into the generator's result, but
+    // the effect type can't see through try/catch, so it still lists it.
+    const err = (await runUnchecked(program)) as RateLimitExceeded;
     expect(err._tag).toBe("RateLimitExceeded");
     expect(err.retryAfterMs).toBeGreaterThan(0);
   });

@@ -60,7 +60,7 @@ describe("PubSub", () => {
       const pubsub = yield* PubSub.unbounded<number>();
       return yield* pubsub.publish(42);
     });
-    expect(await run(program as any)).toBe(false);
+    expect(await run(program)).toBe(false);
   });
 
   test("subscriberCount tracks active subscribers", async () => {
@@ -71,7 +71,7 @@ describe("PubSub", () => {
       yield* pubsub.subscribe;
       return yield* pubsub.subscriberCount;
     });
-    expect(await run(program as any)).toBe(3);
+    expect(await run(program)).toBe(3);
   });
 
   test("shutdown closes all subscriber streams", async () => {
@@ -102,7 +102,7 @@ describe("SubscriptionRef", () => {
       const ref = yield* SubscriptionRef.make(42);
       return yield* ref.get;
     });
-    expect(await run(program as any)).toBe(42);
+    expect(await run(program)).toBe(42);
   });
 
   test("set updates the value", async () => {
@@ -111,7 +111,7 @@ describe("SubscriptionRef", () => {
       yield* ref.set("b");
       return yield* ref.get;
     });
-    expect(await run(program as any)).toBe("b");
+    expect(await run(program)).toBe("b");
   });
 
   test("update applies a function", async () => {
@@ -121,7 +121,7 @@ describe("SubscriptionRef", () => {
       yield* ref.update((n) => n * 2);
       return yield* ref.get;
     });
-    expect(await run(program as any)).toBe(22);
+    expect(await run(program)).toBe(22);
   });
 
   test("changes emits current value first, then updates", async () => {

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Clock, Pipe, Ref, Stream, TestClock, fail, provide, run, runExit, succeed } from "../src";
+import { runUnchecked } from "./run-unchecked";
 
 describe("Stream.scanEffect", () => {
   test("emits the seed then one accumulator per element", async () => {
@@ -38,13 +39,13 @@ describe("Stream.scanEffect", () => {
   });
 
   test("threads state that a plain scan could not — effects see a Ref", async () => {
-    const program = Ref.make(0).flatMap((calls: any) =>
+    const program = Ref.make(0).flatMap((calls) =>
       Stream.of(5, 5, 5)
         .scanEffect(0, (acc, n) => calls.update((c: number) => c + 1).map(() => acc + n))
         .toArray()
         .flatMap((values: number[]) => calls.get.map((c: number) => ({ values, c }))),
     );
-    expect(await run(program as any)).toEqual({ values: [0, 5, 10, 15], c: 3 });
+    expect(await run(program)).toEqual({ values: [0, 5, 10, 15], c: 3 });
   });
 
   test("is stack-safe across a large chunk", async () => {
@@ -62,11 +63,11 @@ describe("Stream.scanEffect", () => {
     const program = provide(
       Stream.of(1, 2)
         .scanEffect(0, (acc, n) => succeed(acc + n))
-        .toArray() as any,
+        .toArray(),
       Clock,
       clock,
     );
-    expect(await run(program as any)).toEqual([0, 1, 3]);
+    expect(await run(program)).toEqual([0, 1, 3]);
   });
 });
 
@@ -108,7 +109,7 @@ describe("Pipe constructors", () => {
     const parse = Pipe.evalMap<string, number, any>((s) =>
       /^\d+$/.test(s) ? succeed(Number(s)) : fail(`bad: ${s}`),
     );
-    expect(await run(Stream.of("1", "2").through(parse).toArray() as any)).toEqual([1, 2]);
+    expect(await runUnchecked(Stream.of("1", "2").through(parse).toArray())).toEqual([1, 2]);
 
     const exit = await runExit(Stream.of("1", "x").through(parse).toArray() as any);
     expect(exit._tag).toBe("Failure");

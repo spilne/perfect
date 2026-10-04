@@ -46,7 +46,7 @@ describe("InMemoryPartitionedState", () => {
     const snapshot = await backend.load(lease!);
     expect(snapshot?.values.get("user-7")).toBe(3);
     expect(snapshot?.sourceOffset).toBe("42");
-    expect(snapshot?.checkpointId).toBe("cp-1");
+    expect<string | undefined>(snapshot?.checkpointId).toBe("cp-1");
   });
 
   test("increments the fence and rejects a stale owner", async () => {
@@ -70,7 +70,7 @@ describe("InMemoryPartitionedState", () => {
       ownerId: TopologyInstanceId("worker-b"),
       leaseMs: 60_000,
     });
-    expect(second?.epoch).toBe((first?.epoch ?? 0) + 1);
+    expect<number | undefined>(second?.epoch).toBe((first?.epoch ?? 0) + 1);
     expect(
       await backend.commit({
         lease: first!,

@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { succeed, fail, sleep, join, type Eff, type Throws } from "../src";
+import { succeed, fail, sleep, join, type Eff, type Fiber, type Throws } from "../src";
 
 describe("fluent runners", () => {
   test(".runSync executes a synchronous program", () => {
@@ -14,7 +14,9 @@ describe("fluent runners", () => {
 
   test(".run rejects with squashed cause on failure", async () => {
     const program = fail("nope") as Eff<never, Throws<string>>;
-    await expect(program.run()).rejects.toBe("nope");
+    // .run() refuses unhandled errors at the type level; this test leaves the
+    // error unhandled on purpose to check the rejection.
+    await expect((program as Eff<never>).run()).rejects.toBe("nope");
   });
 
   test(".runExit returns Success on success", async () => {
@@ -30,7 +32,9 @@ describe("fluent runners", () => {
 
   test(".runFiber returns a Fiber that can be joined", async () => {
     const program = sleep(1).flatMap(() => succeed(99));
-    const fiber = program.runFiber();
+    // The fluent .runFiber() is typed Fiber<A>, losing the "no typed errors"
+    // that runFiber(eff) keeps, so join() would think it can fail.
+    const fiber = program.runFiber() as Fiber<number, never>;
     const value = await join(fiber).run();
     expect(value).toBe(99);
   });

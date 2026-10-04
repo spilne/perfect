@@ -22,7 +22,7 @@ describe("CircuitBreaker", () => {
 
   test("passes through successful effects", () => {
     const cb = CircuitBreaker.make({ failureThreshold: 3, resetTimeoutMs: 100 });
-    expect(runSync(cb.protect(succeed(42)))).toBe(42);
+    expect(runSync(cb.protect(succeed(42)).orDie())).toBe(42);
     expect(runSync(cb.state)).toBe("closed");
   });
 
@@ -71,7 +71,7 @@ describe("CircuitBreaker", () => {
     await new Promise((r) => setTimeout(r, 25));
     expect(runSync(cb.state)).toBe("half-open");
 
-    expect(await run(cb.protect(succeed("ok")))).toBe("ok");
+    expect(await run(cb.protect(succeed("ok")).orDie())).toBe("ok");
     expect(runSync(cb.state)).toBe("closed");
     expect(runSync(cb.failures)).toBe(0);
   });
@@ -110,7 +110,7 @@ describe("CircuitBreaker", () => {
     await expect(run(cb.protect(fail("b") as any) as any)).rejects.toBe("b");
     expect(runSync(cb.failures)).toBe(2);
 
-    expect(await run(cb.protect(succeed(42)))).toBe(42);
+    expect(await run(cb.protect(succeed(42)).orDie())).toBe(42);
     expect(runSync(cb.failures)).toBe(0);
     expect(runSync(cb.state)).toBe("closed");
   });
@@ -128,7 +128,9 @@ describe("CircuitBreaker", () => {
 
   test("100 concurrent .protect calls (closed, all success) all pass", async () => {
     const cb = CircuitBreaker.make<string>({ failureThreshold: 100, resetTimeoutMs: 1000 });
-    const results = await run(all(Array.from({ length: 100 }, (_, i) => cb.protect(succeed(i)))));
+    const results = await run(
+      all(Array.from({ length: 100 }, (_, i) => cb.protect(succeed(i)))).orDie(),
+    );
     expect(results.length).toBe(100);
     expect(runSync(cb.state)).toBe("closed");
     expect(runSync(cb.failures)).toBe(0);
@@ -188,7 +190,7 @@ describe("CircuitBreaker", () => {
     const cb = CircuitBreaker.make<string>({ failureThreshold: 1, resetTimeoutMs: 0 });
     await expect(run(cb.protect(fail("trip") as any) as any)).rejects.toBe("trip");
     await expect(run(cb.protect(die("boom")) as any)).rejects.toBe("boom");
-    expect(await run(cb.protect(succeed("ok")))).toBe("ok");
+    expect(await run(cb.protect(succeed("ok")).orDie())).toBe("ok");
     expect(runSync(cb.state)).toBe("closed");
   });
 

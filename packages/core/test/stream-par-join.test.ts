@@ -23,6 +23,10 @@ import {
   type Throws,
 } from "../src";
 
+// Deferred.await is typed Throws<never> even when the deferred cannot fail, and
+// run()/runFiber() treat that as an unhandled error. These deferreds never fail.
+const awaitDeferred = <A>(deferred: Deferred<A>): Eff<A> => deferred.await as Eff<A>;
+
 class InnerFailure extends TaggedError("InnerFailure")<{}>() {}
 class OuterFailure extends TaggedError("OuterFailure")<{}>() {}
 class FinalizerFailure extends TaggedError("FinalizerFailure")<{ readonly stream: string }>() {}
@@ -91,7 +95,7 @@ describe("Stream.parJoin", () => {
       Stream.suspend(() => {
         open++;
         maxOpen = Math.max(maxOpen, open);
-        return Stream.fromEffect(gate.await.map(() => value));
+        return Stream.fromEffect(awaitDeferred(gate).map(() => value));
       }).onFinalize(
         sync(() => {
           open--;
@@ -129,14 +133,14 @@ describe("Stream.parJoin", () => {
     const seen: number[] = [];
 
     const waitsForInner = runFiber(
-      Stream.of(Stream.of(1), Stream.fromEffect(innerGate.await.map(() => 2)))
+      Stream.of(Stream.of(1), Stream.fromEffect(awaitDeferred(innerGate).map(() => 2)))
         .parJoin(2)
         .toArray(),
       scheduler,
     );
     const waitsForOuter = runFiber(
       Stream.of(Stream.of(1))
-        .concat(Stream.fromEffect(outerGate.await.map(() => Stream.of(2))))
+        .concat(Stream.fromEffect(awaitDeferred(outerGate).map(() => Stream.of(2))))
         .parJoin(2)
         .forEach((value) =>
           sync(() => {
@@ -179,11 +183,19 @@ describe("Stream.parJoin", () => {
       (value === 2
         ? Stream.fromEffect(yieldNow).flatMap(() => Stream.fail(new InnerFailure({})))
         : Stream.fromEffect(never.await.map(() => value))
-      ).onFinalize(sync(() => events.push(`inner${value}`)));
+      ).onFinalize(
+        sync(() => {
+          events.push(`inner${value}`);
+        }),
+      );
 
     const exit = await runExit(
       Stream.of(1, 2, 3)
-        .onFinalize(sync(() => events.push("outer")))
+        .onFinalize(
+          sync(() => {
+            events.push("outer");
+          }),
+        )
         .map(inner)
         .parJoin(3)
         .toArray(),
@@ -204,17 +216,22 @@ describe("Stream.parJoin", () => {
     const events: string[] = [];
     const failing: Stream<number, Throws<InnerFailure>> = Stream.of(1)
       .concat(Stream.fromEffect(yieldNow).flatMap(() => Stream.fail(new InnerFailure({}))))
-      .onFinalize(sync(() => events.push("failing")));
-    const sibling = Stream.fromEffect(never.await.map(() => 2)).onFinalize(
-      sync(() => events.push("sibling")),
+      .onFinalize(
+        sync(() => {
+          events.push("failing");
+        }),
+      );
+    const sibling = Stream.fromEffect(awaitDeferred(never).map(() => 2)).onFinalize(
+      sync(() => {
+        events.push("sibling");
+      }),
     );
 
-    const fiber = runFiber(
-      Stream.of(sibling, failing)
-        .parJoinUnbounded()
-        .forEach(() => consumerGate.await),
-      scheduler,
-    );
+    // The inner failure is left unhandled on purpose: the fiber's result is checked below.
+    const program = Stream.of(sibling, failing)
+      .parJoinUnbounded()
+      .forEach(() => awaitDeferred(consumerGate));
+    const fiber = runFiber(program as Eff<void>, scheduler);
     scheduler.flush();
 
     expect(fiber.result).toBeNull();
@@ -247,10 +264,18 @@ describe("Stream.parJoin", () => {
 
     const exit = await runExit(
       Stream.of(
-        Stream.fromEffect(never.await.map(() => 1)).onFinalize(sync(() => events.push("inner"))),
+        Stream.fromEffect(never.await.map(() => 1)).onFinalize(
+          sync(() => {
+            events.push("inner");
+          }),
+        ),
       )
         .concat(Stream.fail(new OuterFailure({})))
-        .onFinalize(sync(() => events.push("outer")))
+        .onFinalize(
+          sync(() => {
+            events.push("outer");
+          }),
+        )
         .parJoin(2)
         .toArray(),
     );
@@ -312,7 +337,13 @@ describe("Stream.parJoin", () => {
 
     const fiber = runFiber(
       Stream.of(1, 2, 3)
-        .map((value) => Stream.of(value).onFinalize(sync(() => finalized.push(value))))
+        .map((value) =>
+          Stream.of(value).onFinalize(
+            sync(() => {
+              finalized.push(value);
+            }),
+          ),
+        )
         .parJoinUnbounded()
         .take(1)
         .toArray(),
@@ -329,11 +360,19 @@ describe("Stream.parJoin", () => {
     const events: string[] = [];
     const fiber = start(
       Stream.of("a", "b")
-        .onFinalize(sync(() => events.push("outer")))
+        .onFinalize(
+          sync(() => {
+            events.push("outer");
+          }),
+        )
         .map((label) =>
           Stream.tick(10)
             .map(() => label)
-            .onFinalize(sync(() => events.push(label))),
+            .onFinalize(
+              sync(() => {
+                events.push(label);
+              }),
+            ),
         )
         .parJoinUnbounded()
         .drain(),
@@ -358,7 +397,7 @@ describe("Stream.parJoin", () => {
     const fiber = runFiber(
       Stream.of(inner(), inner(), inner())
         .parJoinUnbounded()
-        .forEach(() => gate.await),
+        .forEach(() => awaitDeferred(gate)),
     );
     await drainScheduler();
     const bufferedAfterStall = produced;
@@ -403,7 +442,11 @@ describe("Stream.parJoin", () => {
   test("finalizes outer elements that were pulled but never launched", async () => {
     const events: string[] = [];
     const tracked = (params: { name: string; stream: Stream<number, Throws<InnerFailure>> }) =>
-      params.stream.onFinalize(sync(() => events.push(params.name)));
+      params.stream.onFinalize(
+        sync(() => {
+          events.push(params.name);
+        }),
+      );
 
     const exit = await runExit(
       Stream.of(
@@ -425,7 +468,9 @@ describe("Stream.parJoin", () => {
   test("an interruption raised by an inner or outer stream fails the join", async () => {
     const interrupted = Stream.fromEffect(failCause(Cause.interrupt()));
     const exits = [
-      await runExit(Stream.of(Stream.of(1), interrupted).parJoin(2).toArray()),
+      await runExit(
+        Stream.of<Stream<number, Throws<never>>>(Stream.of(1), interrupted).parJoin(2).toArray(),
+      ),
       await runExit(Stream.of(Stream.of(1)).concat(interrupted).parJoinUnbounded().toArray()),
     ];
 
@@ -617,8 +662,18 @@ describe("Stream.parJoin under operators that race each pull", () => {
           ticks({ label: "a", everyMs: 10, count: 2 }),
           ticks({ label: "b", everyMs: 15, count: 2 }),
         )
-          .map((inner) => inner.onFinalize(sync(() => events.push("inner"))))
-          .onFinalize(sync(() => events.push("outer")));
+          .map((inner) =>
+            inner.onFinalize(
+              sync(() => {
+                events.push("inner");
+              }),
+            ),
+          )
+          .onFinalize(
+            sync(() => {
+              events.push("outer");
+            }),
+          );
 
         const fiber = start(apply(join(outer)).toArray());
         advance(60);
@@ -653,10 +708,18 @@ describe("Stream.parJoin under operators that race each pull", () => {
         const outer = Stream.of("a", "b")
           .map((label) =>
             ticks({ label, everyMs: 10, count: 5 })
-              .concat(Stream.fromEffect(never.await))
-              .onFinalize(sync(() => events.push(label))),
+              .concat(Stream.fromEffect(awaitDeferred(never)))
+              .onFinalize(
+                sync(() => {
+                  events.push(label);
+                }),
+              ),
           )
-          .onFinalize(sync(() => events.push("outer")));
+          .onFinalize(
+            sync(() => {
+              events.push("outer");
+            }),
+          );
 
         const fiber = start(apply({ stream: join(outer), signal: controller.signal }).drain());
         advance(55);
@@ -682,7 +745,7 @@ describe("Stream.parJoinUnbounded", () => {
         .map((value) =>
           Stream.suspend(() => {
             open++;
-            return Stream.fromEffect(gate.await.map(() => value));
+            return Stream.fromEffect(awaitDeferred(gate).map(() => value));
           }),
         )
         .parJoinUnbounded()

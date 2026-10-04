@@ -10,6 +10,7 @@
 import { expect, test } from "bun:test";
 import {
   type Eff,
+  type Throws,
   type Fiber,
   Cause,
   Clock,
@@ -216,14 +217,15 @@ async function runIteration(params: {
   // A one-resource pool whose validate may reject a reused resource or wait
   // on a gate, and whose release may wait on a gate or fail. Uses of it from
   // parallel branches wait for each other, which puts a waiter behind a use
-  // that is releasing a rejected resource.
+  // that is releasing a rejected resource. The gate validate waits on can
+  // fail with "G", hence Throws<string>.
   let validatingCreated = 0;
   // The final shutdown runs outside the scheduler, so its releases neither
   // wait nor fail.
   let validatingPoolClosing = false;
   const validatingReleased = new Map<number, number>();
   const validatingPool = runSync(
-    Pool.make<number>({
+    Pool.make<number, Throws<string>>({
       size: 1,
       acquire: sync(() => {
         if (validatingCreated - validatingReleased.size >= 1) {
@@ -992,11 +994,11 @@ async function runIteration(params: {
       violate("a forEachPar iterator was left open");
     }
   }
-  if (runSync(validatingPool.inUse) !== 0) {
+  if (runSync(validatingPool.inUse.orDie()) !== 0) {
     violate("validating pool resources still in use after the program ended");
   }
   validatingPoolClosing = true;
-  runSync(validatingPool.shutdown());
+  runSync(validatingPool.shutdown().orDie());
   for (let resource = 1; resource <= validatingCreated; resource++) {
     const count = validatingReleased.get(resource) ?? 0;
     if (count !== 1) violate(`a validating pool resource was released ${count} times`);

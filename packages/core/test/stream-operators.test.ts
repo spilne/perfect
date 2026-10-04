@@ -95,12 +95,12 @@ describe("dedupe / distinctBy", () => {
 
   test("differs from changes: changes only drops consecutive duplicates", async () => {
     const source = [1, 1, 2, 1];
-    expect(await run((Stream.fromArray(source) as any).changes().toArray())).toEqual([1, 2, 1]);
-    expect(await run((Stream.fromArray(source) as any).dedupe().toArray())).toEqual([1, 2]);
+    expect(await run(Stream.fromArray(source).changes().toArray())).toEqual([1, 2, 1]);
+    expect(await run(Stream.fromArray(source).dedupe().toArray())).toEqual([1, 2]);
   });
 
   test("empty stream emits nothing", async () => {
-    expect(await run((Stream.empty<number>() as any).dedupe().toArray())).toEqual([]);
+    expect(await run(Stream.empty<number>().dedupe().toArray())).toEqual([]);
   });
 
   test("works across chunk boundaries", async () => {
@@ -118,7 +118,7 @@ describe("sliding", () => {
   const arrays = (chunks: Chunk<number>[]) => chunks.map((c) => c.toArray());
 
   test("step 1 emits overlapping full windows", async () => {
-    const result = await run((Stream.of(1, 2, 3, 4, 5) as any).sliding(3).toArray());
+    const result = await run(Stream.of(1, 2, 3, 4, 5).sliding(3).toArray());
     expect(arrays(result)).toEqual([
       [1, 2, 3],
       [2, 3, 4],
@@ -127,7 +127,7 @@ describe("sliding", () => {
   });
 
   test("step == size behaves like grouped without the partial tail", async () => {
-    const result = await run((Stream.of(1, 2, 3, 4, 5, 6) as any).sliding(2, 2).toArray());
+    const result = await run(Stream.of(1, 2, 3, 4, 5, 6).sliding(2, 2).toArray());
     expect(arrays(result)).toEqual([
       [1, 2],
       [3, 4],
@@ -136,7 +136,7 @@ describe("sliding", () => {
   });
 
   test("step > size skips elements between windows", async () => {
-    const result = await run((Stream.of(1, 2, 3, 4, 5, 6) as any).sliding(2, 3).toArray());
+    const result = await run(Stream.of(1, 2, 3, 4, 5, 6).sliding(2, 3).toArray());
     expect(arrays(result)).toEqual([
       [1, 2],
       [4, 5],
@@ -144,7 +144,7 @@ describe("sliding", () => {
   });
 
   test("windows span chunk boundaries", async () => {
-    const result = await run((Stream.of(1, 2) as any).concat(Stream.of(3, 4)).sliding(3).toArray());
+    const result = await run(Stream.of(1, 2).concat(Stream.of(3, 4)).sliding(3).toArray());
     expect(arrays(result)).toEqual([
       [1, 2, 3],
       [2, 3, 4],
@@ -152,11 +152,11 @@ describe("sliding", () => {
   });
 
   test("stream shorter than the window emits nothing", async () => {
-    expect(await run((Stream.of(1, 2) as any).sliding(3).toArray())).toEqual([]);
+    expect(await run(Stream.of(1, 2).sliding(3).toArray())).toEqual([]);
   });
 
   test("empty stream emits nothing", async () => {
-    expect(await run((Stream.empty<number>() as any).sliding(2).toArray())).toEqual([]);
+    expect(await run(Stream.empty<number>().sliding(2).toArray())).toEqual([]);
   });
 
   test("failure propagates", async () => {
@@ -187,7 +187,7 @@ describe("zipWithPrevious", () => {
   });
 
   test("empty stream emits nothing", async () => {
-    expect(await run((Stream.empty<number>() as any).zipWithPrevious().toArray())).toEqual([]);
+    expect(await run(Stream.empty<number>().zipWithPrevious().toArray())).toEqual([]);
   });
 });
 
@@ -205,7 +205,7 @@ describe("Stream.repeatWith", () => {
   });
 
   test("n = 1 runs the stream once", async () => {
-    expect(await run(Stream.repeatWith(() => Stream.of(7), 1).toArray() as any)).toEqual([7]);
+    expect(await run(Stream.repeatWith(() => Stream.of(7), 1).toArray())).toEqual([7]);
   });
 
   test("n <= 0 is empty and never builds the stream", async () => {
@@ -265,9 +265,13 @@ describe("orElse", () => {
   });
 
   test("empty source stays empty", async () => {
-    expect(await run((Stream.empty<number>() as any).orElse(() => Stream.of(9)).toArray())).toEqual(
-      [],
-    );
+    expect(
+      await run(
+        Stream.empty<number>()
+          .orElse(() => Stream.of(9))
+          .toArray(),
+      ),
+    ).toEqual([]);
   });
 
   test("a failing fallback propagates its own failure", async () => {

@@ -11,6 +11,7 @@ import {
   sleep,
   sync,
 } from "../src";
+import { runUnchecked } from "./run-unchecked";
 
 class SignalError extends TaggedError("SignalError")<{
   readonly message: string;
@@ -25,15 +26,17 @@ describe("Stream.takeUntil", () => {
     const queue = await run(Queue.unbounded<number>());
     const stop = await run(Deferred.make<void>());
     const seen = await run(Deferred.make<number>());
-    const result = run(
+    // Deferred.await is typed Throws<never>, which run() wrongly rejects, so
+    // the effects that wait on a Deferred go through runUnchecked.
+    const result = runUnchecked(
       Stream.fromQueue(queue)
         .tapEffect((value) => seen.succeed(value))
         .takeUntil(Stream.fromEffect(stop.await))
         .toArray(),
     );
 
-    await run(queue.offer(1));
-    await run(seen.await);
+    await run(queue.offer(1).orDie());
+    await runUnchecked(seen.await);
     await run(stop.succeed(undefined));
 
     expect(await result).toEqual([1]);
@@ -61,12 +64,21 @@ describe("Stream.takeUntil", () => {
     const blocked = await run(Deferred.make<number>());
     let sourceFinalized = 0;
     let signalFinalized = 0;
-    const source = Stream.fromEffect(blocked.await).onFinalize(sync(() => sourceFinalized++));
+    const source = Stream.fromEffect(blocked.await).onFinalize(
+      sync(() => {
+        sourceFinalized++;
+      }),
+    );
     const signal = Stream.succeed(undefined).onFinalize(
-      sleep(5).flatMap(() => sync(() => signalFinalized++)),
+      sleep(5).flatMap(() =>
+        sync(() => {
+          signalFinalized++;
+        }),
+      ),
     );
 
-    expect(await run(source.takeUntil(signal).toArray())).toEqual([]);
+    // Deferred.await is typed Throws<never>, which run() wrongly rejects.
+    expect(await runUnchecked(source.takeUntil(signal).toArray())).toEqual([]);
     expect(sourceFinalized).toBe(1);
     expect(signalFinalized).toBe(1);
   });
@@ -120,7 +132,15 @@ describe("Stream.observe", () => {
     let finalized = 0;
     const values = await run(
       Stream.of(1, 2, 3)
-        .observe((stream) => stream.onFinalize(sleep(5).flatMap(() => sync(() => finalized++))))
+        .observe((stream) =>
+          stream.onFinalize(
+            sleep(5).flatMap(() =>
+              sync(() => {
+                finalized++;
+              }),
+            ),
+          ),
+        )
         .take(1)
         .toArray(),
     );

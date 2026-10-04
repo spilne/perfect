@@ -80,31 +80,29 @@ describe(".exit", () => {
 describe(".tapDefect", () => {
   test("observes defects only", async () => {
     let observed: unknown = null;
-    const program = (
-      sync(() => {
-        throw new Error("bug");
-      }) as any
-    )
+    const program = sync(() => {
+      throw new Error("bug");
+    })
       .tapDefect((d: unknown) =>
         sync(() => {
           observed = d;
         }),
       )
       .catchAllCause(() => succeed("caught"));
-    expect(await run(program as any)).toBe("caught");
+    expect(await run(program)).toBe("caught");
     expect((observed as Error).message).toBe("bug");
   });
 
   test("doesn't fire for typed failures", async () => {
     let observed: unknown = null;
-    const program = (fail("typed") as any)
+    const program = fail("typed")
       .tapDefect((d: unknown) =>
         sync(() => {
           observed = d;
         }),
       )
       .catch(() => succeed("ok"));
-    expect(await run(program as any)).toBe("ok");
+    expect(await run(program)).toBe("ok");
     expect(observed).toBeNull();
   });
 });
@@ -216,7 +214,7 @@ describe("TaggedError class helper", () => {
     test("a non-string message still serialises the payload", () => {
       class NumericMessage extends TaggedError("NumericMessage")<{ message: number }>() {}
       const e = new NumericMessage({ message: 7 });
-      expect(e.message).toBe(7 as unknown as string);
+      expect<unknown>(e.message).toBe(7);
     });
 
     test("a non-enumerable message is not adopted (Object.assign would skip it)", () => {

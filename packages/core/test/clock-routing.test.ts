@@ -18,6 +18,7 @@ import {
 import { RateLimiter } from "../src/rate-limiter";
 import { CircuitBreaker } from "../src/circuit-breaker";
 import { CacheStore } from "../src/cache-store";
+import { runUnchecked } from "./run-unchecked";
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
@@ -25,10 +26,10 @@ describe("RateLimiter under TestClock", () => {
   test("fixed window resets on virtual time, no real waiting", async () => {
     const c = new TestClock();
 
-    const make = provide(RateLimiter.fixedWindow({ limit: 2, windowMs: 1000 }) as any, Clock, c);
-    const limiter = await run(make as any);
+    const make = provide(RateLimiter.fixedWindow({ limit: 2, windowMs: 1000 }), Clock, c);
+    const limiter = await run(make);
 
-    const acquire = () => run(provide((limiter as any).tryAcquire, Clock, c) as any);
+    const acquire = () => run(provide(limiter.tryAcquire, Clock, c));
 
     expect(await acquire()).toBe(true);
     expect(await acquire()).toBe(true);
@@ -40,10 +41,10 @@ describe("RateLimiter under TestClock", () => {
 
   test("token bucket refills on virtual time", async () => {
     const c = new TestClock();
-    const limiter: any = await run(
-      provide(RateLimiter.tokenBucket({ limit: 2, windowMs: 100 }) as any, Clock, c) as any,
+    const limiter = await run(
+      provide(RateLimiter.tokenBucket({ limit: 2, windowMs: 100 }), Clock, c),
     );
-    const acquire = () => run(provide(limiter.tryAcquire, Clock, c) as any);
+    const acquire = () => run(provide(limiter.tryAcquire, Clock, c));
 
     expect(await acquire()).toBe(true);
     expect(await acquire()).toBe(true);
@@ -59,20 +60,20 @@ describe("CircuitBreaker under TestClock", () => {
     const c = new TestClock();
     const breaker = CircuitBreaker.make({ failureThreshold: 1, resetTimeoutMs: 5000 });
 
-    const protectedFail = provide(breaker.protect(fail("boom")) as any, Clock, c);
-    const protectedOk = provide(breaker.protect(succeed("ok")) as any, Clock, c);
+    const protectedFail = provide(breaker.protect(fail("boom")), Clock, c);
+    const protectedOk = provide(breaker.protect(succeed("ok")), Clock, c);
 
     // trip it
-    await expect(run(protectedFail as any)).rejects.toBe("boom");
+    await expect(runUnchecked(protectedFail)).rejects.toBe("boom");
     expect(runSync(breaker.state)).toBe("open");
 
     // still open — rejects fast with CircuitOpen
-    const exit = await runExit(provide(breaker.protect(succeed("nope")) as any, Clock, c) as any);
+    const exit = await runExit(provide(breaker.protect(succeed("nope")), Clock, c));
     expect(exit._tag).toBe("Failure");
 
     // advance past the reset timeout: next protect probes (half-open) and closes
     c.advance(5001);
-    expect(await run(protectedOk as any)).toBe("ok");
+    expect(await runUnchecked(protectedOk)).toBe("ok");
     expect(runSync(breaker.state)).toBe("closed");
   });
 });
@@ -82,12 +83,12 @@ describe("CacheStore under TestClock", () => {
     const c = new TestClock();
     const store = CacheStore.memory<string, number>({ ttlMs: 100 });
 
-    await run(provide(store.set("k", 42) as any, Clock, c) as any);
-    expect(await run(provide(store.get("k") as any, Clock, c) as any)).toBe(42);
+    await run(provide(store.set("k", 42), Clock, c));
+    expect(await run(provide(store.get("k"), Clock, c))).toBe(42);
 
     c.advance(101);
-    expect(await run(provide(store.get("k") as any, Clock, c) as any)).toBeUndefined();
-    expect(await run(provide(store.has("k") as any, Clock, c) as any)).toBe(false);
+    expect(await run(provide(store.get("k"), Clock, c))).toBeUndefined();
+    expect(await run(provide(store.has("k"), Clock, c))).toBe(false);
   });
 });
 
@@ -100,16 +101,12 @@ describe("retry time budget under TestClock", () => {
       attempts++;
     }).flatMap(() => fail(`attempt-${attempts}`));
 
-    const program = provide(
-      retry(failing as any, { times: 100, delay: 60, timeBudgetMs: 100 }) as any,
-      Clock,
-      c,
-    );
+    const program = provide(retry(failing, { times: 100, delay: 60, timeBudgetMs: 100 }), Clock, c);
 
     // build long before "running" — budget must not start counting yet
     c.advance(10_000);
 
-    const done = runExit(program as any);
+    const done = runExit(program);
     // drive the retry sleeps: each advance fires the pending sleep(60)
     for (let i = 0; i < 5; i++) {
       await tick();
@@ -134,7 +131,7 @@ describe("stream time ops under TestClock", () => {
     const { Stream } = await import("../src");
     const c = new TestClock();
 
-    const done = run(provide((Stream.of(1, 2, 3) as any).throttle(100).toArray(), Clock, c) as any);
+    const done = run(provide(Stream.of(1, 2, 3).throttle(100).toArray(), Clock, c));
     // item 1 emits at t=0; items 2 and 3 wait on virtual sleeps
     for (let i = 0; i < 6; i++) {
       await tick();
@@ -148,17 +145,17 @@ describe("stream time ops under TestClock", () => {
     const { Stream, Queue } = await import("../src");
     const c = new TestClock();
 
-    const program = (Queue.unbounded<number>() as any).flatMap((q: any) =>
+    const program = Queue.unbounded<number>().flatMap((q) =>
       q
         .offer(1)
         .flatMap(() => q.offer(2))
         .flatMap(() => {
-          const s = (Stream.fromQueue(q) as any).debounce(1000);
+          const s = Stream.fromQueue(q).debounce(1000);
           return s.take(1).toArray();
         }),
     );
 
-    const done = run(provide(program, Clock, c) as any);
+    const done = runUnchecked(provide(program, Clock, c));
     // let the consumer drain both offers and start its quiet-period wait
     await tick();
     await tick();

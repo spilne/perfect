@@ -17,7 +17,7 @@ describe("RetryAttempt", () => {
         expect(s.value).toBe(1);
         break;
       default:
-        expect.fail("unexpected tag");
+        throw new Error("unexpected tag");
     }
 
     switch (e._tag) {
@@ -25,7 +25,7 @@ describe("RetryAttempt", () => {
         expect(e.error).toBe("boom");
         break;
       default:
-        expect.fail("unexpected tag");
+        throw new Error("unexpected tag");
     }
 
     expect(t._tag).toBe("thrown");

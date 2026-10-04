@@ -19,6 +19,7 @@ import {
   RetryAttempt,
   RetryDecision,
 } from "../src";
+import { runUnchecked } from "./run-unchecked";
 
 // ── trapError ──────────────────────────────────────────────────────
 
@@ -55,7 +56,7 @@ describe("trapError", () => {
   });
 
   test("successful effects pass through unchanged", async () => {
-    expect(await run(trapError(succeed(42), ParseError) as any)).toBe(42);
+    expect(await run(trapError(succeed(42), ParseError).orDie())).toBe(42);
   });
 });
 
@@ -68,11 +69,12 @@ describe("validate", () => {
   });
 
   test("collects ALL failures into a Cause.both tree", async () => {
-    const program = (validate([fail("a"), succeed(1), fail("b"), fail("c")]) as any).catchAllCause(
-      (cause: any) => succeed(Cause.failures(cause)),
+    const program = validate([fail("a"), succeed(1), fail("b"), fail("c")]).catchAllCause((cause) =>
+      succeed(Cause.failures(cause)),
     );
 
-    const failures = await run(program as any);
+    // validate always fails here, so the result is the failures list, not the tuple.
+    const failures = (await run(program)) as unknown[];
     expect(failures.sort()).toEqual(["a", "b", "c"]);
   });
 
@@ -81,7 +83,8 @@ describe("validate", () => {
   });
 
   test("empty array returns empty tuple", async () => {
-    expect(await run(validate([]) as any)).toEqual([]);
+    // validate([]) comes out typed with unknown effects, though it cannot fail.
+    expect(await runUnchecked(validate([]))).toEqual([]);
   });
 });
 
@@ -89,10 +92,10 @@ describe("validate", () => {
 
 describe("hedged", () => {
   test("fastest replica wins", async () => {
-    const work = sync(() => "work") as any;
+    const work = sync(() => "work");
     // Any replica succeeds instantly → first one wins
     const race = hedged(work, { replicas: 3, staggerMs: 20 });
-    expect(await run(race as any)).toBe("work");
+    expect(await run(race)).toBe("work");
   });
 
   test("replicas=1 is a passthrough", async () => {
@@ -100,8 +103,8 @@ describe("hedged", () => {
     const eff = sync(() => {
       count++;
       return 42;
-    }) as any;
-    expect(await run(hedged(eff, { replicas: 1, staggerMs: 100 }) as any)).toBe(42);
+    });
+    expect(await run(hedged(eff, { replicas: 1, staggerMs: 100 }))).toBe(42);
     expect(count).toBe(1);
   });
 
@@ -187,30 +190,30 @@ describe("repeatUntilWithBackoff", () => {
 
 describe("Cats-named aliases", () => {
   test("handleErrorWith == catch", async () => {
-    const eff = (fail("x") as any).handleErrorWith((e: string) => succeed(`caught ${e}`));
+    const eff = fail("x").handleErrorWith((e) => succeed(`caught ${e}`));
     expect(await run(eff)).toBe("caught x");
   });
 
   test("recover catches only matching errors via predicate", async () => {
-    const caught = (fail("retry" as const) as any).recover(
-      (e: string) => e === "retry",
+    const caught = fail("retry" as const).recover(
+      (e) => e === "retry",
       () => 99,
     );
-    expect(await run(caught)).toBe(99);
+    expect(await run(caught.orDie())).toBe(99);
 
-    const uncaught = (fail("other" as const) as any).recover(
+    const uncaught = fail("other" as const).recover(
       (e: string) => e === "retry",
       () => 99,
     );
-    await expect(run(uncaught)).rejects.toBe("other");
+    await expect(runUnchecked(uncaught)).rejects.toBe("other");
   });
 
   test("redeem transforms both channels with plain values", async () => {
-    const ok = (succeed(5) as any).redeem(
+    const ok = succeed(5).redeem(
       (_e: unknown) => -1,
       (v: number) => v * 2,
     );
-    const err = (fail("boom") as any).redeem(
+    const err = fail("boom").redeem(
       (_e: unknown) => -1,
       (v: number) => v * 2,
     );
@@ -219,7 +222,7 @@ describe("Cats-named aliases", () => {
   });
 
   test("redeemWith transforms both channels with Effs", async () => {
-    const ok = (succeed(5) as any).redeemWith(
+    const ok = succeed(5).redeemWith(
       (_e: unknown) => succeed("err"),
       (v: number) => succeed(`ok:${v}`),
     );
@@ -233,13 +236,13 @@ describe("retry enhancements", () => {
   test("when-predicate stops retrying on non-matching error", async () => {
     // Use real time with tiny delays — avoids fiddly TestClock drain timing.
     let attempts = 0;
-    const eff: any = sync(() => {
+    const eff = sync(() => {
       attempts++;
       return attempts;
-    }).flatMap((n: number) => fail(n === 1 ? "transient" : "fatal"));
+    }).flatMap((n) => fail(n === 1 ? "transient" : "fatal"));
 
     await expect(
-      run(retry(eff, { times: 5, delay: 1, when: (e: string) => e === "transient" }) as any),
+      runUnchecked(retry(eff, { times: 5, delay: 1, when: (e) => e === "transient" })),
     ).rejects.toBe("fatal");
     expect(attempts).toBe(2);
   });
@@ -314,7 +317,7 @@ describe("retryAllBy", () => {
     const poller = sync(() => {
       calls++;
       return { state: calls === 3 ? "done" : "pending" };
-    }) as any;
+    });
 
     const result = await run(
       retryAllBy(poller, {

@@ -11,6 +11,7 @@ import {
   succeed,
   sync,
 } from "../src";
+import { runUnchecked } from "./run-unchecked";
 
 // A stream or effect is a description: running it twice must give two
 // independent runs, never state carried over from the first.
@@ -49,8 +50,8 @@ describe("state is created per run", () => {
       },
     };
     const eff = Stream.fromAsyncIterable(iterable, (e) => e).count();
-    expect(await run(eff)).toBe(2);
-    expect(await run(eff)).toBe(2);
+    expect(await runUnchecked(eff)).toBe(2);
+    expect(await runUnchecked(eff)).toBe(2);
   });
 
   test("Sink.foldEffect", async () => {

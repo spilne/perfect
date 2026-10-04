@@ -21,7 +21,7 @@ import {
 describe("raceSuccess", () => {
   test("a fast failure does not win", async () => {
     const result = await run(
-      raceSuccess([fail("fast failure"), sleep(5).flatMap(() => succeed("slow success"))]),
+      raceSuccess([fail("fast failure"), sleep(5).flatMap(() => succeed("slow success"))]).orDie(),
     );
     expect(result).toBe("slow success");
   });
@@ -39,7 +39,7 @@ describe("hedged", () => {
     const flaky = sync(() => ++calls).flatMap((n) =>
       n === 1 ? fail("first try failed") : succeed(n),
     );
-    expect(await run(hedged(flaky, { replicas: 2, staggerMs: 1 }))).toBe(2);
+    expect(await run(hedged(flaky, { replicas: 2, staggerMs: 1 }).orDie())).toBe(2);
   });
 });
 
@@ -127,7 +127,7 @@ describe("effects read state when they run, not when they are built", () => {
     const { TestFileSystem } = await import("../src/filesystem");
     const fs = new TestFileSystem();
     const read = fs.readFile("/later.txt");
-    await run(fs.writeFile("/later.txt", "hello"));
-    expect(await run(read)).toBe("hello");
+    await run(fs.writeFile("/later.txt", "hello").orDie());
+    expect(await run(read.orDie())).toBe("hello");
   });
 });

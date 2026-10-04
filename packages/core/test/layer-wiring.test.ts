@@ -10,6 +10,7 @@ import {
   sync,
   type Eff,
 } from "../src";
+import { runUnchecked } from "./run-unchecked";
 
 interface Db {
   name: string;
@@ -38,7 +39,7 @@ describe("Layer.build — automatic wiring", () => {
       sync(() => {
         built.push("Db");
         return { Db: { name: "pg" } as Db };
-      }) as any,
+      }),
     );
 
     const CacheLive = Layer.describe(
@@ -47,7 +48,7 @@ describe("Layer.build — automatic wiring", () => {
         const db = yield* Db.get;
         built.push("Cache");
         return { Cache: { backedBy: db.name } as Cache };
-      }) as any,
+      }),
     );
 
     // Deliberately reversed: Cache needs Db but is listed first.
@@ -58,7 +59,7 @@ describe("Layer.build — automatic wiring", () => {
       return cache.backedBy;
     });
 
-    expect(await run(program.with(AppLive) as any)).toBe("pg");
+    expect(await run(program.with(AppLive))).toBe("pg");
     expect(built).toEqual(["Db", "Cache"]);
   });
 
@@ -70,7 +71,7 @@ describe("Layer.build — automatic wiring", () => {
       sync(() => {
         dbBuilds++;
         return { Db: { name: `pg-${dbBuilds}` } as Db };
-      }) as any,
+      }),
     );
 
     const CacheLive = Layer.describe(
@@ -78,7 +79,7 @@ describe("Layer.build — automatic wiring", () => {
       eff(function* () {
         const db = yield* Db.get;
         return { Cache: { backedBy: db.name } as Cache };
-      }) as any,
+      }),
     );
 
     const SearchLive = Layer.describe(
@@ -86,7 +87,7 @@ describe("Layer.build — automatic wiring", () => {
       eff(function* () {
         const db = yield* Db.get;
         return { Search: { backedBy: db.name } as Search };
-      }) as any,
+      }),
     );
 
     const ApiLive = Layer.describe(
@@ -95,7 +96,7 @@ describe("Layer.build — automatic wiring", () => {
         const cache = yield* Cache.get;
         const search = yield* Search.get;
         return { Api: { summary: `${cache.backedBy}+${search.backedBy}` } as Api };
-      }) as any,
+      }),
     );
 
     const AppLive = Layer.build(ApiLive, SearchLive, CacheLive, DbLive);
@@ -105,15 +106,15 @@ describe("Layer.build — automatic wiring", () => {
       return api.summary;
     });
 
-    expect(await run(program.with(AppLive) as any)).toBe("pg-1+pg-1");
+    expect(await run(program.with(AppLive))).toBe("pg-1+pg-1");
     // The shared Db node is visited once, so both branches observe one instance.
     expect(dbBuilds).toBe(1);
   });
 
   test("detects a cycle and names the path", () => {
-    const A = Layer.describe({ provides: ["Db"], requires: ["Cache"] }, succeed({}) as any);
-    const B = Layer.describe({ provides: ["Cache"], requires: ["Search"] }, succeed({}) as any);
-    const C = Layer.describe({ provides: ["Search"], requires: ["Db"] }, succeed({}) as any);
+    const A = Layer.describe({ provides: ["Db"], requires: ["Cache"] }, succeed({}));
+    const B = Layer.describe({ provides: ["Cache"], requires: ["Search"] }, succeed({}));
+    const C = Layer.describe({ provides: ["Search"], requires: ["Db"] }, succeed({}));
 
     expect(() => Layer.build(A, B, C)).toThrow(LayerCycleError);
     try {
@@ -130,26 +131,26 @@ describe("Layer.build — automatic wiring", () => {
   });
 
   test("detects a two-node cycle", () => {
-    const A = Layer.describe({ provides: ["Db"], requires: ["Cache"] }, succeed({}) as any);
-    const B = Layer.describe({ provides: ["Cache"], requires: ["Db"] }, succeed({}) as any);
+    const A = Layer.describe({ provides: ["Db"], requires: ["Cache"] }, succeed({}));
+    const B = Layer.describe({ provides: ["Cache"], requires: ["Db"] }, succeed({}));
     expect(() => Layer.build(A, B)).toThrow(LayerCycleError);
   });
 
   test("a layer requiring what it also provides is not a cycle", async () => {
     const SelfLive = Layer.describe(
       { provides: ["Db"], requires: ["Db"] },
-      succeed({ Db: { name: "self" } as Db }) as any,
+      succeed({ Db: { name: "self" } as Db }),
     );
     const program = eff(function* () {
       return (yield* Db.get).name;
     });
-    expect(await run(program.with(Layer.build(SelfLive)) as any)).toBe("self");
+    expect(await run(program.with(Layer.build(SelfLive)))).toBe("self");
   });
 
   test("reports a missing dependency with the service and who wanted it", () => {
     const CacheLive = Layer.describe(
       { provides: ["Cache"], requires: ["Db"] },
-      succeed({ Cache: {} as Cache }) as any,
+      succeed({ Cache: {} as Cache }),
     );
 
     expect(() => Layer.build(CacheLive)).toThrow(LayerMissingDependencyError);
@@ -168,10 +169,12 @@ describe("Layer.build — automatic wiring", () => {
     const program = eff(function* () {
       return (yield* Db.get).name;
     });
-    expect(await run(program.with(Layer.build(Plain)) as any)).toBe("plain");
+    expect(await run(program.with(Layer.build(Plain)))).toBe("plain");
   });
 
   test("build with no layers is an empty layer", async () => {
-    expect(await run(succeed(1).with(Layer.build()) as any)).toBe(1);
+    // Layer.build() with no layers is typed as having unknown effects
+    // (MergedEffects of an empty list infers unknown, not never).
+    expect(await runUnchecked(succeed(1).with(Layer.build()))).toBe(1);
   });
 });

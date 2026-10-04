@@ -14,7 +14,7 @@ class SourceError extends TaggedError("SourceError")<{
   readonly message: string;
 }>() {}
 
-const DONE = { done: true, value: undefined };
+const DONE = { done: true, value: undefined } as const;
 
 const nextTick = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
 
@@ -47,7 +47,11 @@ describe("Stream.toAsyncIterable", () => {
     const events: string[] = [];
     const stream = Stream.of(1, 2, 3)
       .map((value) => value * 10)
-      .onFinalize(sync(() => events.push("finalized")));
+      .onFinalize(
+        sync(() => {
+          events.push("finalized");
+        }),
+      );
 
     const values: number[] = [];
     for await (const value of stream.toAsyncIterable()) {
@@ -62,7 +66,11 @@ describe("Stream.toAsyncIterable", () => {
   test("an empty stream completes immediately and still finalizes", async () => {
     let finalized = 0;
     const iterator = Stream.empty<number>()
-      .onFinalize(sync(() => finalized++))
+      .onFinalize(
+        sync(() => {
+          finalized++;
+        }),
+      )
       .toAsyncIterable()
       [Symbol.asyncIterator]();
 
@@ -176,7 +184,11 @@ describe("Stream.toAsyncIterable", () => {
   test("each iterator runs the stream again", async () => {
     let finalized = 0;
     const iterable = Stream.of("a", "b")
-      .onFinalize(sync(() => finalized++))
+      .onFinalize(
+        sync(() => {
+          finalized++;
+        }),
+      )
       .toAsyncIterable();
 
     expect(await collect(iterable)).toEqual(["a", "b"]);
@@ -188,12 +200,24 @@ describe("Stream.toAsyncIterable", () => {
     const events: string[] = [];
     const pulls = { count: 0 };
     const stream = Stream.fromEffect(
-      acquireRelease(succeed("connection"), () => sync(() => events.push("released"))),
+      acquireRelease(succeed("connection"), () =>
+        sync(() => {
+          events.push("released");
+        }),
+      ),
     )
       .flatMap(() =>
-        batches(pulls, [[1, 2], [3], [4]]).onFinalize(sync(() => events.push("inner finalized"))),
+        batches(pulls, [[1, 2], [3], [4]]).onFinalize(
+          sync(() => {
+            events.push("inner finalized");
+          }),
+        ),
       )
-      .onFinalize(sync(() => events.push("outer finalized")));
+      .onFinalize(
+        sync(() => {
+          events.push("outer finalized");
+        }),
+      );
 
     const values: number[] = [];
     for await (const value of stream.toAsyncIterable()) {
@@ -208,7 +232,11 @@ describe("Stream.toAsyncIterable", () => {
 
   test("a throw in the loop body finalizes the stream and propagates", async () => {
     let finalized = 0;
-    const stream = Stream.range(0, 100).onFinalize(sync(() => finalized++));
+    const stream = Stream.range(0, 100).onFinalize(
+      sync(() => {
+        finalized++;
+      }),
+    );
 
     const consume = async () => {
       for await (const value of stream.toAsyncIterable()) {
@@ -234,7 +262,11 @@ describe("Stream.toAsyncIterable", () => {
   test("return right after the first next runs finalizers before resolving", async () => {
     let finalized = 0;
     const iterator = Stream.of(1)
-      .onFinalize(sync(() => finalized++))
+      .onFinalize(
+        sync(() => {
+          finalized++;
+        }),
+      )
       .toAsyncIterable()
       [Symbol.asyncIterator]();
 
@@ -247,7 +279,11 @@ describe("Stream.toAsyncIterable", () => {
   test("return during an in-flight pull interrupts it and finalizes", async () => {
     const events: string[] = [];
     const iterator = stalled<number>(() => events.push("pull interrupted"))
-      .onFinalize(sync(() => events.push("finalized")))
+      .onFinalize(
+        sync(() => {
+          events.push("finalized");
+        }),
+      )
       .toAsyncIterable()
       [Symbol.asyncIterator]();
 
@@ -264,7 +300,11 @@ describe("Stream.toAsyncIterable", () => {
     const events: string[] = [];
     const merged = Stream.of(1)
       .merge(stalled(() => events.push("slow side interrupted")))
-      .onFinalize(sync(() => events.push("finalized")));
+      .onFinalize(
+        sync(() => {
+          events.push("finalized");
+        }),
+      );
 
     for await (const value of merged.toAsyncIterable()) {
       expect(value).toBe(1);
@@ -281,7 +321,9 @@ describe("Stream.toAsyncIterable", () => {
         ? succeed(value)
         : ensuring(
             sleep(60_000),
-            sync(() => interrupted.push(value)),
+            sync(() => {
+              interrupted.push(value);
+            }),
           ).map(() => value),
     );
 
@@ -298,7 +340,11 @@ describe("Stream.toAsyncIterable", () => {
     const events: string[] = [];
     const stream = Stream.of(1)
       .concat(Stream.fail(error))
-      .onFinalize(sync(() => events.push("finalized")))
+      .onFinalize(
+        sync(() => {
+          events.push("finalized");
+        }),
+      )
       .orDie();
 
     const values: number[] = [];
@@ -326,7 +372,11 @@ describe("Stream.toAsyncIterable", () => {
           }),
         ),
       )
-      .onFinalize(sync(() => finalized++));
+      .onFinalize(
+        sync(() => {
+          finalized++;
+        }),
+      );
 
     const values: number[] = [];
     const consume = async () => {
@@ -400,7 +450,13 @@ describe("Stream.toAsyncIterable", () => {
     let heavy: Eff<number> = succeed(0);
     for (let i = 0; i < 10_000; i++) heavy = heavy.flatMap((n) => succeed(n + 1));
     const iterator = Stream.fromEffect(heavy)
-      .onFinalize(sleep(10).flatMap(() => sync(() => finalized++)))
+      .onFinalize(
+        sleep(10).flatMap(() =>
+          sync(() => {
+            finalized++;
+          }),
+        ),
+      )
       .toAsyncIterable()
       [Symbol.asyncIterator]();
 

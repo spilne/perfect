@@ -65,16 +65,16 @@ describe("WaiterList", () => {
 describe("a wait that times out leaves nothing behind", () => {
   test("Queue.take", async () => {
     const q = await run(Queue.bounded<number>(4));
-    for (let i = 0; i < 1_000; i++) await run(timeoutOption(q.take(), 0));
+    for (let i = 0; i < 1_000; i++) await run(timeoutOption(q.take(), 0).orDie());
     expect((q as any).takers.length).toBe(0);
-    await run(q.offer(7));
-    expect(await run(q.take())).toBe(7);
+    await run(q.offer(7).orDie());
+    expect(await run(q.take().orDie())).toBe(7);
   });
 
   test("Queue.offer on a full queue", async () => {
     const q = await run(Queue.bounded<number>(1));
-    await run(q.offer(0));
-    for (let i = 0; i < 1_000; i++) await run(timeoutOption(q.offer(i), 0));
+    await run(q.offer(0).orDie());
+    for (let i = 0; i < 1_000; i++) await run(timeoutOption(q.offer(i), 0).orDie());
     expect((q as any).offerers.length).toBe(0);
     expect(await run(q.takeAll())).toEqual([0]);
   });
@@ -107,14 +107,14 @@ describe("a wait that times out leaves nothing behind", () => {
     // Hold the only resource until the end of the test. If it were given
     // back earlier, the pool would skip over the dead waiters and hide the
     // leak.
-    const holder = runFiber(pool.use(() => async<void>(() => {})));
+    const holder = runFiber(pool.use(() => async<void>(() => {})).orDie());
     await run(sleep(1));
     for (let i = 0; i < 200; i++)
       await run(
         timeoutOption(
           pool.use(() => succeed(1)),
           0,
-        ),
+        ).orDie(),
       );
     expect((pool as any).waiters.length).toBe(0);
     holder.interrupt();

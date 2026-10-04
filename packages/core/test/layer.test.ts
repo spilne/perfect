@@ -11,6 +11,7 @@ import {
   Layer,
   type Eff,
 } from "../src";
+import { runUnchecked } from "./run-unchecked";
 
 interface Db {
   query(sql: string): Eff<string, never>;
@@ -171,11 +172,11 @@ describe("Layer", () => {
               events.push(`rel:${name}`);
             }),
         );
-        return { [name]: v } as Record<K, string>;
+        return { [name]: v as string } as Record<K, string>;
       });
 
     const App = Layer.merge(mkLayer("A"), mkLayer("B"), mkLayer("C"));
-    await run(succeed(0).with(App as any));
+    await run(succeed(0).with(App));
     expect(events).toEqual(["acq:A", "acq:B", "acq:C", "rel:C", "rel:B", "rel:A"]);
   });
 
@@ -183,7 +184,8 @@ describe("Layer", () => {
     const program = eff(function* () {
       return yield* succeed(123);
     });
-    expect(runSync(program.with(Layer.merge()))).toBe(123);
+    // Layer.merge() with no layers comes out typed with unknown effects, though it cannot fail.
+    expect(runSync(program.with(Layer.merge() as Layer<{}>))).toBe(123);
   });
 
   test("memoize reuses one layer build within a scope", async () => {
@@ -242,7 +244,7 @@ describe("Layer", () => {
 
     const program = succeed("unused").with(Layer.merge(LoggerLive, BrokenDb));
 
-    await expect(run(program)).rejects.toBe("db unavailable");
+    await expect(runUnchecked(program)).rejects.toBe("db unavailable");
     expect(events).toEqual(["acquire:logger", "release:logger"]);
   });
 

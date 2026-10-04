@@ -35,7 +35,8 @@ for (const N of [10, 100, 1_000]) {
 
     bench("await eff per step (fresh each time)", async () => {
       let x = 0;
-      for (let i = 0; i < N; i++) x = await succeed(x + 1);
+      // `await eff` is typed unknown, so the number type is restored by hand.
+      for (let i = 0; i < N; i++) x = (await succeed(x + 1)) as number;
       return x;
     });
 

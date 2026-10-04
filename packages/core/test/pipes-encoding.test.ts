@@ -5,17 +5,14 @@ describe("utf8Encode / utf8Decode", () => {
   test("round-trips a string with multi-byte characters", async () => {
     const original = "héllo wörld — 🚀 日本語";
     const parts = await run(
-      (Stream.succeed(original) as any)
-        .through(Pipes.utf8Encode)
-        .through(Pipes.utf8Decode)
-        .toArray(),
+      Stream.succeed(original).through(Pipes.utf8Encode).through(Pipes.utf8Decode).toArray(),
     );
     expect(parts.join("")).toBe(original);
   });
 
   test("utf8Encode produces the expected UTF-8 bytes per chunk", async () => {
     const chunks: Uint8Array[] = await run(
-      (Stream.of("hi", "é") as any).through(Pipes.utf8Encode).toArray(),
+      Stream.of("hi", "é").through(Pipes.utf8Encode).toArray(),
     );
     expect(chunks).toHaveLength(2);
     expect(Array.from(chunks[0]!)).toEqual([0x68, 0x69]);
@@ -26,7 +23,7 @@ describe("utf8Encode / utf8Decode", () => {
     // 🚀 is F0 9F 9A 80 — split in the middle of the sequence
     const a = new Uint8Array([0xf0, 0x9f]);
     const b = new Uint8Array([0x9a, 0x80]);
-    const parts = await run((Stream.of(a, b) as any).through(Pipes.utf8Decode).toArray());
+    const parts = await run(Stream.of(a, b).through(Pipes.utf8Decode).toArray());
     expect(parts.join("")).toBe("🚀");
   });
 
@@ -34,17 +31,16 @@ describe("utf8Encode / utf8Decode", () => {
     // Only the first 2 bytes of 🚀 — the flush step (decode() without
     // { stream: true }) turns the dangling prefix into U+FFFD.
     const parts = await run(
-      (Stream.succeed(new Uint8Array([0xf0, 0x9f])) as any).through(Pipes.utf8Decode).toArray(),
+      Stream.succeed(new Uint8Array([0xf0, 0x9f]))
+        .through(Pipes.utf8Decode)
+        .toArray(),
     );
     expect(parts.join("")).toBe("�");
   });
 
   test("round-trips multi-chunk input", async () => {
     const parts = await run(
-      (Stream.of("ab", "cd", "é🚀") as any)
-        .through(Pipes.utf8Encode)
-        .through(Pipes.utf8Decode)
-        .toArray(),
+      Stream.of("ab", "cd", "é🚀").through(Pipes.utf8Encode).through(Pipes.utf8Decode).toArray(),
     );
     expect(parts.join("")).toBe("abcdé🚀");
   });

@@ -48,13 +48,13 @@ describe("Metrics service", () => {
     const program = Metrics.counter("jobs").flatMap((c) =>
       sync(() => c.inc(3)).flatMap(() => Metrics.snapshot),
     );
-    const snap = await run(provide(program, Metrics, registry) as any);
+    const snap = await run(provide(program, Metrics, registry));
     expect(snap.counters["jobs"]).toBe(3);
     expect(registry.snapshot().counters["jobs"]).toBe(3);
   });
 
   test("default registry works without provide", async () => {
-    const c = await run(Metrics.counter("default-reg-probe") as any);
+    const c = await run(Metrics.counter("default-reg-probe"));
     c.inc();
     expect(c.value).toBe(1);
   });

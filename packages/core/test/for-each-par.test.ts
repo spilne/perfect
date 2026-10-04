@@ -516,7 +516,8 @@ describe("forEachPar — failure and interruption", () => {
       }),
     );
 
-    const fiber = runFiber(program);
+    // The child failure is left unhandled on purpose; the exit is checked below.
+    const fiber = runFiber(program as Eff<void[]>);
     for (let i = 0; i < 100 && release === undefined; i++) await tick();
     expect(release).toBeDefined();
     fiber.interrupt();
@@ -528,7 +529,7 @@ describe("forEachPar — failure and interruption", () => {
     const exit = await fiber.await();
 
     expect(log).toEqual(["child cleanup", "parent finalizer"]);
-    expect(exit).toEqual(Exit.failure(Cause.both(Cause.interrupt(), Cause.fail("boom"))));
+    expect<unknown>(exit).toEqual(Exit.failure(Cause.both(Cause.interrupt(), Cause.fail("boom"))));
   });
 
   test("an interrupt after the failure was delivered has the same cause as one before", () => {
@@ -559,7 +560,7 @@ describe("forEachPar — failure and interruption", () => {
                   }),
                 ),
           { concurrency: 2 },
-        ),
+        ) as Eff<void[]>, // "e1" is left unhandled on purpose
         scheduler,
       );
       scheduler.flush();
@@ -848,7 +849,7 @@ describe("forEachPar — iterables", () => {
 
     expect(exit._tag).toBe("Failure");
     if (exit._tag === "Failure") {
-      expect(Cause.failures(exit.cause)).toEqual([boom]);
+      expect<unknown[]>(Cause.failures(exit.cause)).toEqual([boom]);
       expect(Cause.defects(exit.cause)).toEqual([finallyBoom]);
     }
   });

@@ -20,7 +20,7 @@ describe("Latch", () => {
       // now released
       return yield* join(waiterFiber);
     });
-    expect(await run(program as any)).toBe("released");
+    expect(await run(program)).toBe("released");
   });
 
   test("countDownBy(n) clamps at 0", async () => {
@@ -49,7 +49,7 @@ describe("Latch", () => {
       const rc = yield* join(c);
       return [ra, rb, rc];
     });
-    expect(await run(program as any)).toEqual(["a", "b", "c"]);
+    expect(await run(program)).toEqual(["a", "b", "c"]);
   });
 
   test("validates count >= 0", () => {
@@ -78,7 +78,7 @@ describe("Barrier", () => {
       yield* join(c);
       return order;
     });
-    const result = await run(program as any);
+    const result = await run(program);
     expect(result.length).toBe(3);
     expect(result).toContain("a");
     expect(result).toContain("b");
@@ -94,7 +94,7 @@ describe("Barrier", () => {
       yield* sleep(20);
       return yield* barrier.arrived;
     });
-    expect(await run(program as any)).toBe(2);
+    expect(await run(program)).toBe(2);
   });
 
   test("validates parties >= 1", () => {

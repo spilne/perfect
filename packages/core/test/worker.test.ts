@@ -1,5 +1,6 @@
 import { describe, test, expect } from "bun:test";
 import { sync, ensuring, run, WorkerPool } from "../src";
+import { runUnchecked } from "./run-unchecked";
 
 describe("WorkerPool", () => {
   test("execute a pure function on a worker", async () => {
@@ -9,7 +10,7 @@ describe("WorkerPool", () => {
         pool.shutdown(),
       ),
     );
-    expect(await run(program)).toBe(42);
+    expect(await run(program.orDie())).toBe(42);
   });
 
   test("execute an async function on a worker", async () => {
@@ -22,7 +23,7 @@ describe("WorkerPool", () => {
         pool.shutdown(),
       ),
     );
-    expect(await run(program)).toBe(100);
+    expect(await run(program.orDie())).toBe(100);
   });
 
   test("parMap distributes across workers", async () => {
@@ -32,7 +33,7 @@ describe("WorkerPool", () => {
         pool.shutdown(),
       ),
     );
-    expect(await run(program)).toEqual([1, 4, 9, 16, 25, 36, 49, 64]);
+    expect(await run(program.orDie())).toEqual([1, 4, 9, 16, 25, 36, 49, 64]);
   });
 
   test("handles errors in worker", async () => {
@@ -44,7 +45,7 @@ describe("WorkerPool", () => {
         pool.shutdown(),
       ),
     );
-    await expect(run(program)).rejects.toHaveProperty("_tag", "WorkerError");
+    await expect(runUnchecked(program)).rejects.toHaveProperty("_tag", "WorkerError");
   });
 
   test("a thread that dies fails the task instead of hanging", async () => {
@@ -66,12 +67,12 @@ describe("WorkerPool", () => {
 
     try {
       const pool = await run(WorkerPool.make(1));
-      await expect(run(pool.execute((x: number) => x * 2, 21))).rejects.toHaveProperty(
+      await expect(runUnchecked(pool.execute((x: number) => x * 2, 21))).rejects.toHaveProperty(
         "_tag",
         "WorkerError",
       );
       // And the pool stays failed rather than routing the next task to a dead thread.
-      await expect(run(pool.execute((x: number) => x, 1))).rejects.toHaveProperty(
+      await expect(runUnchecked(pool.execute((x: number) => x, 1))).rejects.toHaveProperty(
         "_tag",
         "WorkerError",
       );
@@ -106,7 +107,7 @@ describe("WorkerPool", () => {
       ),
     );
 
-    const { results, elapsed } = await run(program);
+    const { results, elapsed } = await run(program.orDie());
     expect(results).toEqual([0, 1, 2, 3]);
     // Each task busy-waits 50 ms of wall-clock time, so running them one after
     // another takes at least 200 ms however loaded the machine is. Less than

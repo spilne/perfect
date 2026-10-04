@@ -18,6 +18,7 @@ import {
   runSync as pRunSync,
   type Eff,
 } from "../src";
+import { runUnchecked } from "../test/run-unchecked";
 
 // ── Basic execution overhead ───────────────────────────────────────
 
@@ -171,7 +172,7 @@ group("error: fail → handle → succeed", () => {
     pRun((pFail("boom") as any).catch(() => pSucceed(0))));
 
   bench("effect fail + catchAll + runPromise", async () =>
-    Effect.runPromise(Effect.fail("boom").pipe(Effect.catchAll(() => Effect.succeed(0)))));
+    Effect.runPromise(Effect.fail("boom").pipe(Effect.catch(() => Effect.succeed(0)))));
 });
 
 // ── retry: succeeds first attempt (no actual retry) ────────────────
@@ -187,7 +188,7 @@ group("retry: succeeds first try", () => {
 
 group("timeout: succeeds fast", () => {
   bench("perfect timeout 5s + run", async () =>
-    pRun(pTimeout(pSucceed(42), 5000, () => "timeout" as const)));
+    runUnchecked(pTimeout(pSucceed(42), 5000, () => "timeout" as const)));
 
   bench("effect timeout 5s + runPromise", async () =>
     Effect.runPromise(Effect.succeed(42).pipe(Effect.timeout("5 seconds"))));

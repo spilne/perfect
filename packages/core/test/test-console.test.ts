@@ -1,11 +1,12 @@
 import { describe, test, expect } from "bun:test";
 import { provide, run, Console, TestConsole } from "../src";
+import { runUnchecked } from "./run-unchecked";
 
 describe("TestConsole — capture", () => {
   test("captures log/warn/error per channel in order", async () => {
     const c = new TestConsole();
     const program = provide(
-      Console.get.flatMap((con: any) =>
+      Console.get.flatMap((con) =>
         con
           .log("hello")
           .flatMap(() =>
@@ -25,7 +26,7 @@ describe("TestConsole — capture", () => {
   test("clear() resets all channels", async () => {
     const c = new TestConsole();
     const program = provide(
-      Console.get.flatMap((con: any) => con.log("a").flatMap(() => con.error("b"))),
+      Console.get.flatMap((con) => con.log("a").flatMap(() => con.error("b"))),
       Console,
       c,
     );
@@ -39,6 +40,6 @@ describe("TestConsole — capture", () => {
   test("real Console is the default — no provide() needed", async () => {
     // Just verify it doesn't throw. The actual stdout output is silent in
     // bun test by default; we only care that the service resolves and runs.
-    await run(Console.get.flatMap((con: any) => con.log("")));
+    await runUnchecked(Console.get.flatMap((con) => con.log("")));
   });
 });
