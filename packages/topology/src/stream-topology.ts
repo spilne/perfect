@@ -30,11 +30,12 @@ import type {
 // ---------------------------------------------------------------------------
 
 /**
- * Stateful stream processing with windows, joins, and automatic checkpointing.
+ * Stateful stream processing with windows, joins, and saved state.
  *
  * Build a declarative processing DAG from a message source (Kafka, etc.),
  * apply transformations, partition by key, window, aggregate, and sink results.
- * State is checkpointed periodically and restored on crash/rebalance.
+ * Each record's state changes are saved before the record is acked, and
+ * state is restored after a crash or rebalance.
  *
  * Runs in a single process — Kafka consumer groups handle partition assignment
  * across instances. Use {@link TopologyRunner.run} to execute.
@@ -49,8 +50,7 @@ import type {
  *   .to(outputTopic);
  *
  * const handle = await TopologyRunner.run(topology, {
- *   group: "click-counter",
- *   checkpointIntervalMs: 10_000,
+ *   group: ConsumerGroup("click-counter"),
  * });
  * ```
  *
