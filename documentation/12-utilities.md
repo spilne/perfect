@@ -269,7 +269,10 @@ const loadConfig = eff(function* () {
 
 const files = new TestFileSystem({ "/etc/app.conf": "debug=true\n" });
 console.log(await provide(loadConfig, FileSystem, files).run()); // → "debug=true"
-console.log(await provide(loadConfig, FileSystem, new TestFileSystem()).run()); // → "missing /etc/app.conf"
+assertEq(
+  await provide(loadConfig, FileSystem, new TestFileSystem()).run(),
+  "missing /etc/app.conf",
+);
 ```
 
 <!-- @end -->

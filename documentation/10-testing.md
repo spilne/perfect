@@ -146,7 +146,10 @@ import { join, run, runFiber, sync, SyncScheduler } from "@spilne/perfect-core";
 // order of steps in a test fully predictable.
 const scheduler = new SyncScheduler();
 const steps: string[] = [];
-const fiber = runFiber(sync(() => steps.push("ran")), scheduler);
+const fiber = runFiber(
+  sync(() => steps.push("ran")),
+  scheduler,
+);
 // nothing yet
 console.log(steps); // → []
 scheduler.flush();
