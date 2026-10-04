@@ -26,12 +26,18 @@ import { type Eff, type Throws, succeed, fail, suspend } from "@spilne/perfect-c
 import { type HttpClientError, HttpParseError, HttpStatusError } from "./errors.js";
 import {
   AbstractHttpClient,
+  decodeResponse,
   type HttpClient,
   type HttpClientConfig,
   type HttpRequestParams,
   type RequestOptions,
 } from "./client.js";
-import { type HttpResponse, type ResponseDecoder, type ResponseParser } from "./response.js";
+import {
+  binaryDecoder,
+  type HttpResponse,
+  type ResponseDecoder,
+  type ResponseParser,
+} from "./response.js";
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -248,13 +254,23 @@ export class MockHttpClient extends AbstractHttpClient {
         ? this.resolveEntry(entry, this.calls[this.calls.length - 1]!)
         : this.defaultResponse;
       if (isHttpClientError(raw)) return fail(raw) as Eff<HttpResponse<T>, Throws<HttpClientError>>;
-      return succeed<HttpResponse<T>>({
+      // Build a real response and run the decoder on it, like the real
+      // client, so the body has the type the caller asked for (a byte stream
+      // by default, or whatever the decoder returns).
+      const text = typeof raw === "string" ? raw : JSON.stringify(raw);
+      const contentType = typeof raw === "string" ? "text/plain" : "application/json";
+      const response = new Response(text, {
         status: 200,
-        headers: new Headers(),
-        contentType: null,
-        contentLength: null,
-        body: raw as T,
+        headers: { "content-type": contentType },
       });
+      const decoder = (options?.decoder ?? binaryDecoder) as ResponseDecoder<T>;
+      return decodeResponse(response, decoder).map((body): HttpResponse<T> => ({
+        status: 200,
+        headers: response.headers,
+        contentType,
+        contentLength: new TextEncoder().encode(text).length,
+        body,
+      }));
     });
   }
 

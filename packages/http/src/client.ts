@@ -338,7 +338,7 @@ export abstract class AbstractHttpClient implements HttpClient {
 // ── DefaultHttpClient — real HTTP via fetch ───────────────────────
 
 export class DefaultHttpClient extends AbstractHttpClient {
-  constructor(private readonly config: HttpClientConfig = {}) {
+  constructor(protected readonly config: HttpClientConfig = {}) {
     super();
   }
 
@@ -527,7 +527,8 @@ export class DefaultHttpClient extends AbstractHttpClient {
 import { tryPromise } from "@spilne/perfect-core";
 import { HttpParseError } from "./errors.js";
 
-function decodeResponse<T>(
+/** Run a decoder on a response; a decoder failure becomes an HttpParseError. */
+export function decodeResponse<T>(
   response: Response,
   decoder: ResponseDecoder<T>,
 ): Eff<T, Throws<HttpClientError>> {

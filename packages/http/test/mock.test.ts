@@ -1,6 +1,6 @@
 import { describe, test, expect } from "bun:test";
 import { run, succeed } from "@spilne/perfect-core";
-import { MockHttpClient, mockHttpClient, type ResponseParser } from "../src";
+import { MockHttpClient, jsonDecoder, mockHttpClient, type ResponseParser } from "../src";
 import { runUnchecked } from "./run-unchecked";
 
 interface User {
@@ -179,9 +179,16 @@ describe("MockHttpClient — getText + getResponse", () => {
     const mock = new MockHttpClient().on("GET", "/file", "the-body");
     const r = await run(mock.getResponse("/file").orDie());
     expect(r.status).toBe(200);
-    // The mock hands back the canned body as-is instead of decoding it, so it is
-    // a string here even though the type says ReadableStream.
-    expect<unknown>(r.body).toBe("the-body");
+    expect(r.contentLength).toBe(8);
+    // Without a decoder the body is a byte stream, as with the real client.
+    expect(await new Response(r.body).text()).toBe("the-body");
+  });
+
+  test("getResponse runs the decoder", async () => {
+    const mock = new MockHttpClient().on("GET", "/user", { id: 1 });
+    const r = await run(mock.getResponse("/user", { decoder: jsonDecoder }).orDie());
+    expect(r.contentType).toBe("application/json");
+    expect(r.body).toEqual({ id: 1 });
   });
 });
 
