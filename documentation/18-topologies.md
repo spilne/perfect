@@ -150,6 +150,24 @@ const averages = StreamTopology.source(readings)
   .to(output);
 ```
 
+### Name your stateful steps
+
+Give every stateful step (`process`, `dedupe`, a window, `join`) a name:
+
+```ts
+.process(spec, { name: "running-average" })
+.tumbling(60_000, { name: "clicks-per-minute" })
+.join(other, { windowMs: 5_000, name: "orders-with-customers" })
+```
+
+Its saved state is kept under that name. Without one, the state is kept
+under the step's position (`process:0`, `window:1`), so a later version that
+adds a step of the same kind in front would hand this step's state to the
+new one. With durable state, the runner warns at startup about unnamed
+steps (pass `onWarning` to route the message). To name a step that already
+has saved state, use its position number as the name: `{ name: "0" }` keeps
+the state of `process:0`.
+
 Durable state is namespaced by topology, stage, operator, source partition,
 and key. Assignment restores a partition before delivery; revocation drains
 in-flight work, checkpoints, and releases its fenced lease.

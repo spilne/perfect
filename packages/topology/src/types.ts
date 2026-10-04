@@ -36,7 +36,7 @@ export interface AggregateSpec<S, T, U> {
 }
 
 /** Options shared by the window steps. */
-export interface WindowOptions {
+export interface WindowOptions extends StepOptions {
   /**
    * How long to wait for records that arrive out of order. A window closes
    * once the partition has seen a record this much past the window's end.
@@ -53,6 +53,24 @@ export interface ProcessSpec<S, T, U> {
 
 export interface JoinConfig {
   windowMs: number;
+  /**
+   * A stable name for this step's saved state. Without it the state is
+   * saved under the step's position (e.g. "process:0"), so adding a step of
+   * the same kind earlier in the topology hands this step's state to the
+   * other one. Letters, digits, "_", "-" and "." only.
+   */
+  name?: string;
+}
+
+/** Options for a stateful step. */
+export interface StepOptions {
+  /**
+   * A stable name for this step's saved state. Without it the state is
+   * saved under the step's position (e.g. "process:0"), so adding a step of
+   * the same kind earlier in the topology hands this step's state to the
+   * other one. Letters, digits, "_", "-" and "." only.
+   */
+  name?: string;
 }
 
 export interface TopologyConfig {
@@ -85,6 +103,12 @@ export interface TopologyConfig {
    * Default: forever, which grows without bound on a long-running topology.
    */
   processedRetentionMs?: number;
+  /**
+   * Called with warnings found when the topology starts, such as stateful
+   * steps without a `name` while state is saved durably. Default:
+   * console.warn.
+   */
+  onWarning?: (message: string) => void;
   /** @deprecated Not called yet; it has no effect. */
   onBackpressure?: (stats: BackpressureStats) => void;
   /**
@@ -203,6 +227,7 @@ export interface WindowNode<_T> {
   parent: TopologyNode;
   windowType: WindowType;
   allowedLatenessMs?: number;
+  name?: string;
 }
 
 export interface AggregateNode<T> {
@@ -215,12 +240,14 @@ export interface ProcessNode<T> {
   type: "process";
   parent: TopologyNode;
   spec: ProcessSpec<unknown, unknown, T>;
+  name?: string;
 }
 
 export interface DedupeNode<T> {
   type: "dedupe";
   parent: TopologyNode;
   keyFn: (value: T) => string;
+  name?: string;
 }
 
 export interface JoinNode<_T> {

@@ -14,6 +14,7 @@ import { Stream } from "@spilne/perfect-core/stream";
 import {
   CheckpointName,
   InMemoryPartitionedState,
+  InMemoryState,
   Partition,
   SourceRecordId,
   StageId,
@@ -145,6 +146,8 @@ class TopologyRunnerInstance {
   private readonly partitionLifecycle: PartitionLifecycle;
   private readonly operatorIds = new Map<TopologyNode, string>();
   private readonly operatorCounts = new Map<string, number>();
+  // Ids of stateful steps without a name (see warnAboutUnnamedSteps).
+  private readonly unnamedSteps: string[] = [];
   private readonly managedSubscriptions: ManagedAcknowledgementSubscription<unknown, unknown>[] =
     [];
 
@@ -224,6 +227,7 @@ class TopologyRunnerInstance {
       drains.push(pipeline.evalMap((record) => this.deliverRecord(record)).drain());
     }
 
+    this.warnAboutUnnamedSteps();
     this.fibers = drains.map((drain) => runFiber((drain as Eff<void, Throws<unknown>>).orDie()));
     const exits = this.fibers.map((fiber, index) =>
       fiber.await().then((exit) => {
@@ -888,12 +892,56 @@ class TopologyRunnerInstance {
     };
   }
 
+  /**
+   * With durable state, an unnamed stateful step's state is tied to its
+   * position, so changing the topology later can hand it to another step.
+   * Say so once at startup, with the ids to use as names to keep the state.
+   */
+  private warnAboutUnnamedSteps(): void {
+    const backend = this.config.partitionedStateBackend ?? this.config.stateBackend;
+    // State kept in memory is gone after a deploy, so positions can't go stale.
+    const durable =
+      backend !== undefined &&
+      !(backend instanceof InMemoryPartitionedState) &&
+      !(backend instanceof InMemoryState);
+    if (!durable || this.unnamedSteps.length === 0) return;
+    const warn = this.config.onWarning ?? ((message: string) => console.warn(message));
+    warn(
+      `[perfect-topology] stateful steps without a name: ${this.unnamedSteps.join(", ")}. ` +
+        "Their saved state is tied to their position, so adding a step of the same kind " +
+        "before them later would hand their state to another step. Give each a name, e.g. " +
+        '`.process(spec, { name: "dedupe-orders" })`; to keep existing state, use the number ' +
+        'after the colon as the name (`{ name: "0" }` for "process:0").',
+    );
+  }
+
+  /**
+   * The id a stateful step saves its state under: `type:name`, or
+   * `type:position` among the unnamed steps of that type. Named steps don't
+   * take a position, so naming one step doesn't move the others' state, and
+   * naming a step after its current position ("0") keeps its existing state.
+   */
   private operatorId(node: TopologyNode, type: string): string {
     const existing = this.operatorIds.get(node);
     if (existing) return existing;
-    const index = this.operatorCounts.get(type) ?? 0;
-    this.operatorCounts.set(type, index + 1);
-    const id = `${type}:${index}`;
+    const name = stepName(node);
+    let id: string;
+    if (name === undefined) {
+      const index = this.operatorCounts.get(type) ?? 0;
+      this.operatorCounts.set(type, index + 1);
+      id = `${type}:${index}`;
+      this.unnamedSteps.push(id);
+    } else {
+      if (!/^[\w.-]+$/.test(name)) {
+        throw new TypeError(`step name "${name}" may only use letters, digits, "_", "-" and "."`);
+      }
+      id = `${type}:${name}`;
+    }
+    if ([...this.operatorIds.values()].includes(id)) {
+      throw new TypeError(
+        `two stateful steps would save their state under "${id}"; give them different names`,
+      );
+    }
     this.operatorIds.set(node, id);
     return id;
   }
@@ -974,6 +1022,26 @@ class TopologyRunnerInstance {
       if (typeof candidate.createdAt === "string") return new Date(candidate.createdAt).getTime();
     }
     return Date.now();
+  }
+}
+
+/** The name given to a stateful step, if any. A window's name sits on its window step. */
+function stepName(node: TopologyNode): string | undefined {
+  switch (node.type) {
+    case "process":
+    case "dedupe":
+      return node.name;
+    case "join":
+      return node.config.name;
+    case "aggregate": {
+      let current: TopologyNode | undefined = node.parent;
+      while (current && current.type !== "window") {
+        current = "parent" in current ? current.parent : undefined;
+      }
+      return current?.type === "window" ? current.name : undefined;
+    }
+    default:
+      return undefined;
   }
 }
 
