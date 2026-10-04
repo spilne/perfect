@@ -11,46 +11,35 @@
 // implements it, topology consumes it); DistributedTopologyConfig is local.
 // ---------------------------------------------------------------------------
 
-import { StreamTopology, BuiltTopology } from "./stream-topology.js";
+import { BuiltTopology } from "./stream-topology.js";
 import { TopologyRunner } from "./topology-runner.js";
-import { planStages } from "./stage-planner.js";
-import type { TopologyHandle, TopologyMetrics, TopologyConfig } from "./types.js";
-import type { StateBackend } from "./state-backend.js";
+import { planStages, type TopologyStage } from "./stage-planner.js";
+import type {
+  SinkNode,
+  TopologyConfig,
+  TopologyHandle,
+  TopologyMetrics,
+  TopologyNode,
+} from "./types.js";
 import type {
   Streamable,
   Acknowledgeable,
   KeyedSinkable,
   ShuffleTransport,
   ChannelName,
-  PartitionedStateBackend,
-  TopologyId,
-  TopologyInstanceId,
 } from "@spilne/perfect-core/connect";
 import {
   JsonCodec,
   ConsumerGroup,
   TopologyId as makeTopologyId,
 } from "@spilne/perfect-core/connect";
-import type { Eff } from "@spilne/perfect-core";
 
 /**
- * Config for DistributedRunner — extends TopologyConfig with shuffle transport.
+ * Config for DistributedRunner: everything TopologyRunner takes, plus the
+ * transport that carries records between stages.
  */
-export interface DistributedTopologyConfig {
-  group: ConsumerGroup;
-  deliveryGuarantee?: "at-least-once" | "exactly-once";
+export interface DistributedTopologyConfig extends TopologyConfig {
   shuffleTransport: ShuffleTransport<unknown, unknown>;
-  stateBackend?: StateBackend<string, unknown>;
-  partitionedStateBackend?: PartitionedStateBackend<unknown>;
-  topologyId?: TopologyId;
-  instanceId?: TopologyInstanceId;
-  partitionLeaseMs?: number;
-  checkpointIntervalMs?: number;
-  maxBufferSize?: number;
-  maxItemsPerSecond?: number;
-  maxDedupeSize?: number;
-  ackBatchSize?: number;
-  ackMaxWaitMs?: number;
 }
 
 /**
@@ -104,7 +93,16 @@ export class DistributedRunner {
 
     // No shuffles — delegate to TopologyRunner
     if (plan.stages.length === 1 && plan.repartitionTopics.length === 0) {
-      return TopologyRunner.run(topology, config as TopologyConfig);
+      return TopologyRunner.run(topology, config);
+    }
+
+    // Stages are planned along one chain of steps, and a join has two
+    // inputs, so a join can't be split into stages yet.
+    if (hasJoin(topology.compiled)) {
+      throw new TypeError(
+        "DistributedRunner can't run a join in a topology with shuffle() yet; " +
+          "run it with TopologyRunner instead",
+      );
     }
 
     // Create repartition channels
@@ -125,54 +123,39 @@ export class DistributedRunner {
       channels.set(topicName, channel);
     }
 
-    // Run each stage
-    const handles: TopologyHandle[] = [];
-
+    // The key each repartition channel is written with. The stage reading
+    // that channel needs it again: keyed steps there (windows, process,
+    // dedupe) group by the key that was set before the shuffle.
+    const channelKeys = new Map<ChannelName, (value: unknown) => string>();
     for (const stage of plan.stages) {
-      // Build stage source
-      let stageSource:
-        | (Streamable<unknown, unknown> & Acknowledgeable<unknown, unknown>)
-        | undefined;
-      if (stage.source === "original") {
-        // Use the original source from the topology
-        stageSource = undefined; // TopologyRunner will use the source node
-      } else {
-        stageSource = channels.get(stage.source.repartitionTopic)!.source;
+      if (stage.sink !== "terminal" && stage.keyFn) {
+        channelKeys.set(stage.sink.repartitionTopic, stage.keyFn);
       }
+    }
 
-      // Build stage sink (repartition publish)
-      let stageSink: KeyedSinkable<unknown, unknown> | undefined;
-      if (stage.sink !== "terminal") {
-        stageSink = channels.get(stage.sink.repartitionTopic)!.sink;
+    // Start every stage. If one fails to start, stop the ones already
+    // running instead of leaving them behind.
+    const handles: TopologyHandle[] = [];
+    try {
+      for (const stage of plan.stages) {
+        const stageTopology = buildStageTopology({
+          stage,
+          channels,
+          channelKeys,
+        });
+        handles.push(
+          await TopologyRunner.run(stageTopology, {
+            ...config,
+            // Each stage is its own consumer group — derived, so rebrand.
+            group: ConsumerGroup(`${config.group}-${stage.id}`),
+            topologyId: config.topologyId ?? makeTopologyId(config.group),
+            stageId: stage.id,
+          }),
+        );
       }
-
-      // Build sub-topology for this stage
-      const stageTopology = buildStageTopology({
-        stage,
-        stageSource,
-        stageSink,
-        originalTopology: topology,
-      });
-
-      const handle = await TopologyRunner.run(stageTopology, {
-        // Each stage is its own consumer group — derived, so rebrand.
-        group: ConsumerGroup(`${config.group}-${stage.id}`),
-        deliveryGuarantee: config.deliveryGuarantee,
-        topologyId: config.topologyId ?? makeTopologyId(config.group),
-        stageId: stage.id,
-        instanceId: config.instanceId,
-        stateBackend: config.stateBackend,
-        partitionedStateBackend: config.partitionedStateBackend,
-        partitionLeaseMs: config.partitionLeaseMs,
-        checkpointIntervalMs: config.checkpointIntervalMs,
-        maxBufferSize: config.maxBufferSize,
-        maxItemsPerSecond: config.maxItemsPerSecond,
-        maxDedupeSize: config.maxDedupeSize,
-        ackBatchSize: config.ackBatchSize,
-        ackMaxWaitMs: config.ackMaxWaitMs,
-      });
-
-      handles.push(handle);
+    } catch (error) {
+      await Promise.allSettled(handles.map((handle) => handle.shutdown()));
+      throw error;
     }
 
     // Return composite handle
@@ -205,140 +188,71 @@ export class DistributedRunner {
 // Helpers
 // ---------------------------------------------------------------------------
 
+type Channel = {
+  source: Streamable<unknown, unknown> & Acknowledgeable<unknown, unknown>;
+  sink: KeyedSinkable<unknown, unknown>;
+};
+
 /**
- * Build a BuiltTopology for a single stage.
+ * Build the topology one stage runs.
  *
- * - If the stage reads from a repartition topic, splices in a new source node.
- * - If the stage writes to a repartition topic, splices in a sink that publishes with key.
- * - If the stage is the original (no shuffle), returns the original topology.
+ * A stage's nodes are copied and linked onto the stage's own start: the
+ * original source for the first stage, otherwise the repartition channel it
+ * reads, followed by the key from before the shuffle. Copying the nodes (not
+ * replaying them through the builder) keeps every kind of step working.
+ * A stage that writes to a repartition channel ends in a sink that publishes
+ * each value with its key.
  */
 function buildStageTopology(params: {
-  stage: ReturnType<typeof planStages>["stages"][number];
-  stageSource?: Streamable<unknown, unknown> & Acknowledgeable<unknown, unknown>;
-  stageSink?: KeyedSinkable<unknown, unknown>;
-  originalTopology: BuiltTopology;
+  stage: TopologyStage;
+  channels: ReadonlyMap<ChannelName, Channel>;
+  channelKeys: ReadonlyMap<ChannelName, (value: unknown) => string>;
 }): BuiltTopology {
-  const { stage, stageSource, stageSink, originalTopology } = params;
+  const { stage, channels, channelKeys } = params;
+  let last: TopologyNode;
+  if (stage.source === "original") {
+    const source = stage.nodes.find((node) => node.type === "source");
+    if (!source) throw new Error("No source node found in topology");
+    last = source;
+  } else {
+    const topic = stage.source.repartitionTopic;
+    last = { type: "source", source: channels.get(topic)!.source };
+    const keyFn = channelKeys.get(topic);
+    if (keyFn) last = { type: "keyBy", parent: last, keyFn };
+  }
 
-  // If this is stage 0 with original source and writing to repartition
-  if (stage.source === "original" && stageSink) {
-    // Build a topology: original source → pre-shuffle nodes → keyed publish
+  for (const node of stage.nodes) {
+    if (node.type === "source" || node.type === "shuffle" || node.type === "join") continue;
+    if (node.type === "sink") continue;
+    last = { ...node, parent: last };
+  }
+
+  const sinks: SinkNode<unknown>[] = [];
+  if (stage.sink === "terminal") {
+    for (const sink of stage.sinkNodes) sinks.push({ ...sink, parent: last });
+  } else {
+    const channelSink = channels.get(stage.sink.repartitionTopic)!.sink;
     const keyFn = stage.keyFn;
-    const sinkable = {
-      publish: (value: unknown) => {
-        const key = keyFn ? keyFn(value) : undefined;
-        return stageSink.publish(value, key ? { key } : undefined);
+    sinks.push({
+      type: "sink",
+      parent: last,
+      sink: {
+        codec: JsonCodec,
+        publish: (value: unknown) =>
+          channelSink.publish(value, keyFn ? { key: keyFn(value) } : undefined),
       },
-      codec: JsonCodec,
-    };
-
-    // Find the original source node from the compiled topology
-    const sourceNode = findSourceNode(originalTopology.compiled.nodes);
-    if (!sourceNode) throw new Error("No source node found in topology");
-
-    // Rebuild from original source to the keyBy, then sink to repartition
-    const topo = StreamTopology.source(sourceNode.source as any);
-
-    // Apply pre-shuffle transforms by walking stage.nodes
-    return buildFromNodes(topo, stage.nodes, sinkable);
+    });
   }
-
-  // If this stage reads from repartition and is the final stage
-  if (stageSource && stage.sink === "terminal") {
-    // Build topology: repartition source → post-shuffle nodes → original sink(s)
-    const topo = StreamTopology.source(stageSource);
-    return buildFromNodes(topo, stage.nodes, undefined);
-  }
-
-  // If this stage reads from repartition and writes to repartition (middle stage)
-  if (stageSource && stageSink) {
-    const keyFn = stage.keyFn;
-    const sinkable = {
-      publish: (value: unknown) => {
-        const key = keyFn ? keyFn(value) : undefined;
-        return stageSink.publish(value, key ? { key } : undefined);
-      },
-      codec: JsonCodec,
-    };
-    const topo = StreamTopology.source(stageSource);
-    return buildFromNodes(topo, stage.nodes, sinkable);
-  }
-
-  // Fallback: return original topology
-  return originalTopology;
+  return new BuiltTopology({ nodes: [last], sinks });
 }
 
-/** Find the source node in a list of topology nodes. */
-function findSourceNode(nodes: readonly any[]): { source: unknown } | undefined {
-  for (const node of nodes) {
-    if (node.type === "source") return node;
-  }
-  // Also walk parent chains
-  for (const node of nodes) {
-    let current = node;
-    while (current) {
-      if (current.type === "source") return current;
-      current = "parent" in current ? current.parent : undefined;
-    }
-  }
-  return undefined;
-}
-
-/**
- * Build a BuiltTopology by replaying node types onto a StreamTopology.
- * Handles the common linear topology case.
- */
-function buildFromNodes(
-  base: StreamTopology<unknown>,
-  nodes: readonly any[],
-  sink?: { publish: (value: unknown) => Eff<void, any>; codec: any },
-): BuiltTopology {
-  let topo: any = base;
-
-  for (const node of nodes) {
-    switch (node.type) {
-      case "map":
-        topo = topo.map(node.fn);
-        break;
-      case "filter":
-        topo = topo.filter(node.fn);
-        break;
-      case "mapAsync":
-        topo = topo.mapAsync(node.concurrency, node.fn);
-        break;
-      case "keyBy":
-        topo = topo.keyBy(node.keyFn);
-        break;
-      case "window":
-        if (node.windowType.type === "tumbling") topo = topo.tumbling(node.windowType.windowMs);
-        else if (node.windowType.type === "sliding")
-          topo = topo.sliding({
-            windowMs: node.windowType.windowMs,
-            slideMs: node.windowType.slideMs,
-          });
-        else if (node.windowType.type === "session") topo = topo.session(node.windowType.gapMs);
-        break;
-      case "aggregate":
-        topo = topo.aggregate(node.spec);
-        break;
-      case "process":
-        topo = topo.process(node.spec);
-        break;
-      case "dedupe":
-        topo = topo.dedupe(node.keyFn);
-        break;
-      case "sink":
-        return topo.to(node.sink);
-      case "source":
-      case "shuffle":
-        // Skip — already handled
-        break;
-    }
-  }
-
-  if (sink) {
-    return topo.to(sink);
-  }
-
-  return topo.build();
+function hasJoin(compiled: BuiltTopology["compiled"]): boolean {
+  const seen = new Set<TopologyNode>();
+  const visit = (node: TopologyNode): boolean => {
+    if (seen.has(node)) return false;
+    seen.add(node);
+    if (node.type === "join") return true;
+    return "parent" in node && visit(node.parent);
+  };
+  return [...compiled.sinks, ...compiled.nodes].some(visit);
 }
