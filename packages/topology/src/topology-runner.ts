@@ -450,6 +450,10 @@ class TopologyRunnerInstance {
 
   private compileJoin(node: Extract<TopologyNode, { type: "join" }>): Stream<TopologyRecord, any> {
     const operatorId = this.operatorId(node, "join");
+    // Each key's buffered items are saved under their own state entry.
+    const keyPrefix = `${operatorId}:key:`;
+    const keyEntry = (key: string) => `${keyPrefix}${encodeURIComponent(key)}`;
+    const migrating = new WeakSet<PartitionContext>();
     const leftKeyFn = this.findKeyBy(node.left).keyFn;
     const rightKeyFn = this.findKeyBy(node.right).keyFn;
 
@@ -476,15 +480,37 @@ class TopologyRunnerInstance {
         | undefined;
       if (!buffer) {
         buffer = new JoinBuffer(node.config.windowMs);
-        const saved = context.values.get(operatorId);
-        if (saved) buffer.restore(saved as any);
+        for (const [entryKey, saved] of context.values) {
+          if (entryKey.startsWith(keyPrefix)) {
+            buffer.restoreKey(decodeURIComponent(entryKey.slice(keyPrefix.length)), saved as any);
+          }
+        }
+        // State saved before keys had their own entries: load it, and the
+        // first record below saves every key in the new format.
+        const legacy = context.values.get(operatorId);
+        if (legacy !== undefined) {
+          buffer.restore(legacy as any);
+          migrating.add(context);
+        }
         context.operatorCaches.set(operatorId, buffer);
       }
       const outputs =
         tagged.side === "left"
           ? buffer.addLeft(tagged.key, record.value, tagged.ts)
           : buffer.addRight(tagged.key, record.value, tagged.ts);
-      this.putMutation(record, operatorId, buffer.snapshot());
+
+      // Save only the keys that changed. (Before, every record saved the
+      // whole buffer under one entry, so the cost grew with the buffer.)
+      const changed = new Set(buffer.takeChangedKeys());
+      if (migrating.delete(context)) {
+        for (const key of buffer.keys()) changed.add(key);
+        this.deleteMutation(record, operatorId);
+      }
+      for (const key of changed) {
+        const saved = buffer.snapshotKey(key);
+        if (saved) this.putMutation(record, keyEntry(key), saved);
+        else this.deleteMutation(record, keyEntry(key));
+      }
       return Stream.fromArray(this.branch(record, outputs as unknown[]));
     });
   }
