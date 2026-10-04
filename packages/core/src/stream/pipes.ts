@@ -614,9 +614,12 @@ export interface XmlEvent {
 /**
  * Parse XML text into SAX-style events — lightweight, no DOM tree in memory.
  * Handles open tags, close tags, self-closing tags, double-quoted attributes,
- * and trimmed text nodes. Each incoming text chunk is scanned independently
- * (no cross-chunk buffering), so a tag split across chunk boundaries will not
- * be recognized — feed whole documents or tag-complete chunks.
+ * and trimmed text nodes. `<![CDATA[...]]>` becomes a text event as written;
+ * the `<?xml ...?>` declaration, comments and `<!DOCTYPE ...>` are skipped.
+ * Entities such as `&amp;` are not decoded.
+ *
+ * The text can arrive in pieces split anywhere, even in the middle of a tag:
+ * an unfinished tag or text is kept until the rest arrives.
  *
  * @example
  * ```ts
@@ -626,39 +629,127 @@ export interface XmlEvent {
  * ```
  */
 export const xml: Pipe<string, XmlEvent> = (input) =>
-  input.flatMap((chunk) => {
-    const events: XmlEvent[] = [];
-    const tagRegex = /<\/?([a-zA-Z][\w.-]*)((?:\s+[\w.-]+\s*=\s*"[^"]*")*)\s*(\/?)>|([^<]+)/g;
-    let match;
-
-    while ((match = tagRegex.exec(chunk)) !== null) {
-      const [full, tag, attrStr, selfClose, text] = match;
-
-      if (text?.trim()) {
-        events.push({ type: "text", text: text.trim() });
-      } else if (tag) {
-        if (full!.startsWith("</")) {
-          events.push({ type: "close", tag });
-        } else {
-          const attributes: Record<string, string> = {};
-          if (attrStr) {
-            const attrRegex = /([\w.-]+)\s*=\s*"([^"]*)"/g;
-            let am;
-            while ((am = attrRegex.exec(attrStr)) !== null) {
-              attributes[am[1]!] = am[2]!;
-            }
+  parseChunks(input, () => {
+    // Pieces of the part we could not parse yet: an unfinished tag, or text
+    // that may go on in the next piece.
+    let pending: string[] = [];
+    // A character the next piece must contain before the pending part can
+    // be finished: ">" for a tag, "<" for text. Pieces without it are only
+    // collected, so a huge text node arriving in many pieces is still read
+    // once, not again for every piece.
+    let waitFor = "";
+    return {
+      step(chunk) {
+        const out: XmlEvent[] = [];
+        for (let i = 0; i < chunk.length; i++) {
+          const piece = chunk.get(i);
+          if (pending.length > 0 && !piece.includes(waitFor)) {
+            pending.push(piece);
+            continue;
           }
-          events.push({
-            type: selfClose ? "selfClose" : "open",
-            tag,
-            attributes: Object.keys(attributes).length > 0 ? attributes : undefined,
-          });
+          pending.push(piece);
+          const rest = parseXml(pending.join(""), out, false);
+          pending = rest === "" ? [] : [rest];
+          waitFor = rest.startsWith("<") ? ">" : "<";
         }
-      }
+        return out;
+      },
+      end() {
+        const out: XmlEvent[] = [];
+        parseXml(pending.join(""), out, true);
+        pending = [];
+        return out;
+      },
+    };
+  });
+
+const XML_TAG = /^<(\/?)([a-zA-Z][\w.-]*)((?:\s+[\w.-]+\s*=\s*"[^"]*")*)\s*(\/?)>$/;
+const XML_ATTRIBUTE = /([\w.-]+)\s*=\s*"([^"]*)"/g;
+
+// Things that start with "<" but are not tags, and where each one ends.
+const XML_SPECIAL: ReadonlyArray<readonly [start: string, end: string, keepAsText: boolean]> = [
+  ["<![CDATA[", "]]>", true],
+  ["<!--", "-->", false],
+  ["<?", "?>", false],
+  ["<!", ">", false],
+];
+
+/**
+ * Parse as much of `text` as is complete, pushing events into `out`, and
+ * return the part that is not complete yet. When `atEnd` is true there is no
+ * more input, so trailing text is emitted and an unfinished tag is dropped.
+ */
+function parseXml(text: string, out: XmlEvent[], atEnd: boolean): string {
+  let pos = 0;
+  while (pos < text.length) {
+    const lt = text.indexOf("<", pos);
+    if (lt !== pos) {
+      // Text up to the next "<". Without a "<" the text may go on in the
+      // next piece, so wait for it (unless the input has ended).
+      if (lt === -1 && !atEnd) break;
+      pushText(text.slice(pos, lt === -1 ? text.length : lt), out);
+      pos = lt === -1 ? text.length : lt;
+      continue;
     }
 
-    return Stream.fromArray(events);
-  });
+    const special = XML_SPECIAL.find(([start]) => text.startsWith(start, pos));
+    if (special === undefined && isPrefixOfSpecial(text, pos) && !atEnd) break;
+    if (special !== undefined) {
+      const [start, end, keepAsText] = special;
+      const close = text.indexOf(end, pos + start.length);
+      if (close === -1) {
+        if (atEnd) return "";
+        break;
+      }
+      if (keepAsText) pushText(text.slice(pos + start.length, close), out);
+      pos = close + end.length;
+      continue;
+    }
+
+    const gt = text.indexOf(">", pos);
+    if (gt === -1) {
+      if (!atEnd) break;
+      // The input ended without a ">", so this "<" was not a tag after all.
+      pushText(text.slice(pos + 1), out);
+      return "";
+    }
+    const tag = text.slice(pos, gt + 1);
+    const match = XML_TAG.exec(tag);
+    if (match === null) {
+      // A "<" that does not start a tag, as in "a < b": skip just the "<"
+      // and read on, so a real tag after it is still found.
+      pos += 1;
+      continue;
+    }
+    out.push(xmlTagEvent(match));
+    pos = gt + 1;
+  }
+  return text.slice(pos);
+}
+
+// True when the text at `pos` could still turn into one of XML_SPECIAL once
+// more input arrives, e.g. a piece that ends with "<!-".
+function isPrefixOfSpecial(text: string, pos: number): boolean {
+  const rest = text.slice(pos);
+  return XML_SPECIAL.some(([start]) => rest.length < start.length && start.startsWith(rest));
+}
+
+function pushText(text: string, out: XmlEvent[]): void {
+  const trimmed = text.trim();
+  if (trimmed !== "") out.push({ type: "text", text: trimmed });
+}
+
+function xmlTagEvent(match: RegExpExecArray): XmlEvent {
+  const [, slash, tag, attrText, selfClose] = match;
+  if (slash) return { type: "close", tag: tag! };
+  const attributes: Record<string, string> = {};
+  for (const attr of attrText!.matchAll(XML_ATTRIBUTE)) attributes[attr[1]!] = attr[2]!;
+  return {
+    type: selfClose ? "selfClose" : "open",
+    tag: tag!,
+    attributes: Object.keys(attributes).length > 0 ? attributes : undefined,
+  };
+}
 
 // ── Helpers ────────────────────────────────────────────────────────
 
