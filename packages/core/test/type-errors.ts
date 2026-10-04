@@ -30,6 +30,7 @@ import {
   runSync,
   all,
   cached,
+  Layer,
   forEachPar,
   race,
   fork,
@@ -636,4 +637,24 @@ const _err8 = run(
   const _plain: Eff<Fiber<number>, never> = fork(failing);
   // @ts-expect-error — the error is not dropped
   const _dropped: Eff<number, never> = fork(failing).flatMap(join);
+}
+
+// Layer.build: a requirement met by another layer in the same build is gone
+// from the result; one that nothing in the build provides stays.
+{
+  const BuildDb = service<{ name: string }>()("BuildDb");
+  const BuildLog = service<{ line: string }>()("BuildLog");
+  const BuildCache = service<{ backedBy: string }>()("BuildCache");
+  const DbLive = Layer.describe({ provides: ["BuildDb"] }, succeed({ BuildDb: { name: "pg" } }));
+  const CacheLive = Layer.describe(
+    { provides: ["BuildCache"], requires: ["BuildDb"] },
+    BuildDb.get.map((db) => ({ BuildCache: { backedBy: db.name } })),
+  );
+  const CacheWithLog = BuildDb.get
+    .flatMap(() => BuildLog.get)
+    .map(() => ({ BuildCache: { backedBy: "x" } }));
+  const _built: Eff<{ BuildDb: { name: string } } & { BuildCache: { backedBy: string } }, never> =
+    Layer.build(CacheLive, DbLive);
+  // @ts-expect-error BuildLog is not provided by any layer in the build
+  const _stillNeedsLog: Eff<unknown, never> = Layer.build(CacheWithLog, DbLive);
 }
