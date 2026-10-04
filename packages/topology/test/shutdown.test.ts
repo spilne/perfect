@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { fail, succeed, sync } from "@spilne/perfect-core";
+import { fail, succeed, sync, type Throws } from "@spilne/perfect-core";
 import { Stream } from "@spilne/perfect-core/stream";
 import {
   InMemoryPartitionedState,
@@ -77,8 +77,10 @@ describe("stopping a topology", () => {
 
   test("after a sink failure, shutdown returns promptly and frees the partition", async () => {
     const state = new InMemoryPartitionedState<unknown>();
-    const sink = listSink();
-    sink.publish = (value) => (value === 2 ? fail(new Error("sink down")) : succeed(undefined));
+    const sink: Sinkable<number, Throws<Error>> = {
+      codec,
+      publish: (value) => (value === 2 ? fail(new Error("sink down")) : succeed(undefined)),
+    } as Sinkable<number, Throws<Error>>;
     const runner = await TopologyRunner.run(
       StreamTopology.source(listSource([1, 2, 3]))
         .mapAsync(2, async (n) => n)
