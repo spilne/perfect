@@ -115,6 +115,53 @@ console.log(captured.logs()); // → ["hello", "world"]
 | `.errors()` | array of `error()` messages |
 | `.all()` | unified, with `level` tags |
 | `.clear()` | reset captured state |
+| `new TestConsole(["line 1", "line 2"])` / `.feed(...lines)` | lines that `readLine()` returns, in order (`undefined` when there are none left) |
+| `.remainingInput()` | lines not read yet |
+
+## Files, logs and spans
+
+The other built-in services have test versions too:
+
+| Service | Test version | Check with |
+| --- | --- | --- |
+| `FileSystem` | `new TestFileSystem({ "/path": "contents" })` | read the files back through the service |
+| `Logger` | `new TestLogger()` | `.entries`, `.messages`, `.atLevel("warn")`, `.clear()` |
+| `Tracer` | `new TestTracer()` | `.finished` (ended spans, children first), `.find(name)`, `.clear()` |
+
+See [Files](./12-utilities.md#filesystem) and
+[Observability](./15-observability.md) for examples.
+
+## Running fibers step by step — `SyncScheduler`
+
+Fibers normally run on the default scheduler, which picks its own moment.
+`SyncScheduler` only runs them when you call `flush()`, so a test decides
+exactly when each step happens:
+
+<!-- @embed packages/core/examples/17-runtime-utilities.ts#sync-scheduler -->
+
+```ts
+import { join, run, runFiber, sync, SyncScheduler } from "@spilne/perfect-core";
+
+// SyncScheduler runs fibers only when you call flush(), which makes the
+// order of steps in a test fully predictable.
+const scheduler = new SyncScheduler();
+const steps: string[] = [];
+const fiber = runFiber(
+  sync(() => steps.push("ran")),
+  scheduler,
+);
+// nothing yet
+console.log(steps); // → []
+scheduler.flush();
+console.log(steps); // → ["ran"]
+console.log(await run(join(fiber))); // → 1
+```
+
+<!-- @end -->
+
+Pass the scheduler to `runFiber(eff, scheduler)` or `run(eff, scheduler)`
+for one effect. `setDefaultScheduler(scheduler)` changes it for everything
+that doesn't pass one; set it back when the test ends.
 
 ## Property-based testing — `Gen` and `forAll`
 

@@ -246,6 +246,133 @@ The implementation uses prefix-scoped scanning for `clear()` and supports a
 custom value codec and key encoder. See
 [Distributed backends](./17-distributed-backends.md#redis).
 
+## FileSystem
+
+`FileSystem` is a service for reading and writing files. Every operation
+that can fail at the OS level (a missing file, no permission) fails with a
+typed `FileSystemError` that says which operation and path failed, instead
+of throwing. Provide `realFileSystem` in your app and `TestFileSystem` in
+tests.
+
+<!-- @embed packages/core/examples/17-runtime-utilities.ts#file-system -->
+
+```ts
+import { eff, provide, run, sync, FileSystem, TestFileSystem } from "@spilne/perfect-core";
+
+// Code reads files through the FileSystem service. In tests, provide a
+// TestFileSystem that keeps everything in memory.
+const loadConfig = eff(function* () {
+  const fs = yield* FileSystem.get;
+  const text = yield* fs.readFile("/etc/app.conf");
+  return text.trim();
+}).catchTag("FileSystemError", (e) => sync(() => `missing ${e.path}`));
+
+const files = new TestFileSystem({ "/etc/app.conf": "debug=true\n" });
+console.log(await provide(loadConfig, FileSystem, files).run()); // → "debug=true"
+assertEq(
+  await provide(loadConfig, FileSystem, new TestFileSystem()).run(),
+  "missing /etc/app.conf",
+);
+```
+
+<!-- @end -->
+
+| API | What it does |
+| --- | --- |
+| `readFile(path)` / `readFileBytes(path)` | read as text / bytes |
+| `writeFile(path, contents)` / `appendFile(path, text)` | write or append |
+| `exists(path)` | never fails, just `true` / `false` |
+| `remove(path, { recursive? })` / `mkdir(path, { recursive? })` | delete / create |
+| `readDir(path)` / `stat(path)` | list a folder / size, type and modification time |
+| `watch(path, { recursive? })` | a `Stream` of changes; it runs until you stop it (`take`, `interruptOn`), and the watcher is closed when the stream ends |
+
+`TestFileSystem` keeps everything in memory and does not normalize paths,
+so use one spelling (`/a/b`, not `/a/./b`) in a test.
+
+## Branded types — `nominal` and `refined`
+
+A user id and an order id are both strings, so TypeScript lets you pass one
+where the other is expected. A brand makes them different types. It only
+exists in the types, so it costs nothing at runtime.
+
+<!-- @embed packages/core/examples/17-runtime-utilities.ts#brands -->
+
+```ts
+import { nominal, refined, BrandError, type Brand } from "@spilne/perfect-core";
+
+// A brand makes two kinds of string (or number) incompatible, so they can't
+// be swapped by accident. It costs nothing at runtime.
+type UserId = Brand<string, "UserId">;
+type OrderId = Brand<string, "OrderId">;
+const UserId = nominal<UserId>();
+const OrderId = nominal<OrderId>();
+
+function cancelOrder(user: UserId, order: OrderId): string {
+  return `${user} cancels ${order}`;
+}
+console.log(cancelOrder(UserId("u-1"), OrderId("o-9"))); // → "u-1 cancels o-9"
+// cancelOrder(OrderId("o-9"), UserId("u-1")) does not compile.
+
+// refined() also checks the value, and throws BrandError when it is wrong.
+type Port = Brand<number, "Port">;
+const Port = refined<Port>(
+  (n) => Number.isInteger(n) && n > 0 && n < 65_536,
+  (n) => `${n} is not a valid port`,
+);
+console.log(Port(8080)); // → 8080
+let rejected = "";
+try {
+  Port(70_000);
+} catch (e) {
+  if (e instanceof BrandError) rejected = e.message;
+}
+console.log(rejected); // → "70000 is not a valid port"
+```
+
+<!-- @end -->
+
+Brand identifiers that are easy to mix up (ids, topic names, offsets). Plain
+text like log messages doesn't need it.
+
+## Graceful shutdown
+
+`createGracefulShutdown()` gives you one place to stop everything when the
+process is asked to exit:
+
+<!-- @embed packages/core/examples/17-runtime-utilities.ts#graceful-shutdown -->
+
+```ts
+import { run, createGracefulShutdown } from "@spilne/perfect-core";
+
+// One object to stop everything: streams stop on `signal`, other resources
+// register a teardown with `onShutdown`. run() aborts the signal and waits
+// for every teardown, so work in flight can finish first.
+const shutdown = createGracefulShutdown();
+const closed: string[] = [];
+shutdown.onShutdown(async () => {
+  closed.push("db pool");
+});
+shutdown.onShutdown(async () => {
+  closed.push("kafka producer");
+});
+
+// In an app: process.once("SIGTERM", () => shutdown.run().then(() => process.exit(0)));
+await shutdown.run();
+await shutdown.run(); // safe to call twice; teardowns run once
+console.log(shutdown.signal.aborted); // → true
+console.log(closed); // → ["db pool", "kafka producer"]
+```
+
+<!-- @end -->
+
+- `signal` is an `AbortSignal`; connect streams to it with
+  `stream.interruptOn(shutdown.signal)`.
+- `onShutdown(close)` registers a cleanup function (close a client, flush a
+  producer).
+- `run()` aborts the signal and waits for every cleanup. A cleanup that
+  fails doesn't stop the others. Calling `run()` again returns the same
+  promise, so two signals in a row are harmless.
+
 ## Next
 
 - [Resilience + Coordination Primitives](./11-resilience-and-coordination.md)

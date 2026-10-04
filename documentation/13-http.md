@@ -31,6 +31,11 @@ Who cancels what:
   read the body. (The streaming helpers below are different: their
   `timeoutMs` covers only the headers.)
 
+Requests made with these functions can also go through a proxy:
+`proxy: { url: "http://user:pass@proxy.corp:8080", ca? }`, where `ca` is a
+PEM certificate for proxies that inspect TLS. **This only works on Bun.**
+Node's `fetch` has no proxy option, so there it is ignored.
+
 ### Tier 1 — `httpFetch` (raw Response)
 
 <!-- @embed packages/http/examples/01-basic.ts#tier-1-raw -->
@@ -135,6 +140,26 @@ console.log(caught!.isClientError); // → true
 
 A reusable client carries `baseUrl`, default headers, transport, middleware,
 and an optional `errorSchema`.
+
+| Method | Returns |
+| --- | --- |
+| `get` / `post` / `put` / `patch` / `delete(path, schema, options?)` | the body, checked by `schema` |
+| `postMultipart(path, schema, { file, fileField?, fields? })` | upload a file as `multipart/form-data` (`fileField` defaults to `"file"`) |
+| `getJson(path)` / `postJson(path, options?)` | parsed JSON as `unknown`, not checked |
+| `getText(path)` | the body as a string |
+| `getResponse(path, { decoder? })` | `{ status, headers, contentType, contentLength, body }`; the body is a byte stream unless you pass a decoder |
+| `request({ path, method, schema, ... })` | the general form the others use |
+
+Pass `identityParser` as the schema to skip checking the body (you get
+`unknown`). The decoders for `getResponse` are `textDecoder`, `jsonDecoder`,
+`arrayBufferDecoder`, `blobDecoder` and `binaryDecoder` (the stream, not
+read into memory); a decoder is just `(response) => Promise<T>`, so you can
+write your own (for protobuf, say).
+
+Every method takes `headers`, `timeoutMs`, `tag` (a short name for logs and
+metrics instead of the full URL), `acceptStatus` (which statuses count as
+success; default 200–299) and `errorSchema`. The body methods also take
+`json` or `body`.
 
 <!-- @embed packages/http/examples/02-client.ts#client-basic -->
 
@@ -330,6 +355,16 @@ console.log(t5.attempts); // → 3
 ```
 
 <!-- @end -->
+
+`retryHttp` options:
+
+| option | default | what |
+| --- | --- | --- |
+| `maxRetries` | 3 | retries after the first attempt |
+| `baseDelayMs` | 250 | first wait; it doubles for each retry |
+| `maxDelayMs` | 30 000 | no single wait is longer than this |
+| `policy` | — | a full `RetryPolicy`; replaces the three timing options |
+| `when` | `HTTP_RETRYABLE` | which errors to retry: by default 5xx, 429, timeouts and network errors |
 
 For polling cadence with a max-attempts/max-duration cap, prefer core's
 `.repeatUntil` / `.repeatUntilWithBackoff` — they subsume the polling pattern.
