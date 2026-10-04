@@ -15,11 +15,19 @@ interface BufferedItem<T> {
   timestamp: number;
 }
 
+/** One key's buffered items on both sides, as saved in state. */
+export interface JoinKeySnapshot<L, R> {
+  readonly left: BufferedItem<L>[];
+  readonly right: BufferedItem<R>[];
+}
+
 export class JoinBuffer<L, R> {
   private leftBuffer = new Map<string, BufferedItem<L>[]>();
   private rightBuffer = new Map<string, BufferedItem<R>[]>();
   // When we last cleaned expired items out of every key (see sweep).
   private lastSweep = -Infinity;
+  // Keys whose items changed since takeChangedKeys() was last called.
+  private changed = new Set<string>();
 
   constructor(private readonly windowMs: number) {}
 
@@ -32,6 +40,7 @@ export class JoinBuffer<L, R> {
     const existing = this.leftBuffer.get(key) ?? [];
     existing.push(entry);
     this.leftBuffer.set(key, existing);
+    this.changed.add(key);
 
     // Check for matches in right buffer
     const rightItems = this.rightBuffer.get(key) ?? [];
@@ -49,6 +58,7 @@ export class JoinBuffer<L, R> {
     const existing = this.rightBuffer.get(key) ?? [];
     existing.push(entry);
     this.rightBuffer.set(key, existing);
+    this.changed.add(key);
 
     // Check for matches in left buffer
     const leftItems = this.leftBuffer.get(key) ?? [];
@@ -64,6 +74,7 @@ export class JoinBuffer<L, R> {
     const leftItems = this.leftBuffer.get(key);
     if (leftItems) {
       const filtered = leftItems.filter((item) => item.timestamp > cutoff);
+      if (filtered.length !== leftItems.length) this.changed.add(key);
       if (filtered.length === 0) this.leftBuffer.delete(key);
       else this.leftBuffer.set(key, filtered);
     }
@@ -71,6 +82,7 @@ export class JoinBuffer<L, R> {
     const rightItems = this.rightBuffer.get(key);
     if (rightItems) {
       const filtered = rightItems.filter((item) => item.timestamp > cutoff);
+      if (filtered.length !== rightItems.length) this.changed.add(key);
       if (filtered.length === 0) this.rightBuffer.delete(key);
       else this.rightBuffer.set(key, filtered);
     }
@@ -85,9 +97,7 @@ export class JoinBuffer<L, R> {
   private sweep(currentTime: number): void {
     if (currentTime - this.lastSweep < this.windowMs) return;
     this.lastSweep = currentTime;
-    for (const key of new Set([...this.leftBuffer.keys(), ...this.rightBuffer.keys()])) {
-      this.evict(key, currentTime);
-    }
+    for (const key of this.keys()) this.evict(key, currentTime);
   }
 
   /** Current buffer sizes (for monitoring). */
@@ -108,6 +118,34 @@ export class JoinBuffer<L, R> {
   clear(): void {
     this.leftBuffer.clear();
     this.rightBuffer.clear();
+  }
+
+  /**
+   * The keys whose items changed (added or expired) since the last call. A
+   * checkpoint only needs to save these keys.
+   */
+  takeChangedKeys(): string[] {
+    const keys = [...this.changed];
+    this.changed.clear();
+    return keys;
+  }
+
+  /** Every key that has items on either side. */
+  keys(): Set<string> {
+    return new Set([...this.leftBuffer.keys(), ...this.rightBuffer.keys()]);
+  }
+
+  /** One key's items, or undefined when it has none left. */
+  snapshotKey(key: string): JoinKeySnapshot<L, R> | undefined {
+    const left = this.leftBuffer.get(key) ?? [];
+    const right = this.rightBuffer.get(key) ?? [];
+    return left.length === 0 && right.length === 0 ? undefined : { left, right };
+  }
+
+  /** Restore one key's items, as saved by snapshotKey. */
+  restoreKey(key: string, saved: JoinKeySnapshot<L, R>): void {
+    if (saved.left.length > 0) this.leftBuffer.set(key, saved.left);
+    if (saved.right.length > 0) this.rightBuffer.set(key, saved.right);
   }
 
   /** Snapshot current state for checkpointing. */
