@@ -577,23 +577,26 @@ class TopologyRunnerInstance {
     record: TopologyRecord,
     sink?: Sinkable<unknown, unknown>,
   ): Eff<void, unknown> {
+    const waitForRate =
+      this.rateLimiter && !record.skip && sink
+        ? fromPromise(
+            () => this.rateLimiter!.acquire(),
+            (error) => error,
+          )
+        : succeed(undefined);
+
     if (this.config.deliveryGuarantee === "exactly-once") {
       if (!record.skip && sink) {
         record.completion.outputs.push({ sink, value: record.value });
       }
-      return this.finishRecord(record, true);
+      // maxItemsPerSecond limits outputs here too (it used to be ignored).
+      return waitForRate.flatMap(() => this.finishRecord(record, true));
     }
 
     const publish =
       record.skip || !sink
         ? succeed(undefined)
-        : (this.rateLimiter
-            ? fromPromise(
-                () => this.rateLimiter!.acquire(),
-                (error) => error,
-              )
-            : succeed(undefined)
-          ).flatMap(() => sink.publish(record.value));
+        : waitForRate.flatMap(() => sink.publish(record.value));
     // A finalizer, not tapErrorCause: the in-flight count must drop even when
     // the publish is interrupted.
     return publish

@@ -50,8 +50,6 @@ const topology = StreamTopology.source(clicks)
 const handle = await TopologyRunner.run(topology, {
   group: ConsumerGroup("analytics"),
   maxBufferSize: 1_024,
-  ackBatchSize: 100,
-  ackMaxWaitMs: 1_000,
 });
 
 const shutdown = () => void handle.shutdown();
@@ -80,9 +78,31 @@ exist (or broker-side topic auto-creation is enabled).
 | Correlation | time-windowed keyed `join` |
 | Terminal | `to(sink)` / `build()` |
 
-`keyBy` is a logical key. In a multi-instance deployment, add `shuffle()` so
-a `ShuffleTransport` physically routes equal keys to the same partition
-before stateful operators.
+`keyBy` is a logical key. Keyed state is kept **per source partition**: with
+`TopologyRunner`, a key that appears in two partitions of the source has two
+separate counts or windows. Make sure the source is partitioned by the same
+key (for Kafka, produce with that key), or use `DistributedRunner` with
+`shuffle()` so a `ShuffleTransport` routes equal keys to the same partition
+before stateful operators. (`TopologyRunner` ignores `shuffle()`.)
+
+## Event time and when windows close
+
+Windows and joins use each record's **event time**, read from the value
+itself: the first of `ts`, `timestamp` or `eventTime` that is a number, or
+`createdAt` as an ISO date string. A value without any of these uses the
+current time instead, so keep the field when you `map` before a window.
+
+A key's windows close when **that key** gets a record whose time is past the
+window's end:
+
+- A key that stops receiving records keeps its last windows open (and in
+  state) until it gets another record.
+- Windows still open when a finite source ends are not emitted.
+- A record older than windows that already closed opens them again, so they
+  can be emitted twice. Sources should deliver records roughly in time order
+  per key.
+- A session window gets one session per key; a record arriving after a gap
+  longer than `gapMs` closes the old session and starts a new one.
 
 ## Stateful processing
 

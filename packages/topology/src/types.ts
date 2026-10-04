@@ -68,11 +68,14 @@ export interface TopologyConfig {
    * Default: forever, which grows without bound on a long-running topology.
    */
   processedRetentionMs?: number;
-  /** Called when backpressure is applied (buffer full). */
+  /** @deprecated Not called yet; it has no effect. */
   onBackpressure?: (stats: BackpressureStats) => void;
-  /** Ack every N items instead of per-item. Default: 100. Set to 1 for per-item ack. */
+  /**
+   * @deprecated Has no effect yet: every record is committed and acked on
+   * its own.
+   */
   ackBatchSize?: number;
-  /** Flush a partial ack batch after this many milliseconds. Default: 1_000. */
+  /** @deprecated Has no effect yet (see ackBatchSize). */
   ackMaxWaitMs?: number;
 }
 
@@ -97,11 +100,14 @@ export interface TopologyHandle {
 }
 
 export interface TopologyMetrics {
-  /** Total items processed since start. */
+  /**
+   * Source records finished since start, including ones that were filtered
+   * out or skipped as duplicates.
+   */
   itemsProcessed: number;
-  /** Items processed per second (rolling average). */
+  /** itemsProcessed divided by the seconds since start (not a recent rate). */
   itemsPerSecond: number;
-  /** Current buffer fill levels by operator. */
+  /** @deprecated Always empty for now. */
   bufferStats: { operator: string; buffered: number; capacity: number }[];
   /** Number of keys in dedup set. */
   dedupeSize: number;
