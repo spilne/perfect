@@ -55,7 +55,10 @@ const loadConfig = eff(function* () {
 
 const files = new TestFileSystem({ "/etc/app.conf": "debug=true\n" });
 assertEq(await provide(loadConfig, FileSystem, files).run(), "debug=true");
-assertEq(await provide(loadConfig, FileSystem, new TestFileSystem()).run(), "missing /etc/app.conf");
+assertEq(
+  await provide(loadConfig, FileSystem, new TestFileSystem()).run(),
+  "missing /etc/app.conf",
+);
 // <<< example
 
 // >>> example: brands
@@ -113,7 +116,10 @@ assertEq(closed, ["db pool", "kafka producer"]);
 // order of steps in a test fully predictable.
 const scheduler = new SyncScheduler();
 const steps: string[] = [];
-const fiber = runFiber(sync(() => steps.push("ran")), scheduler);
+const fiber = runFiber(
+  sync(() => steps.push("ran")),
+  scheduler,
+);
 assertEq(steps, []); // nothing yet
 scheduler.flush();
 assertEq(steps, ["ran"]);
