@@ -52,7 +52,11 @@ not push or publish. On success it prints the exact atomic push command.
 The version must increase after the first release; prereleases are not currently supported.
 
 Nx generates changelog entries from commit history. Use descriptive `feat:`,
-`fix:`, or `perf:` commits for useful release notes. The selected version or bump
+`fix:`, or `perf:` commits for useful release notes. Use `deps:` for
+dependency updates (Dependabot does this too): they get their own
+"Dependencies" section and count as a patch. Other types, such as `chore:`,
+`test:` or `refactor:`, are left out of the changelog; a release made only of
+those says "version bump only". The selected version or bump
 controls versioning; no changeset files are required.
 
 If validation or versioning fails, inspect `git status` and any partial changes

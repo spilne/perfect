@@ -19,7 +19,9 @@
 //      `from "../src"` becomes `from "@spilne/perfect-core"` and the internal
 //      `_assert` helper is skipped (it's a test utility, not user-facing).
 //   2. The snippet body itself, with `assertEq(actual, expected)` rewritten to
-//      `console.log(actual); // → expected` so readers can copy-paste-and-run.
+//      `console.log(actual); // → expected` (and `assertContains(actual, part)`
+//      to `console.log(actual); // contains part`) so readers can
+//      copy-paste-and-run.
 //
 // The source TS files stay self-verifying via assertEq (test/examples.test.ts
 // imports them all and any wrong assertion throws), but the docs show the
@@ -215,15 +217,16 @@ function splitArgs(argsSource: string): [string, string] | null {
   return null;
 }
 
-function rewriteAssertEq(code: string): string {
+function rewriteAsserts(code: string): string {
   const out: string[] = [];
   for (const line of code.split("\n")) {
-    const open = line.match(/^(\s*)assertEq\(/);
+    const open = line.match(/^(\s*)assert(Eq|Contains)\(/);
     if (!open) {
       out.push(line);
       continue;
     }
     const indent = open[1]!;
+    const contains = open[2] === "Contains";
     const start = open[0].length;
     // Walk to the matching close paren so we can keep any trailing comment.
     let depth = 1;
@@ -262,7 +265,11 @@ function rewriteAssertEq(code: string): string {
       return s ? s[0] : expected;
     })();
     if (trailingComment) out.push(`${indent}${trailingComment}`);
-    out.push(`${indent}console.log(${actual}); // → ${expectedClean}`);
+    out.push(
+      contains
+        ? `${indent}console.log(${actual}); // contains ${expectedClean}`
+        : `${indent}console.log(${actual}); // → ${expectedClean}`,
+    );
   }
   return out.join("\n");
 }
@@ -285,7 +292,7 @@ function extractRegion(file: string, region: string): string {
 
   const imports = parseImports(src);
   const importBlock = renderImports(imports, body, packageNameFor(file));
-  const renderedBody = rewriteAssertEq(body);
+  const renderedBody = rewriteAsserts(body);
 
   return importBlock ? `${importBlock}\n\n${renderedBody}` : renderedBody;
 }

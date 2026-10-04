@@ -7,35 +7,6 @@ and run your own effects.
 
 ## Install
 
-> **Pre-release**: the packages are not published to npm yet — clone the
-> repo and use the Bun workspace. The commands below describe the
-> post-publish shape.
-
-For the repository workflow:
-
-```bash
-git clone https://github.com/spilne/perfect.git
-cd perfect
-bun install
-bun packages/core/examples/01-hello.ts
-```
-
-To read the guide locally, run `bun run documentation:dev` and open the URL
-printed by VitePress. `bun run smoke:stackblitz` builds and tests the standalone
-starter; it does not start an interactive server.
-
-The [built-in playground](./playground.md) includes editable examples for typed
-errors, concurrency, retry, state, cancellation, and observation. Programs run
-in an isolated worker directly inside this guide. Its
-[StackBlitz project](https://stackblitz.com/fork/github/spilne/perfect/tree/main/templates/stackblitz?title=Perfect%20Playground)
-becomes independently installable with the first npm release. Until then, run
-the same template locally from the repository:
-
-```bash
-bun run build:packages
-bun run smoke:stackblitz
-```
-
 ```bash
 bun add @spilne/perfect-core
 ```
@@ -46,6 +17,24 @@ Optional packages:
 bun add @spilne/perfect-swc-plugin   # SWC WASM plugin — compiles eff(($) => …) in Next.js/Vite/SWC builds
 bun add @spilne/perfect-transform    # Bun-plugin rewriter — eff(($) => …) and for { x <- e } yield under Bun
 ```
+
+To run the examples in this guide, clone the repository:
+
+```bash
+git clone https://github.com/spilne/perfect.git
+cd perfect
+bun install
+bun packages/core/examples/01-hello.ts
+```
+
+To read the guide locally, run `bun run documentation:dev` and open the URL
+printed by VitePress.
+
+The [built-in playground](./playground.md) has editable examples for typed
+errors, concurrency, retry, state, cancellation, and observation. Programs run
+in an isolated worker directly inside this guide. You can also
+[open it in StackBlitz](https://stackblitz.com/fork/github/spilne/perfect/tree/main/templates/stackblitz?title=Perfect%20Playground),
+which installs the published npm package.
 
 ## Your first program
 
@@ -131,7 +120,7 @@ the experimental `for { ... } yield` syntax.
 | `runSync(eff)`  | Sync only — throws if the effect suspends.                    |
 | `run(eff)`      | Returns `Promise<A>`, rejects with squashed cause on failure. |
 | `runExit(eff)`  | Returns `Promise<Exit<unknown, A>>` — preserves the full failure cause.                 |
-| `runFiber(eff)` | Returns a `Fiber<A>` you can join, interrupt, race.           |
+| `runFiber(eff)` | Returns a `Fiber` you can join, interrupt, race.               |
 
 Each runner is also available as a fluent method, so a chain can close on
 itself instead of wrapping in a call:

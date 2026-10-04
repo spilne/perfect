@@ -56,6 +56,30 @@ After all error tags are handled, the error requirement is removed. Other
 requirements, such as named services, remain. This does not rule out defects
 or interruption.
 
+### Declaring errors with `TaggedError`
+
+Writing `{ _tag: "NotFound", id }` by hand works, but `TaggedError` gives you
+a real `Error` class (with a message and a stack trace) that already has the
+`_tag`. Note the extra `()` at the end of the class line.
+
+```ts
+import { TaggedError, fail, succeed, type Eff, type Throws } from "@spilne/perfect-core";
+
+class NotFound extends TaggedError("NotFound")<{ id: number }>() {}
+class Forbidden extends TaggedError("Forbidden")() {}
+
+const lookup = (id: number): Eff<string, Throws<NotFound | Forbidden>> =>
+  id === 1 ? succeed("alice") : id === 2 ? fail(new Forbidden({})) : fail(new NotFound({ id }));
+
+// .catchTags handles several tags at once, like chaining .catchTag calls.
+const safe = lookup(99).catchTags({
+  NotFound: (e) => succeed(`(missing ${e.id})`),
+  Forbidden: () => succeed("(no access)"),
+});
+
+console.log(safe.runSync()); // → "(missing 99)"
+```
+
 ## Full causes with `.catchAllCause`
 
 If you need to see defects too, use `.catchAllCause`. It also sees an
@@ -149,19 +173,23 @@ What the final `Cause` keeps:
 | interrupted, then a finalizer fails with `e` | the interrupt, then the finalizer failure: `(Interrupt ; Fail(e))` |
 | a handler that would have received a typed failure is bypassed | the typed failure is dropped; defects stay |
 
-A failure counts as raised once the fiber is scheduled to raise it, even if it
-has not run yet. When an async callback resumed it with the failure, an
-interrupt that lands in between keeps the failure, e.g. `(Die(d) ; Interrupt)`.
-When `all` or `race` returned a child's failure, the cause is the same whether
-the interrupt lands before or after that: `(Interrupt & Die(d))` (see
-[Structured teardown](./06-concurrency.md#structured-teardown)).
+Some details that matter when you read a cause:
 
-A typed failure is dropped only when a bypassed handler would have consumed or
-mapped it, so an interrupted effect never surfaces an error its type says was
-handled. When it stays, `run()` rejects with it (`Cause.squash` prefers typed
-failures, then defects, then interruption) and `runSafe` returns it as
-`error`; `Exit.isInterrupted` is `false` for a cause that holds more than
-interrupts.
+- **A failure counts once it is on its way.** If an async callback already
+  resumed the fiber with a failure and the interrupt lands right after, the
+  failure is kept: `(Die(d) ; Interrupt)`.
+- **`all` and `race` give the same answer either way.** When they already
+  returned a child's failure, the cause is `(Interrupt & Die(d))` whether the
+  interrupt lands before or after (see
+  [Structured teardown](./06-concurrency.md#structured-teardown)).
+- **A typed failure is dropped only when a handler was skipped.** If the
+  interrupt skipped a handler that would have caught or changed the failure,
+  the failure is dropped. That way an interrupted effect never surfaces an
+  error that its type says was already handled.
+- **What you see when it is kept:** `run()` rejects with it
+  (`Cause.squash` picks typed failures first, then defects, then
+  interruption), and `runSafe` returns it as `error`. `Exit.isInterrupted`
+  is `false` for a cause that holds anything besides interrupts.
 
 Put cleanup that must also run on interruption in `ensuring`, `acquireRelease`
 or `onExit`, not in `.catchAllCause`.
@@ -190,6 +218,17 @@ use `.retryAllBy(...)` or a `RetryPolicy.whenCause(...)` policy to opt in.
 | `.either()` | turn `Eff<A, Throws<E>>` into `Eff<Either<E, A>, never>` |
 | `.rethrow()` | inverse of `.either()` / `.exit()`: a `Left` or `Failure` becomes the error again |
 | `.mapError(f)` | transform the error type |
+| `.catchTags({ Tag: f, ... })` | handle several tagged variants at once |
+| `.matchTag(tag, onMatch, onElse)` | one handler for the tag, another for every other error |
+| `.catchSome(f)` | handle some errors: return `undefined` from `f` to keep the error |
+| `.redeem(onError, onSuccess)` | turn both outcomes into a plain value |
+| `.redeemWith(onError, onSuccess)` | same, but both functions return effects |
+| `.tapBoth(onError, onSuccess)` | observe either outcome without changing it |
+| `.tapDefect(f)` | observe defects only (thrown bugs), then re-raise |
+| `.mapErrorCause(f)` | rewrite the whole `Cause`, not just typed errors |
+| `.orDie()` | turn typed failures into defects, removing them from the type |
+| `.exit()` | turn any outcome into an `Exit` value that never fails |
+| `failCause(cause)` | fail with a full `Cause` you built yourself |
 
 ## Pitfalls
 

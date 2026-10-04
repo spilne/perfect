@@ -15,8 +15,6 @@ be handled by any AST plugin.
 bun add @spilne/perfect-transform
 ```
 
-> Not yet published to npm — install from the workspace for now.
-
 ## Quickstart
 
 Wire the preload in `bunfig.toml`:
@@ -59,12 +57,15 @@ const output = rewriteEffBlocks(source);
 
 ## Entry points
 
-| Import                                 | What it does                                                 |
-| -------------------------------------- | ------------------------------------------------------------ |
-| `@spilne/perfect-transform`            | `rewriteEffBlocks` / `RewriteError` — the pure rewriter      |
-| `@spilne/perfect-transform/preload`    | Bun preload: both syntaxes + auto-import, skips node_modules |
-| `@spilne/perfect-transform/plugin`     | Bun plugin: `eff($)` only + auto-import                      |
-| `@spilne/perfect-transform/bun-plugin` | Bun plugin: both syntaxes, no auto-import                    |
+| Import                                 | What it does                                            |
+| -------------------------------------- | ------------------------------------------------------- |
+| `@spilne/perfect-transform`            | `rewriteEffBlocks` / `RewriteError` — the pure rewriter |
+| `@spilne/perfect-transform/preload`    | Bun preload that registers the plugin                   |
+| `@spilne/perfect-transform/plugin`     | Registers the Bun plugin when imported                  |
+| `@spilne/perfect-transform/bun-plugin` | Same as `/plugin` (kept as an alias)                    |
+
+All three set up the same plugin: it handles both syntaxes, adds the core
+imports the rewritten code needs, and skips files in `node_modules`.
 
 ## What it handles
 

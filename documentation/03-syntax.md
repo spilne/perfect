@@ -133,8 +133,11 @@ runSync(two); // 20
 - **`yield*` not `yield`** — `yield effect` yields the effect to the driver,
   but you usually want the value, which requires `yield*`. (`yield*` calls
   the effect's `[Symbol.iterator]`, threads the value back through.)
-- **`eff($)` without the plugin compiles to a runtime error** — the rewriter
-  is mandatory. If you can't add it, use `eff(function*)`.
+- **`eff($)` needs the plugin.** Without it, the code fails at runtime.
+  `eff` only accepts generator functions in its types, so `tsc` also reports
+  an error (TS2769) on `eff(($) => …)`, even when the plugin compiles it
+  fine. If you type-check with `tsc`, or can't add the plugin, use
+  `eff(function* () { … })`.
 
 ## Next
 

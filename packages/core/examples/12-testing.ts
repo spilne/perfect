@@ -29,10 +29,10 @@ const program = eff(function* () {
   return clock.now() - start;
 });
 
-const fiber = run(provide(program, Clock, clock));
-await tick(); // let the fiber register the sleep
+const result = run(provide(program, Clock, clock)); // a Promise, started now
+await tick(); // let the program reach its sleep
 clock.advance(1000); // fire the sleep
-assertEq(await fiber, 1000); // 1000ms elapsed in virtual time, ~0ms real
+assertEq(await result, 1000); // 1000ms elapsed in virtual time, ~0ms real
 // <<< example
 
 // >>> example: test-random

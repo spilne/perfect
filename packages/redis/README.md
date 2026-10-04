@@ -12,8 +12,6 @@ Distributed Redis implementations of the concurrency and coordination contracts 
 bun add @spilne/perfect-redis ioredis
 ```
 
-> Not yet published to npm — install from the workspace for now.
-
 The package is driver-agnostic. Inject any client implementing `RedisClient`; ioredis is
 used by the integration suite but is not bundled at runtime.
 
@@ -74,7 +72,7 @@ const events = RedisStream.make<{ id: string }>({
   },
 });
 
-await events.publish({ id: "e-1" }, { key: "account-1" });
+await events.publish({ id: "e-1" }, { key: "account-1" }).orDie().run();
 
 const envelopes = await run(
   events
@@ -83,7 +81,7 @@ const envelopes = await run(
     .toArray()
     .orDie(),
 );
-await envelopes[0]!.ack();
+await envelopes[0]!.ack().orDie().run();
 ```
 
 `RedisStream.subscribe()` auto-acknowledges each Redis read batch. Use

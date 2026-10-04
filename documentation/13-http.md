@@ -21,10 +21,15 @@ Every request flows through a `HttpTransport`. The default transport is
 `globalThis.fetch`; pass your own to mock, proxy, or instrument. The three
 tiers compose: pick the level of automation you need.
 
-The default transport owns cancellation until response headers arrive. After
-that, the caller owns the body stream; finishing the fetch effect does not
-abort it. The request timeout and an external abort signal still apply during
-body consumption (the streaming helpers below time only the headers). Consume or cancel a raw `Response` body when you are done.
+Who cancels what:
+
+- Until the response headers arrive, the transport handles cancellation.
+- After that, the body belongs to you. The fetch effect finishing does not
+  abort the body, so read it to the end or cancel it when you are done with a
+  raw `Response`.
+- The request timeout and an abort signal you pass in still apply while you
+  read the body. (The streaming helpers below are different: their
+  `timeoutMs` covers only the headers.)
 
 ### Tier 1 — `httpFetch` (raw Response)
 
@@ -163,8 +168,9 @@ console.log(transport.last!.headers!.authorization); // → "Bearer xyz"
 // else falls back to the base when the override is undefined.
 const traced = client.withOverrides({ headers: { "x-trace": "t-123" } });
 await traced.get("/users/1", UserSchema).orDie().run();
-assertContains(JSON.stringify(transport.last!.headers), "x-trace");
-assertContains(JSON.stringify(transport.last!.headers), "Bearer xyz"); // base header preserved
+console.log(JSON.stringify(transport.last!.headers)); // contains "x-trace"
+// base header preserved
+console.log(JSON.stringify(transport.last!.headers)); // contains "Bearer xyz"
 ```
 
 <!-- @end -->
@@ -200,8 +206,8 @@ const observed = new DefaultHttpClient({
   middleware: [logging],
 });
 await observed.get("/users/2", UserSchema).orDie().run();
-assertContains(calls.join("|"), "→ GET https://api.example.com/users/2");
-assertContains(calls.join("|"), "← GET");
+console.log(calls.join("|")); // contains "→ GET https://api.example.com/users/2"
+console.log(calls.join("|")); // contains "← GET"
 ```
 
 <!-- @end -->
@@ -430,7 +436,7 @@ Every other helper is a composition of this base + composable `Pipe`s
 |---|---|
 | `httpStreamText(opts)` | bytes → `utf8Decode` |
 | `httpStreamLines(opts)` | bytes → `utf8Decode` → `lines` |
-| `httpStreamNDJSON(opts, schema)` | lines → `parseNDJSON(schema)` |
+| `httpStreamNDJSON({ ...opts, schema })` | lines → `parseNDJSON(schema)` |
 | `httpStreamSSE(opts)` | lines → `parseSSE` |
 
 A stream can stay open as long as you listen, so its timeouts differ from a

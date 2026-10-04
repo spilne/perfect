@@ -4,8 +4,8 @@ Drop-in OpenTelemetry tracing for `@spilne/perfect-http`. Two integration points
 that compose independently: `tracingMiddleware` starts a CLIENT span per
 request with semantic HTTP attributes, and `TracingFetchTransport` injects
 W3C `traceparent` / `tracestate` headers so downstream services join the
-trace from the active context. The middleware does not activate its own span;
-the propagated context is whatever the application made active. Configure an
+trace. Used together, the request's CLIENT span is sent as the parent, so
+downstream services appear as children of the HTTP call. Configure an
 OpenTelemetry provider and propagator before using these integrations.
 
 This package is HTTP-specific. For the general bridge — running `@spilne/perfect-core`'s
@@ -17,12 +17,10 @@ This package is HTTP-specific. For the general bridge — running `@spilne/perfe
 bun add @spilne/perfect-http-otel @opentelemetry/api
 ```
 
-> Not yet published to npm — install from the workspace for now.
-
 ## Quickstart
 
 ```ts
-import { DefaultHttpClient } from "@spilne/perfect-http";
+import { DefaultHttpClient, identityParser } from "@spilne/perfect-http";
 import { tracingMiddleware, tracingTransport } from "@spilne/perfect-http-otel";
 
 const client = new DefaultHttpClient({
@@ -31,7 +29,7 @@ const client = new DefaultHttpClient({
   middleware: [tracingMiddleware()], // CLIENT span per request
 });
 
-await client.get("/users/1", undefined, { tag: "user.lookup" }).orDie().run();
+await client.get("/users/1", identityParser, { tag: "user.lookup" }).orDie().run();
 // span "GET https://api.example.com/users/1", kind CLIENT:
 //   http.request.method = "GET"
 //   http.route          = "user.lookup"   (the low-cardinality request tag)

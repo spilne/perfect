@@ -13,8 +13,6 @@ Everything else in the Perfect stack (`@spilne/perfect-http`, `@spilne/perfect-k
 bun add @spilne/perfect-core
 ```
 
-> Not yet published to npm — install from the workspace for now.
-
 ## Quickstart
 
 ```ts
@@ -83,7 +81,7 @@ const c = eff(($) => {
 | `runSync(eff)`  | Sync only — throws if the effect suspends.                              |
 | `run(eff)`      | Returns `Promise<A>`, rejects with squashed cause on failure.           |
 | `runExit(eff)`  | Returns `Promise<Exit<unknown, A>>` — preserves the full failure cause. |
-| `runFiber(eff)` | Returns a `Fiber<A>` you can join, interrupt, race.                     |
+| `runFiber(eff)` | Returns a `Fiber` you can join, interrupt, race.                        |
 
 Each is also a fluent method: `program.run()`, `.runSync()`, `.runExit()`, `.runFiber()`.
 
@@ -122,14 +120,15 @@ Each is also a fluent method: `program.run()`, `.runSync()`, `.runExit()`, `.run
 
 ## Subpath exports
 
-| Import                         | Contents                                                                                                                                                                               |
-| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@spilne/perfect-core`         | Everything above                                                                                                                                                                       |
-| `@spilne/perfect-core/stream`  | `Stream`, `Chunk`, `Sink`, `Pipes` (also re-exported from root)                                                                                                                        |
-| `@spilne/perfect-core/retry`   | `RetryPolicy`, `Schedule`, `retryWith`, and scheduled repetition                                                                                                                       |
-| `@spilne/perfect-core/connect` | Queue-agnostic endpoint contracts (`Streamable`, `Sinkable`, `Envelope`, `Codec`, `OffsetTracker`, …) — implemented by `@spilne/perfect-kafka`, consumed by `@spilne/perfect-topology` |
-| `@spilne/perfect-core/syntax`  | The `eff` comprehension entry point                                                                                                                                                    |
-| `@spilne/perfect-core/worker`  | `WorkerPool`                                                                                                                                                                           |
+| Import                          | Contents                                                                                                                                                                               |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@spilne/perfect-core`          | Everything above                                                                                                                                                                       |
+| `@spilne/perfect-core/stream`   | `Stream`, `Chunk`, `Sink`, `Pipes` (also re-exported from root)                                                                                                                        |
+| `@spilne/perfect-core/retry`    | `RetryPolicy`, `Schedule`, `retryWith`, and scheduled repetition                                                                                                                       |
+| `@spilne/perfect-core/connect`  | Queue-agnostic endpoint contracts (`Streamable`, `Sinkable`, `Envelope`, `Codec`, `OffsetTracker`, …) — implemented by `@spilne/perfect-kafka`, consumed by `@spilne/perfect-topology` |
+| `@spilne/perfect-core/syntax`   | The `eff` comprehension entry point                                                                                                                                                    |
+| `@spilne/perfect-core/worker`   | `WorkerPool`                                                                                                                                                                           |
+| `@spilne/perfect-core/thenable` | Import once to make `await eff` run the effect. Off by default: without it, use `run(eff)` or `eff.run()`                                                                              |
 
 ## Links
 

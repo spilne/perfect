@@ -8,8 +8,6 @@ KafkaJS driver adapter for `@spilne/perfect-kafka`.
 bun add @spilne/perfect-kafka @spilne/perfect-kafka-kafkajs kafkajs
 ```
 
-> Not yet published to npm — install from the workspace for now.
-
 ## Quickstart
 
 ```ts

@@ -100,3 +100,34 @@ const FakeAll = succeed({
 
 assertEq(program.with(FakeAll).runSync(), "FAKE");
 // <<< example
+
+// >>> example: layer-auto-wire
+// Layer.build puts layers in the right order for you. Each layer says what
+// it provides and what it needs (Layer.describe), and build() makes sure a
+// layer is built after the layers it needs, whatever order you pass them in.
+const built: string[] = [];
+const DbWired = Layer.describe(
+  { provides: ["Db"] },
+  sync(() => {
+    built.push("Db");
+    return { Db: { query: (s: string) => succeed(`db:${s}`) } as Db };
+  }),
+);
+const CacheWired = Layer.describe(
+  { provides: ["Cache"], requires: ["Db"] },
+  eff(function* () {
+    yield* Db.get; // a real cache would load from the database here
+    built.push("Cache");
+    return { Cache: { get: (k: string) => k } as Cache };
+  }),
+);
+
+const AppWired = Layer.build(CacheWired, DbWired); // Cache listed first on purpose
+
+const lookup = eff(function* () {
+  const cache = yield* Cache.get;
+  return cache.get("user:1");
+});
+assertEq(lookup.with(AppWired).runSync(), "user:1");
+assertEq(built, ["Db", "Cache"]);
+// <<< example

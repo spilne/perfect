@@ -9,10 +9,10 @@
 | `TracingFetchTransport` | `HttpTransport` wrapper — injects W3C `traceparent` / `tracestate` headers so downstream services join the trace |
 | `tracingTransport` | the default — `TracingFetchTransport` wrapping `FetchTransport` |
 
-Either can be used independently. The middleware records client spans; the
-transport propagates the context active at request time. The middleware does
-not install its newly-created span as the active context, so combining them
-does not make that span the parent of the downstream request.
+Either can be used on its own. Used together, the transport sends the
+middleware's CLIENT span as the parent, so downstream services show up as
+children of the HTTP call. With the transport alone, it sends whatever
+context is active.
 
 An interrupted request (a `timeout`, a lost `race`) still ends its span, with
 an `ERROR` status and `error.type` set to `Interrupted`.
@@ -94,8 +94,9 @@ console.log(errSpans[0]!.attributes["error.type"]); // → "HttpStatusError"
 
 ## W3C trace propagation
 
-`TracingFetchTransport` wraps another transport and injects the active
-span's `traceparent` / `tracestate` headers into outgoing requests. Use it
+`TracingFetchTransport` wraps another transport and adds `traceparent` /
+`tracestate` headers to outgoing requests. The parent is the request's own
+span from `tracingMiddleware` when it is installed, otherwise the active span. Use it
 when you want downstream services to join the same trace, not just
 client-side observability.
 
@@ -172,5 +173,6 @@ const client = new DefaultHttpClient({
 });
 ```
 
-This records request spans and propagates the application's active context.
-Provider/exporter setup and context activation remain application responsibilities.
+This records a span per request and makes that span the parent of the
+downstream trace. Setting up the OpenTelemetry provider and exporter is still
+up to the application.

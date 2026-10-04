@@ -46,11 +46,14 @@ part of this map.
 | `@spilne/perfect-core/retry` | `RetryPolicy`, `Schedule`, `retryWith`, and scheduled repetition |
 | `@spilne/perfect-core/stream` | `Stream`, `Chunk`, `Sink`, and `Pipes` |
 | `@spilne/perfect-core/syntax` | Comprehension syntax and fluent syntax installation |
+| `@spilne/perfect-core/syntax/*` | Single syntax modules, e.g. `@spilne/perfect-core/syntax/generator` |
+| `@spilne/perfect-core/thenable` | Import it once to make `await eff` run the effect (off by default; skips `run`'s check that every error is handled) |
 | `@spilne/perfect-core/worker` | Worker executors and `WorkerPool` |
 | `@spilne/perfect-postgres/pgmq` | Typed `PgmqQueue` plus low-level PGMQ queue, read, send, acknowledgement, metrics, notify, and FIFO helpers |
-| `@spilne/perfect-transform/preload` | Bun preload with both source syntaxes and automatic imports |
-| `@spilne/perfect-transform/plugin` | Bun plugin for `eff($)` with automatic imports |
-| `@spilne/perfect-transform/bun-plugin` | Bun plugin for both source syntaxes without automatic imports |
+| `@spilne/perfect-transform` | `rewriteEffBlocks` / `RewriteError`, the rewriter on its own |
+| `@spilne/perfect-transform/preload` | Bun preload: both source syntaxes plus automatic imports |
+| `@spilne/perfect-transform/plugin` | The same Bun plugin, registered when imported |
+| `@spilne/perfect-transform/bun-plugin` | Alias of `/plugin` |
 
 The documentation build checks this package map against every
 `packages/*/package.json` and requires each workspace package to have a
