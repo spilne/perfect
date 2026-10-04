@@ -43,12 +43,7 @@ import { BuiltTopology } from "./stream-topology.js";
 import { WindowManager } from "./window-manager.js";
 import { JoinBuffer } from "./join-buffer.js";
 import { PartitionLifecycle, type PartitionContext } from "./partition-lifecycle.js";
-import type {
-  TopologyConfig,
-  TopologyHandle,
-  TopologyMetrics,
-  TopologyNode,
-} from "./types.js";
+import type { TopologyConfig, TopologyHandle, TopologyMetrics, TopologyNode } from "./types.js";
 
 export class TopologyRunner {
   static async run(topology: BuiltTopology, config: TopologyConfig): Promise<TopologyHandle> {
