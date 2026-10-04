@@ -128,6 +128,16 @@ const handle = await DistributedRunner.run(topology, {
 });
 ```
 
+Each stage after a shuffle groups by the key set before that shuffle, so
+windows, `aggregate`, `process` and `dedupe` work there as usual. To re-key,
+end a stage with `process` (or a window), then `keyBy(...).shuffle()` again.
+`DistributedRunner` takes the same options as `TopologyRunner`, plus
+`shuffleTransport`.
+
+A `join` can't be split into stages yet: `DistributedRunner` refuses a
+topology that has both `shuffle()` and `join`. Run such a topology with
+`TopologyRunner`.
+
 `planStages({ compiled: topology.compiled, group })` and
 `analyzeTopology(topology.compiled)` are available for inspection. The
 analyzer reports suspicious DAGs such as keyed state without a preceding
