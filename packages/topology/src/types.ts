@@ -127,6 +127,7 @@ export type TopologyNode<_T = unknown> =
   | FilterNode<any>
   | MapAsyncNode<any>
   | KeyByNode<any>
+  | EventTimeNode<any>
   | ShuffleNode<any>
   | WindowNode<any>
   | AggregateNode<any>
@@ -163,6 +164,12 @@ export interface KeyByNode<T> {
   type: "keyBy";
   parent: TopologyNode;
   keyFn: (value: T) => string;
+}
+
+export interface EventTimeNode<T> {
+  type: "eventTime";
+  parent: TopologyNode;
+  fn: (value: T) => number;
 }
 
 export interface ShuffleNode<_T> {

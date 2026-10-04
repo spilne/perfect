@@ -123,6 +123,22 @@ export class DistributedRunner {
       channels.set(topicName, channel);
     }
 
+    // Only the value goes through a repartition channel, not the event time
+    // an eventTime() step set. Windows after the shuffle would quietly fall
+    // back to reading the time from the value, so ask for the step there.
+    let eventTimeUpstream = false;
+    for (const stage of plan.stages) {
+      const setsTime = stage.nodes.some((node) => node.type === "eventTime");
+      const usesTime = stage.nodes.some((node) => node.type === "window");
+      if (eventTimeUpstream && usesTime && !setsTime) {
+        throw new TypeError(
+          "eventTime() doesn't carry across shuffle(); call it again after shuffle(), " +
+            "before the window",
+        );
+      }
+      eventTimeUpstream ||= setsTime;
+    }
+
     // The key each repartition channel is written with. The stage reading
     // that channel needs it again: keyed steps there (windows, process,
     // dedupe) group by the key that was set before the shuffle.
