@@ -4,6 +4,15 @@ import { join, resolve } from "node:path";
 
 const LOADER = "./scripts/node-bun-test-loader.mjs";
 
+// undici 8 (used by testcontainers and the Kafka client) needs Node 22.19 or
+// newer. On older Node some test files crash on import with a confusing
+// error, so stop right away with a clear one. (`nvm use` picks .nvmrc.)
+const [major, minor] = process.versions.node.split(".").map(Number);
+if (major < 22 || (major === 22 && minor < 19)) {
+  console.error(`Node ${process.versions.node} is too old: the tests need Node 22.19 or newer.`);
+  process.exit(1);
+}
+
 const ALL_TEST_ROOTS = [
   "packages/core/test",
   "packages/http/test",
