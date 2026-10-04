@@ -12,6 +12,7 @@ import {
   type StatePartitionScope,
   type TransactionalPartitionedStateBackend,
   type SourceRecordId,
+  committedSourceIds,
 } from "@spilne/perfect-core/connect";
 import { execRaw, type DrizzleDb } from "./drizzle-db.js";
 
@@ -222,19 +223,36 @@ export class PgPartitionedStateBackend<V = unknown> implements TransactionalPart
     );
     if (!owned[0]) return "fenced";
 
-    if (commit.sourceId !== undefined) {
-      const inserted = await execRaw(
+    const sourceIds = committedSourceIds(commit);
+    if (sourceIds.length > 0) {
+      const { topologyId, stageId, partition } = commit.lease.scope;
+      const rows = sql.join(
+        sourceIds.map((id) => sql`(${topologyId}, ${stageId}, ${partition}, ${id})`),
+        sql`, `,
+      );
+      // The partition's row is locked above, so no other commit for it can
+      // add these ids between this check and the insert.
+      const seen = await execRaw(
         transaction,
         sql`
-          INSERT INTO ${sql.raw(`"${this.processedTable}"`)}
-            (topology_id, stage_id, partition, source_id)
-          VALUES
-            (${commit.lease.scope.topologyId}, ${commit.lease.scope.stageId}, ${commit.lease.scope.partition}, ${commit.sourceId})
-          ON CONFLICT DO NOTHING
-          RETURNING source_id
+          SELECT 1 FROM ${sql.raw(`"${this.processedTable}"`)}
+          WHERE topology_id = ${topologyId}
+            AND stage_id = ${stageId}
+            AND partition = ${partition}
+            AND source_id IN (${sql.join(
+              sourceIds.map((id) => sql`${id}`),
+              sql`, `,
+            )})
+          LIMIT 1
         `,
       );
-      if (!inserted[0]) return "duplicate";
+      if (seen[0]) return "duplicate";
+      await transaction.execute(sql`
+        INSERT INTO ${sql.raw(`"${this.processedTable}"`)}
+          (topology_id, stage_id, partition, source_id)
+        VALUES ${rows}
+        ON CONFLICT DO NOTHING
+      `);
     }
 
     let stateExpression: SQL = sql`state`;

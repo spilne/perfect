@@ -11,6 +11,7 @@ import {
   type StatePartitionLease,
   type StatePartitionScope,
   type SourceRecordId,
+  committedSourceIds,
 } from "@spilne/perfect-core/connect";
 import { decode, encode, redisKeyFamily } from "./internal.js";
 import type { RedisClient } from "./redis-client.js";
@@ -131,10 +132,11 @@ export class RedisPartitionedStateBackend<V = unknown> implements PartitionedSta
   }
 
   async commit(commit: PartitionStateCommit<V>): Promise<PartitionCommitResult> {
+    const sourceIds = committedSourceIds(commit);
     const args: Array<string | number> = [
       commit.lease.ownerId,
       commit.lease.epoch,
-      commit.sourceId ?? "",
+      sourceIds.length,
       commit.sourceOffset ?? "",
       commit.checkpointId ?? "",
       this.processedRetentionMs ?? "",
@@ -145,6 +147,8 @@ export class RedisPartitionedStateBackend<V = unknown> implements PartitionedSta
         args.push("put", mutation.key, encode(this.codec, mutation.value));
       else args.push("delete", mutation.key, "");
     }
+    // The source record ids go last, after the mutations.
+    args.push(...sourceIds);
     const result = String(
       await this.redis.eval(
         COMMIT_SCRIPT,
@@ -275,8 +279,13 @@ if redis.call('HGET', KEYS[1], 'owner') ~= ARGV[1]
   or tonumber(redis.call('HGET', KEYS[1], 'expires') or '0') <= now then
   return 'fenced'
 end
-if ARGV[3] ~= '' and redis.call('ZSCORE', KEYS[3], ARGV[3]) then return 'duplicate' end
+local idCount = tonumber(ARGV[3])
 local count = tonumber(ARGV[7])
+local firstId = 8 + count * 3
+-- If any of the source records was processed already, change nothing.
+for index = 0, idCount - 1 do
+  if redis.call('ZSCORE', KEYS[3], ARGV[firstId + index]) then return 'duplicate' end
+end
 local cursor = 8
 for index = 1, count do
   if ARGV[cursor] == 'put' then
@@ -286,7 +295,9 @@ for index = 1, count do
   end
   cursor = cursor + 3
 end
-if ARGV[3] ~= '' then redis.call('ZADD', KEYS[3], now, ARGV[3]) end
+for index = 0, idCount - 1 do
+  redis.call('ZADD', KEYS[3], now, ARGV[firstId + index])
+end
 if ARGV[4] ~= '' then redis.call('HSET', KEYS[1], 'offset', ARGV[4]) end
 if ARGV[5] ~= '' then redis.call('HSET', KEYS[1], 'checkpoint', ARGV[5]) end
 if ARGV[6] ~= '' then redis.call('ZREMRANGEBYSCORE', KEYS[3], '-inf', now - tonumber(ARGV[6])) end

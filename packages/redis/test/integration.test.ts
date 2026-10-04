@@ -318,6 +318,30 @@ describe.skipIf(!dockerAvailable)("integration — redis:7-alpine", () => {
     expect(await state.load(first!)).toMatchObject({ sourceOffset: "12", checkpointId: "cp-12" });
     expect((await state.load(first!))?.values.get("count")).toBe(9);
 
+    // A batch commit marks all its source records at once...
+    expect(
+      await state.commit({
+        lease: first!,
+        mutations: [{ type: "put", key: "batch", value: 1 }],
+        sourceIds: [SourceRecordId("orders:3:20"), SourceRecordId("orders:3:21")],
+      }),
+    ).toBe("committed");
+    // ...and a batch with one record that was already processed changes nothing.
+    expect(
+      await state.commit({
+        lease: first!,
+        mutations: [{ type: "put", key: "batch", value: 2 }],
+        sourceIds: [SourceRecordId("orders:3:21"), SourceRecordId("orders:3:22")],
+      }),
+    ).toBe("duplicate");
+    expect(
+      await state.isProcessed({ lease: first!, sourceId: SourceRecordId("orders:3:20") }),
+    ).toBe(true);
+    expect(
+      await state.isProcessed({ lease: first!, sourceId: SourceRecordId("orders:3:22") }),
+    ).toBe(false);
+    expect((await state.load(first!))?.values.get("batch")).toBe(1);
+
     expect(await state.release(first!)).toBe(true);
     const second = await state.acquire({
       scope,

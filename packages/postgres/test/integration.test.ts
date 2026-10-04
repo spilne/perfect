@@ -343,6 +343,30 @@ describe.skipIf(!dockerAvailable)("integration — postgres:17-alpine", () => {
     ).toBe("duplicate");
     expect((await backend.load(first!))?.values.get("count")).toBe(42);
 
+    // A batch commit marks all its source records at once...
+    expect(
+      await backend.commit({
+        lease: first!,
+        mutations: [{ type: "put", key: "batch", value: 1 }],
+        sourceIds: [SourceRecordId("orders:0:20"), SourceRecordId("orders:0:21")],
+      }),
+    ).toBe("committed");
+    // ...and a batch with one record that was already processed changes nothing.
+    expect(
+      await backend.commit({
+        lease: first!,
+        mutations: [{ type: "put", key: "batch", value: 2 }],
+        sourceIds: [SourceRecordId("orders:0:21"), SourceRecordId("orders:0:22")],
+      }),
+    ).toBe("duplicate");
+    expect(
+      await backend.isProcessed({ lease: first!, sourceId: SourceRecordId("orders:0:20") }),
+    ).toBe(true);
+    expect(
+      await backend.isProcessed({ lease: first!, sourceId: SourceRecordId("orders:0:22") }),
+    ).toBe(false);
+    expect((await backend.load(first!))?.values.get("batch")).toBe(1);
+
     expect(await backend.release(first!)).toBe(true);
     const second = await backend.acquire({
       scope,
