@@ -21,6 +21,6 @@
     "@types/debug": "^4.1.12",
     "kafkajs": "^2.2.4",
     "node": "26.10.0",
-    "testcontainers": "^12.1.0"
+    "testcontainers": "^12.2.0"
   }
 }

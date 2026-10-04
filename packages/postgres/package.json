@@ -53,6 +53,6 @@
     "postgres": "^3.4.5"
   },
   "devDependencies": {
-    "testcontainers": "^11.13.0"
+    "testcontainers": "^12.2.0"
   }
 }
