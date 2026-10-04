@@ -114,6 +114,8 @@ interface RecordCompletion {
   readonly sourceId?: SourceRecordId;
   readonly sourceOffset?: string;
   readonly knownDuplicate: boolean;
+  /** This record put its sourceId in the context's inflightSources. */
+  readonly tracksSource: boolean;
   readonly outputs: { readonly sink: Sinkable<unknown, unknown>; readonly value: unknown }[];
 }
 
@@ -516,9 +518,15 @@ class TopologyRunnerInstance {
         : SourceRecordId(
             `${String(envelope.metadata.topic ?? this.topologyId)}:${partition}:${sourceOffset}`,
           );
-    const duplicate = sourceId
-      ? await this.stateBackend.isProcessed({ lease: context.lease, sourceId })
-      : false;
+    const duplicate =
+      sourceId !== undefined &&
+      (context.inflightSources.has(sourceId) ||
+        (await this.stateBackend.isProcessed({ lease: context.lease, sourceId })));
+    // Another copy of this record is skipped while this one is in flight. It
+    // is still acked: records commit in order, so by the time the copy
+    // commits, this one has, and the backend reports the copy as a duplicate.
+    const tracksSource = sourceId !== undefined && !duplicate;
+    if (tracksSource) context.inflightSources.add(sourceId);
 
     context.inflight += 1;
     return {
@@ -533,6 +541,7 @@ class TopologyRunnerInstance {
         sourceId,
         sourceOffset,
         knownDuplicate: duplicate,
+        tracksSource,
         outputs: [],
       },
     };
@@ -568,7 +577,7 @@ class TopologyRunnerInstance {
           : sync(() => {
               if (record.completion.pending > 0) {
                 record.completion.pending = 0;
-                record.completion.context.inflight -= 1;
+                this.recordDone(record.completion);
               }
             }),
       )
@@ -610,11 +619,13 @@ class TopologyRunnerInstance {
         }
         this.itemsProcessed += 1;
       })
-      .ensuring(
-        sync(() => {
-          completion.context.inflight -= 1;
-        }),
-      );
+      .ensuring(sync(() => this.recordDone(completion)));
+  }
+
+  /** The record is finished (committed, or given up), so it is no longer in flight. */
+  private recordDone(completion: RecordCompletion): void {
+    completion.context.inflight -= 1;
+    if (completion.tracksSource) completion.context.inflightSources.delete(completion.sourceId!);
   }
 
   private async commitExactlyOnce(

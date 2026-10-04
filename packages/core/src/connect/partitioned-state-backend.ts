@@ -112,6 +112,13 @@ export interface InMemoryPartitionedStateOptions {
   readonly processedRetentionMs?: number;
 }
 
+/**
+ * Partitioned state kept in this process. Values are copied when they are
+ * committed and when they are loaded, like a real store that saves them as
+ * bytes. Without the copies, a caller that kept changing an object after
+ * committing it would change the "saved" state too, and a restart would
+ * see changes that were never committed.
+ */
 export class InMemoryPartitionedState<V = unknown> implements PartitionedStateBackend<V> {
   private readonly partitions = new Map<string, InMemoryPartition<V>>();
   private readonly processedRetentionMs?: number;
@@ -169,7 +176,7 @@ export class InMemoryPartitionedState<V = unknown> implements PartitionedStateBa
     const current = this.partitions.get(scopeKey(lease.scope));
     if (!current || !owns(current, lease)) return undefined;
     return {
-      values: new Map(current.values),
+      values: new Map(structuredClone([...current.values])),
       sourceOffset: current.sourceOffset,
       checkpointId: current.checkpointId,
     };
@@ -181,7 +188,8 @@ export class InMemoryPartitionedState<V = unknown> implements PartitionedStateBa
     if (commit.sourceId !== undefined && current.processed.has(commit.sourceId)) return "duplicate";
 
     for (const mutation of commit.mutations) {
-      if (mutation.type === "put") current.values.set(mutation.key, mutation.value);
+      if (mutation.type === "put")
+        current.values.set(mutation.key, structuredClone(mutation.value));
       else current.values.delete(mutation.key);
     }
     if (commit.sourceId !== undefined) current.processed.set(commit.sourceId, Date.now());

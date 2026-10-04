@@ -13,6 +13,13 @@ export interface PartitionContext {
   lease: StatePartitionLease;
   readonly values: Map<string, unknown>;
   inflight: number;
+  /**
+   * Ids of the source records being processed right now. A source can
+   * deliver a record again before its first copy is committed (a queue's
+   * visibility timeout running out, say). The backend can't tell yet that
+   * it was processed, so this set is what stops it from being applied twice.
+   */
+  readonly inflightSources: Set<string>;
   sourceOffset?: string;
   /**
    * Each operator's in-memory working copy of its state for this partition
@@ -75,6 +82,7 @@ export class PartitionLifecycle {
       lease,
       values: new Map(snapshot.values),
       inflight: 0,
+      inflightSources: new Set(),
       sourceOffset: snapshot.sourceOffset,
       operatorCaches: new Map(),
     };
