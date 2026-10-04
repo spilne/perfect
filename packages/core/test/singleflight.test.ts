@@ -1,14 +1,11 @@
 import { describe, test, expect } from "bun:test";
-import { succeed, fail, sync, sleep, all, Singleflight, type Eff, type Throws } from "../src";
+import { succeed, fail, sync, sleep, all, run, Singleflight, type Eff, type Throws } from "../src";
 import { runUnchecked } from "./run-unchecked";
-
-// Singleflight.do() types even a never-failing effect as failing (with
-// Throws<unknown> or Throws<never>), so runUnchecked() rejects every result here.
 
 describe("Singleflight", () => {
   test("single call passes through", async () => {
     const sf = Singleflight.make();
-    const result = await runUnchecked(sf.do("k", succeed(42)));
+    const result = await run(sf.do("k", succeed(42)));
     expect(result).toBe(42);
   });
 
@@ -29,7 +26,7 @@ describe("Singleflight", () => {
       sf.do("user:1", work),
       sf.do("user:1", work),
     ]);
-    const results = await runUnchecked(program);
+    const results = await run(program);
     // All should see the same value because work ran exactly once
     expect(executions).toBe(1);
     expect(results).toEqual([1, 1, 1, 1, 1]);
@@ -48,7 +45,7 @@ describe("Singleflight", () => {
           }),
         ),
       );
-    const results = await runUnchecked(all([mk("a"), mk("b"), mk("c"), mk("a"), mk("b")]));
+    const results = await run(all([mk("a"), mk("b"), mk("c"), mk("a"), mk("b")]));
     expect(executions).toBe(3);
     expect(results).toEqual(["a", "b", "c", "a", "b"]);
   });
@@ -57,9 +54,9 @@ describe("Singleflight", () => {
     const sf = Singleflight.make();
     let executions = 0;
     const work = sync(() => ++executions);
-    expect(await runUnchecked(sf.do("k", work))).toBe(1);
-    expect(await runUnchecked(sf.do("k", work))).toBe(2);
-    expect(await runUnchecked(sf.do("k", work))).toBe(3);
+    expect(await run(sf.do("k", work))).toBe(1);
+    expect(await run(sf.do("k", work))).toBe(2);
+    expect(await run(sf.do("k", work))).toBe(3);
   });
 
   test("failure also fans out to all followers", async () => {

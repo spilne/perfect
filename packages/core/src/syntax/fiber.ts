@@ -32,10 +32,10 @@ declare module "../eff.js" {
     fork<A, S>(this: Eff<A, S>): Eff<Fiber<A, ErrorsOf<S>>, Exclude<S, Throws<unknown>>>;
     withSpan<A, S>(this: Eff<A, S>, name: string, attributes?: Record<string, unknown>): Eff<A, S>;
     forkDaemon<A, S>(this: Eff<A, S>): Eff<Fiber<A, ErrorsOf<S>>, Exclude<S, Throws<unknown>>>;
-    ensuring<A, S, S2>(this: Eff<A, S>, finalizer: Eff<void, S2>): Eff<A, S | S2>;
+    ensuring<A, S, S2>(this: Eff<A, S>, finalizer: Eff<unknown, S2>): Eff<A, S | S2>;
     onExit<A, S, S2>(
       this: Eff<A, S>,
-      handler: (exit: Exit<unknown, A>) => Eff<void, S2>,
+      handler: (exit: Exit<unknown, A>) => Eff<unknown, S2>,
     ): Eff<A, S | S2>;
     uninterruptible<A, S>(this: Eff<A, S>): Eff<A, S>;
     interruptible<A, S>(this: Eff<A, S>): Eff<A, S>;
@@ -55,13 +55,13 @@ declare module "../eff.js" {
      * Pair this acquire effect with a release function — the release fires
      * when the surrounding `scoped` block ends.
      */
-    acquireRelease<A, S, S2>(this: Eff<A, S>, release: (a: A) => Eff<void, S2>): Eff<A, S | S2>;
+    acquireRelease<A, S, S2>(this: Eff<A, S>, release: (a: A) => Eff<unknown, S2>): Eff<A, S | S2>;
     provide<A, S, T, Name extends string>(
       this: Eff<A, S>,
       tag: ServiceTag<T, Name>,
       impl: NoInfer<T>,
     ): Eff<A, ProvidedService<S, T, Name>>;
-    retry<A, S>(this: Eff<A, S>, policy: RetryPolicy | RetryConfig): Eff<A, S>;
+    retry<A, S>(this: Eff<A, S>, policy: RetryPolicy | RetryConfig<ErrorsOf<S>>): Eff<A, S>;
     retryAllBy<A, S, E = ErrorsOf<S>>(this: Eff<A, S>, options: RetryAllByOptions<A, E>): Eff<A, S>;
     repeat<A, S>(this: Eff<A, S>, schedule: Schedule<A>): Eff<A, S>;
     /** See the standalone `retryWith`: also retries defects; `while` filters. */

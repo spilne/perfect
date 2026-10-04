@@ -14,14 +14,18 @@ import { Cause } from "../cause.js";
 import { run } from "../runtime.js";
 import { PROMISE_SOURCES } from "../constructors.js";
 
+// The value an effect produces, read from the instance's own type, so that
+// `await eff` is typed as that value instead of unknown.
+type ValueOf<T> = T extends { readonly _A: infer A } ? A : unknown;
+
 declare module "../eff.js" {
   interface Suspend {
     /**
      * Make `await eff` work. For composition in hot paths prefer `.flatMap`
      * (~14 ns/step vs ~200 ns+ per await).
      */
-    then<TResult1 = unknown, TResult2 = never>(
-      onFulfilled?: ((value: unknown) => TResult1 | PromiseLike<TResult1>) | null,
+    then<TResult1 = ValueOf<this>, TResult2 = never>(
+      onFulfilled?: ((value: ValueOf<this>) => TResult1 | PromiseLike<TResult1>) | null,
       // `reason: any` mirrors lib.es5's PromiseLike/Promise `then` exactly —
       // required for structural thenable compatibility.
       onRejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | null,

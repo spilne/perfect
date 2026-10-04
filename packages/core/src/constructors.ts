@@ -136,7 +136,7 @@ export function join<A, E>(fiber: Fiber<A, E>): Eff<A, WithError<never, E>> {
   ) as any;
 }
 
-export function interrupt(fiber: Fiber): Eff<void, never> {
+export function interrupt<A, E>(fiber: Fiber<A, E>): Eff<void, never> {
   return sync(() => fiber.interrupt());
 }
 
@@ -326,7 +326,9 @@ export function timeout<A, S, E>(
 
 // ── Resource safety ────────────────────────────────────────────────
 
-export function ensuring<A, S, S2>(eff: Eff<A, S>, finalizer: Eff<void, S2>): Eff<A, S | S2> {
+// Finalizers may produce any value; it is thrown away. So a finalizer like
+// `sync(() => log.push("closed"))` (an Eff<number>) is fine.
+export function ensuring<A, S, S2>(eff: Eff<A, S>, finalizer: Eff<unknown, S2>): Eff<A, S | S2> {
   return new Suspend(Op.Ensuring, eff, finalizer) as any;
 }
 
@@ -335,14 +337,14 @@ export function ensuring<A, S, S2>(eff: Eff<A, S>, finalizer: Eff<void, S2>): Ef
 // interrupted, and its failure is added to the outcome like any finalizer's.
 export function onExit<A, S, S2>(
   eff: Eff<A, S>,
-  handler: (exit: Exit<unknown, A>) => Eff<void, S2>,
+  handler: (exit: Exit<unknown, A>) => Eff<unknown, S2>,
 ): Eff<A, S | S2> {
   return new Suspend(Op.Ensuring, eff, handler) as any;
 }
 
 export function acquireRelease<A, S, S2>(
   acquire: Eff<A, S>,
-  release: (a: A) => Eff<void, S2>,
+  release: (a: A) => Eff<unknown, S2>,
 ): Eff<A, S | S2> {
   return new Suspend(Op.AcqRel, acquire, release) as any;
 }
@@ -380,8 +382,12 @@ export interface RetryConfig<E = unknown> {
 // translated by RetryPolicy.fromConfig and run by the same applier as a
 // hand-built policy.
 export function retry<A, S>(eff: Eff<A, S>, policy: RetryPolicy): Eff<A, S>;
-export function retry<A, S>(eff: Eff<A, S>, config: RetryConfig): Eff<A, S>;
-export function retry<A, S>(eff: Eff<A, S>, policyOrConfig: RetryConfig | RetryPolicy): Eff<A, S> {
+// RetryConfig<ErrorsOf<S>> so `when` receives the effect's real error type.
+export function retry<A, S>(eff: Eff<A, S>, config: RetryConfig<ErrorsOf<S>>): Eff<A, S>;
+export function retry<A, S>(
+  eff: Eff<A, S>,
+  policyOrConfig: RetryConfig<ErrorsOf<S>> | RetryPolicy,
+): Eff<A, S> {
   return runRetryUnified(
     eff,
     policyOrConfig instanceof RetryPolicy ? policyOrConfig : RetryPolicy.fromConfig(policyOrConfig),

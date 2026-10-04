@@ -102,7 +102,7 @@ export class PgSingleflight implements Singleflight<Throws<PostgresError>> {
   // Singleflight (Eff-typed contract)
   // ---------------------------------------------------------------------------
 
-  do<A, E>(key: string, eff: Eff<A, Throws<E>>): Eff<A, Throws<E> | Throws<PostgresError>> {
+  do<A, E = never>(key: string, eff: Eff<A, Throws<E>>): Eff<A, Throws<E> | Throws<PostgresError>> {
     // run() rejects with the squashed cause — for a typed failure that is
     // the original error value, so the winner path preserves `E`.
     return fromPromise(

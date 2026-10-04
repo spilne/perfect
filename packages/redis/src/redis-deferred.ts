@@ -1,7 +1,7 @@
 import { fail as failEff, succeed as succeedEff } from "@spilne/perfect-core";
 import type { Codec } from "@spilne/perfect-core/connect";
 import { JsonCodec } from "@spilne/perfect-core/connect";
-import type { Deferred, Eff, Throws } from "@spilne/perfect-core";
+import type { Deferred, Eff, Throws, WithError } from "@spilne/perfect-core";
 import { numberResult, redisBlocking, redisEff, redisKeyFamily } from "./internal.js";
 import type { RedisClient } from "./redis-client.js";
 import { RedisError } from "./redis-error.js";
@@ -74,7 +74,7 @@ export class RedisDeferred<A, E = never> implements Deferred<A, E, Throws<RedisE
     });
   }
 
-  get await(): Eff<A, Throws<RedisError> | Throws<E>> {
+  get await(): Eff<A, WithError<Throws<RedisError>, E>> {
     const read = (): Eff<ReadResult<A, E>, Throws<RedisError>> =>
       redisEff("deferred.read", async () => {
         const raw = await this.redis.get(this.valueKey);
@@ -85,7 +85,9 @@ export class RedisDeferred<A, E = never> implements Deferred<A, E, Throws<RedisE
           : ({ done: true, ok: false, error: this.errorCodec.decode(envelope.error) } as const);
       });
 
-    return read().flatMap((result) => {
+    // Throws<E> | Throws<RedisError> is what WithError gives for any real E;
+    // TypeScript just can't see that while E is still generic.
+    const awaited = read().flatMap((result) => {
       if (result.done) return result.ok ? succeedEff(result.value) : failEff(result.error);
       const timeoutSeconds = this.timeoutMs === 0 ? 0 : Math.max(0.001, this.timeoutMs / 1000);
       return redisBlocking(
@@ -107,6 +109,7 @@ export class RedisDeferred<A, E = never> implements Deferred<A, E, Throws<RedisE
           return resolved.ok ? succeedEff(resolved.value) : failEff(resolved.error);
         });
     });
+    return awaited as Eff<A, WithError<Throws<RedisError>, E>>;
   }
 
   get isDone(): Eff<boolean, Throws<RedisError>> {

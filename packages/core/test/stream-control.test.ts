@@ -11,7 +11,6 @@ import {
   sleep,
   sync,
 } from "../src";
-import { runUnchecked } from "./run-unchecked";
 
 class SignalError extends TaggedError("SignalError")<{
   readonly message: string;
@@ -26,9 +25,7 @@ describe("Stream.takeUntil", () => {
     const queue = await run(Queue.unbounded<number>());
     const stop = await run(Deferred.make<void>());
     const seen = await run(Deferred.make<number>());
-    // Deferred.await is typed Throws<never>, which run() wrongly rejects, so
-    // the effects that wait on a Deferred go through runUnchecked.
-    const result = runUnchecked(
+    const result = run(
       Stream.fromQueue(queue)
         .tapEffect((value) => seen.succeed(value))
         .takeUntil(Stream.fromEffect(stop.await))
@@ -36,7 +33,7 @@ describe("Stream.takeUntil", () => {
     );
 
     await run(queue.offer(1).orDie());
-    await runUnchecked(seen.await);
+    await run(seen.await);
     await run(stop.succeed(undefined));
 
     expect(await result).toEqual([1]);
@@ -77,8 +74,7 @@ describe("Stream.takeUntil", () => {
       ),
     );
 
-    // Deferred.await is typed Throws<never>, which run() wrongly rejects.
-    expect(await runUnchecked(source.takeUntil(signal).toArray())).toEqual([]);
+    expect(await run(source.takeUntil(signal).toArray())).toEqual([]);
     expect(sourceFinalized).toBe(1);
     expect(signalFinalized).toBe(1);
   });

@@ -1,5 +1,3 @@
-import type { Throws } from "./eff.js";
-
 export type Either<E, A> =
   | { readonly _tag: "Left"; readonly left: E }
   | { readonly _tag: "Right"; readonly right: A };
@@ -16,5 +14,4 @@ export const Either = {
     e._tag === "Right",
 } as const;
 
-/** S plus a typed failure E, leaving S untouched when E is never. */
-export type WithError<S, E> = [E] extends [never] ? S : S | Throws<E>;
+export type { WithError } from "./eff.js";

@@ -30,13 +30,13 @@ export interface Singleflight<SF = never> {
    * with the same key wait for that execution to settle and receive its
    * result (success or failure). Key is cleared on settle.
    */
-  do<A, E>(key: string, eff: Eff<A, Throws<E>>): Eff<A, SF | Throws<E>>;
+  do<A, E = never>(key: string, eff: Eff<A, Throws<E>>): Eff<A, SF | Throws<E>>;
 }
 
 class InProcessSingleflight implements Singleflight {
   private readonly flights = new Map<string, Deferred<unknown, unknown>>();
 
-  do<A, E>(key: string, eff: Eff<A, Throws<E>>): Eff<A, Throws<E>> {
+  do<A, E = never>(key: string, eff: Eff<A, Throws<E>>): Eff<A, Throws<E>> {
     return suspend(() => {
       let leader: Deferred<A, E> | null = null;
       // The finalizer is in place before the key is registered, so no

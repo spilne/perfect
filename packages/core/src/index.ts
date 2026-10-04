@@ -6,6 +6,7 @@ export type {
   InferEffects,
   EffectCheck,
   ErrorsOf,
+  WithError,
   Suspend,
 } from "./eff.js";
 export { Cause } from "./cause.js";

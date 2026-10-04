@@ -256,9 +256,11 @@ function csvPipe(options: CsvOptions): Pipe<string, string[] | Record<string, st
 
 /** Parse CSV text chunks directly. Passing the function to `through` keeps
  * the historical array output; calling `csv({ header: true })` emits records. */
-export function csv<S>(input: Stream<string, S>): Stream<string[], S>;
 export function csv(options: CsvOptions & { header: true }): Pipe<string, Record<string, string>>;
 export function csv(options?: CsvOptions & { header?: false }): Pipe<string, string[]>;
+// Last on purpose: when `csv` itself is passed to `.through(Pipes.csv)`,
+// TypeScript infers from the last overload.
+export function csv<S>(input: Stream<string, S>): Stream<string[], S>;
 export function csv<S>(
   inputOrOptions?: Stream<string, S> | CsvOptions,
 ): Stream<string[], S> | Pipe<string, string[]> | Pipe<string, Record<string, string>> {

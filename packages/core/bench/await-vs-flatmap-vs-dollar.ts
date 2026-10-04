@@ -71,7 +71,7 @@ group(`pure compute × ${N}`, () => {
   bench("await eff per step (N fibers via thenable)", async () => {
     // `await eff` is typed as unknown, so each await below is cast back.
     let x = 0;
-    for (let i = 0; i < N; i++) x = (await succeed(x + 1)) as number;
+    for (let i = 0; i < N; i++) x = await succeed(x + 1);
     return x;
   });
 
@@ -141,7 +141,7 @@ group(`single async + pure × ${N - 1}`, () => {
   bench("await eff per step (sleep then loop)", async () => {
     await sleep(0);
     let x = 0;
-    for (let i = 0; i < N - 1; i++) x = (await succeed(x + 1)) as number;
+    for (let i = 0; i < N - 1; i++) x = await succeed(x + 1);
     return x;
   });
 
@@ -177,7 +177,7 @@ group(`all-async sleep(0) × ${N_SMALL}`, () => {
     let x = 0;
     for (let i = 0; i < N_SMALL; i++) {
       await sleep(0);
-      x = (await succeed(x + 1)) as number;
+      x = await succeed(x + 1);
     }
     return x;
   });
@@ -262,13 +262,13 @@ group("fail mid-chain + recover", () => {
   bench("composed: flatMap + catch + flatMap (one fiber)", async () => run(composedRecover));
   bench("await: try/catch around fail per step", async () => {
     let x = 0;
-    for (let i = 0; i < N / 2; i++) x = (await succeed(x + 1)) as number;
+    for (let i = 0; i < N / 2; i++) x = await succeed(x + 1);
     try {
       await fail("midway");
     } catch {
       x = 999;
     }
-    for (let i = 0; i < N / 2; i++) x = (await succeed(x + 1)) as number;
+    for (let i = 0; i < N / 2; i++) x = await succeed(x + 1);
     return x;
   });
 

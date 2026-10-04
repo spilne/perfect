@@ -47,7 +47,7 @@ export class RedisSingleflight implements Singleflight<Throws<RedisError>> {
     return new RedisSingleflight(config.redis, config);
   }
 
-  do<A, E>(key: string, eff: Eff<A, Throws<E>>): Eff<A, Throws<RedisError> | Throws<E>> {
+  do<A, E = never>(key: string, eff: Eff<A, Throws<E>>): Eff<A, Throws<RedisError> | Throws<E>> {
     const lockKey = `${this.prefix}${key}:lock`;
 
     // Taking the lock and installing the leader's finalizer happen in one
