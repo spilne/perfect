@@ -6,6 +6,7 @@ import {
   Cause,
   Exit,
   fromPromise,
+  runExit,
   runFiber,
   succeed,
   sync,
@@ -15,6 +16,7 @@ import {
   CheckpointName,
   InMemoryPartitionedState,
   InMemoryState,
+  committedSourceIds,
   Partition,
   SourceRecordId,
   StageId,
@@ -128,6 +130,14 @@ interface TopologyRecord {
   readonly endOfInput?: boolean;
 }
 
+/** Finished records of one partition waiting to be committed together. */
+class CommitBatch {
+  records: RecordCompletion[] = [];
+  timer: ReturnType<typeof setTimeout> | undefined;
+  // The commit in progress; the next one waits for it.
+  committing: Promise<void> = Promise.resolve();
+}
+
 /** A window step's working state for one partition. */
 class WindowOperatorState {
   /** Newest event time seen in the partition; the watermark follows it. */
@@ -163,6 +173,10 @@ class TopologyRunnerInstance {
   private checkpointSequence = 0;
 
   private itemsProcessed = 0;
+  // Finished records waiting to be committed together (see ackBatchSize).
+  private readonly batches = new WeakMap<PartitionContext, CommitBatch>();
+  private readonly batchSize: number;
+  private readonly batchWaitMs: number;
   // How many sources the topology reads, and how many have ended.
   private sources = 0;
   private endedSources = 0;
@@ -201,6 +215,8 @@ class TopologyRunnerInstance {
         StateCheckpointId(`${this.instanceId}:revoke:${++this.checkpointSequence}`),
     });
     this.rateLimiter = config.maxItemsPerSecond ? new RateLimiter(config.maxItemsPerSecond) : null;
+    this.batchSize = config.ackBatchSize ?? 1;
+    this.batchWaitMs = config.ackMaxWaitMs ?? 1_000;
   }
 
   async start(): Promise<TopologyHandle> {
@@ -218,13 +234,23 @@ class TopologyRunnerInstance {
         this.validateSink(sinkTarget);
         if (this.config.maxBufferSize) pipeline = pipeline.buffer(this.config.maxBufferSize);
 
-        drains.push(pipeline.evalMap((record) => this.deliverRecord(record, sinkTarget)).drain());
+        drains.push(
+          pipeline
+            .evalMap((record) => this.deliverRecord(record, sinkTarget))
+            .drain()
+            .flatMap(() => this.commitPendingBatches()),
+        );
       }
     } else {
       const terminal = this.topology.compiled.nodes[this.topology.compiled.nodes.length - 1]!;
       let pipeline = this.compile(terminal);
       if (this.config.maxBufferSize) pipeline = pipeline.buffer(this.config.maxBufferSize);
-      drains.push(pipeline.evalMap((record) => this.deliverRecord(record)).drain());
+      drains.push(
+        pipeline
+          .evalMap((record) => this.deliverRecord(record))
+          .drain()
+          .flatMap(() => this.commitPendingBatches()),
+      );
     }
 
     this.warnAboutUnnamedSteps();
@@ -331,9 +357,11 @@ class TopologyRunnerInstance {
         },
         revoking: async ({ partitions }) => {
           await Promise.all(
-            partitions.map((partition) =>
-              this.partitionLifecycle.revoke(partition, { waitForInflight: !closing }),
-            ),
+            partitions.map(async (partition) => {
+              const context = this.partitionLifecycle.contexts.get(partition);
+              if (context && !closing) await this.commitBatch(context);
+              await this.partitionLifecycle.revoke(partition, { waitForInflight: !closing });
+            }),
           );
         },
       });
@@ -713,6 +741,7 @@ class TopologyRunnerInstance {
       this.recordDone(completion);
       return succeed(undefined);
     }
+    if (!exactlyOnce && this.batchSize > 1) return this.addToBatch(completion);
     const checkpointId = StateCheckpointId(`${this.instanceId}:${++this.checkpointSequence}`);
 
     const commit = exactlyOnce
@@ -749,6 +778,100 @@ class TopologyRunnerInstance {
   private recordDone(completion: RecordCompletion): void {
     completion.context.inflight -= 1;
     if (completion.tracksSource) completion.context.inflightSources.delete(completion.sourceId!);
+  }
+
+  // ── Batched commits ────────────────────────────────────────────────
+
+  /**
+   * Add a finished record to its partition's batch. A full batch is
+   * committed before the next record is taken, so a slow store slows the
+   * input down instead of letting batches pile up.
+   */
+  private addToBatch(completion: RecordCompletion): Eff<void, unknown> {
+    const context = completion.context;
+    let batch = this.batches.get(context);
+    if (!batch) this.batches.set(context, (batch = new CommitBatch()));
+    batch.records.push(completion);
+    if (batch.records.length >= this.batchSize) {
+      return fromPromise(
+        () => this.commitBatch(context),
+        (error) => error,
+      );
+    }
+    batch.timer ??= setTimeout(
+      () => void this.commitBatch(context).catch((error) => this.failBackground(error)),
+      this.batchWaitMs,
+    );
+    return succeed(undefined);
+  }
+
+  /** Commit what is in a partition's batch now. Batches of one partition commit in order. */
+  private commitBatch(context: PartitionContext): Promise<void> {
+    const batch = this.batches.get(context);
+    if (!batch) return Promise.resolve();
+    clearTimeout(batch.timer);
+    batch.timer = undefined;
+    const records = batch.records;
+    batch.records = [];
+    if (records.length > 0) {
+      batch.committing = batch.committing.then(() => this.saveBatch(context, records));
+    }
+    return batch.committing;
+  }
+
+  private commitAllBatches(): Promise<void> {
+    return Promise.all(
+      [...this.partitionLifecycle.contexts.values()].map((context) => this.commitBatch(context)),
+    ).then(() => undefined);
+  }
+
+  private commitPendingBatches(): Eff<void, unknown> {
+    return fromPromise(
+      () => this.commitAllBatches(),
+      (error) => error,
+    );
+  }
+
+  /** One commit for the whole batch, then every record's ack, in order. */
+  private async saveBatch(context: PartitionContext, records: RecordCompletion[]): Promise<void> {
+    try {
+      // Only the last change to each key matters.
+      const mutations = new Map<string, StateMutation<unknown>>();
+      for (const record of records) {
+        for (const [key, mutation] of record.mutations) {
+          mutations.delete(key);
+          mutations.set(key, mutation);
+        }
+      }
+      // Records already known to be duplicates were processed before; they
+      // only need their ack.
+      const sourceIds = records.flatMap((record) =>
+        record.sourceId !== undefined && !record.knownDuplicate ? [record.sourceId] : [],
+      );
+      const sourceOffset = records.findLast(
+        (record) => record.sourceOffset !== undefined,
+      )?.sourceOffset;
+      const result = await this.stateBackend.commit({
+        lease: context.lease,
+        mutations: [...mutations.values()],
+        sourceIds,
+        sourceOffset,
+        checkpointId: StateCheckpointId(`${this.instanceId}:${++this.checkpointSequence}`),
+      });
+      if (result === "fenced") throw new Error("partition state lease was fenced");
+      // Duplicates are filtered out before processing, so this means another
+      // instance processed the same records, which the lease should prevent.
+      if (result === "duplicate") {
+        throw new Error("a batch contained a source record that another commit already saved");
+      }
+      for (const record of records) {
+        if (record.envelope) await runOrThrow(record.envelope.ack());
+        if (record.sourceOffset !== undefined) context.sourceOffset = record.sourceOffset;
+        if (record.envelope) this.itemsProcessed += 1;
+      }
+    } finally {
+      for (const record of records) this.recordDone(record);
+    }
   }
 
   private async commitExactlyOnce(
@@ -856,6 +979,9 @@ class TopologyRunnerInstance {
       this.leaseInterval = null;
       for (const fiber of this.fibers) fiber.interrupt();
       await this.drainPromise;
+      // Records waiting in a batch were fully processed (and published), so
+      // save them before giving the partitions up.
+      await this.commitAllBatches();
       await this.checkpointInFlight;
       await this.checkpointAllState();
       // Processing has stopped, so records still counted as in flight will
@@ -1045,6 +1171,12 @@ function stepName(node: TopologyNode): string | undefined {
   }
 }
 
+/** Run an effect from promise code, rejecting with its failure. */
+async function runOrThrow(effect: Eff<unknown, unknown>): Promise<void> {
+  const exit = await runExit(effect);
+  if (exit._tag === "Failure") throw Cause.squash(exit.cause);
+}
+
 function sum<T>(items: Iterable<T>, count: (item: T) => number): number {
   let total = 0;
   for (const item of items) total += count(item);
@@ -1151,15 +1283,10 @@ class LegacyPartitionedStateBackend implements PartitionedStateBackend<unknown> 
 
   async commit(commit: PartitionStateCommit<unknown>) {
     if (!(await this.leases.load(commit.lease))) return "fenced" as const;
-    if (
-      commit.sourceId &&
-      this.stillSeen(
-        await this.backend.get(`${this.prefix(commit.lease.scope)}@seen:${commit.sourceId}`),
-      )
-    ) {
-      return "duplicate" as const;
-    }
     const prefix = this.prefix(commit.lease.scope);
+    const sourceIds = committedSourceIds(commit);
+    const seen = await Promise.all(sourceIds.map((id) => this.backend.get(`${prefix}@seen:${id}`)));
+    if (seen.some((value) => this.stillSeen(value))) return "duplicate" as const;
     // Only the last mutation of each key matters, and different keys don't
     // depend on each other, so they are written in parallel instead of one
     // round trip at a time.
@@ -1170,9 +1297,9 @@ class LegacyPartitionedStateBackend implements PartitionedStateBackend<unknown> 
         ? this.backend.put(`${prefix}${mutation.key}`, mutation.value)
         : this.backend.delete(`${prefix}${mutation.key}`),
     );
-    if (commit.sourceId) {
-      const seenKey = `${prefix}@seen:${commit.sourceId}`;
-      const now = Date.now();
+    const now = Date.now();
+    for (const id of sourceIds) {
+      const seenKey = `${prefix}@seen:${id}`;
       writes.push(this.backend.put(seenKey, now));
       if (this.processedRetentionMs !== undefined) {
         this.seenAt.delete(seenKey);

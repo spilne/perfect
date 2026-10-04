@@ -70,5 +70,6 @@ export {
   InMemoryPartitionedState,
   type InMemoryPartitionedStateOptions,
   isTransactionalPartitionedStateBackend,
+  committedSourceIds,
 } from "./partitioned-state-backend.js";
 export { AckError, autoCommitBatchWithin } from "./auto-commit.js";

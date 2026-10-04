@@ -28,9 +28,23 @@ export type StateMutation<V> =
 export interface PartitionStateCommit<V> {
   readonly lease: StatePartitionLease;
   readonly mutations: readonly StateMutation<V>[];
+  /** The source record this commit finishes. */
   readonly sourceId?: SourceRecordId;
+  /**
+   * More source records this commit finishes, when one commit saves a batch
+   * of records. If any of them (or `sourceId`) was already processed, the
+   * commit changes nothing and returns "duplicate".
+   */
+  readonly sourceIds?: readonly SourceRecordId[];
   readonly sourceOffset?: string;
   readonly checkpointId?: StateCheckpointId;
+}
+
+/** Every source record id a commit finishes: `sourceId` and `sourceIds`. */
+export function committedSourceIds(commit: PartitionStateCommit<unknown>): SourceRecordId[] {
+  const ids = commit.sourceIds ? [...commit.sourceIds] : [];
+  if (commit.sourceId !== undefined) ids.unshift(commit.sourceId);
+  return ids;
 }
 
 export type PartitionCommitResult = "committed" | "duplicate" | "fenced";
@@ -185,14 +199,15 @@ export class InMemoryPartitionedState<V = unknown> implements PartitionedStateBa
   async commit(commit: PartitionStateCommit<V>): Promise<PartitionCommitResult> {
     const current = this.partitions.get(scopeKey(commit.lease.scope));
     if (!current || !owns(current, commit.lease)) return "fenced";
-    if (commit.sourceId !== undefined && current.processed.has(commit.sourceId)) return "duplicate";
+    const sourceIds = committedSourceIds(commit);
+    if (sourceIds.some((id) => current.processed.has(id))) return "duplicate";
 
     for (const mutation of commit.mutations) {
       if (mutation.type === "put")
         current.values.set(mutation.key, structuredClone(mutation.value));
       else current.values.delete(mutation.key);
     }
-    if (commit.sourceId !== undefined) current.processed.set(commit.sourceId, Date.now());
+    for (const id of sourceIds) current.processed.set(id, Date.now());
     this.forgetOldRecords(current);
     if (commit.sourceOffset !== undefined) current.sourceOffset = commit.sourceOffset;
     if (commit.checkpointId !== undefined) current.checkpointId = commit.checkpointId;

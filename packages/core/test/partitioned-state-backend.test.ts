@@ -47,6 +47,30 @@ describe("InMemoryPartitionedState", () => {
     expect(snapshot?.values.get("user-7")).toBe(3);
     expect(snapshot?.sourceOffset).toBe("42");
     expect<string | undefined>(snapshot?.checkpointId).toBe("cp-1");
+
+    // A batch commit marks all its source records at once...
+    expect(
+      await backend.commit({
+        lease: lease!,
+        mutations: [{ type: "put", key: "batch", value: 1 }],
+        sourceIds: [SourceRecordId("orders:2:50"), SourceRecordId("orders:2:51")],
+      }),
+    ).toBe("committed");
+    // ...and a batch with one record that was already processed changes nothing.
+    expect(
+      await backend.commit({
+        lease: lease!,
+        mutations: [{ type: "put", key: "batch", value: 2 }],
+        sourceIds: [SourceRecordId("orders:2:51"), SourceRecordId("orders:2:52")],
+      }),
+    ).toBe("duplicate");
+    expect(
+      await backend.isProcessed({ lease: lease!, sourceId: SourceRecordId("orders:2:50") }),
+    ).toBe(true);
+    expect(
+      await backend.isProcessed({ lease: lease!, sourceId: SourceRecordId("orders:2:52") }),
+    ).toBe(false);
+    expect((await backend.load(lease!))?.values.get("batch")).toBe(1);
   });
 
   test("increments the fence and rejects a stale owner", async () => {

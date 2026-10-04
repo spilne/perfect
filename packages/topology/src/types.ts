@@ -112,11 +112,15 @@ export interface TopologyConfig {
   /** @deprecated Not called yet; it has no effect. */
   onBackpressure?: (stats: BackpressureStats) => void;
   /**
-   * @deprecated Has no effect yet: every record is committed and acked on
-   * its own.
+   * Commit and ack up to this many records of a partition together: one
+   * state commit (one round trip to Redis or Postgres) for the whole batch,
+   * then the acks. Default: 1, every record on its own. Larger batches are
+   * much faster on remote stores; acks then wait until the batch commits.
+   * Not used with exactly-once delivery, which commits each record in its own
+   * transaction.
    */
   ackBatchSize?: number;
-  /** @deprecated Has no effect yet (see ackBatchSize). */
+  /** Commit a batch that isn't full after this many ms. Default: 1_000. */
   ackMaxWaitMs?: number;
 }
 
