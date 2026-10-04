@@ -1,5 +1,6 @@
 import { describe, test, expect } from "bun:test";
 import { succeed, fail, die, sync, sleep, run, runExit, Cause } from "../src";
+import { runUnchecked } from "./run-unchecked";
 import { Semaphore } from "../src/semaphore";
 import { Queue } from "../src/queue";
 import { Stream } from "../src/stream";
@@ -23,7 +24,7 @@ describe("Semaphore.withPermits atomicity", () => {
       ]),
     );
 
-    await run(program as any);
+    await run(program);
     expect(order.sort()).toEqual(["a", "b"]);
   });
 
@@ -35,7 +36,7 @@ describe("Semaphore.withPermits atomicity", () => {
         .flatMap(() => sem.available),
     );
 
-    expect(await run(program as any)).toBe(3);
+    expect(await run(program)).toBe(3);
   });
 
   test("large request is not starved by a stream of small ones", async () => {
@@ -52,7 +53,7 @@ describe("Semaphore.withPermits atomicity", () => {
       ]),
     );
 
-    await run(program as any);
+    await run(program);
     expect(done).toContain("big");
   });
 });
@@ -67,15 +68,17 @@ describe("Stream.fromQueue error propagation", () => {
         .flatMap(() => Stream.fromQueue(q).toArray()),
     );
 
-    expect(await run(program as any)).toEqual([1, 2]);
+    expect(await runUnchecked(program)).toEqual([1, 2]);
   });
 
   test("non-close failures propagate instead of silently ending", async () => {
+    // Not a real Queue: just enough of one to make take() fail with an error
+    // other than QueueClosed.
     const failingQueue = {
       take: () => fail("db exploded"),
-    };
+    } as unknown as Queue<number>;
 
-    const exit = await runExit(Stream.fromQueue(failingQueue as any).toArray() as any);
+    const exit = await runExit(Stream.fromQueue(failingQueue).toArray());
 
     expect(exit._tag).toBe("Failure");
     if (exit._tag === "Failure") {
@@ -91,7 +94,7 @@ describe("generator Cause fidelity", () => {
       return "unreachable";
     });
 
-    const exit = await runExit(program as any);
+    const exit = await runExit(program);
     expect(exit._tag).toBe("Failure");
     if (exit._tag === "Failure") {
       expect(Cause.hasDie(exit.cause)).toBe(true);
@@ -112,7 +115,7 @@ describe("generator Cause fidelity", () => {
       return "unreachable";
     });
 
-    const exit = await runExit(program as any);
+    const exit = await runExit(program);
     expect(exit._tag).toBe("Failure");
     if (exit._tag === "Failure") {
       expect(Cause.hasDie(exit.cause)).toBe(true);
@@ -130,7 +133,7 @@ describe("generator Cause fidelity", () => {
       return `caught:${caught}`;
     });
 
-    expect(await run(program as any)).toBe("caught:kaboom");
+    expect(await run(program)).toBe("caught:kaboom");
   });
 });
 
@@ -141,7 +144,7 @@ describe("ensuring cause fidelity", () => {
       fail("boom"),
       syncFn(() => {}),
     );
-    const exit = await runExit(program as any);
+    const exit = await runExit(program);
     expect(exit._tag).toBe("Failure");
     if (exit._tag === "Failure") {
       expect(Cause.pretty(exit.cause)).toBe("Fail(boom)");
@@ -149,7 +152,11 @@ describe("ensuring cause fidelity", () => {
   });
 
   test("stream failure through onFinalize keeps the cause un-duplicated", async () => {
-    const exit = await runExit((Stream.fail("boom") as any).onFinalize(sync(() => {})).toArray());
+    const exit = await runExit(
+      Stream.fail("boom")
+        .onFinalize(sync(() => {}))
+        .toArray(),
+    );
     expect(exit._tag).toBe("Failure");
     if (exit._tag === "Failure") {
       expect(Cause.pretty(exit.cause)).toBe("Fail(boom)");
@@ -162,16 +169,14 @@ describe("stream concurrency ops — structured cleanup", () => {
     let calls = 0;
     const result = await run(
       Stream.iterate(0, (n: number) => n + 1)
-        .parEvalMap(
-          2,
-          (x) =>
-            sync(() => {
-              calls++;
-              return x;
-            }) as any,
+        .parEvalMap(2, (x) =>
+          sync(() => {
+            calls++;
+            return x;
+          }),
         )
         .take(3)
-        .toArray() as any,
+        .toArray(),
     );
     expect(result).toEqual([0, 1, 2]);
 
@@ -187,14 +192,9 @@ describe("stream concurrency ops — structured cleanup", () => {
       sync(() => {
         pulls++;
         return 1;
-      }) as any,
+      }),
     );
-    const result = await run(
-      infinite
-        .merge(infinite as any)
-        .take(4)
-        .toArray() as any,
-    );
+    const result = await run(infinite.merge(infinite).take(4).toArray());
     expect(result.length).toBe(4);
 
     const after = pulls;
@@ -208,7 +208,7 @@ describe("throwing callbacks become defects", () => {
     const exit = await runExit(
       succeed(1).map(() => {
         throw new Error("mapper blew up");
-      }) as any,
+      }),
     );
     expect(exit._tag).toBe("Failure");
     if (exit._tag === "Failure") {
@@ -220,7 +220,7 @@ describe("throwing callbacks become defects", () => {
     const exit = await runExit(
       fail("boom").catch(() => {
         throw new Error("handler blew up");
-      }) as any,
+      }),
     );
     expect(exit._tag).toBe("Failure");
     if (exit._tag === "Failure") {

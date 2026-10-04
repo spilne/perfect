@@ -21,7 +21,9 @@ import {
   run,
   Cause,
   Exit,
+  type Fiber,
 } from "../src";
+import { runUnchecked } from "./run-unchecked";
 
 describe("Cause combinators", () => {
   test("Both + firstFail finds left-first error", () => {
@@ -55,7 +57,7 @@ describe("Cause combinators", () => {
     // Easier: verify the catch-via-firstFail path via catchAll + reconstruction is skipped —
     // just confirm a plain fail is still caught as before (regression).
     const eff = fail("x").catch((e: string) => succeed(`caught ${e}`));
-    expect(await run(eff as any)).toBe("caught x");
+    expect(await run(eff)).toBe("caught x");
   });
 });
 
@@ -86,13 +88,13 @@ describe("Exit", () => {
 
   test("awaitFiber returns Success on completion", async () => {
     const eff = fork(succeed(42)).flatMap(awaitFiber);
-    const exit = await run(eff as any);
+    const exit = await run(eff);
     expect(exit).toEqual({ _tag: "Success", value: 42 });
   });
 
   test("awaitFiber returns Failure on error — does NOT reject run()", async () => {
     const eff = fork(fail("boom")).flatMap(awaitFiber);
-    const exit = (await run(eff as any)) as Exit;
+    const exit = await run(eff);
     expect(Exit.isFailure(exit)).toBe(true);
     if (Exit.isFailure(exit)) {
       expect(Cause.firstFail(exit.cause)).toEqual({ value: "boom" });
@@ -100,7 +102,7 @@ describe("Exit", () => {
   });
 
   test("Fiber.await promise resolves with Exit (daemon — survives run)", async () => {
-    const f = (await run(forkDaemon(succeed("hi")) as any)) as any;
+    const f = await run(forkDaemon(succeed("hi")));
     const exit = await f.await();
     expect(exit).toEqual({ _tag: "Success", value: "hi" });
   });
@@ -108,28 +110,30 @@ describe("Exit", () => {
 
 describe("onExit", () => {
   test("runs handler with Success exit", async () => {
-    let seen: Exit | null = null;
+    let seen = null as Exit | null;
     const eff = onExit(succeed(7), (exit) =>
       sync(() => {
         seen = exit;
       }),
     );
-    expect(await run(eff as any)).toBe(7);
+    expect(await run(eff)).toBe(7);
     expect(seen).toEqual({ _tag: "Success", value: 7 });
   });
 
   test("runs handler with Failure exit and propagates the failure", async () => {
-    let seen: Exit | null = null;
+    let seen = null as Exit | null;
     const eff = onExit(fail("nope"), (exit) =>
       sync(() => {
         seen = exit;
       }),
     );
-    await expect(run(eff as any)).rejects.toBe("nope");
+    await expect(runUnchecked(eff)).rejects.toBe("nope");
     expect(seen && seen._tag).toBe("Failure");
   });
 });
 
+// interrupt() takes a Fiber<unknown>, which rejects typed fibers because Fiber
+// is invariant in its result type. Fiber<any> is how src admits any fiber.
 describe("Interruption masks", () => {
   test("uninterruptible blocks the interrupt until the block finishes", async () => {
     let ran = 0;
@@ -143,10 +147,10 @@ describe("Interruption masks", () => {
     );
     const eff = fork(work).flatMap((f) =>
       sleep(5)
-        .flatMap(() => interrupt(f))
+        .flatMap(() => interrupt(f as Fiber<any>))
         .flatMap(() => awaitFiber(f)),
     );
-    const exit = (await run(eff as any)) as Exit;
+    const exit = await run(eff);
     // Inner work must have completed before the interrupt could land
     expect(ran).toBe(1);
     // After the uninterruptible block ends, the pending interrupt fires
@@ -169,10 +173,10 @@ describe("Interruption masks", () => {
     );
     const eff = fork(work).flatMap((f) =>
       sleep(5)
-        .flatMap(() => interrupt(f))
+        .flatMap(() => interrupt(f as Fiber<any>))
         .flatMap(() => awaitFiber(f)),
     );
-    const exit = (await run(eff as any)) as Exit;
+    const exit = await run(eff);
     expect(ran).toBe(1); // only the outer uninterruptible syncran; inner sleep was interrupted
     expect(Exit.isInterrupted(exit)).toBe(true);
   });
@@ -187,10 +191,10 @@ describe("Interruption masks", () => {
     );
     const eff = fork(work).flatMap((f) =>
       sleep(5)
-        .flatMap(() => interrupt(f))
+        .flatMap(() => interrupt(f as Fiber<any>))
         .flatMap(() => awaitFiber(f)),
     );
-    await run(eff as any);
+    await run(eff);
     expect(finalized).toBe(true);
   });
 });
@@ -205,7 +209,7 @@ describe("forkDaemon", () => {
     );
     const parent = forkDaemon(daemon).flatMap(() => succeed("parent done"));
     // parent resolves quickly
-    expect(await run(parent as any)).toBe("parent done");
+    expect(await run(parent)).toBe("parent done");
     // daemon still completing after parent finished
     await new Promise((r) => setTimeout(r, 80));
     expect(ticks).toBe(1);
@@ -217,7 +221,7 @@ describe("yieldNow", () => {
     const eff = succeed(1)
       .flatMap(() => yieldNow)
       .flatMap(() => succeed(2));
-    expect(await run(eff as any)).toBe(2);
+    expect(await run(eff)).toBe(2);
   });
 });
 
@@ -226,15 +230,15 @@ describe("race variants", () => {
     const slow = sleep(50).flatMap(() => succeed("slow"));
     const fast = sleep(5).flatMap(() => succeed(99));
     const eff = raceEither(slow, fast);
-    const r = (await run(eff as any)) as any;
+    const r = await run(eff);
     expect(r._tag).toBe("Right");
-    expect(r.right).toBe(99);
+    expect(r._tag === "Right" && r.right).toBe(99);
   });
 
   test("allSettled collects all Exits without killing siblings (raceAll is the old name)", async () => {
     expect(raceAll).toBe(allSettled);
     const eff = allSettled([sleep(5).flatMap(() => succeed("a")), fail("b"), succeed("c")]);
-    const exits = (await run(eff as any)) as Exit[];
+    const exits = await run(eff);
     expect(exits.length).toBe(3);
     expect(exits[0]).toEqual({ _tag: "Success", value: "a" });
     expect(exits[1]!._tag).toBe("Failure");
@@ -247,7 +251,7 @@ describe("race variants", () => {
       10,
       () => "timed-out" as const,
     );
-    await expect(run(eff as any)).rejects.toBe("timed-out");
+    await expect(runUnchecked(eff)).rejects.toBe("timed-out");
   });
 
   test("timeoutOption returns undefined on timeout", async () => {
@@ -255,7 +259,7 @@ describe("race variants", () => {
       sleep(100).flatMap(() => succeed("done")),
       10,
     );
-    expect(await run(eff as any)).toBe(undefined);
+    expect(await run(eff)).toBe(undefined);
   });
 
   test("timeoutOption returns value when fast enough", async () => {
@@ -263,6 +267,6 @@ describe("race variants", () => {
       sleep(1).flatMap(() => succeed("done")),
       100,
     );
-    expect(await run(eff as any)).toBe("done");
+    expect(await run(eff)).toBe("done");
   });
 });

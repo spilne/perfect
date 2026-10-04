@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { runFiber, sync, SyncScheduler } from "../src";
+import { type Eff, runFiber, sync, SyncScheduler } from "../src";
 import { Stream } from "../src/stream";
 
 for (const method of ["parEvalMap", "parEvalMapUnordered"] as const) {
@@ -14,7 +14,7 @@ for (const method of ["parEvalMap", "parEvalMapUnordered"] as const) {
             finalized++;
           }),
         )
-        [method](2, () => {
+        [method](2, (): Eff<never, never> => {
           throw error;
         })
         .toArray(),

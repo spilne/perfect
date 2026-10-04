@@ -76,6 +76,6 @@ describe("CacheStore — memory", () => {
       const v = yield* store.get("greeting");
       return v ?? "(missing)";
     });
-    expect(await run(program as any)).toBe("hi");
+    expect(await run(program)).toBe("hi");
   });
 });

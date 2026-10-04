@@ -16,26 +16,27 @@ import {
   retryWith,
   type RetryDetails,
 } from "../src";
+import { runUnchecked } from "./run-unchecked";
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
 describe("RetryPolicy — fluent builder", () => {
   test("recurs + withMaxRetries is the simple case", async () => {
     let attempts = 0;
-    const eff: any = sync(() => ++attempts).flatMap((n: number) =>
+    const eff = sync(() => ++attempts).flatMap((n: number) =>
       n < 3 ? fail("try-again") : succeed("ok"),
     );
     const policy = RetryPolicy.recurs(5);
-    expect(await run(retry(eff, policy))).toBe("ok");
+    expect(await runUnchecked(retry(eff, policy))).toBe("ok");
     expect(attempts).toBe(3);
   });
 
   test("exponential + withMaxRetries + withMaxDelay composes via Schedule algebra", async () => {
     let attempts = 0;
-    const eff: any = sync(() => ++attempts).flatMap(() => fail("nope"));
+    const eff = sync(() => ++attempts).flatMap(() => fail("nope"));
     // small delays so we don't wait real seconds
     const policy = RetryPolicy.exponential(1).withMaxRetries(3).withMaxDelay(5);
-    await expect(run(retry(eff, policy))).rejects.toBe("nope");
+    await expect(runUnchecked(retry(eff, policy))).rejects.toBe("nope");
     expect(attempts).toBe(4); // 1 initial + 3 retries
   });
 
@@ -102,10 +103,10 @@ describe("RetryPolicy — fluent builder", () => {
 
   test("withTimeBudget caps total retry duration", async () => {
     let attempts = 0;
-    const eff: any = sync(() => ++attempts).flatMap(() => fail("always"));
+    const eff = sync(() => ++attempts).flatMap(() => fail("always"));
     // 10ms delay × 3 attempts = 30ms; budget 35ms just barely allows 3
     const policy = RetryPolicy.spaced(10).withTimeBudget(35);
-    await expect(run(retry(eff, policy))).rejects.toBe("always");
+    await expect(runUnchecked(retry(eff, policy))).rejects.toBe("always");
     // 1 initial + some retries; stops when cumulative >= budget
     expect(attempts).toBeGreaterThanOrEqual(2);
     expect(attempts).toBeLessThanOrEqual(5);
@@ -113,12 +114,12 @@ describe("RetryPolicy — fluent builder", () => {
 
   test("whenError stops retrying on non-matching error", async () => {
     let attempts = 0;
-    const eff: any = sync(() => ++attempts).flatMap((n: number) =>
+    const eff = sync(() => ++attempts).flatMap((n: number) =>
       fail(n === 1 ? "transient" : "fatal"),
     );
 
     const policy = RetryPolicy.recurs(5).whenError((e: string) => e === "transient");
-    await expect(run(retry(eff, policy))).rejects.toBe("fatal");
+    await expect(runUnchecked(retry(eff, policy))).rejects.toBe("fatal");
     expect(attempts).toBe(2);
   });
 
@@ -128,24 +129,23 @@ describe("RetryPolicy — fluent builder", () => {
       attempts++;
       if (attempts < 3) throw new Error("transient");
       return "ok";
-    }) as any;
+    });
 
     const policy = RetryPolicy.recurs(5).whenCause((c) => Cause.hasDie(c));
-    expect(await run(retry(eff, policy) as any)).toBe("ok");
+    expect(await run(retry(eff, policy))).toBe("ok");
     expect(attempts).toBe(3);
   });
 
   test("onRetry hook fires for each attempt and on giveup", async () => {
     const details: RetryDetails[] = [];
-    const eff: any = fail("boom");
+    const eff = fail("boom");
 
-    const policy = RetryPolicy.recurs(2).onRetry(
-      (d) =>
-        sync(() => {
-          details.push(d);
-        }) as any,
+    const policy = RetryPolicy.recurs(2).onRetry((d) =>
+      sync(() => {
+        details.push(d);
+      }),
     );
-    await expect(run(retry(eff, policy))).rejects.toBe("boom");
+    await expect(runUnchecked(retry(eff, policy))).rejects.toBe("boom");
     // 2 retries + 1 giving-up call
     expect(details.length).toBe(3);
     expect(details[0]!.givingUp).toBe(false);
@@ -157,19 +157,19 @@ describe("RetryPolicy — fluent builder", () => {
 
   test("and composes two policies — both must agree to continue", async () => {
     let attempts = 0;
-    const eff: any = sync(() => ++attempts).flatMap(() => fail("x"));
+    const eff = sync(() => ++attempts).flatMap(() => fail("x"));
 
     // recurs(10) AND recurs(3) → 3 wins
     const policy = RetryPolicy.recurs(10).and(RetryPolicy.recurs(3));
-    await expect(run(retry(eff, policy))).rejects.toBe("x");
+    await expect(runUnchecked(retry(eff, policy))).rejects.toBe("x");
     expect(attempts).toBe(4); // 1 initial + 3 retries
   });
 
   test("fromSchedule accepts a raw Schedule", async () => {
     let attempts = 0;
-    const eff: any = sync(() => ++attempts).flatMap(() => fail("x"));
+    const eff = sync(() => ++attempts).flatMap(() => fail("x"));
     const policy = RetryPolicy.fromSchedule(Schedule.recurs(2));
-    await expect(run(retry(eff, policy))).rejects.toBe("x");
+    await expect(runUnchecked(retry(eff, policy))).rejects.toBe("x");
     expect(attempts).toBe(3);
   });
 });
@@ -177,14 +177,14 @@ describe("RetryPolicy — fluent builder", () => {
 describe("retryWith onRetry hook", () => {
   test("callback sees each attempt", async () => {
     const seen: RetryDetails[] = [];
-    const eff: any = fail("nope");
+    const eff = fail("nope");
     const program = retryWith(eff, Schedule.recurs(2), {
       onRetry: (d) =>
         sync(() => {
           seen.push(d);
-        }) as any,
+        }),
     });
-    await expect(run(program)).rejects.toBe("nope");
+    await expect(runUnchecked(program)).rejects.toBe("nope");
     // 2 retries + 1 giveup
     expect(seen.length).toBe(3);
     expect(seen[seen.length - 1]!.givingUp).toBe(true);
@@ -194,10 +194,10 @@ describe("retryWith onRetry hook", () => {
 describe("legacy retry config still works", () => {
   test("old config dict is preserved for back-compat", async () => {
     let attempts = 0;
-    const eff: any = sync(() => ++attempts).flatMap((n: number) =>
+    const eff = sync(() => ++attempts).flatMap((n: number) =>
       n < 3 ? fail("retry") : succeed("ok"),
     );
-    expect(await run(retry(eff, { times: 5, delay: 0 }) as any)).toBe("ok");
+    expect(await runUnchecked(retry(eff, { times: 5, delay: 0 }))).toBe("ok");
     expect(attempts).toBe(3);
   });
 });
@@ -206,14 +206,10 @@ describe("RetryPolicy.fromConfig — the config dict is sugar, not a second engi
   test("delay schedule matches the config: first retry waits `delay`, then doubles", async () => {
     const c = new TestClock();
     let attempts = 0;
-    const eff: any = sync(() => ++attempts).flatMap(() => fail("nope"));
+    const eff = sync(() => ++attempts).flatMap(() => fail("nope"));
 
-    const program = provide(
-      retry(eff, { times: 3, delay: 100, backoff: "exponential" }) as any,
-      Clock,
-      c,
-    );
-    const done = runExit(program as any);
+    const program = provide(retry(eff, { times: 3, delay: 100, backoff: "exponential" }), Clock, c);
+    const done = runExit(program);
 
     // Delays are 100, 200, 400 — the same sequence the config dict has always
     // produced, now sourced from Schedule.exponential.
@@ -232,14 +228,14 @@ describe("RetryPolicy.fromConfig — the config dict is sugar, not a second engi
   test("maxDelay caps fixed backoff too (it silently did not before)", async () => {
     const c = new TestClock();
     let attempts = 0;
-    const eff: any = sync(() => ++attempts).flatMap(() => fail("nope"));
+    const eff = sync(() => ++attempts).flatMap(() => fail("nope"));
 
     const program = provide(
-      retry(eff, { times: 1, delay: 5_000, backoff: "fixed", maxDelay: 250 }) as any,
+      retry(eff, { times: 1, delay: 5_000, backoff: "fixed", maxDelay: 250 }),
       Clock,
       c,
     );
-    const done = runExit(program as any);
+    const done = runExit(program);
     await tick();
     const waited = c.pendingDeadlines()[0]! - c.now();
     c.advance(waited);
@@ -250,9 +246,10 @@ describe("RetryPolicy.fromConfig — the config dict is sugar, not a second engi
 
   test("`when` predicate stops the retry loop", async () => {
     let attempts = 0;
-    const eff: any = sync(() => ++attempts).flatMap(() => fail("fatal"));
+    const eff = sync(() => ++attempts).flatMap(() => fail("fatal"));
     await expect(
-      run(retry(eff, { times: 5, delay: 0, when: (e: string) => e === "transient" }) as any),
+      // retry() takes a RetryConfig<unknown>, so `when` sees the error as unknown.
+      runUnchecked(retry(eff, { times: 5, delay: 0, when: (e) => e === "transient" })),
     ).rejects.toBe("fatal");
     expect(attempts).toBe(1);
   });
@@ -263,12 +260,12 @@ describe("RetryPolicy.withWallClockBudget", () => {
     const c = new TestClock();
     let attempts = 0;
     // Each attempt itself burns 40ms of virtual time before failing.
-    const eff: any = sync(() => ++attempts)
+    const eff = sync(() => ++attempts)
       .flatMap(() => sleep(40))
       .flatMap(() => fail("nope"));
 
     const policy = RetryPolicy.spaced(10).withMaxRetries(100).withWallClockBudget(100);
-    const done = runExit(provide(retry(eff, policy) as any, Clock, c) as any);
+    const done = runExit(provide(retry(eff, policy), Clock, c));
 
     // Drive: attempt runs (40) then sleeps (10) => 50ms per cycle.
     for (let i = 0; i < 8; i++) {
@@ -290,12 +287,12 @@ describe("RetryPolicy.withWallClockBudget", () => {
     const c = new TestClock();
     const policy = RetryPolicy.spaced(60).withMaxRetries(100).withWallClockBudget(100);
     let attempts = 0;
-    const eff: any = sync(() => ++attempts).flatMap(() => fail("nope"));
+    const eff = sync(() => ++attempts).flatMap(() => fail("nope"));
 
     // Simulate a policy built at module load, used much later.
     c.advance(10_000);
 
-    const done = runExit(provide(retry(eff, policy) as any, Clock, c) as any);
+    const done = runExit(provide(retry(eff, policy), Clock, c));
     for (let i = 0; i < 5; i++) {
       await tick();
       c.advance(60);

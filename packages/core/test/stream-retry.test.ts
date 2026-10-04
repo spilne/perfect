@@ -1,5 +1,6 @@
 import { describe, test, expect } from "bun:test";
 import { Stream, RetryPolicy, succeed, fail, sync, run } from "../src";
+import { runUnchecked } from "./run-unchecked";
 
 describe("Stream.retry", () => {
   test("happy-path: no failure → retry is a no-op", async () => {
@@ -12,32 +13,30 @@ describe("Stream.retry", () => {
     // Use Stream.suspend so each retry rebuilds the underlying stream.
     const flaky = Stream.suspend(() =>
       Stream.fromEffect(
-        (sync(() => ++attempts) as any).flatMap((n: number) =>
-          n < 3 ? fail(`attempt-${n}`) : succeed(99),
-        ),
+        sync(() => ++attempts).flatMap((n: number) => (n < 3 ? fail(`attempt-${n}`) : succeed(99))),
       ),
     );
 
-    const result = await run(flaky.retry(RetryPolicy.recurs(5)).toArray());
+    const result = await run(flaky.retry(RetryPolicy.recurs(5)).toArray().orDie());
     expect(result).toEqual([99]);
     expect(attempts).toBe(3);
   });
 
   test("retry exhaustion surfaces the last failure", async () => {
-    const eternal = Stream.fromEffect(fail("boom") as any);
-    await expect(run(eternal.retry(RetryPolicy.recurs(2)).toArray())).rejects.toBe("boom");
+    const eternal = Stream.fromEffect(fail("boom"));
+    await expect(runUnchecked(eternal.retry(RetryPolicy.recurs(2)).toArray())).rejects.toBe("boom");
   });
 
   test("retry uses the supplied policy.delay (RetryConfig form)", async () => {
     let attempts = 0;
     const flaky = Stream.suspend(() =>
       Stream.fromEffect(
-        (sync(() => ++attempts) as any).flatMap((n: number) => (n < 3 ? fail("nope") : succeed(7))),
+        sync(() => ++attempts).flatMap((n: number) => (n < 3 ? fail("nope") : succeed(7))),
       ),
     );
 
     const start = Date.now();
-    const result = await run(flaky.retry({ times: 5, delay: 5 }).toArray());
+    const result = await run(flaky.retry({ times: 5, delay: 5 }).toArray().orDie());
     expect(result).toEqual([7]);
     expect(attempts).toBe(3);
     expect(Date.now() - start).toBeGreaterThanOrEqual(5);
@@ -49,7 +48,7 @@ describe("Stream.retry", () => {
       sync(() => {
         attempts++;
         throw new Error("defect");
-      }) as any,
+      }),
     );
     await expect(run(flaky.retry(RetryPolicy.recurs(3)).toArray())).rejects.toBeInstanceOf(Error);
     expect(attempts).toBe(1); // no retry on defect

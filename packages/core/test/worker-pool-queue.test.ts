@@ -17,7 +17,7 @@ describe("WorkerPool queue", () => {
         pool.execute(busyFor, ms).map(() => finished.push(Date.now() - started));
       // One slow task, then fast ones. With round-robin, every other fast
       // task would land behind the slow one.
-      await run(all([task(300), task(5), task(5), task(5), task(5)]));
+      await run(all([task(300), task(5), task(5), task(5), task(5)]).orDie());
       // A fast task stuck behind the slow one would finish after it (300 ms
       // or more). Finishing earlier is the proof, however busy the machine.
       const fast = finished.slice(0, 4);
@@ -30,13 +30,13 @@ describe("WorkerPool queue", () => {
   test("a task that gives up while queued is never run", async () => {
     const pool = await run(WorkerPool.make(1, { tasksPerWorker: 1 }));
     try {
-      const slow = run(pool.execute(busyFor, 100));
+      const slow = run(pool.execute(busyFor, 100).orDie());
       // Queued behind the slow task, and abandoned right away.
-      const abandoned = await run(timeoutOption(pool.execute(busyFor, 1000), 1));
+      const abandoned = await run(timeoutOption(pool.execute(busyFor, 1000), 1).orDie());
       expect(abandoned).toBeUndefined();
       await slow;
       const started = Date.now();
-      expect(await run(pool.execute(busyFor, 1))).toBe(1);
+      expect(await run(pool.execute(busyFor, 1).orDie())).toBe(1);
       // If the abandoned 1000 ms task had run, this would have waited for it.
       expect(Date.now() - started).toBeLessThan(1_000);
     } finally {

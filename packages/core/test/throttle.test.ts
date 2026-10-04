@@ -7,8 +7,8 @@ import { run, provide, sync, Clock, TestClock, Throttle } from "../src";
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
-async function makeThrottle(c: TestClock, permits: number, windowMs: number): Promise<any> {
-  return run(provide(Throttle.make({ permits, windowMs }) as any, Clock, c) as any);
+async function makeThrottle(c: TestClock, permits: number, windowMs: number): Promise<Throttle> {
+  return run(provide(Throttle.make({ permits, windowMs }), Clock, c));
 }
 
 describe("Throttle", () => {
@@ -101,7 +101,7 @@ describe("Throttle", () => {
     const c = new TestClock();
     const t = await makeThrottle(c, 1, 500);
 
-    expect(await run(provide(t.withPermit(sync(() => 1)), Clock, c) as any)).toBe(1);
+    expect(await run(provide(t.withPermit(sync(() => 1)), Clock, c))).toBe(1);
 
     let ran = false;
     const done = run(

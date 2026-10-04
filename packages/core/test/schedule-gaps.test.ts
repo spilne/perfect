@@ -132,7 +132,7 @@ describe("Schedule.once", () => {
         Schedule.once,
       ).flatMap(() => counter.get),
     );
-    expect(await run(program as any)).toBe(2); // initial + one repeat
+    expect(await run(program)).toBe(2); // initial + one repeat
   });
 
   test("retryWith once allows a single retry", async () => {
@@ -142,7 +142,7 @@ describe("Schedule.once", () => {
       if (attempts < 2) throw new Error("first");
       return "ok";
     });
-    expect(await run(retryWith(flaky as any, Schedule.once) as any)).toBe("ok");
+    expect(await run(retryWith(flaky, Schedule.once))).toBe("ok");
     expect(attempts).toBe(2);
   });
 });
@@ -167,7 +167,7 @@ describe("Schedule.forever", () => {
       if (attempts < 5) throw new Error("nope");
       return "ok";
     });
-    expect(await run(retryWith(flaky as any, Schedule.forever) as any)).toBe("ok");
+    expect(await run(retryWith(flaky, Schedule.forever))).toBe("ok");
     expect(attempts).toBe(5);
   });
 });

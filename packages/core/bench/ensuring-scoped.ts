@@ -58,9 +58,9 @@ group("Stream with finalizer per emit", () => {
     run(
       Stream.fromArray(items)
         .map((x) => x + 1)
-        .forEach((x) =>
+        .forEach(() =>
           ensuring(
-            succeed(x),
+            succeed(undefined),
             sync(() => undefined),
           ),
         ),

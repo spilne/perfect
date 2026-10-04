@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { eff, succeed, sync, sleep, fork, join, interrupt, run, Pool } from "../src";
+import { eff, succeed, sync, sleep, fork, join, interrupt, run, Pool, type Fiber } from "../src";
 
 interface FakeConn {
   id: number;
@@ -111,7 +111,9 @@ describe("Pool", () => {
         const holder = yield* fork(pool.use(() => sleep(20)));
         const waiter = yield* fork(pool.use((c) => succeed(c.id)));
         yield* sleep(1);
-        yield* interrupt(waiter);
+        // interrupt() takes a plain Fiber, which is Fiber<unknown>, and Fiber is
+        // invariant in its result type, so this fiber needs the cast.
+        yield* interrupt(waiter as Fiber);
         yield* join(holder);
         const idle = yield* pool.idle;
         const inUse = yield* pool.inUse;

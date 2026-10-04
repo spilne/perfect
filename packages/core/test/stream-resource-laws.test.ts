@@ -18,8 +18,10 @@ describe("Stream resource laws", () => {
   test("flatMap finalizes every inner stream before the outer stream", async () => {
     const events: string[] = [];
     const stream = Stream.of(1, 2)
-      .onFinalize(sync(() => events.push("outer")))
-      .flatMap((value) => Stream.of(value).onFinalize(sync(() => events.push(`inner:${value}`))));
+      .onFinalize(sync(() => void events.push("outer")))
+      .flatMap((value) =>
+        Stream.of(value).onFinalize(sync(() => void events.push(`inner:${value}`))),
+      );
 
     expect(await run(stream.toArray())).toEqual([1, 2]);
     expect(events).toEqual(["inner:1", "inner:2", "outer"]);
@@ -28,8 +30,8 @@ describe("Stream resource laws", () => {
   test("flatMap finalizes the active inner and outer streams on failure", async () => {
     const events: string[] = [];
     const stream = Stream.of(1)
-      .onFinalize(sync(() => events.push("outer")))
-      .flatMap(() => Stream.fail("boom").onFinalize(sync(() => events.push("inner"))));
+      .onFinalize(sync(() => void events.push("outer")))
+      .flatMap(() => Stream.fail("boom").onFinalize(sync(() => void events.push("inner"))));
 
     expect((await runExit(stream.toArray()))._tag).toBe("Failure");
     expect(events).toEqual(["inner", "outer"]);
@@ -38,9 +40,9 @@ describe("Stream resource laws", () => {
   test("flatMap finalizes only the active inner on early termination", async () => {
     const events: string[] = [];
     const stream = Stream.of(1, 2)
-      .onFinalize(sync(() => events.push("outer")))
+      .onFinalize(sync(() => void events.push("outer")))
       .flatMap((value) =>
-        Stream.of(value, value).onFinalize(sync(() => events.push(`inner:${value}`))),
+        Stream.of(value, value).onFinalize(sync(() => void events.push(`inner:${value}`))),
       );
 
     expect(await run(stream.take(1).toArray())).toEqual([1]);
@@ -49,8 +51,8 @@ describe("Stream resource laws", () => {
 
   test("zip finalizes both inputs on early termination", async () => {
     const events: string[] = [];
-    const left = Stream.of(1, 2).onFinalize(sync(() => events.push("left")));
-    const right = Stream.of("a", "b").onFinalize(sync(() => events.push("right")));
+    const left = Stream.of(1, 2).onFinalize(sync(() => void events.push("left")));
+    const right = Stream.of("a", "b").onFinalize(sync(() => void events.push("right")));
 
     expect(await run(left.zip(right).take(1).toArray())).toEqual([[1, "a"]]);
     expect(events).toEqual(["left", "right"]);

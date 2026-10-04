@@ -51,6 +51,7 @@ import {
   type Throws,
 } from "../src";
 import { rewriteEffBlocks } from "../../transform/src/rewrite";
+import { runUnchecked } from "../test/run-unchecked";
 
 const N = 100;
 
@@ -68,8 +69,9 @@ group(`pure compute × ${N}`, () => {
   bench("composed flatMap + await (single thenable fast-path)", async () => await composedPure);
 
   bench("await eff per step (N fibers via thenable)", async () => {
+    // `await eff` is typed as unknown, so each await below is cast back.
     let x = 0;
-    for (let i = 0; i < N; i++) x = await succeed(x + 1);
+    for (let i = 0; i < N; i++) x = (await succeed(x + 1)) as number;
     return x;
   });
 
@@ -139,7 +141,7 @@ group(`single async + pure × ${N - 1}`, () => {
   bench("await eff per step (sleep then loop)", async () => {
     await sleep(0);
     let x = 0;
-    for (let i = 0; i < N - 1; i++) x = await succeed(x + 1);
+    for (let i = 0; i < N - 1; i++) x = (await succeed(x + 1)) as number;
     return x;
   });
 
@@ -175,7 +177,7 @@ group(`all-async sleep(0) × ${N_SMALL}`, () => {
     let x = 0;
     for (let i = 0; i < N_SMALL; i++) {
       await sleep(0);
-      x = await succeed(x + 1);
+      x = (await succeed(x + 1)) as number;
     }
     return x;
   });
@@ -260,13 +262,13 @@ group("fail mid-chain + recover", () => {
   bench("composed: flatMap + catch + flatMap (one fiber)", async () => run(composedRecover));
   bench("await: try/catch around fail per step", async () => {
     let x = 0;
-    for (let i = 0; i < N / 2; i++) x = await succeed(x + 1);
+    for (let i = 0; i < N / 2; i++) x = (await succeed(x + 1)) as number;
     try {
       await fail("midway");
     } catch {
       x = 999;
     }
-    for (let i = 0; i < N / 2; i++) x = await succeed(x + 1);
+    for (let i = 0; i < N / 2; i++) x = (await succeed(x + 1)) as number;
     return x;
   });
 
@@ -312,14 +314,19 @@ group(`Eff wrapping promises vs plain promises × ${N}`, () => {
 
   // Eff wrapping a Promise per step — every step pays a microtask
   const composedTryPromise = (() => {
-    let e: Eff<number, any> = succeed(0);
+    let e: Eff<number, Throws<unknown>> = succeed(0);
     for (let i = 0; i < N; i++) {
-      e = e.flatMap((x) => tryPromise(() => Promise.resolve(x + 1)));
+      e = e.flatMap((x) =>
+        tryPromise(
+          () => Promise.resolve(x + 1),
+          (error) => error,
+        ),
+      );
     }
     return e;
   })();
   bench("Eff: composed flatMap + tryPromise(Promise.resolve)", async () =>
-    run(composedTryPromise as any));
+    runUnchecked(composedTryPromise));
 
   // Plain Promise.then chain — what we're competing against
   bench("Promise: .then(Promise.resolve(...)) chain", async () => {

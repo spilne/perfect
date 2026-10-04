@@ -3,7 +3,8 @@
 // Run: bun packages/core/bench/promise-shortcut.ts
 
 import { group, bench, run as mitataRun } from "mitata";
-import { tryPromise, run } from "../src";
+import { tryPromise } from "../src";
+import { runUnchecked } from "../test/run-unchecked";
 
 const N = 1000;
 
@@ -25,7 +26,7 @@ group(`Promise bridging × ${N}`, () => {
   // Forced through run(): explicit fiber spawn (no shortcut benefit).
   bench("await run(tryPromise(...)) — forced fiber path", async () => {
     for (let i = 0; i < N; i++)
-      await run(
+      await runUnchecked(
         tryPromise(
           () => Promise.resolve(i),
           () => "err",

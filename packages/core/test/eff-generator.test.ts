@@ -12,6 +12,7 @@ import {
   type Eff,
   type Throws,
 } from "../src";
+import { runUnchecked } from "./run-unchecked";
 
 describe("eff(function*)", () => {
   test("pure sequence — runs synchronously", () => {
@@ -51,7 +52,8 @@ describe("eff(function*)", () => {
         return `caught:${e}`;
       }
     });
-    expect(await run(program as any)).toBe("caught:boom");
+    // The try/catch handles the failure, but the type still lists it.
+    expect(await runUnchecked(program)).toBe("caught:boom");
   });
 
   test("uncaught failure propagates through generator", async () => {
@@ -59,7 +61,7 @@ describe("eff(function*)", () => {
       yield* fail("nope") as Eff<never, Throws<string>>;
       return "unreachable";
     });
-    await expect(run(program as any)).rejects.toBe("nope");
+    await expect(runUnchecked(program)).rejects.toBe("nope");
   });
 
   test("return of another effect is flattened", async () => {
@@ -85,7 +87,7 @@ describe("eff(function*)", () => {
       return b;
     });
     const wired = provide(program, Counter, { add: (n: number) => succeed(n + 1) });
-    expect(await run(wired as any)).toBe(3);
+    expect(await run(wired)).toBe(3);
   });
 
   test("generator body runs fresh each execution", async () => {

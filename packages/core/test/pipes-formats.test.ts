@@ -47,7 +47,7 @@ describe("tsv", () => {
   });
 
   test("empty stream emits nothing", async () => {
-    expect(await run((Stream.empty<string>() as any).through(Pipes.tsv).toArray())).toEqual([]);
+    expect(await run(Stream.empty<string>().through(Pipes.tsv).toArray())).toEqual([]);
   });
 });
 
@@ -143,12 +143,10 @@ describe("parseAs / parseAsLenient", () => {
 
   test("empty stream stays empty for both", async () => {
     expect(
-      await run((Stream.empty<unknown>() as any).through(Pipes.parseAs(NumberSchema)).toArray()),
+      await run(Stream.empty<unknown>().through(Pipes.parseAs(NumberSchema)).toArray().orDie()),
     ).toEqual([]);
     expect(
-      await run(
-        (Stream.empty<unknown>() as any).through(Pipes.parseAsLenient(NumberSchema)).toArray(),
-      ),
+      await run(Stream.empty<unknown>().through(Pipes.parseAsLenient(NumberSchema)).toArray()),
     ).toEqual([]);
   });
 });
@@ -161,10 +159,8 @@ describe("lengthPrefixed", () => {
 
   test("splits 4-byte big-endian framed messages", async () => {
     const bytes = new Uint8Array([...frame4([1, 2, 3]), ...frame4([9])]);
-    const messages = await run(
-      (Stream.succeed(bytes) as any).through(Pipes.lengthPrefixed()).toArray(),
-    );
-    expect(messages.map((m: Uint8Array) => Array.from(m))).toEqual([[1, 2, 3], [9]]);
+    const messages = await run(Stream.succeed(bytes).through(Pipes.lengthPrefixed()).toArray());
+    expect(messages.map((m) => Array.from(m))).toEqual([[1, 2, 3], [9]]);
   });
 
   test("buffers frames split across chunk boundaries — even inside the header", async () => {
@@ -174,10 +170,8 @@ describe("lengthPrefixed", () => {
       new Uint8Array(all.slice(2, 8)),
       new Uint8Array(all.slice(8)),
     ];
-    const messages = await run(
-      (Stream.fromArray(chunks) as any).through(Pipes.lengthPrefixed()).toArray(),
-    );
-    expect(messages.map((m: Uint8Array) => Array.from(m))).toEqual([
+    const messages = await run(Stream.fromArray(chunks).through(Pipes.lengthPrefixed()).toArray());
+    expect(messages.map((m) => Array.from(m))).toEqual([
       [1, 2, 3],
       [4, 5],
     ]);
@@ -185,28 +179,28 @@ describe("lengthPrefixed", () => {
 
   test("a trailing incomplete frame is dropped", async () => {
     const bytes = new Uint8Array([...frame4([7]), 0, 0, 0, 5, 1, 2]); // second frame truncated
-    const messages = await run(
-      (Stream.succeed(bytes) as any).through(Pipes.lengthPrefixed()).toArray(),
-    );
-    expect(messages.map((m: Uint8Array) => Array.from(m))).toEqual([[7]]);
+    const messages = await run(Stream.succeed(bytes).through(Pipes.lengthPrefixed()).toArray());
+    expect(messages.map((m) => Array.from(m))).toEqual([[7]]);
   });
 
   test("supports 1-byte headers", async () => {
     const bytes = new Uint8Array([3, 1, 2, 3, 1, 9]);
     const messages = await run(
-      (Stream.succeed(bytes) as any).through(Pipes.lengthPrefixed({ headerBytes: 1 })).toArray(),
+      Stream.succeed(bytes)
+        .through(Pipes.lengthPrefixed({ headerBytes: 1 }))
+        .toArray(),
     );
-    expect(messages.map((m: Uint8Array) => Array.from(m))).toEqual([[1, 2, 3], [9]]);
+    expect(messages.map((m) => Array.from(m))).toEqual([[1, 2, 3], [9]]);
   });
 
   test("supports 2-byte little-endian headers", async () => {
     const bytes = new Uint8Array([3, 0, 1, 2, 3]);
     const messages = await run(
-      (Stream.succeed(bytes) as any)
+      Stream.succeed(bytes)
         .through(Pipes.lengthPrefixed({ headerBytes: 2, littleEndian: true }))
         .toArray(),
     );
-    expect(messages.map((m: Uint8Array) => Array.from(m))).toEqual([[1, 2, 3]]);
+    expect(messages.map((m) => Array.from(m))).toEqual([[1, 2, 3]]);
   });
 });
 
@@ -268,6 +262,6 @@ describe("xml", () => {
   });
 
   test("empty stream emits nothing", async () => {
-    expect(await run((Stream.empty<string>() as any).through(Pipes.xml).toArray())).toEqual([]);
+    expect(await run(Stream.empty<string>().through(Pipes.xml).toArray())).toEqual([]);
   });
 });

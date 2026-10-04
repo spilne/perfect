@@ -13,9 +13,11 @@ import {
   runExit,
   yieldNow,
   Cause,
+  type Eff,
 } from "../src";
+import { runUnchecked } from "./run-unchecked";
 
-const withFs = (fs: TestFileSystem, program: any) => provide(program, FileSystem, fs) as any;
+const withFs = <A, S>(fs: TestFileSystem, program: Eff<A, S>) => provide(program, FileSystem, fs);
 
 describe("TestFileSystem", () => {
   test("reads seeded files and reports missing ones as typed failures", async () => {
@@ -25,7 +27,7 @@ describe("TestFileSystem", () => {
       const io = yield* FileSystem.get;
       return yield* io.readFile("/etc/app.conf");
     });
-    expect(await run(withFs(fs, read))).toBe("debug=true");
+    expect(await runUnchecked(withFs(fs, read))).toBe("debug=true");
 
     const missing = eff(function* () {
       const io = yield* FileSystem.get;
@@ -54,7 +56,7 @@ describe("TestFileSystem", () => {
       return { contents, there, absent, size: stat.size, isFile: stat.isFile };
     });
 
-    expect(await run(withFs(fs, program))).toEqual({
+    expect(await runUnchecked(withFs(fs, program))).toEqual({
       contents: "one-two",
       there: true,
       absent: false,
@@ -70,7 +72,7 @@ describe("TestFileSystem", () => {
       yield* io.appendFile("/new.txt", "hello");
       return yield* io.readFile("/new.txt");
     });
-    expect(await run(withFs(fs, program))).toBe("hello");
+    expect(await runUnchecked(withFs(fs, program))).toBe("hello");
   });
 
   test("readDir lists immediate children only", async () => {
@@ -84,7 +86,7 @@ describe("TestFileSystem", () => {
       const io = yield* FileSystem.get;
       return yield* io.readDir("/src");
     });
-    expect(await run(withFs(fs, program))).toEqual(["index.ts", "lib"]);
+    expect(await runUnchecked(withFs(fs, program))).toEqual(["index.ts", "lib"]);
   });
 
   test("remove recursive clears a subtree", async () => {
@@ -97,7 +99,7 @@ describe("TestFileSystem", () => {
         kept: yield* io.exists("/keep.txt"),
       };
     });
-    expect(await run(withFs(fs, program))).toEqual({ gone: false, kept: true });
+    expect(await runUnchecked(withFs(fs, program))).toEqual({ gone: false, kept: true });
     expect(fs.snapshot()).toEqual({ "/keep.txt": "k" });
   });
 
@@ -114,7 +116,7 @@ describe("TestFileSystem", () => {
       return yield* join(fiber);
     });
 
-    const events = (await run(withFs(fs, program))) as any[];
+    const events = await runUnchecked(withFs(fs, program));
     expect(events).toHaveLength(2);
     expect(events.every((e) => e.path === "/watched.txt")).toBe(true);
     expect(events.every((e) => e.type === "change")).toBe(true);
@@ -132,7 +134,7 @@ describe("TestFileSystem", () => {
       yield* io.writeFile("/w.txt", "b");
       return true;
     });
-    expect(await run(withFs(fs, program))).toBe(true);
+    expect(await runUnchecked(withFs(fs, program))).toBe(true);
   });
 
   test("snapshot exposes the whole store for assertions", async () => {
@@ -142,7 +144,7 @@ describe("TestFileSystem", () => {
       yield* io.writeFile("/x", "1");
       yield* io.writeFile("/y", "2");
     });
-    await run(withFs(fs, program));
+    await runUnchecked(withFs(fs, program));
     expect(fs.snapshot()).toEqual({ "/x": "1", "/y": "2" });
   });
 });
@@ -154,11 +156,7 @@ describe("Console.readLine", () => {
       const io = yield* Console.get;
       return [yield* io.readLine(), yield* io.readLine(), yield* io.readLine()];
     });
-    expect(await run(provide(program, Console, console) as any)).toEqual([
-      "alpha",
-      "beta",
-      undefined,
-    ]);
+    expect(await run(provide(program, Console, console))).toEqual(["alpha", "beta", undefined]);
   });
 
   test("feed appends more input and remainingInput reflects consumption", async () => {
@@ -168,7 +166,7 @@ describe("Console.readLine", () => {
       const io = yield* Console.get;
       return yield* io.readLine();
     });
-    expect(await run(provide(program, Console, console) as any)).toBe("one");
+    expect(await run(provide(program, Console, console))).toBe("one");
     expect(console.remainingInput()).toEqual(["two", "three"]);
   });
 
@@ -184,7 +182,7 @@ describe("Console.readLine", () => {
       }
       return seen;
     });
-    expect(await run(provide(program, Console, console) as any)).toEqual(["a", "b", "c"]);
+    expect(await run(provide(program, Console, console))).toEqual(["a", "b", "c"]);
   });
 
   test("clear() drops pending input too", async () => {
@@ -217,7 +215,7 @@ describe("RealFileSystem", () => {
       return { contents, byteLen: bytes.length, size: stat.size, entries, present, absent, gone };
     });
 
-    expect(await run(provide(program, FileSystem, realFileSystem) as any)).toEqual({
+    expect(await runUnchecked(provide(program, FileSystem, realFileSystem))).toEqual({
       contents: "hello world",
       byteLen: 11,
       size: 11,
@@ -233,7 +231,7 @@ describe("RealFileSystem", () => {
       const io = yield* FileSystem.get;
       return yield* io.readFile(`${root}/definitely-not-here`);
     });
-    const exit = await runExit(provide(program, FileSystem, realFileSystem) as any);
+    const exit = await runExit(provide(program, FileSystem, realFileSystem));
     expect(exit._tag).toBe("Failure");
     if (exit._tag === "Failure") {
       expect(Cause.firstFail(exit.cause)?.value).toBeInstanceOf(FileSystemError);

@@ -1,9 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { Pipes, Stream, run } from "../src";
+import { runUnchecked } from "./run-unchecked";
 
 describe("Pipes.csv", () => {
   test("keeps the direct through form as headerless arrays", async () => {
-    const rows = await run(Stream.of("name,age\nalice,30\n").through(Pipes.csv).toArray());
+    // Passing the overloaded Pipes.csv itself infers unknown output and
+    // effects, so run() would reject it.
+    const rows = await runUnchecked(Stream.of("name,age\nalice,30\n").through(Pipes.csv).toArray());
     expect(rows).toEqual([
       ["name", "age"],
       ["alice", "30"],

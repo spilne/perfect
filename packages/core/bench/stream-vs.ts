@@ -141,7 +141,14 @@ group(`fold/sum × ${N}`, () => {
   bench("perfect Stream.fold", async () => pRun(PStream.fromArray(items).fold(0, (a, b) => a + b)));
 
   bench("effect Stream.runFold", async () =>
-    Effect.runPromise(EStream.fromIterable(items).pipe(EStream.fold(0, (a, b) => a + b))));
+    Effect.runPromise(
+      EStream.fromIterable(items).pipe(
+        EStream.runFold(
+          () => 0,
+          (a, b) => a + b,
+        ),
+      ),
+    ));
 
   bench("RxJS scan + last", async () =>
     lastValueFrom(rxFrom(items).pipe(rxScan((a: number, b: number) => a + b, 0))));

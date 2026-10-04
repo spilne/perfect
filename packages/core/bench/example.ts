@@ -70,5 +70,5 @@ const program = provide(
 // type: Eff<string[], Throws<DbError>>
 // Needs<UserRepo> and Needs<Logger> are gone ↑
 
-const result = await run(program);
+const result = await run(program.orDie());
 console.log("\nResult:", result);

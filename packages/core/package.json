@@ -73,7 +73,7 @@
   "scripts": {
     "test": "bun test",
     "build": "bun ../../scripts/build-package.ts .",
-    "typecheck": "tsc -p tsconfig.src.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
     "typecheck:types": "tsc -p tsconfig.type-tests.json --noEmit",
     "bench": "bun run bench/index.ts"
   },

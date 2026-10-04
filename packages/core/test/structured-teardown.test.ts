@@ -25,6 +25,7 @@ import {
   validate,
 } from "../src";
 import type { Scheduler } from "../src/scheduler";
+import { runFiberUnchecked } from "./run-unchecked";
 
 // Runs queued loop slices one at a time so a test can act between them.
 class StepScheduler implements Scheduler {
@@ -132,7 +133,7 @@ describe("all() waits for its children", () => {
     const log: string[] = [];
     const sibling = slowRelease(log, "sibling");
     const failNow = gate();
-    const fiber = runFiber(
+    const fiber = runFiberUnchecked(
       ensuring(
         all([failNow.wait.flatMap(() => fail("boom")), sibling.effect]),
         sync(() => void log.push("parent finalizer")),
@@ -156,7 +157,7 @@ describe("all() waits for its children", () => {
   test("a sibling's teardown failure joins the child failure with Cause.both", () => {
     const scheduler = new StepScheduler();
     const failNow = gate();
-    const fiber = runFiber(
+    const fiber = runFiberUnchecked(
       all([failNow.wait.flatMap(() => fail("boom")), ensuring(waitForever, die("release"))]),
       scheduler,
     );
@@ -190,7 +191,7 @@ describe("all() waits for its children", () => {
     const log: string[] = [];
     const sibling = slowRelease(log, "sibling");
     const failNow = gate();
-    const fiber = runFiber(
+    const fiber = runFiberUnchecked(
       all([failNow.wait.flatMap(() => fail("boom")), sibling.effect]),
       scheduler,
     );
@@ -262,7 +263,7 @@ describe("all() waits for its children", () => {
       const scheduler = new StepScheduler();
       const hold = gate();
       const failNow = gate();
-      const fiber = runFiber(
+      const fiber = runFiberUnchecked(
         all([failNow.wait.flatMap(() => fail("e1")), uninterruptible(hold.wait)]),
         scheduler,
       );
@@ -413,7 +414,7 @@ describe("race() waits for its children", () => {
   test("a loser's teardown failure joins a failed winner with Cause.both", () => {
     const scheduler = new StepScheduler();
     const lose = gate();
-    const fiber = runFiber(
+    const fiber = runFiberUnchecked(
       race([lose.wait.flatMap(() => fail("first")), ensuring(waitForever, die("release"))]),
       scheduler,
     );
@@ -481,7 +482,7 @@ describe("race() waits for its children", () => {
     const clock = new TestClock();
     const log: string[] = [];
     const body = slowRelease(log, "body");
-    const fiber = runFiber(
+    const fiber = runFiberUnchecked(
       provide(
         ensuring(
           timeoutFail(body.effect, 10, () => "timeout"),

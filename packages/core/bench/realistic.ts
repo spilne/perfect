@@ -161,7 +161,7 @@ const processAllUsers = (userIds: string[]) =>
 // Resource management — connection lifecycle
 // ═══════════════════════════════════════════════════════════════════
 
-const withConnectionLogging = <A, S>(eff: Eff<A, S>): Eff<A, S | Needs<Logger>> =>
+const withConnectionLogging = <A, S>(eff: Eff<A, S>): Eff<A, S | Needs<Logger, "Logger">> =>
   Logger.get.flatMap((log) =>
     ensuring(
       log.info("[conn] opened").flatMap(() => eff),
@@ -238,7 +238,7 @@ const provided = provide(
 
 console.log("═══ Running realistic example ═══\n");
 
-const totalProcessed = await run(provided);
+const totalProcessed = await run(provided.orDie());
 
 console.log("\n═══ Execution log ═══\n");
 for (const line of logs) console.log(line);

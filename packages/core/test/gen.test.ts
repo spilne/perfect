@@ -102,7 +102,7 @@ describe("Gen — primitive generators", () => {
   test("flatMap chains generators", () => {
     const g = Gen.flatMap(Gen.int(1, 5), (n) => Gen.array(Gen.constant(n), { length: n }));
     const v = withSeed<number[]>(13, g.generate);
-    expect(v.length).toBe(v[0]);
+    expect(v.length).toBe(v[0]!);
     expect(v.every((x) => x === v[0])).toBe(true);
   });
 });

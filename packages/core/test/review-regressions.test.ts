@@ -98,8 +98,10 @@ describe("pool acquisition cleanup", () => {
       expect(first.result?.ok).toBe(false);
       expect(second.result).toEqual({ ok: true, value: 42 });
       expect(attempts).toBe(2);
-      expect(runSync(pool.inUse as any)).toBe(0);
-      expect(runSync(pool.idle as any)).toBe(1);
+      // Pool types inUse and idle with the acquire's error, though reading
+      // them can't fail.
+      expect(runSync(pool.inUse.orDie())).toBe(0);
+      expect(runSync(pool.idle.orDie())).toBe(1);
     });
   }
 
@@ -129,7 +131,7 @@ describe("pool acquisition cleanup", () => {
     expect(first.result).toEqual({ ok: false, cause: { _tag: "Die", defect: error } });
     expect(runSync(pool.inUse)).toBe(0);
     expect(runSync(pool.idle)).toBe(1);
-    expect(runSync(pool.use(succeed) as any)).toBe(1);
+    expect(runSync(pool.use(succeed).orDie())).toBe(1);
     expect(acquisitions).toBe(1);
     runSync(pool.shutdown());
     expect(released).toEqual([1]);

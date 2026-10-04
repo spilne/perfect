@@ -5,7 +5,7 @@ describe("Stream.parEvalMap", () => {
   test("processes in parallel, preserves order", async () => {
     const result = await run(
       Stream.of(3, 1, 2)
-        .parEvalMap(3, (x) => sleep(x * 10).map(() => `done:${x}`) as any)
+        .parEvalMap(3, (x) => sleep(x * 10).map(() => `done:${x}`))
         .toArray(),
     );
     expect(result).toEqual(["done:3", "done:1", "done:2"]);
@@ -17,20 +17,18 @@ describe("Stream.parEvalMap", () => {
 
     const result = await run(
       Stream.range(0, 8)
-        .parEvalMap(
-          2,
-          (x) =>
-            sync(() => {
-              current++;
-              maxConcurrent = Math.max(maxConcurrent, current);
-            })
-              .flatMap(() => sleep(20))
-              .flatMap(() =>
-                sync(() => {
-                  current--;
-                  return x * 10;
-                }),
-              ) as any,
+        .parEvalMap(2, (x) =>
+          sync(() => {
+            current++;
+            maxConcurrent = Math.max(maxConcurrent, current);
+          })
+            .flatMap(() => sleep(20))
+            .flatMap(() =>
+              sync(() => {
+                current--;
+                return x * 10;
+              }),
+            ),
         )
         .toArray(),
     );
@@ -57,7 +55,7 @@ describe("Stream.parEvalMapUnordered", () => {
   test("processes in parallel, results may be out of order", async () => {
     const result = await run(
       Stream.of(30, 10, 20)
-        .parEvalMapUnordered(3, (x) => sleep(x).map(() => x) as any)
+        .parEvalMapUnordered(3, (x) => sleep(x).map(() => x))
         .toArray(),
     );
     // all values present, but order depends on completion time
@@ -98,7 +96,7 @@ describe("Stream.groupWithin", () => {
     const result = await run(
       Stream.iterate(0, (n: number) => n + 1)
         .take(5)
-        .evalMap((x) => sleep(5).map(() => x) as any)
+        .evalMap((x) => sleep(5).map(() => x))
         .groupWithin(2, 500)
         .map((c: any) => c.toArray())
         .take(2)
@@ -166,7 +164,7 @@ describe("Stream.merge", () => {
 
   test("merge with different speeds", async () => {
     const fast = Stream.of(1, 2, 3);
-    const slow = Stream.repeat(sleep(20).map(() => 99) as any).take(2);
+    const slow = Stream.repeat(sleep(20).map(() => 99)).take(2);
     const result = await run(fast.merge(slow).toArray());
     expect(result).toContain(1);
     expect(result).toContain(99);
@@ -184,7 +182,9 @@ describe("Pipes", () => {
 
   test("csv pipe", async () => {
     const result = await run(
-      Stream.of("name,age\n", "alice,30\nbob,25\n").through(Pipes.csv).toArray(),
+      // Bare Pipes.csv is overloaded, so .through() can't infer its output
+      // type on its own.
+      Stream.of("name,age\n", "alice,30\nbob,25\n").through<string[], never>(Pipes.csv).toArray(),
     );
     expect(result).toEqual([
       ["name", "age"],

@@ -25,13 +25,11 @@ describe("cached", () => {
   test("failures are not cached — next call re-runs the source", async () => {
     let runs = 0;
     const getThing = cached(
-      (sync(() => ++runs) as any).flatMap((n: number) =>
-        n === 1 ? fail("first-fails") : succeed(n),
-      ),
+      sync(() => ++runs).flatMap((n) => (n === 1 ? fail("first-fails") : succeed(n))),
     );
 
-    const program = (getThing as any).catch((_e: any) => succeed(0)).flatMap(() => getThing);
-    expect(await run(program as any)).toBe(2);
+    const program = getThing.catch(() => succeed(0)).flatMap(() => getThing);
+    expect(await run(program.orDie())).toBe(2);
     expect(runs).toBe(2);
   });
 
@@ -166,16 +164,18 @@ describe("cachedBy", () => {
     let runs = 0;
     const cache = cachedBy((_: string) => sync(() => ++runs));
 
-    const program = (cache.get("a") as any).flatMap(() =>
-      cache
-        .get("b")
-        .flatMap(() =>
-          cache.invalidateAll.flatMap(() =>
-            cache.size.flatMap((s: number) => (cache.get("a") as any).map(() => s)),
+    const program = cache
+      .get("a")
+      .flatMap(() =>
+        cache
+          .get("b")
+          .flatMap(() =>
+            cache.invalidateAll.flatMap(() =>
+              cache.size.flatMap((s) => cache.get("a").map(() => s)),
+            ),
           ),
-        ),
-    );
-    expect(await run(program as any)).toBe(0);
+      );
+    expect(await run(program)).toBe(0);
     expect(runs).toBe(3);
   });
 

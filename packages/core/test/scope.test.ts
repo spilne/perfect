@@ -13,6 +13,7 @@ import {
   runExit,
   Cause,
 } from "../src";
+import { runUnchecked } from "./run-unchecked";
 
 class ReleaseFailure {
   readonly _tag = "ReleaseFailure" as const;
@@ -79,7 +80,7 @@ describe("acquireRelease + scoped", () => {
 
     const program = scoped(managed.flatMap(() => fail("boom")));
 
-    await expect(run(program)).rejects.toBe("boom");
+    await expect(runUnchecked(program)).rejects.toBe("boom");
     expect(log).toEqual(["acquire", "release:conn"]);
   });
 
@@ -252,7 +253,7 @@ describe("acquireRelease without scoped()", () => {
         }),
     ).flatMap(() => fail("boom"));
 
-    await expect(run(program)).rejects.toBe("boom");
+    await expect(runUnchecked(program)).rejects.toBe("boom");
     expect(log).toEqual(["acquire", "release:conn"]);
   });
 

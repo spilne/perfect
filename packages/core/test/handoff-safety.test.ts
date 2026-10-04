@@ -34,6 +34,7 @@ import {
 } from "../src";
 import { VALUE_IN_FLIGHT } from "../src/fiber";
 import { DEFAULT_BUDGET, type Scheduler } from "../src/scheduler";
+import { runUnchecked, runFiberUnchecked } from "./run-unchecked";
 
 // Runs queued loop slices one at a time so a test can act between them.
 class StepScheduler implements Scheduler {
@@ -73,12 +74,12 @@ function aroundBudget(radius: number): number[] {
 }
 
 // An async wait that exposes its resume, so a test decides when and with what
-// it resumes.
+// it resumes. A test may resume it with a failure its type doesn't show.
 function manualWait<A>(): {
   wait: Eff<A, never>;
-  resume: (value: Eff<A, never>, onDiscard?: () => void) => void;
+  resume: (value: Eff<A, unknown>, onDiscard?: () => void) => void;
 } {
-  let resume: ((value: Eff<A, never>, onDiscard?: () => void) => void) | undefined;
+  let resume: ((value: Eff<A, unknown>, onDiscard?: () => void) => void) | undefined;
   return {
     wait: async<A>((r) => {
       resume = r as typeof resume;
@@ -111,7 +112,7 @@ describe("async resume with onDiscard", () => {
     scheduler.flush();
 
     expect({ ran, discarded }).toEqual({ ran: 0, discarded: 1 });
-    expect(fiber.result).toEqual(interrupted);
+    expect<unknown>(fiber.result).toEqual(interrupted);
   });
 
   test("a value the fiber started running is never discarded", () => {
@@ -136,7 +137,7 @@ describe("async resume with onDiscard", () => {
     scheduler.flush();
 
     expect({ got, discarded }).toEqual({ got: 7, discarded: 0 });
-    expect(fiber.result).toEqual(interrupted);
+    expect<unknown>(fiber.result).toEqual(interrupted);
   });
 
   test("a resume that arrives after the fiber stopped waiting is discarded at once", () => {
@@ -151,7 +152,7 @@ describe("async resume with onDiscard", () => {
     manual.resume(succeed(1), () => void discarded++);
 
     expect(discarded).toBe(1);
-    expect(fiber.result).toEqual(interrupted);
+    expect<unknown>(fiber.result).toEqual(interrupted);
   });
 
   test("only the first of two resumes is delivered; the second is discarded", () => {
@@ -190,7 +191,7 @@ describe("async resume with onDiscard", () => {
     scheduler.flush();
 
     expect({ got, discarded }).toEqual({ got: 3, discarded: 0 });
-    expect(fiber.result).toEqual(interrupted);
+    expect<unknown>(fiber.result).toEqual(interrupted);
   });
 
   test("a resume whose run was dropped by scheduler.shutdown() is discarded on interrupt", () => {
@@ -210,7 +211,7 @@ describe("async resume with onDiscard", () => {
     scheduler.flush();
 
     expect(discarded).toBe(1);
-    expect(fiber.result).toEqual(interrupted);
+    expect<unknown>(fiber.result).toEqual(interrupted);
   });
 
   test("a fiber with nothing left to finalize completes on interrupt and still discards", () => {
@@ -225,7 +226,7 @@ describe("async resume with onDiscard", () => {
     scheduler.flush();
 
     expect(discarded).toBe(1);
-    expect(fiber.result).toEqual(interrupted);
+    expect<unknown>(fiber.result).toEqual(interrupted);
   });
 
   test("a throwing onDiscard becomes a defect of the interrupted fiber", () => {
@@ -287,7 +288,7 @@ describe("async resume with onDiscard", () => {
     const scheduler = new StepScheduler();
     const boom = new Error("cleanup blew up");
     const queue = runSync(Queue.unbounded<number>());
-    const taker = runFiber(
+    const taker = runFiberUnchecked(
       ensuring(
         queue.take(),
         sync(() => {
@@ -298,7 +299,7 @@ describe("async resume with onDiscard", () => {
     );
     scheduler.flush();
 
-    runSync(queue.offer(1));
+    runSync(queue.offer(1).orDie());
     taker.interrupt();
     scheduler.flush();
 
@@ -339,12 +340,12 @@ describe("async resume with onDiscard", () => {
       for (let pad = 0; pad < 3; pad++) {
         const scheduler = new StepScheduler();
         const queue = runSync(Queue.unbounded<number>());
-        runSync(queue.offer(1));
+        runSync(queue.offer(1).orDie());
         const taken: number[] = [];
         let body: Eff<unknown, never> = succeed(0);
         for (let i = 0; i < pad; i++) body = succeed(body) as Eff<unknown, never>;
         for (let i = 0; i < length; i++) body = body.flatMap((x) => succeed(x));
-        const fiber = runFiber(
+        const fiber = runFiberUnchecked(
           body.flatMap(() => queue.take().map((n) => void taken.push(n))),
           scheduler,
         );
@@ -415,7 +416,7 @@ describe("an interrupt during an op-budget pause on a value", () => {
     scheduler.flush();
 
     expect(log).toEqual(["received 0"]);
-    expect(fiber.result).toEqual(interrupted);
+    expect<unknown>(fiber.result).toEqual(interrupted);
   });
 
   test("lets a fiber whose value is its result complete normally", () => {
@@ -444,7 +445,7 @@ describe("an interrupt during an op-budget pause on a value", () => {
     scheduler.flush();
 
     expect(log).toEqual(["received"]);
-    expect(fiber.result).toEqual(interrupted);
+    expect<unknown>(fiber.result).toEqual(interrupted);
   });
 });
 
@@ -516,7 +517,7 @@ describe("interrupting a Ready fiber keeps the failure it was about to raise", (
   test("a failed race winner, interrupted before the parent runs", () => {
     const scheduler = new StepScheduler();
     const manual = manualWait<void>();
-    const fiber = runFiber(
+    const fiber = runFiberUnchecked(
       race([manual.wait.flatMap(() => fail("lost")), async<void>(() => () => {})]).map(() => 0),
       scheduler,
     );
@@ -570,7 +571,7 @@ describe("interrupting a Ready fiber keeps the failure it was about to raise", (
       scheduler,
     );
     scheduler.flush();
-    first.resume(fail("handled") as Eff<void, never>);
+    first.resume(fail("handled"));
     scheduler.flush();
     expect(fiber.status).toBe("suspended");
 
@@ -585,31 +586,31 @@ describe("Queue handoff", () => {
   test("an item handed to a taker interrupted before it runs goes back to the queue", () => {
     const scheduler = new StepScheduler();
     const queue = runSync(Queue.unbounded<string>());
-    const taker = runFiber(queue.take(), scheduler);
+    const taker = runFiberUnchecked(queue.take(), scheduler);
     scheduler.flush();
 
-    runSync(queue.offer("a"));
+    runSync(queue.offer("a").orDie());
     expect(taker.status).toBe("ready");
     taker.interrupt();
     scheduler.flush();
 
-    expect(taker.result).toEqual(interrupted);
+    expect<unknown>(taker.result).toEqual(interrupted);
     expect(runSync(queue.size)).toBe(1);
-    expect(runSync(queue.take())).toBe("a");
+    expect(runSync(queue.take().orDie())).toBe("a");
   });
 
   test("the item goes to the next waiting taker", () => {
     const scheduler = new StepScheduler();
     const queue = runSync(Queue.unbounded<string>());
-    const first = runFiber(queue.take(), scheduler);
-    const second = runFiber(queue.take(), scheduler);
+    const first = runFiberUnchecked(queue.take(), scheduler);
+    const second = runFiberUnchecked(queue.take(), scheduler);
     scheduler.flush();
 
-    runSync(queue.offer("a"));
+    runSync(queue.offer("a").orDie());
     first.interrupt();
     scheduler.flush();
 
-    expect(first.result).toEqual(interrupted);
+    expect<unknown>(first.result).toEqual(interrupted);
     expect(second.result).toEqual({ ok: true, value: "a" });
     expect(runSync(queue.size)).toBe(0);
   });
@@ -618,10 +619,10 @@ describe("Queue handoff", () => {
     test(`items given back ${order} return to the queue in FIFO order`, () => {
       const scheduler = new StepScheduler();
       const queue = runSync(Queue.unbounded<number>());
-      const takers = [0, 1, 2].map(() => runFiber(queue.take(), scheduler));
+      const takers = [0, 1, 2].map(() => runFiberUnchecked(queue.take(), scheduler));
       scheduler.flush();
 
-      for (const item of [1, 2, 3, 4, 5]) runSync(queue.offer(item));
+      for (const item of [1, 2, 3, 4, 5]) runSync(queue.offer(item).orDie());
       const interruptOrder = order === "in handoff order" ? takers : [...takers].reverse();
       for (const taker of interruptOrder) taker.interrupt();
       scheduler.flush();
@@ -633,34 +634,34 @@ describe("Queue handoff", () => {
   test("all([take, take]) interrupted after both were handed items keeps FIFO order", () => {
     const scheduler = new StepScheduler();
     const queue = runSync(Queue.unbounded<number>());
-    const parent = runFiber(all([queue.take(), queue.take()]), scheduler);
+    const parent = runFiberUnchecked(all([queue.take(), queue.take()]), scheduler);
     scheduler.flush();
 
-    runSync(queue.offer(1));
-    runSync(queue.offer(2));
-    runSync(queue.offer(3));
+    runSync(queue.offer(1).orDie());
+    runSync(queue.offer(2).orDie());
+    runSync(queue.offer(3).orDie());
     parent.interrupt();
     scheduler.flush();
 
-    expect(parent.result).toEqual(interrupted);
+    expect<unknown>(parent.result).toEqual(interrupted);
     expect(runSync(queue.takeAll())).toEqual([1, 2, 3]);
   });
 
   test("a given-back item handed on and given back again keeps its place", () => {
     const scheduler = new StepScheduler();
     const queue = runSync(Queue.unbounded<number>());
-    const first = runFiber(queue.take(), scheduler);
-    const second = runFiber(queue.take(), scheduler);
-    const third = runFiber(queue.take(), scheduler);
+    const first = runFiberUnchecked(queue.take(), scheduler);
+    const second = runFiberUnchecked(queue.take(), scheduler);
+    const third = runFiberUnchecked(queue.take(), scheduler);
     scheduler.flush();
 
-    runSync(queue.offer(1));
-    runSync(queue.offer(2));
+    runSync(queue.offer(1).orDie());
+    runSync(queue.offer(2).orDie());
     // 1 goes on to the third taker; then both remaining handoffs come back.
     first.interrupt();
     third.interrupt();
     second.interrupt();
-    runSync(queue.offer(3));
+    runSync(queue.offer(3).orDie());
     scheduler.flush();
 
     expect(runSync(queue.takeAll())).toEqual([1, 2, 3]);
@@ -669,13 +670,13 @@ describe("Queue handoff", () => {
   test("a bounded queue overshoots its capacity by at most the interrupted handoffs", () => {
     const scheduler = new StepScheduler();
     const queue = runSync(Queue.bounded<number>(2));
-    const takers = Array.from({ length: 5 }, () => runFiber(queue.take(), scheduler));
+    const takers = Array.from({ length: 5 }, () => runFiberUnchecked(queue.take(), scheduler));
     scheduler.flush();
-    for (let item = 0; item < 5; item++) runSync(queue.offer(item));
-    runSync(queue.offer(10));
-    runSync(queue.offer(11));
+    for (let item = 0; item < 5; item++) runSync(queue.offer(item).orDie());
+    runSync(queue.offer(10).orDie());
+    runSync(queue.offer(11).orDie());
     const offerScheduler = new StepScheduler();
-    const blocked = runFiber(queue.offer(12), offerScheduler);
+    const blocked = runFiberUnchecked(queue.offer(12), offerScheduler);
     offerScheduler.flush();
     expect(blocked.status).toBe("suspended");
 
@@ -689,11 +690,11 @@ describe("Queue handoff", () => {
   test("a returned item keeps its place ahead of later offers", () => {
     const scheduler = new StepScheduler();
     const queue = runSync(Queue.unbounded<number>());
-    const taker = runFiber(queue.take(), scheduler);
+    const taker = runFiberUnchecked(queue.take(), scheduler);
     scheduler.flush();
 
-    runSync(queue.offer(1));
-    runSync(queue.offer(2));
+    runSync(queue.offer(1).orDie());
+    runSync(queue.offer(2).orDie());
     taker.interrupt();
     scheduler.flush();
 
@@ -703,27 +704,27 @@ describe("Queue handoff", () => {
   test("a returned item is still taken after the queue is closed", () => {
     const scheduler = new StepScheduler();
     const queue = runSync(Queue.unbounded<number>());
-    const taker = runFiber(queue.take(), scheduler);
+    const taker = runFiberUnchecked(queue.take(), scheduler);
     scheduler.flush();
 
-    runSync(queue.offer(1));
+    runSync(queue.offer(1).orDie());
     runSync(queue.close());
     taker.interrupt();
     scheduler.flush();
 
-    expect(runSync(queue.take())).toBe(1);
+    expect(runSync(queue.take().orDie())).toBe(1);
   });
 
   test("a returned item can overfill a bounded queue; a blocked offer waits for room", () => {
     const scheduler = new StepScheduler();
     const queue = runSync(Queue.bounded<number>(1));
-    const taker = runFiber(queue.take(), scheduler);
+    const taker = runFiberUnchecked(queue.take(), scheduler);
     scheduler.flush();
-    runSync(queue.offer(1));
-    runSync(queue.offer(2));
+    runSync(queue.offer(1).orDie());
+    runSync(queue.offer(2).orDie());
     // Its own scheduler, so starting it does not also run the taker.
     const offerScheduler = new StepScheduler();
-    const blocked = runFiber(queue.offer(3), offerScheduler);
+    const blocked = runFiberUnchecked(queue.offer(3), offerScheduler);
     offerScheduler.flush();
     expect(blocked.status).toBe("suspended");
 
@@ -731,9 +732,9 @@ describe("Queue handoff", () => {
     scheduler.flush();
     expect(runSync(queue.size)).toBe(2);
 
-    expect(runSync(queue.take())).toBe(1);
+    expect(runSync(queue.take().orDie())).toBe(1);
     expect(blocked.status).toBe("suspended");
-    expect(runSync(queue.take())).toBe(2);
+    expect(runSync(queue.take().orDie())).toBe(2);
     offerScheduler.flush();
     expect(blocked.result).toEqual({ ok: true, value: true });
     expect(runSync(queue.takeAll())).toEqual([3]);
@@ -742,16 +743,16 @@ describe("Queue handoff", () => {
   test("an offer admitted by a take and then interrupted enqueues its value once", () => {
     const scheduler = new StepScheduler();
     const queue = runSync(Queue.bounded<number>(1));
-    runSync(queue.offer(1));
-    const offerer = runFiber(queue.offer(2), scheduler);
+    runSync(queue.offer(1).orDie());
+    const offerer = runFiberUnchecked(queue.offer(2), scheduler);
     scheduler.flush();
 
-    expect(runSync(queue.take())).toBe(1);
+    expect(runSync(queue.take().orDie())).toBe(1);
     expect(offerer.status).toBe("ready");
     offerer.interrupt();
     scheduler.flush();
 
-    expect(offerer.result).toEqual(interrupted);
+    expect<unknown>(offerer.result).toEqual(interrupted);
     expect(runSync(queue.takeAll())).toEqual([2]);
   });
 
@@ -759,17 +760,20 @@ describe("Queue handoff", () => {
     const scheduler = new SyncScheduler();
     const clock = new TestClock();
     const queue = runSync(Queue.unbounded<number>());
-    const fiber = runFiber(provide(timeoutOption(queue.take(), 5), Clock, clock), scheduler);
+    const fiber = runFiberUnchecked(
+      provide(timeoutOption(queue.take(), 5), Clock, clock),
+      scheduler,
+    );
     scheduler.flush();
 
     // Both sides resume at the same instant, the timer first: it wins the
     // race and interrupts the take, whose fiber has not run yet.
     clock.advance(5);
-    runSync(queue.offer(1));
+    runSync(queue.offer(1).orDie());
     scheduler.flush();
 
     expect(fiber.result).toEqual({ ok: true, value: undefined });
-    expect(runSync(queue.take())).toBe(1);
+    expect(runSync(queue.take().orDie())).toBe(1);
   });
 });
 
@@ -784,7 +788,7 @@ describe("Semaphore handoff", () => {
     fiber.interrupt();
     scheduler.flush();
 
-    expect(fiber.result).toEqual(interrupted);
+    expect<unknown>(fiber.result).toEqual(interrupted);
     expect(runSync(semaphore.available)).toBe(1);
   });
 
@@ -804,7 +808,7 @@ describe("Semaphore handoff", () => {
     waiter.interrupt();
     scheduler.flush();
 
-    expect(waiter.result).toEqual(interrupted);
+    expect<unknown>(waiter.result).toEqual(interrupted);
     expect(next.result).toEqual({ ok: true, value: "next" });
     expect(runSync(semaphore.available)).toBe(1);
   });
@@ -835,7 +839,7 @@ describe("Semaphore handoff", () => {
     scheduler.flush();
 
     expect(ran).toBe(1);
-    expect(fiber.result).toEqual(interrupted);
+    expect<unknown>(fiber.result).toEqual(interrupted);
     expect(runSync(semaphore.available)).toBe(1);
   });
 });
@@ -867,15 +871,15 @@ describe("Pool handoff", () => {
   test("an idle resource handed to a fiber interrupted before it runs stays idle", () => {
     const scheduler = new StepScheduler();
     const pool = makePool({ size: 1 });
-    runSync(pool.use(succeed));
-    const fiber = runFiber(pool.use(succeed), scheduler);
+    runSync(pool.use(succeed).orDie());
+    const fiber = runFiberUnchecked(pool.use(succeed), scheduler);
     scheduler.step();
     expect(fiber.status).toBe("ready");
 
     fiber.interrupt();
     scheduler.flush();
 
-    expect(fiber.result).toEqual(interrupted);
+    expect<unknown>(fiber.result).toEqual(interrupted);
     expect({ inUse: runSync(pool.inUse), idle: runSync(pool.idle) }).toEqual({ inUse: 0, idle: 1 });
   });
 
@@ -883,13 +887,13 @@ describe("Pool handoff", () => {
     const scheduler = new StepScheduler();
     const pool = makePool({ size: 1 });
     const release = manualWait<void>();
-    const holder = runFiber(
+    const holder = runFiberUnchecked(
       pool.use(() => release.wait),
       scheduler,
     );
     scheduler.flush();
-    const waiter = runFiber(pool.use(succeed), scheduler);
-    const next = runFiber(pool.use(succeed), scheduler);
+    const waiter = runFiberUnchecked(pool.use(succeed), scheduler);
+    const next = runFiberUnchecked(pool.use(succeed), scheduler);
     scheduler.flush();
 
     release.resume(succeed(undefined));
@@ -899,7 +903,7 @@ describe("Pool handoff", () => {
     waiter.interrupt();
     scheduler.flush();
 
-    expect(waiter.result).toEqual(interrupted);
+    expect<unknown>(waiter.result).toEqual(interrupted);
     expect(next.result).toEqual({ ok: true, value: 1 });
     expect({ inUse: runSync(pool.inUse), idle: runSync(pool.idle) }).toEqual({ inUse: 0, idle: 1 });
   });
@@ -909,12 +913,12 @@ describe("Pool handoff", () => {
     const released: number[] = [];
     const pool = makePool({ size: 1, released });
     const release = manualWait<void>();
-    runFiber(
+    runFiberUnchecked(
       pool.use(() => release.wait),
       scheduler,
     );
     scheduler.flush();
-    const waiter = runFiber(pool.use(succeed), scheduler);
+    const waiter = runFiberUnchecked(pool.use(succeed), scheduler);
     scheduler.flush();
 
     release.resume(succeed(undefined));
@@ -924,7 +928,7 @@ describe("Pool handoff", () => {
     waiter.interrupt();
     scheduler.flush();
 
-    expect(waiter.result).toEqual(interrupted);
+    expect<unknown>(waiter.result).toEqual(interrupted);
     expect(released).toEqual([1]);
     expect({ inUse: runSync(pool.inUse), idle: runSync(pool.idle) }).toEqual({ inUse: 0, idle: 0 });
   });
@@ -937,10 +941,10 @@ describe("Pool handoff", () => {
       size: 1,
       acquire: suspend(() => (++attempts === 1 ? firstCreate.wait : succeed(attempts))),
     });
-    const creator = runFiber(pool.use(succeed), scheduler);
+    const creator = runFiberUnchecked(pool.use(succeed), scheduler);
     scheduler.flush();
-    const woken = runFiber(pool.use(succeed), scheduler);
-    const next = runFiber(pool.use(succeed), scheduler);
+    const woken = runFiberUnchecked(pool.use(succeed), scheduler);
+    const next = runFiberUnchecked(pool.use(succeed), scheduler);
     scheduler.flush();
 
     firstCreate.resume(die("connect failed"));
@@ -950,7 +954,7 @@ describe("Pool handoff", () => {
     woken.interrupt();
     scheduler.flush();
 
-    expect(woken.result).toEqual(interrupted);
+    expect<unknown>(woken.result).toEqual(interrupted);
     expect(next.result).toEqual({ ok: true, value: 2 });
     expect({ inUse: runSync(pool.inUse), idle: runSync(pool.idle) }).toEqual({ inUse: 0, idle: 1 });
   });
@@ -963,16 +967,16 @@ describe("Pool handoff", () => {
       size: 1,
       validate: () => (validating ? check.wait : succeed(true)),
     });
-    runSync(pool.use(succeed));
+    runSync(pool.use(succeed).orDie());
     validating = true;
-    const fiber = runFiber(pool.use(succeed), scheduler);
+    const fiber = runFiberUnchecked(pool.use(succeed), scheduler);
     scheduler.flush();
     expect(fiber.status).toBe("suspended");
 
     fiber.interrupt();
     scheduler.flush();
 
-    expect(fiber.result).toEqual(interrupted);
+    expect<unknown>(fiber.result).toEqual(interrupted);
     expect({ inUse: runSync(pool.inUse), idle: runSync(pool.idle) }).toEqual({ inUse: 0, idle: 1 });
   });
 
@@ -986,11 +990,11 @@ describe("Pool handoff", () => {
       validate: () => (gated ? check.wait : succeed(true)),
       release: () => (gated ? releasing.wait : succeed(undefined)),
     });
-    runSync(pool.use(succeed));
+    runSync(pool.use(succeed).orDie());
     gated = true;
-    const validating = runFiber(pool.use(succeed), scheduler);
+    const validating = runFiberUnchecked(pool.use(succeed), scheduler);
     scheduler.flush();
-    const waiting = runFiber(pool.use(succeed), scheduler);
+    const waiting = runFiberUnchecked(pool.use(succeed), scheduler);
     scheduler.flush();
     expect(waiting.status).toBe("suspended");
 
@@ -1001,7 +1005,7 @@ describe("Pool handoff", () => {
     releasing.resume(succeed(undefined));
     scheduler.flush();
 
-    expect(validating.result).toEqual(interrupted);
+    expect<unknown>(validating.result).toEqual(interrupted);
     expect(waiting.result).toEqual({ ok: true, value: 2 });
     expect({ inUse: runSync(pool.inUse), idle: runSync(pool.idle) }).toEqual({ inUse: 0, idle: 1 });
   });
@@ -1015,11 +1019,11 @@ describe("Pool handoff", () => {
       validate: () => (gated ? check.wait : succeed(true)),
       release: () => (gated ? die("release failed") : succeed(undefined)),
     });
-    runSync(pool.use(succeed));
+    runSync(pool.use(succeed).orDie());
     gated = true;
-    const validating = runFiber(pool.use(succeed), scheduler);
+    const validating = runFiberUnchecked(pool.use(succeed), scheduler);
     scheduler.flush();
-    const waiting = runFiber(pool.use(succeed), scheduler);
+    const waiting = runFiberUnchecked(pool.use(succeed), scheduler);
     scheduler.flush();
 
     check.resume(succeed(false));
@@ -1038,7 +1042,7 @@ describe("Pool handoff", () => {
     const hold = manualWait<void>();
     const holder = await run(forkDaemon(pool.use(() => hold.wait)));
     await run(sleep(1));
-    const waiting = run(pool.use(succeed));
+    const waiting = runUnchecked(pool.use(succeed));
     await run(sleep(1));
     await run(pool.shutdown());
     await expect(waiting).rejects.toBeInstanceOf(PoolClosed);
@@ -1065,7 +1069,7 @@ describe("push-source bridges", () => {
     emit(1);
     pull.interrupt();
     scheduler.flush();
-    expect(pull.result).toEqual(interrupted);
+    expect<unknown>(pull.result).toEqual(interrupted);
 
     const retried = runSync(first.next.step as Eff<any, never>) as { chunk: Chunk<number> };
     expect(retried.chunk.toArray()).toEqual([1]);
@@ -1188,6 +1192,6 @@ describe("stream operators at timer ties", () => {
         Stream.fromQueue(queue).timeout(10).retry(RetryPolicy.recurs(10_000)).toArray(),
       ),
     );
-    expect(await run(program)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    expect(await run(program.orDie())).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
   });
 });

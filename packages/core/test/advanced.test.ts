@@ -24,7 +24,9 @@ import {
   addFiberSupervisor,
   type Eff,
   type Throws,
+  type Fiber,
 } from "../src";
+import { runUnchecked } from "./run-unchecked";
 
 // ── Fiber ──────────────────────────────────────────────────────────
 
@@ -53,8 +55,10 @@ describe("fiber", () => {
   });
 
   test("interrupt a fiber", async () => {
+    // interrupt() takes a plain Fiber, which is Fiber<unknown>, and Fiber is
+    // invariant in its result type, so a Fiber<void> needs the cast.
     const program = fork(sleep(1000)).flatMap((fiber) =>
-      sleep(10).flatMap(() => interrupt(fiber).as("done")),
+      sleep(10).flatMap(() => interrupt(fiber as Fiber).as("done")),
     );
 
     expect(await run(program)).toBe("done");
@@ -116,7 +120,7 @@ describe("race", () => {
   test("race propagates failure", async () => {
     const failing = delay(fail("oops") as Eff<string, Throws<string>>, 5);
     const slow = delay(succeed("slow"), 50);
-    await expect(run(race([failing, slow]))).rejects.toBe("oops");
+    await expect(runUnchecked(race([failing, slow]))).rejects.toBe("oops");
   });
 
   test("empty race fails instead of hanging", async () => {
@@ -129,12 +133,12 @@ describe("race", () => {
 describe("timeout", () => {
   test("completes before timeout", async () => {
     const eff = timeout(delay(succeed("ok"), 5), 100, () => "timed out");
-    expect(await run(eff)).toBe("ok");
+    expect(await run(eff.orDie())).toBe("ok");
   });
 
   test("times out", async () => {
     const eff = timeout(sleep(200).as("late"), 10, () => "timed out");
-    await expect(run(eff)).rejects.toBe("timed out");
+    await expect(runUnchecked(eff)).rejects.toBe("timed out");
   });
 });
 
@@ -161,7 +165,7 @@ describe("ensuring", () => {
         finalized = true;
       }),
     );
-    await expect(run(eff)).rejects.toBe("boom");
+    await expect(runUnchecked(eff)).rejects.toBe("boom");
     expect(finalized).toBe(true);
   });
 
@@ -200,11 +204,9 @@ describe("ensuring", () => {
 describe("retry", () => {
   test("retries on typed failure", async () => {
     let attempts = 0;
-    const flaky: any = sync(() => ++attempts).flatMap((n: number) =>
-      n < 3 ? fail("not yet") : succeed("ok"),
-    );
+    const flaky = sync(() => ++attempts).flatMap((n) => (n < 3 ? fail("not yet") : succeed("ok")));
 
-    expect(await run(retry(flaky, { times: 5 }))).toBe("ok");
+    expect(await run(retry(flaky, { times: 5 }).orDie())).toBe("ok");
     expect(attempts).toBe(3);
   });
 
@@ -220,17 +222,15 @@ describe("retry", () => {
 
   test("gives up after max retries", async () => {
     const always_fail = fail("nope");
-    await expect(run(retry(always_fail, { times: 3 }))).rejects.toBe("nope");
+    await expect(runUnchecked(retry(always_fail, { times: 3 }))).rejects.toBe("nope");
   });
 
   test("retry with delay", async () => {
     let attempts = 0;
-    const flaky: any = sync(() => ++attempts).flatMap((n: number) =>
-      n < 2 ? fail("not yet") : succeed("ok"),
-    );
+    const flaky = sync(() => ++attempts).flatMap((n) => (n < 2 ? fail("not yet") : succeed("ok")));
 
     const start = Date.now();
-    await run(retry(flaky, { times: 3, delay: 20 }));
+    await run(retry(flaky, { times: 3, delay: 20 }).orDie());
     const elapsed = Date.now() - start;
     expect(elapsed).toBeGreaterThanOrEqual(15);
   });
@@ -325,12 +325,10 @@ describe("sleep and delay", () => {
 describe("complex compositions", () => {
   test("retry + timeout", async () => {
     let attempts = 0;
-    const flaky: any = sync(() => ++attempts).flatMap((n: number) =>
-      n < 3 ? fail("nope") : succeed("ok"),
-    );
+    const flaky = sync(() => ++attempts).flatMap((n) => (n < 3 ? fail("nope") : succeed("ok")));
 
     const eff = timeout(retry(flaky, { times: 5, delay: 10 }), 500, () => "timed out");
-    expect(await run(eff)).toBe("ok");
+    expect(await run(eff.orDie())).toBe("ok");
   });
 
   test("service + retry + ensuring", async () => {
@@ -358,7 +356,7 @@ describe("complex compositions", () => {
         ) as any,
     });
 
-    expect(await run(provided)).toBe("response");
+    expect(await run(provided.orDie())).toBe("response");
     expect(attempts).toBe(2);
     expect(cleaned).toBe(true);
   });

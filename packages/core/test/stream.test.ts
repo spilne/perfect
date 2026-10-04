@@ -1,5 +1,6 @@
 import { describe, test, expect } from "bun:test";
 import { succeed, sync, run, Queue, Stream, Chunk } from "../src";
+import { runUnchecked } from "./run-unchecked";
 
 describe("Chunk", () => {
   test("fromArray + toArray", () => {
@@ -72,7 +73,7 @@ describe("Stream constructors", () => {
   });
 
   test("fail", async () => {
-    await expect(run(Stream.fail("boom").toArray())).rejects.toBe("boom");
+    await expect(runUnchecked(Stream.fail("boom").toArray())).rejects.toBe("boom");
   });
 
   test("range", async () => {
@@ -115,7 +116,7 @@ describe("Stream constructors", () => {
         .flatMap(() => q.shutdown())
         .flatMap(() => Stream.fromQueue(q).toArray()),
     );
-    expect(await run(program)).toEqual([1, 2, 3]);
+    expect(await runUnchecked(program)).toEqual([1, 2, 3]);
   });
 
   test("bracket — resource released", async () => {
@@ -219,7 +220,7 @@ describe("Stream transforms", () => {
           .changes((a, b) => a.id === b.id)
           .toArray(),
       ),
-    ).toEqual([values[0], values[2]]);
+    ).toEqual([values[0]!, values[2]!]);
   });
 
   test("collect", async () => {

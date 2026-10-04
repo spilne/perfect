@@ -6,7 +6,7 @@ describe("withSpan", () => {
   test("records span with attributes and ok status", async () => {
     const tracer = new TestTracer();
     const program = withSpan(succeed(42), "op", { route: "/x" });
-    expect(await run(provide(program, Tracer, tracer) as any)).toBe(42);
+    expect(await run(provide(program, Tracer, tracer))).toBe(42);
 
     const span = tracer.find("op")!;
     expect(span.attributes).toEqual({ route: "/x" });
@@ -50,13 +50,13 @@ describe("withSpan", () => {
 
   test("no-op tracer short-circuits — program runs unchanged", async () => {
     // default context has the noop tracer; withSpan should be transparent
-    expect(await run(withSpan(succeed("plain"), "ignored") as any)).toBe("plain");
+    expect(await run(withSpan(succeed("plain"), "ignored"))).toBe("plain");
   });
 
   test("fluent .withSpan works", async () => {
     const tracer = new TestTracer();
-    const program = (succeed(7) as any).withSpan("fluent-op");
-    expect(await run(provide(program, Tracer, tracer) as any)).toBe(7);
+    const program = succeed(7).withSpan("fluent-op");
+    expect(await run(provide(program, Tracer, tracer))).toBe(7);
     expect(tracer.find("fluent-op")!.status).toEqual({ ok: true });
   });
 

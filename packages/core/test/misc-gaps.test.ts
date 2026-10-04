@@ -143,7 +143,7 @@ describe("Layer.memoize (standalone function)", () => {
       sync(() => {
         builds++;
         return { Db: { query: () => sync(() => `db:${builds}`) } as Db };
-      }) as any,
+      }),
     );
 
     const program = eff(function* () {
@@ -151,8 +151,8 @@ describe("Layer.memoize (standalone function)", () => {
       return yield* db.query("x");
     });
 
-    expect(await run(program.with(DbLive as any) as any)).toBe("db:1");
-    expect(await run(program.with(DbLive as any) as any)).toBe("db:2");
+    expect(await run(program.with(DbLive))).toBe("db:1");
+    expect(await run(program.with(DbLive))).toBe("db:2");
     expect(builds).toBe(2);
   });
 });

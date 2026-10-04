@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { runFiber, runSync, SyncScheduler } from "../src";
+import { runFiber, runSync, SyncScheduler, type Eff } from "../src";
 import { InProcessDeferred, type DeferredState } from "../src/deferred";
 
 test("canceled waits release their registrations while the deferred stays pending", () => {
@@ -26,7 +26,7 @@ test("canceling one waiter preserves failure delivery to the remaining waiters",
   const deferred = new InProcessDeferred<number, string>();
   const scheduler = new SyncScheduler();
   const first = runFiber(
-    deferred.await.catch((error) => {
+    deferred.await.catch((error): Eff<never, never> => {
       throw error;
     }),
     scheduler,
@@ -39,6 +39,6 @@ test("canceling one waiter preserves failure delivery to the remaining waiters",
   runSync(deferred.fail("failed"));
   scheduler.flush();
   expect(canceled.interrupted).toBe(true);
-  expect(first.result).toEqual({ ok: false, cause: { _tag: "Die", defect: "failed" } });
+  expect<unknown>(first.result).toEqual({ ok: false, cause: { _tag: "Die", defect: "failed" } });
   expect(last.result).toEqual(first.result);
 });

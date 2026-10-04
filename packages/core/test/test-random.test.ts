@@ -1,5 +1,6 @@
 import { describe, test, expect } from "bun:test";
 import { provide, run, runSync, Random, TestRandom } from "../src";
+import { runUnchecked } from "./run-unchecked";
 
 describe("TestRandom — seeded determinism", () => {
   test("same seed → same sequence", () => {
@@ -33,7 +34,7 @@ describe("TestRandom — seeded determinism", () => {
   test("nextInt is bounded", async () => {
     const r = new TestRandom(99);
     const program = provide(
-      Random.get.flatMap((rnd: any) => rnd.nextInt(10)),
+      Random.get.flatMap((rnd) => rnd.nextInt(10)),
       Random,
       r,
     );
@@ -47,7 +48,7 @@ describe("TestRandom — seeded determinism", () => {
   test("nextRange honors min/max", async () => {
     const r = new TestRandom(7);
     const program = provide(
-      Random.get.flatMap((rnd: any) => rnd.nextRange(50, 60)),
+      Random.get.flatMap((rnd) => rnd.nextRange(50, 60)),
       Random,
       r,
     );
@@ -119,7 +120,9 @@ describe("TestRandom — seeded determinism", () => {
   });
 
   test("real Random is the default — no provide() needed", async () => {
-    const v = await run(Random.get.flatMap((rnd: any) => rnd.next()));
+    // Random.get still asks for Random in its type; this test checks the
+    // runtime falls back to the real one when nothing is provided.
+    const v = await runUnchecked(Random.get.flatMap((rnd) => rnd.next()));
     expect(v).toBeGreaterThanOrEqual(0);
     expect(v).toBeLessThan(1);
   });

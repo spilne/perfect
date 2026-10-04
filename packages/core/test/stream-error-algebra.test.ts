@@ -15,12 +15,12 @@ describe("Stream error algebra", () => {
     let recoveryFinalized = 0;
     const source = Stream.of(1)
       .concat(Stream.fail(new SourceError({ message: "failed" })))
-      .onFinalize(sync(() => sourceFinalized++));
+      .onFinalize(sync(() => void sourceFinalized++));
 
     const values = await run(
       source
         .catch((error) =>
-          Stream.of(error.message.length).onFinalize(sync(() => recoveryFinalized++)),
+          Stream.of(error.message.length).onFinalize(sync(() => void recoveryFinalized++)),
         )
         .toArray(),
     );
@@ -125,7 +125,7 @@ describe("Stream error algebra", () => {
 
   test("rethrow fails on a Left that opens a chunk", async () => {
     const exit = await runExit(
-      Stream.of(Either.left("first"), Either.right(1)).rethrow().toArray(),
+      Stream.of<Either<string, number>>(Either.left("first"), Either.right(1)).rethrow().toArray(),
     );
     expect(exit._tag === "Failure" && Cause.firstFail(exit.cause)?.value).toBe("first");
   });
@@ -144,7 +144,7 @@ describe("Stream error algebra", () => {
   test("rethrow runs the source finalizer when it fails", async () => {
     let finalized = 0;
     const exit = await runExit(
-      Stream.of(Either.right(1), Either.left("stop"))
+      Stream.of<Either<string, number>>(Either.right(1), Either.left("stop"))
         .onFinalize(sync(() => void finalized++))
         .rethrow()
         .drain(),
@@ -156,7 +156,7 @@ describe("Stream error algebra", () => {
   test("catchSome leaves unhandled failures intact", async () => {
     const exit = await runExit(
       Stream.fail(new OtherError({ message: "other" }))
-        .catchSome((error) =>
+        .catchSome((error: SourceError | OtherError) =>
           error instanceof SourceError ? Stream.succeed(error.message) : undefined,
         )
         .toArray(),
@@ -171,7 +171,7 @@ describe("Stream error algebra", () => {
     const exit = await runExit(
       Stream.of(1)
         .concat(Stream.fail(error))
-        .onFinalize(sync(() => finalized++))
+        .onFinalize(sync(() => void finalized++))
         .orDie()
         .tap((value) => emitted.push(value))
         .drain(),

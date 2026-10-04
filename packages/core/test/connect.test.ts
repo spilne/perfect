@@ -211,7 +211,10 @@ describe("OffsetTracker — parallel-safe commit ordering", () => {
 function makeEnvelope<T>(value: T, acked: T[]): Envelope<T> {
   return {
     value,
-    ack: () => sync(() => acked.push(value)),
+    ack: () =>
+      sync(() => {
+        acked.push(value);
+      }),
     nack: () => succeed(undefined),
     metadata: {},
   };
@@ -251,7 +254,10 @@ describe("autoCommitBatchWithin", () => {
     let current: number[] = [];
     const envelopes = [1, 2, 3, 4].map((n) => ({
       value: n,
-      ack: () => sync(() => current.push(n)),
+      ack: () =>
+        sync(() => {
+          current.push(n);
+        }),
       nack: () => succeed(undefined),
       metadata: {},
     }));
@@ -284,7 +290,7 @@ describe("autoCommitBatchWithin", () => {
 
     const result = await run(
       Stream.of(envelope)
-        .through(autoCommitBatchWithin<number>(1, 1000))
+        .through(autoCommitBatchWithin<number, Throws<AckError>>(1, 1000))
         .toArray()
         .map(() => "unexpected")
         .catchTag("AckError", (error) => succeed((error.cause as Error).message)),

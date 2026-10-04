@@ -15,8 +15,14 @@ describe("Stream.retryFrom", () => {
         const attempt = ++builds;
         const source =
           attempt < 3 ? Stream.fail(new RetrySourceError({ attempt })) : Stream.succeed(42);
-        return source.onFinalize(sync(() => finalizers++));
-      }, RetryPolicy.recurs(4)).toArray(),
+        return source.onFinalize(
+          sync(() => {
+            finalizers++;
+          }),
+        );
+      }, RetryPolicy.recurs(4))
+        .toArray()
+        .orDie(),
     );
 
     expect(values).toEqual([42]);
@@ -35,8 +41,14 @@ describe("Stream.retryFrom", () => {
           attempt === 1
             ? Stream.succeed(1).concat(Stream.fail(new RetrySourceError({ attempt })))
             : Stream.succeed(2);
-        return source.onFinalize(sync(() => finalizers++));
-      }, RetryPolicy.recurs(2)).toArray(),
+        return source.onFinalize(
+          sync(() => {
+            finalizers++;
+          }),
+        );
+      }, RetryPolicy.recurs(2))
+        .toArray()
+        .orDie(),
     );
 
     expect(values).toEqual([1, 2]);
@@ -50,7 +62,11 @@ describe("Stream.retryFrom", () => {
     const exit = await runExit(
       Stream.retryFrom(() => {
         const attempt = ++builds;
-        return Stream.fail(new RetrySourceError({ attempt })).onFinalize(sync(() => finalizers++));
+        return Stream.fail(new RetrySourceError({ attempt })).onFinalize(
+          sync(() => {
+            finalizers++;
+          }),
+        );
       }, RetryPolicy.recurs(2)).toArray(),
     );
 
@@ -66,7 +82,12 @@ describe("Stream.retryFrom", () => {
     let finalizers = 0;
     const values = await run(
       Stream.retryFrom(
-        () => Stream.repeatValue(1).onFinalize(sync(() => finalizers++)),
+        () =>
+          Stream.repeatValue(1).onFinalize(
+            sync(() => {
+              finalizers++;
+            }),
+          ),
         RetryPolicy.recurs(2),
       )
         .take(1)
