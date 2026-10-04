@@ -1,5 +1,10 @@
 version: 2
 
+# Every ecosystem commits as "deps: ..." so updates get their own
+# "Dependencies" section in CHANGELOG.md (see conventionalCommits in nx.json).
+# With the usual "chore(deps): ..." they were hidden, and a release made only
+# of updates said "version bump only".
+
 updates:
   # JS/TS dependencies. One entry at the root covers the whole Bun workspace
   # (packages/* and templates/*). Bun lives inside the npm_and_yarn ecosystem,
@@ -16,6 +21,8 @@ updates:
       interval: "weekly"
       day: "monday"
     open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps"
     groups:
       dev-minor-patch:
         dependency-type: "development"
@@ -34,6 +41,8 @@ updates:
       interval: "weekly"
       day: "monday"
     open-pull-requests-limit: 3
+    commit-message:
+      prefix: "deps"
     groups:
       swc:
         patterns: ["swc*"]
@@ -44,6 +53,8 @@ updates:
       interval: "weekly"
       day: "monday"
     open-pull-requests-limit: 3
+    commit-message:
+      prefix: "deps"
     groups:
       actions:
         patterns: ["*"]

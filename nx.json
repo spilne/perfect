@@ -46,6 +46,14 @@
   },
   "analytics": false,
   "release": {
+    "conventionalCommits": {
+      "types": {
+        "deps": {
+          "semverBump": "patch",
+          "changelog": { "title": "📦 Dependencies" }
+        }
+      }
+    },
     "projects": ["packages/*", "templates/*", "!@spilne/perfect-integration"],
     "projectsRelationship": "fixed",
     "releaseTag": {

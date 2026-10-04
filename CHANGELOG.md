@@ -1,6 +1,8 @@
 ## 0.3.1 (2026-10-04)
 
-This was a version bump only, there were no code changes.
+### 📦 Dependencies
+
+- bump dependencies, actions and swc_core ([b897e94](https://github.com/spilne/perfect/commit/b897e94))
 
 ## 0.3.0 (2026-10-03)
 
