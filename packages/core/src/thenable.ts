@@ -7,5 +7,3 @@
 // Promise.resolve / Promise.all, runs it too. Without this import, use
 // run(eff) or eff.run().
 import "./syntax/thenable.js";
-
-export {};
