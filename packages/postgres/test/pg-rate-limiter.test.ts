@@ -54,7 +54,7 @@ describe("PgRateLimiter (fake db)", () => {
     });
     const rl = new PgRateLimiter({ db, key: "api", limit: 2, windowMs: 100 });
 
-    const granted = await run(rl.tryAcquire);
+    const granted = await run(rl.tryAcquire.orDie());
     expect(granted).toBe(true);
     // The lock comes first, so two callers can't both see room for one more.
     expect(fake.queries.findIndex((q) => q.sql.includes("pg_advisory_xact_lock"))).toBeLessThan(
@@ -77,8 +77,10 @@ describe("PgRateLimiter (fake db)", () => {
     expect(exit._tag).toBe("Left");
     if (exit._tag === "Left") {
       expect(exit.left._tag).toBe("RateLimitExceeded");
-      // oldest (9960) + window (100) - now (10000), all from the database
-      expect(exit.left.retryAfterMs).toBe(60);
+      if (exit.left._tag === "RateLimitExceeded") {
+        // oldest (9960) + window (100) - now (10000), all from the database
+        expect(exit.left.retryAfterMs).toBe(60);
+      }
     }
     // Rejected — no slot row inserted
     expect(fake.allSql).not.toContain("INSERT INTO");
@@ -90,7 +92,7 @@ describe("PgRateLimiter (fake db)", () => {
       return [];
     });
     const rl = new PgRateLimiter({ db, key: "api", limit: 5, windowMs: 100 });
-    expect(await run(rl.remaining)).toBe(2);
+    expect(await run(rl.remaining.orDie())).toBe(2);
   });
 
   it("nextSlotIn is 0 when a slot is free", async () => {
@@ -99,6 +101,6 @@ describe("PgRateLimiter (fake db)", () => {
       return [];
     });
     const rl = new PgRateLimiter({ db, key: "api", limit: 1, windowMs: 100 });
-    expect(await run(rl.nextSlotIn)).toBe(0);
+    expect(await run(rl.nextSlotIn.orDie())).toBe(0);
   });
 });

@@ -17,6 +17,7 @@ import {
   RetryDecision,
   httpRequestText,
 } from "../src";
+import { runUnchecked } from "./run-unchecked";
 
 class ScriptedTransport implements HttpTransport {
   public calls = 0;
@@ -26,7 +27,7 @@ class ScriptedTransport implements HttpTransport {
       const next = this.script[this.calls++];
       if (next === undefined) throw new Error("script exhausted");
       return next;
-    }).flatMap((r) => (r instanceof Response ? succeed(r) : (fail(r) as any)));
+    }).flatMap((r) => (r instanceof Response ? succeed(r) : fail(r)));
   }
 }
 
@@ -38,7 +39,7 @@ describe("withRetryAll — full outcome ADT", () => {
       new Response("ok"),
     ]);
     const result = await run(
-      withRetryAll(httpRequestText({ url: "/x", transport: t }), { baseDelayMs: 1 }),
+      withRetryAll(httpRequestText({ url: "/x", transport: t }), { baseDelayMs: 1 }).orDie(),
     );
     expect(result).toBe("ok");
     expect(t.calls).toBe(3);
@@ -51,11 +52,11 @@ describe("withRetryAll — full outcome ADT", () => {
       new Response("", { status: 503 }),
     ]);
     await expect(
-      run(
+      runUnchecked(
         withRetryAll(httpRequestText({ url: "/x", transport: t }), {
           maxRetries: 2,
           baseDelayMs: 1,
-        }) as any,
+        }),
       ),
     ).rejects.toMatchObject({ _tag: "HttpStatusError", status: 503 });
     expect(t.calls).toBe(3); // 1 initial + 2 retries
@@ -64,7 +65,7 @@ describe("withRetryAll — full outcome ADT", () => {
   test("can stop on specific HTTP status", async () => {
     const t = new ScriptedTransport([new Response("", { status: 404 }), new Response("ok")]);
     await expect(
-      run(
+      runUnchecked(
         withRetryAll(httpRequestText({ url: "/x", transport: t }), {
           baseDelayMs: 1,
           shouldRetry: (r) => {
@@ -73,7 +74,7 @@ describe("withRetryAll — full outcome ADT", () => {
             }
             return true;
           },
-        }) as any,
+        }),
       ),
     ).rejects.toMatchObject({ _tag: "HttpStatusError", status: 404 });
     expect(t.calls).toBe(1);
@@ -85,7 +86,7 @@ describe("withRetryAll — full outcome ADT", () => {
       new Response("ok"),
     ]);
     const result = await run(
-      withRetryAll(httpRequestText({ url: "/x", transport: t }), { baseDelayMs: 1 }),
+      withRetryAll(httpRequestText({ url: "/x", transport: t }), { baseDelayMs: 1 }).orDie(),
     );
     expect(result).toBe("ok");
     expect(t.calls).toBe(2);
@@ -94,10 +95,10 @@ describe("withRetryAll — full outcome ADT", () => {
   test("policy override is honored", async () => {
     const t = new ScriptedTransport([new Response("", { status: 503 }), new Response("ok")]);
     await expect(
-      run(
+      runUnchecked(
         withRetryAll(httpRequestText({ url: "/x", transport: t }), {
           policy: RetryPolicy.recurs(0),
-        }) as any,
+        }),
       ),
     ).rejects.toMatchObject({ _tag: "HttpStatusError", status: 503 });
     expect(t.calls).toBe(1);
@@ -117,15 +118,15 @@ describe("withRetryAll — full outcome ADT", () => {
     ]);
 
     // Use httpRequestText + JSON.parse to keep things simple here
-    const eff = (httpRequestText({ url: "/x", transport: t }) as any).map(
-      (s: string) => JSON.parse(s) as { status: string },
+    const eff = httpRequestText({ url: "/x", transport: t }).map(
+      (s) => JSON.parse(s) as { status: string },
     );
 
     const result = await run(
       withRetryAll(eff, {
         baseDelayMs: 1,
         shouldRetry: (r) => (RetryAttempt.isSuccess(r) ? r.value.status !== "done" : true),
-      }) as any,
+      }).orDie(),
     );
     expect(result).toEqual({ status: "done" });
     expect(t.calls).toBe(3);
@@ -136,15 +137,15 @@ describe("withRetryAll — full outcome ADT", () => {
     const bug = sync(() => {
       calls++;
       throw new Error("bug");
-    }) as any;
+    });
     await expect(
-      run(
+      runUnchecked(
         withRetryAll(bug, {
           baseDelayMs: 1,
           maxRetries: 2,
           // retry thrown as well
           shouldRetry: (r) => r._tag !== "success",
-        }) as any,
+        }),
       ),
     ).rejects.toBeInstanceOf(Error);
     expect(calls).toBe(3); // 1 + 2 retries
@@ -168,11 +169,11 @@ describe("withRetryAll — full outcome ADT", () => {
       new Response("", { status: 503 }),
     ]);
     await expect(
-      run(
+      runUnchecked(
         withRetryAll(httpRequestText({ url: "/x", transport: t }), {
           policy: RetryPolicy.recurs(1),
           shouldRetry: (r) => RetryAttempt.isHttpError(r) && HTTP_RETRYABLE(r.error),
-        }) as any,
+        }),
       ),
     ).rejects.toMatchObject({ _tag: "HttpStatusError", status: 503 });
     expect(t.calls).toBe(2);
@@ -181,7 +182,7 @@ describe("withRetryAll — full outcome ADT", () => {
   test("retryHttp uses HTTP_RETRYABLE typed defaults", async () => {
     const t = new ScriptedTransport([new Response("", { status: 503 }), new Response("ok")]);
     const result = await run(
-      retryHttp(httpRequestText({ url: "/x", transport: t }), { baseDelayMs: 1 }),
+      retryHttp(httpRequestText({ url: "/x", transport: t }), { baseDelayMs: 1 }).orDie(),
     );
     expect(result).toBe("ok");
     expect(t.calls).toBe(2);
@@ -190,7 +191,7 @@ describe("withRetryAll — full outcome ADT", () => {
   test("Retry.http namespace helper uses HTTP retry defaults", async () => {
     const t = new ScriptedTransport([new Response("", { status: 503 }), new Response("ok")]);
     const result = await run(
-      Retry.http(httpRequestText({ url: "/x", transport: t }), { baseDelayMs: 1 }) as any,
+      Retry.http(httpRequestText({ url: "/x", transport: t }), { baseDelayMs: 1 }).orDie(),
     );
     expect(result).toBe("ok");
     expect(t.calls).toBe(2);
@@ -207,8 +208,8 @@ describe("withRetryAllBy — handler style", () => {
         headers: { "content-type": "application/json" },
       }),
     ]);
-    const eff = (httpRequestText({ url: "/x", transport: t }) as any).map(
-      (s: string) => JSON.parse(s) as { state: string },
+    const eff = httpRequestText({ url: "/x", transport: t }).map(
+      (s) => JSON.parse(s) as { state: string },
     );
 
     const result = await run(
@@ -218,7 +219,7 @@ describe("withRetryAllBy — handler style", () => {
           RetryAttempt.isSuccess(r) && r.value.state === "pending"
             ? RetryDecision.retry()
             : RetryDecision.stop(),
-      }) as any,
+      }).orDie(),
     );
     expect(result).toEqual({ state: "done" });
     expect(t.calls).toBe(2);
@@ -227,13 +228,13 @@ describe("withRetryAllBy — handler style", () => {
   test("can stop on retryable HTTP errors", async () => {
     const t = new ScriptedTransport([new Response("", { status: 503 }), new Response("ok")]);
     await expect(
-      run(
+      runUnchecked(
         withRetryAllBy(httpRequestText({ url: "/x", transport: t }), {
           baseDelayMs: 1,
           policy: RetryPolicy.recurs(0),
           handle: (r) =>
             RetryAttempt.isHttpError(r) ? RetryDecision.retry() : RetryDecision.stop(),
-        }) as any,
+        }),
       ),
     ).rejects.toMatchObject({ _tag: "HttpStatusError", status: 503 });
     expect(t.calls).toBe(1);

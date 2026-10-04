@@ -13,6 +13,7 @@ import {
   httpStreamSSE,
   type ResponseParser,
 } from "../src";
+import { runUnchecked } from "./run-unchecked";
 
 /**
  * Build a `Response` whose body is a `ReadableStream` pushing the given chunks
@@ -99,20 +100,20 @@ describe("httpStreamText", () => {
 
   test("emits decoded chunks as they arrive", async () => {
     const transport = new OneShotTransport(() => streamingResponse(["hello ", "world", "!"]));
-    const collected = await run(httpStreamText({ url: "/x", transport }).toArray());
+    const collected = await run(httpStreamText({ url: "/x", transport }).toArray().orDie());
     expect(collected.join("")).toBe("hello world!");
   });
 
   test("empty body closes the stream with no emits", async () => {
     const transport = new OneShotTransport(() => new Response(null));
-    const collected = await run(httpStreamText({ url: "/x", transport }).toArray());
+    const collected = await run(httpStreamText({ url: "/x", transport }).toArray().orDie());
     expect(collected).toEqual([]);
   });
 
   test("HTTP 500 → typed HttpStatusError", async () => {
     const transport = new OneShotTransport(() => new Response("boom", { status: 500 }));
     await expect(
-      run(httpStreamText({ url: "/x", transport }).toArray() as any),
+      runUnchecked(httpStreamText({ url: "/x", transport }).toArray()),
     ).rejects.toMatchObject({ _tag: "HttpStatusError", status: 500 });
   });
 });
@@ -125,13 +126,13 @@ describe("httpStreamLines", () => {
     const transport = new OneShotTransport(() =>
       streamingResponse(["line one\r\nline ", "two\nline three\n", "tail"]),
     );
-    const lines = await run(httpStreamLines({ url: "/x", transport }).toArray());
+    const lines = await run(httpStreamLines({ url: "/x", transport }).toArray().orDie());
     expect(lines).toEqual(["line one", "line two", "line three", "tail"]);
   });
 
   test("empty body → no lines", async () => {
     const transport = new OneShotTransport(() => new Response(""));
-    const lines = await run(httpStreamLines({ url: "/x", transport }).toArray());
+    const lines = await run(httpStreamLines({ url: "/x", transport }).toArray().orDie());
     expect(lines).toEqual([]);
   });
 });
@@ -158,7 +159,7 @@ describe("httpStreamNDJSON", () => {
     ];
     const transport = new OneShotTransport(() => streamingResponse(body));
     const users = await run(
-      httpStreamNDJSON({ url: "/x", transport, schema: UserParser }).toArray(),
+      httpStreamNDJSON({ url: "/x", transport, schema: UserParser }).toArray().orDie(),
     );
     expect(users).toEqual([
       { id: 1, name: "alice" },
@@ -172,7 +173,7 @@ describe("httpStreamNDJSON", () => {
       streamingResponse([`{"id":1,"name":"a"}\n\n\n{"id":2,"name":"b"}\n`]),
     );
     const users = await run(
-      httpStreamNDJSON({ url: "/x", transport, schema: UserParser }).toArray(),
+      httpStreamNDJSON({ url: "/x", transport, schema: UserParser }).toArray().orDie(),
     );
     expect(users.length).toBe(2);
   });
@@ -182,7 +183,7 @@ describe("httpStreamNDJSON", () => {
       streamingResponse([`{"id":1,"name":"a"}\nnot json\n{"id":2,"name":"b"}\n`]),
     );
     await expect(
-      run(httpStreamNDJSON({ url: "/x", transport, schema: UserParser }).toArray() as any),
+      runUnchecked(httpStreamNDJSON({ url: "/x", transport, schema: UserParser }).toArray()),
     ).rejects.toMatchObject({ _tag: "HttpParseError" });
   });
 
@@ -191,7 +192,7 @@ describe("httpStreamNDJSON", () => {
       streamingResponse([`{"id":1,"name":"a"}\n{"wrong":"shape"}\n`]),
     );
     await expect(
-      run(httpStreamNDJSON({ url: "/x", transport, schema: UserParser }).toArray() as any),
+      runUnchecked(httpStreamNDJSON({ url: "/x", transport, schema: UserParser }).toArray()),
     ).rejects.toMatchObject({ _tag: "HttpParseError" });
   });
 });
@@ -202,7 +203,7 @@ describe("httpStreamSSE", () => {
   test("parses basic message events", async () => {
     const body = ["data: hello\n", "\n", "data: world\n", "\n"];
     const transport = new OneShotTransport(() => streamingResponse(body));
-    const events = await run(httpStreamSSE({ url: "/x", transport }).toArray());
+    const events = await run(httpStreamSSE({ url: "/x", transport }).toArray().orDie());
     expect(events).toEqual([
       { event: "message", data: "hello", id: undefined, retry: undefined },
       { event: "message", data: "world", id: undefined, retry: undefined },
@@ -212,7 +213,7 @@ describe("httpStreamSSE", () => {
   test("multi-line data joined with \\n per spec", async () => {
     const body = ["event: msg\n", "data: line1\n", "data: line2\n", "data: line3\n", "\n"];
     const transport = new OneShotTransport(() => streamingResponse(body));
-    const events = await run(httpStreamSSE({ url: "/x", transport }).toArray());
+    const events = await run(httpStreamSSE({ url: "/x", transport }).toArray().orDie());
     expect(events.length).toBe(1);
     expect(events[0]!.event).toBe("msg");
     expect(events[0]!.data).toBe("line1\nline2\nline3");
@@ -221,7 +222,7 @@ describe("httpStreamSSE", () => {
   test("id + retry fields populate", async () => {
     const body = ["id: 42\n", "retry: 5000\n", "event: ping\n", "data: hi\n", "\n"];
     const transport = new OneShotTransport(() => streamingResponse(body));
-    const events = await run(httpStreamSSE({ url: "/x", transport }).toArray());
+    const events = await run(httpStreamSSE({ url: "/x", transport }).toArray().orDie());
     expect(events[0]).toEqual({
       event: "ping",
       data: "hi",
@@ -233,7 +234,7 @@ describe("httpStreamSSE", () => {
   test("comment lines (starting with :) are ignored", async () => {
     const body = [": heartbeat\n", "data: real\n", "\n"];
     const transport = new OneShotTransport(() => streamingResponse(body));
-    const events = await run(httpStreamSSE({ url: "/x", transport }).toArray());
+    const events = await run(httpStreamSSE({ url: "/x", transport }).toArray().orDie());
     expect(events.length).toBe(1);
     expect(events[0]!.data).toBe("real");
   });
@@ -242,7 +243,7 @@ describe("httpStreamSSE", () => {
     // No trailing blank line — server closed mid-event
     const body = ["data: orphan\n"];
     const transport = new OneShotTransport(() => streamingResponse(body));
-    const events = await run(httpStreamSSE({ url: "/x", transport }).toArray());
+    const events = await run(httpStreamSSE({ url: "/x", transport }).toArray().orDie());
     expect(events.length).toBe(1);
     expect(events[0]!.data).toBe("orphan");
   });
@@ -253,7 +254,7 @@ describe("httpStreamSSE", () => {
 describe("take(n) terminates early", () => {
   test("httpStreamLines.take(2) stops after 2 lines", async () => {
     const transport = new OneShotTransport(() => streamingResponse(["a\nb\nc\nd\ne\n"]));
-    const lines = await run(httpStreamLines({ url: "/x", transport }).take(2).toArray());
+    const lines = await run(httpStreamLines({ url: "/x", transport }).take(2).toArray().orDie());
     expect(lines).toEqual(["a", "b"]);
   });
 });

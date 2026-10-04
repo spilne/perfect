@@ -38,7 +38,7 @@ class OneShot implements HttpTransport {
 describe("httpStream + ad-hoc pipe composition", () => {
   test("httpStream gives raw Uint8Array chunks", async () => {
     const transport = new OneShot(() => streamingResponse(["hello ", "world"]));
-    const bytes = await run(httpStream({ url: "/x", transport }).toArray());
+    const bytes = await run(httpStream({ url: "/x", transport }).toArray().orDie());
     const combined = new Uint8Array(bytes.reduce((n, b) => n + b.length, 0));
     let off = 0;
     for (const b of bytes) {
@@ -52,14 +52,17 @@ describe("httpStream + ad-hoc pipe composition", () => {
     const make = () => new OneShot(() => streamingResponse(["a\nb\nc\n"]));
 
     // Named helper
-    const viaHelper = await run(httpStreamLines({ url: "/x", transport: make() }).toArray());
+    const viaHelper = await run(
+      httpStreamLines({ url: "/x", transport: make() }).toArray().orDie(),
+    );
 
     // Same pipeline, hand-composed
     const viaPipes = await run(
       httpStream({ url: "/x", transport: make() })
         .through(Pipes.utf8Decode)
         .through(Pipes.lines)
-        .toArray(),
+        .toArray()
+        .orDie(),
     );
 
     expect(viaHelper).toEqual(viaPipes);
@@ -74,7 +77,8 @@ describe("httpStream + ad-hoc pipe composition", () => {
         .through(Pipes.utf8Decode)
         .through(Pipes.lines)
         .through(parseSSE)
-        .toArray(),
+        .toArray()
+        .orDie(),
     );
     expect(events.length).toBe(1);
     expect(events[0]).toMatchObject({ event: "ping", data: "hi" });
@@ -94,7 +98,8 @@ describe("httpStream + ad-hoc pipe composition", () => {
         .through(Pipes.utf8Decode)
         .through(Pipes.lines)
         .through(parseNDJSON(parser))
-        .toArray(),
+        .toArray()
+        .orDie(),
     );
     expect(rows).toEqual([{ n: 1 }, { n: 2 }, { n: 3 }]);
   });
@@ -102,7 +107,7 @@ describe("httpStream + ad-hoc pipe composition", () => {
   test("take(n) short-circuits through the whole pipe chain", async () => {
     const transport = new OneShot(() => streamingResponse(["a\n", "b\n", "c\n", "d\n", "e\n"]));
     const first2 = await run(
-      httpStreamText({ url: "/x", transport }).through(Pipes.lines).take(2).toArray(),
+      httpStreamText({ url: "/x", transport }).through(Pipes.lines).take(2).toArray().orDie(),
     );
     expect(first2).toEqual(["a", "b"]);
   });

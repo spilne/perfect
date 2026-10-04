@@ -1,7 +1,7 @@
 // HttpClient as a Perfect service — Layer-based DI.
 
 import { describe, test, expect } from "bun:test";
-import { type Eff, type Throws, eff, succeed, sync, run } from "@spilne/perfect-core";
+import { type Eff, type Throws, die, eff, succeed, sync, run } from "@spilne/perfect-core";
 import {
   DefaultHttpClient,
   type HttpClient,
@@ -46,34 +46,31 @@ describe("HttpClientService — Layer-based DI", () => {
       return yield* client.get("/u/7", UserParser);
     });
 
-    const result = await run(program.with(HttpClientLive) as any);
+    const result = await run(program.with(HttpClientLive).orDie());
     expect(result).toEqual({ id: 7 });
   });
 
   test("swap in a mock client for tests via a different layer", async () => {
     let called = 0;
+    // Only get() is called below; the other methods just fill out the interface.
+    const unused = () => die(new Error("not used in this test"));
     const mockClient: HttpClient = {
-      get: () =>
+      get: <T>() =>
         sync(() => {
           called++;
-          return { id: 99 } as User;
-        }) as any,
-      post: () => succeed(null) as any,
-      put: () => succeed(null) as any,
-      patch: () => succeed(null) as any,
-      delete: () => succeed(null) as any,
-      getJson: () => succeed(null) as any,
-      postJson: () => succeed(null) as any,
-      getText: () => succeed("mock") as any,
-      getResponse: () =>
-        succeed({
-          status: 200,
-          headers: new Headers(),
-          contentType: null,
-          contentLength: null,
-          body: null,
-        }) as any,
-      request: () => succeed(null) as any,
+          // The fake ignores the schema and always answers with a User.
+          return { id: 99 } as T;
+        }),
+      post: unused,
+      postMultipart: unused,
+      put: unused,
+      patch: unused,
+      delete: unused,
+      getJson: unused,
+      postJson: unused,
+      getText: unused,
+      getResponse: unused,
+      request: unused,
       withOverrides: () => mockClient,
     };
 
@@ -82,7 +79,7 @@ describe("HttpClientService — Layer-based DI", () => {
       return yield* client.get("/anything", UserParser);
     });
 
-    const result = await run(program.with(succeed({ HttpClient: mockClient })) as any);
+    const result = await run(program.with(succeed({ HttpClient: mockClient })).orDie());
     expect(result).toEqual({ id: 99 });
     expect(called).toBe(1);
   });

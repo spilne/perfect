@@ -3,5 +3,8 @@
   "compilerOptions": {
     "noEmit": true
   },
-  "include": ["src", "test"]
+  "include": ["src", "test"],
+  // The fixtures are source text fed to the rewriter, not code that has to
+  // type-check on its own.
+  "exclude": ["test/fixtures"]
 }

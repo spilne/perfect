@@ -1,4 +1,5 @@
 import { describe, test, expect } from "bun:test";
+import type { Eff } from "../../core/src";
 import { rewriteEffBlocks } from "../src/rewrite";
 
 describe("eff($) rewriter", () => {
@@ -140,7 +141,7 @@ describe("integration — desugared code runs", () => {
         `$(${expression}); return 11;`,
       ]) {
         const output = rewriteEffBlocks(`eff(($) => { ${body} })`);
-        const program = new Function("succeed", `return ${output}`)(succeed);
+        const program: Eff<number, never> = new Function("succeed", `return ${output}`)(succeed);
         expect(await run(program)).toBe(11);
       }
     }

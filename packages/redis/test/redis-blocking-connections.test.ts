@@ -36,21 +36,21 @@ describe("blocking Redis commands reuse their connection", () => {
   test("a take that polls several times opens one connection", async () => {
     const fake = fakeRedis(5);
     const queue = RedisQueue.make<number>({ redis: fake.redis, key: "jobs", pollIntervalMs: 1 });
-    expect(await run(queue.take())).toBe(0);
+    expect(await run(queue.take().orDie())).toBe(0);
     expect(fake.opened()).toBe(1);
   });
 
   test("takes one after another share the connection", async () => {
     const fake = fakeRedis(0);
     const queue = RedisQueue.make<number>({ redis: fake.redis, key: "jobs", pollIntervalMs: 1 });
-    for (let i = 0; i < 10; i++) await run(queue.take());
+    for (let i = 0; i < 10; i++) await run(queue.take().orDie());
     expect(fake.opened()).toBe(1);
   });
 
   test("an idle connection is closed after a short while", async () => {
     const fake = fakeRedis(0);
     const queue = RedisQueue.make<number>({ redis: fake.redis, key: "jobs", pollIntervalMs: 1 });
-    await run(queue.take());
+    await run(queue.take().orDie());
     expect(fake.closed()).toBe(0);
     await new Promise((r) => setTimeout(r, 1_100));
     expect(fake.closed()).toBe(1);

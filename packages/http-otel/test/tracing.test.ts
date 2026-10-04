@@ -12,16 +12,7 @@ import {
   ROOT_CONTEXT,
   propagation,
 } from "@opentelemetry/api";
-import {
-  type Eff,
-  type Throws,
-  async,
-  succeed,
-  fail,
-  sync,
-  run,
-  runFiber,
-} from "@spilne/perfect-core";
+import { type Eff, type Throws, async, succeed, fail, sync, run } from "@spilne/perfect-core";
 import {
   type HttpClientError,
   type HttpRequestOptions,
@@ -37,6 +28,7 @@ import {
   redactHeaders,
   redactUrl,
 } from "../src";
+import { runFiberUnchecked, runUnchecked } from "./run-unchecked";
 
 // ── Minimal in-memory Tracer ──────────────────────────────────────
 
@@ -200,7 +192,7 @@ describe("tracingMiddleware", () => {
       middleware: [tracingMiddleware({ tracer })],
     });
 
-    await run(client.get("/users/1", UserParser, { tag: "user.lookup" }));
+    await run(client.get("/users/1", UserParser, { tag: "user.lookup" }).orDie());
 
     expect(spans).toHaveLength(1);
     const span = spans[0]!;
@@ -222,7 +214,7 @@ describe("tracingMiddleware", () => {
       middleware: [tracingMiddleware({ tracer })],
     });
 
-    await expect(run(client.get("/u", UserParser) as any)).rejects.toMatchObject({
+    await expect(runUnchecked(client.get("/u", UserParser))).rejects.toMatchObject({
       _tag: "HttpStatusError",
       status: 503,
     });
@@ -246,7 +238,7 @@ describe("tracingMiddleware", () => {
       middleware: [tracingMiddleware({ tracer })],
     });
 
-    const fiber = runFiber(client.get("/u", UserParser) as any);
+    const fiber = runFiberUnchecked(client.get("/u", UserParser));
     for (let i = 0; i < 20 && spans.length === 0; i++) {
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
@@ -275,8 +267,8 @@ describe("tracingMiddleware", () => {
       ],
     });
 
-    await run(client.get("/a", UserParser));
-    await run(client.get("/b", UserParser, { tag: "skip" }));
+    await run(client.get("/a", UserParser).orDie());
+    await run(client.get("/b", UserParser, { tag: "skip" }).orDie());
     expect(spans).toHaveLength(1);
     expect(spans[0]!.name).toBe("CUSTOM GET");
   });
@@ -288,7 +280,7 @@ describe("tracingMiddleware", () => {
       transport,
       middleware: [tracingMiddleware({ tracer })],
     });
-    await run(client.get("/search?q=secret&user=abc", UserParser));
+    await run(client.get("/search?q=secret&user=abc", UserParser).orDie());
     expect(spans[0]!.attributes["url.full"]).toBe("/search");
   });
 
@@ -299,7 +291,7 @@ describe("tracingMiddleware", () => {
       transport,
       middleware: [tracingMiddleware({ tracer, includeQuery: true })],
     });
-    await run(client.get("/search?q=x", UserParser));
+    await run(client.get("/search?q=x", UserParser).orDie());
     expect(spans[0]!.attributes["url.full"]).toBe("/search?q=x");
   });
 });
@@ -316,7 +308,7 @@ describe("TracingFetchTransport — W3C traceparent injection", () => {
     const span = tracer.startSpan("outer");
     const ctxWithSpan = trace.setSpan(ROOT_CONTEXT, span);
     await otelContext.with(ctxWithSpan, async () => {
-      await run(wrapper.execute({ url: "/x", method: "GET" }) as any);
+      await run(wrapper.execute({ url: "/x", method: "GET" }).orDie());
     });
     span.end();
 
@@ -361,7 +353,7 @@ describe("tracingMiddleware + TracingFetchTransport together", () => {
   }
 
   test("the injected parent is the request's own client span", async () => {
-    propagation.setGlobalPropagator(spanIdPropagator as any);
+    propagation.setGlobalPropagator(spanIdPropagator);
     try {
       const { tracer, ids } = idTracer();
       const inner = new StubTransport(() => json({ id: 1, name: "x" }));
@@ -370,7 +362,7 @@ describe("tracingMiddleware + TracingFetchTransport together", () => {
         transport: new TracingFetchTransport({ tracer, inner }),
       });
 
-      await run(client.get("/users/1", UserParser));
+      await run(client.get("/users/1", UserParser).orDie());
 
       expect(ids).toHaveLength(1);
       expect(inner.lastOptions?.headers?.["x-parent-span"]).toBe(ids[0]);
@@ -380,7 +372,7 @@ describe("tracingMiddleware + TracingFetchTransport together", () => {
   });
 
   test("two runs of the same request effect get their own spans", async () => {
-    propagation.setGlobalPropagator(spanIdPropagator as any);
+    propagation.setGlobalPropagator(spanIdPropagator);
     try {
       const { tracer, ids } = idTracer();
       const seen: string[] = [];
@@ -389,13 +381,13 @@ describe("tracingMiddleware + TracingFetchTransport together", () => {
           async<Response, never>((resume) => {
             seen.push(options.headers?.["x-parent-span"] ?? "none");
             setTimeout(() => resume(succeed(json({ id: 1, name: "x" }))), 5);
-          }) as any,
+          }),
       };
       const client = new DefaultHttpClient({
         middleware: [tracingMiddleware({ tracer })],
         transport: new TracingFetchTransport({ tracer, inner }),
       });
-      const request = client.get("/users/1", UserParser);
+      const request = client.get("/users/1", UserParser).orDie();
 
       await Promise.all([run(request), run(request)]);
 

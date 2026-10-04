@@ -18,13 +18,14 @@ import {
   httpFetchOk,
   httpRequest,
 } from "../src";
+import { runUnchecked } from "./run-unchecked";
 
 class MockTransport implements HttpTransport {
   constructor(private readonly respond: () => Response | HttpClientError) {}
   execute(_options: HttpRequestOptions): Eff<Response, Throws<HttpClientError>> {
     const r = this.respond();
     if (r instanceof Response) return succeed(r);
-    return fail(r) as any;
+    return fail(r);
   }
 }
 
@@ -62,8 +63,8 @@ describe("httpFetchOk — errorSchema → HttpStatusError<B>", () => {
     );
     let caught: HttpStatusError<ApiError> | undefined;
     try {
-      await run(
-        httpFetchOk<ApiError>({ url: "/x", transport: t, errorSchema: ApiErrorParser }) as any,
+      await runUnchecked(
+        httpFetchOk<ApiError>({ url: "/x", transport: t, errorSchema: ApiErrorParser }),
       );
     } catch (e) {
       caught = e as HttpStatusError<ApiError>;
@@ -81,8 +82,8 @@ describe("httpFetchOk — errorSchema mismatch → HttpUnknownError", () => {
     const t = new MockTransport(() => new Response("<html>500</html>", { status: 500 }));
     let caught: HttpUnknownError | undefined;
     try {
-      await run(
-        httpFetchOk<ApiError>({ url: "/x", transport: t, errorSchema: ApiErrorParser }) as any,
+      await runUnchecked(
+        httpFetchOk<ApiError>({ url: "/x", transport: t, errorSchema: ApiErrorParser }),
       );
     } catch (e) {
       caught = e as HttpUnknownError;
@@ -100,8 +101,8 @@ describe("httpFetchOk — errorSchema mismatch → HttpUnknownError", () => {
     );
     let caught: HttpUnknownError | undefined;
     try {
-      await run(
-        httpFetchOk<ApiError>({ url: "/x", transport: t, errorSchema: ApiErrorParser }) as any,
+      await runUnchecked(
+        httpFetchOk<ApiError>({ url: "/x", transport: t, errorSchema: ApiErrorParser }),
       );
     } catch (e) {
       caught = e as HttpUnknownError;
@@ -119,7 +120,7 @@ describe("httpFetchOk — no errorSchema → unchanged behaviour", () => {
     const t = new MockTransport(() => new Response("plain text", { status: 500 }));
     let caught: HttpStatusError | undefined;
     try {
-      await run(httpFetchOk({ url: "/x", transport: t }) as any);
+      await runUnchecked(httpFetchOk({ url: "/x", transport: t }));
     } catch (e) {
       caught = e as HttpStatusError;
     }
@@ -143,7 +144,7 @@ describe("httpRequest — errorSchema propagates", () => {
         transport: t,
         schema: UserParser,
         errorSchema: ApiErrorParser,
-      }),
+      }).orDie(),
     );
     expect(user.id).toBe(1);
   });
@@ -158,7 +159,7 @@ describe("httpRequest — errorSchema propagates", () => {
     );
     let caught: HttpStatusError<ApiError> | undefined;
     try {
-      await run(
+      await runUnchecked(
         httpRequest<User, ApiError>({
           url: "/u/1",
           transport: t,
@@ -186,7 +187,9 @@ describe("DefaultHttpClient — errorSchema per-request + client-level", () => {
     const client = new DefaultHttpClient({ transport });
     let caught: HttpStatusError<ApiError> | undefined;
     try {
-      await run(client.get<User, ApiError>("/u", UserParser, { errorSchema: ApiErrorParser }));
+      await runUnchecked(
+        client.get<User, ApiError>("/u", UserParser, { errorSchema: ApiErrorParser }),
+      );
     } catch (e) {
       caught = e as HttpStatusError<ApiError>;
     }
@@ -205,7 +208,7 @@ describe("DefaultHttpClient — errorSchema per-request + client-level", () => {
     const client = new DefaultHttpClient({ transport, errorSchema: ApiErrorParser });
     let caught: HttpStatusError<ApiError> | undefined;
     try {
-      await run(client.get<User, ApiError>("/u", UserParser));
+      await runUnchecked(client.get<User, ApiError>("/u", UserParser));
     } catch (e) {
       caught = e as HttpStatusError<ApiError>;
     }
@@ -229,7 +232,7 @@ describe("DefaultHttpClient — errorSchema per-request + client-level", () => {
     const client = new DefaultHttpClient({ transport, errorSchema: ApiErrorParser });
     let caught: HttpStatusError<{ different: string }> | undefined;
     try {
-      await run(
+      await runUnchecked(
         client.get<User, { different: string }>("/u", UserParser, { errorSchema: Permissive }),
       );
     } catch (e) {
@@ -250,7 +253,7 @@ describe("DefaultHttpClient — errorSchema per-request + client-level", () => {
     const derived = base.withOverrides({ headers: { "x-trace": "1" } });
     let caught: HttpStatusError<ApiError> | undefined;
     try {
-      await run(derived.get<User, ApiError>("/u", UserParser));
+      await runUnchecked(derived.get<User, ApiError>("/u", UserParser));
     } catch (e) {
       caught = e as HttpStatusError<ApiError>;
     }
@@ -262,7 +265,7 @@ describe("DefaultHttpClient — errorSchema per-request + client-level", () => {
     const client = new DefaultHttpClient({ transport, errorSchema: ApiErrorParser });
     let caught: HttpUnknownError | undefined;
     try {
-      await run(client.get<User, ApiError>("/u", UserParser));
+      await runUnchecked(client.get<User, ApiError>("/u", UserParser));
     } catch (e) {
       caught = e as HttpUnknownError;
     }

@@ -11,6 +11,7 @@ describe("PostgresError", () => {
     const ref = new PgRef({ db, name: "counter", initial: 0 });
 
     const error = await run(ref.get.catchTag("PostgresError", (failure) => succeed(failure)));
+    if (typeof error === "number") throw new Error(`expected a PostgresError, got ${error}`);
 
     expect(error._tag).toBe("PostgresError");
     expect(error.operation).toBe("ref.get");

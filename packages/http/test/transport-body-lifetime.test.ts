@@ -38,27 +38,27 @@ afterAll(() => {
 
 describe("transport keeps the response body readable after the fetch effect", () => {
   test("httpRequestJson reads a slow body in full", async () => {
-    const result = (await run(httpRequestJson({ url: `${base}/?delay=25` }) as any)) as {
+    const result = (await run(httpRequestJson({ url: `${base}/?delay=25` }).orDie())) as {
       data: string;
     };
     expect(result.data).toHaveLength(200_000);
   });
 
   test("httpRequestText reads a slow body in full", async () => {
-    const text = await run(httpRequestText({ url: `${base}/?delay=25` }) as any);
-    expect((text as string).length).toBe(payload.length);
+    const text = await run(httpRequestText({ url: `${base}/?delay=25` }).orDie());
+    expect(text.length).toBe(payload.length);
   });
 
   test("DefaultHttpClient.get reads a slow body in full", async () => {
     const client = new DefaultHttpClient({ baseUrl: base });
-    const result = (await run(client.get("/?delay=25", identityParser) as any)) as {
+    const result = (await run(client.get("/?delay=25", identityParser).orDie())) as {
       data: string;
     };
     expect(result.data).toHaveLength(200_000);
   });
 
   test("a longer stall still succeeds — no hidden timing dependence", async () => {
-    const result = (await run(httpRequestJson({ url: `${base}/?delay=150` }) as any)) as {
+    const result = (await run(httpRequestJson({ url: `${base}/?delay=150` }).orDie())) as {
       data: string;
     };
     expect(result.data).toHaveLength(200_000);
@@ -67,13 +67,13 @@ describe("transport keeps the response body readable after the fetch effect", ()
   test("the request timeout still fires while the body is in flight", async () => {
     // The guard must not disable timeouts: AbortSignal.timeout covers the whole
     // exchange, so a body slower than the budget is still a failure.
-    const exit = await runExit(
-      httpRequestJson({ url: `${base}/?delay=400`, timeoutMs: 60 }) as any,
-    );
+    const exit = await runExit(httpRequestJson({ url: `${base}/?delay=400`, timeoutMs: 60 }));
     expect(exit._tag).toBe("Failure");
     if (exit._tag === "Failure") {
       const error = Cause.firstFail(exit.cause)?.value as { _tag?: string };
-      expect(["HttpTimeoutError", "HttpParseError", "HttpNetworkError"]).toContain(error?._tag);
+      expect<unknown>(["HttpTimeoutError", "HttpParseError", "HttpNetworkError"]).toContain(
+        error?._tag,
+      );
     }
   });
 });
