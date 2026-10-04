@@ -14,6 +14,15 @@ export interface PartitionContext {
   readonly values: Map<string, unknown>;
   inflight: number;
   sourceOffset?: string;
+  /**
+   * Each operator's in-memory working copy of its state for this partition
+   * (open windows, the dedupe set, the join buffer), by operator id. It lives
+   * on the context so it goes away when the partition is revoked: if the
+   * partition comes back later, another instance may have changed its state
+   * in the meantime, and the operators must start again from what was just
+   * loaded instead of from their old copy.
+   */
+  readonly operatorCaches: Map<string, unknown>;
 }
 
 interface PartitionLifecycleOptions {
@@ -67,9 +76,18 @@ export class PartitionLifecycle {
       values: new Map(snapshot.values),
       inflight: 0,
       sourceOffset: snapshot.sourceOffset,
+      operatorCaches: new Map(),
     };
     this.contexts.set(partition, context);
     return context;
+  }
+
+  /**
+   * The context of a partition this instance owns or is taking over right
+   * now, or undefined when it has neither.
+   */
+  owned(partition: Partition): PartitionContext | Promise<PartitionContext> | undefined {
+    return this.contexts.get(partition) ?? this.activations.get(partition);
   }
 
   async revoke(partition: Partition): Promise<void> {

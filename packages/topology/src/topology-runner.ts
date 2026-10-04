@@ -148,10 +148,6 @@ class TopologyRunnerInstance {
   private shutdownPromise: Promise<void> | null = null;
   private checkpointSequence = 0;
 
-  private readonly windowManagers: Map<Partition, WindowManager<unknown, unknown, unknown>>[] = [];
-  private readonly joinBuffers: Map<Partition, JoinBuffer<unknown, unknown>>[] = [];
-  private readonly dedupSets: Map<Partition, InsertionOrderSet>[] = [];
-
   private itemsProcessed = 0;
   private readonly metricsStartTime = Date.now();
   private readonly rateLimiter: RateLimiter | null;
@@ -318,12 +314,15 @@ class TopologyRunnerInstance {
       envelopes = source.subscribeAck({ group: this.config.group });
     }
 
-    return envelopes.evalMap((envelope) =>
-      fromPromise(
-        () => this.prepareEnvelope(envelope),
-        (error) => error,
-      ),
-    );
+    const managed = isManagedAcknowledgeable(source);
+    return envelopes
+      .evalMap((envelope) =>
+        fromPromise(
+          () => this.prepareEnvelope(envelope, managed),
+          (error) => error,
+        ),
+      )
+      .collect((record) => record);
   }
 
   private compileProcess(
@@ -356,8 +355,6 @@ class TopologyRunnerInstance {
   ): Stream<TopologyRecord, any> {
     const { windowType, keyFn } = this.findWindowAndKey(node.parent);
     const operatorId = this.operatorId(node, "window");
-    const managers = new Map<Partition, WindowManager<unknown, unknown, unknown>>();
-    this.windowManagers.push(managers);
 
     // Each key's windows are saved under their own state entry, so a record
     // only rewrites its own key's windows. (Before, every record saved every
@@ -369,32 +366,34 @@ class TopologyRunnerInstance {
     // sets a marker. The marker matters because the old entry can sit where
     // a commit can't delete it (the store's root, for partition 0); after
     // the marker it is ignored, so flushed windows can't come back from it.
-    const migrating = new Set<Partition>();
+    const migrating = new WeakSet<PartitionContext>();
     const migratedMarker = `${operatorId}:windows-migrated`;
 
     return this.compile(node.parent).flatMap((record) => {
       if (record.skip) return Stream.fromArray([record]);
       const context = record.completion.context;
-      let manager = managers.get(record.partition);
+      let manager = context.operatorCaches.get(operatorId) as
+        | WindowManager<unknown, unknown, unknown>
+        | undefined;
       if (!manager) {
         manager = new WindowManager(windowType, node.spec);
         const legacy = context.values.get(operatorId);
         if (Array.isArray(legacy) && context.values.get(migratedMarker) !== true) {
           manager.restore(legacy as any);
-          migrating.add(record.partition);
+          migrating.add(context);
         }
         for (const [entryKey, saved] of context.values) {
           if (entryKey.startsWith(windowsPrefix) && Array.isArray(saved))
             manager.restore(saved as any);
         }
-        managers.set(record.partition, manager);
+        context.operatorCaches.set(operatorId, manager);
       }
 
       const key = keyFn(record.value);
       const now = this.extractTimestamp(record.value);
       const outputs = [...manager.add(key, record.value, now), ...manager.flush(key, now)];
 
-      if (migrating.delete(record.partition)) {
+      if (migrating.delete(context)) {
         for (const openKey of manager.keys()) {
           this.putMutation(record, windowsEntry(openKey), manager.snapshotKey(openKey));
         }
@@ -412,21 +411,19 @@ class TopologyRunnerInstance {
     node: Extract<TopologyNode, { type: "dedupe" }>,
   ): Stream<TopologyRecord, any> {
     const operatorId = this.operatorId(node, "dedupe");
-    const sets = new Map<Partition, InsertionOrderSet>();
-    this.dedupSets.push(sets);
     const maxSize = this.config.maxDedupeSize ?? 100_000;
 
     return this.compile(node.parent).map((record) => {
       if (record.skip) return record;
       const context = record.completion.context;
-      let seen = sets.get(record.partition);
+      let seen = context.operatorCaches.get(operatorId) as InsertionOrderSet | undefined;
       if (!seen) {
         seen = new InsertionOrderSet(maxSize);
         const prefix = `${operatorId}:item:`;
         for (const key of context.values.keys()) {
           if (key.startsWith(prefix)) seen.add(decodeURIComponent(key.slice(prefix.length)));
         }
-        sets.set(record.partition, seen);
+        context.operatorCaches.set(operatorId, seen);
       }
 
       const key = node.keyFn(record.value);
@@ -442,8 +439,6 @@ class TopologyRunnerInstance {
 
   private compileJoin(node: Extract<TopologyNode, { type: "join" }>): Stream<TopologyRecord, any> {
     const operatorId = this.operatorId(node, "join");
-    const buffers = new Map<Partition, JoinBuffer<unknown, unknown>>();
-    this.joinBuffers.push(buffers);
     const leftKeyFn = this.findKeyBy(node.left).keyFn;
     const rightKeyFn = this.findKeyBy(node.right).keyFn;
 
@@ -465,12 +460,14 @@ class TopologyRunnerInstance {
       const record = tagged.record;
       if (record.skip) return Stream.fromArray([record]);
       const context = record.completion.context;
-      let buffer = buffers.get(record.partition);
+      let buffer = context.operatorCaches.get(operatorId) as
+        | JoinBuffer<unknown, unknown>
+        | undefined;
       if (!buffer) {
         buffer = new JoinBuffer(node.config.windowMs);
         const saved = context.values.get(operatorId);
         if (saved) buffer.restore(saved as any);
-        buffers.set(record.partition, buffer);
+        context.operatorCaches.set(operatorId, buffer);
       }
       const outputs =
         tagged.side === "left"
@@ -481,12 +478,27 @@ class TopologyRunnerInstance {
     });
   }
 
-  private async prepareEnvelope(envelope: Envelope<unknown, unknown>): Promise<TopologyRecord> {
+  /**
+   * Turn a source envelope into a record, or undefined to drop it.
+   *
+   * A managed source tells us which partitions we own. A record can still
+   * arrive for a partition it just took away (it was already fetched). Such a
+   * record is dropped without an ack, so the new owner processes it. Taking
+   * the partition's lease back here would lock the new owner out.
+   */
+  private async prepareEnvelope(
+    envelope: Envelope<unknown, unknown>,
+    managed: boolean,
+  ): Promise<TopologyRecord | undefined> {
     const rawPartition = envelope.metadata.partition;
     const partition = Partition(
       typeof rawPartition === "number" && Number.isInteger(rawPartition) ? rawPartition : 0,
     );
-    const context = await this.partitionLifecycle.activate(partition);
+    const owned = managed
+      ? this.partitionLifecycle.owned(partition)
+      : this.partitionLifecycle.activate(partition);
+    if (owned === undefined) return undefined;
+    const context = await owned;
     const sourceOffset =
       envelope.metadata.offset === undefined ? undefined : String(envelope.metadata.offset);
     const sourceId =
@@ -705,31 +717,28 @@ class TopologyRunnerInstance {
     return this.shutdownPromise;
   }
 
+  private *operatorCaches(): Iterable<unknown> {
+    for (const context of this.partitionLifecycle.contexts.values())
+      yield* context.operatorCaches.values();
+  }
+
   private getMetrics(): TopologyMetrics {
     const elapsed = (Date.now() - this.metricsStartTime) / 1000;
     return {
       itemsProcessed: this.itemsProcessed,
       itemsPerSecond: elapsed > 0 ? this.itemsProcessed / elapsed : 0,
       bufferStats: [],
-      dedupeSize: this.dedupSets.reduce(
-        (total, byPartition) =>
-          total + [...byPartition.values()].reduce((sum, set) => sum + set.size, 0),
-        0,
+      dedupeSize: sum(this.operatorCaches(), (cache) =>
+        cache instanceof InsertionOrderSet ? cache.size : 0,
       ),
-      activeWindows: this.windowManagers.reduce(
-        (total, byPartition) =>
-          total + [...byPartition.values()].reduce((sum, manager) => sum + manager.size, 0),
-        0,
+      activeWindows: sum(this.operatorCaches(), (cache) =>
+        cache instanceof WindowManager ? cache.size : 0,
       ),
-      joinBufferSize: this.joinBuffers.reduce(
-        (total, byPartition) =>
-          total +
-          [...byPartition.values()].reduce((sum, buffer) => {
-            const stats = buffer.stats();
-            return sum + stats.leftItems + stats.rightItems;
-          }, 0),
-        0,
-      ),
+      joinBufferSize: sum(this.operatorCaches(), (cache) => {
+        if (!(cache instanceof JoinBuffer)) return 0;
+        const stats = cache.stats();
+        return stats.leftItems + stats.rightItems;
+      }),
     };
   }
 
@@ -808,6 +817,12 @@ class TopologyRunnerInstance {
     }
     return Date.now();
   }
+}
+
+function sum<T>(items: Iterable<T>, count: (item: T) => number): number {
+  let total = 0;
+  for (const item of items) total += count(item);
+  return total;
 }
 
 function validateTopologyConfig(config: TopologyConfig): void {
