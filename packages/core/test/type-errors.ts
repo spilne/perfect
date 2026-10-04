@@ -463,6 +463,15 @@ const _okSink3: Eff<void, never> = Stream.of(1, 2, 3).runSink(
   Sinks.forEachWhile((n) => succeed(n < 2)),
 );
 const _okSink4: Eff<string, never> = Stream.of(1, 2, 3).runSink(Sinks.drainWith(succeed("done")));
+// Without an annotation the result type is still exact, so .run() accepts it
+// (it used to infer `unknown` errors, which .run() refused).
+const _okSinkRun = () => Stream.of(1, 2, 3).runSink(Sinks.collectAll()).run();
+// A sink's own error stays in the result.
+const _okSinkError: Eff<number, Throws<NotFound>> = Stream.of(1, 2, 3).runSink(
+  Sinks.foldEffect(0, (acc, n) => (n > 2 ? fail(new NotFound()) : succeed(acc + n))),
+);
+// @ts-expect-error the sink's error must be handled before run()
+const _badSinkRun = () => _okSinkError.run();
 const _okSink5: Eff<number, never> = Stream.of(1, 2, 3).runSink(Sinks.fromEffect(succeed(42)));
 const _okSink6: Eff<string, never> = Stream.of("a", "bb").runSink(
   Sinks.fold(0, (acc: number, n: number) => acc + n)
