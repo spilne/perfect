@@ -289,6 +289,10 @@ class TopologyRunnerInstance {
 
     if (isManagedAcknowledgeable(source)) {
       const subscription = source.subscribeAckManaged({ group: this.config.group });
+      // The source is closed only after processing has ended (finished,
+      // failed or interrupted). Partitions it gives up then have nothing in
+      // flight that can still finish, so their revocation must not wait.
+      let closing = false;
       subscription.setPartitionLifecycle({
         assigned: async ({ partitions }) => {
           await Promise.all(
@@ -297,7 +301,9 @@ class TopologyRunnerInstance {
         },
         revoking: async ({ partitions }) => {
           await Promise.all(
-            partitions.map((partition) => this.partitionLifecycle.revoke(partition)),
+            partitions.map((partition) =>
+              this.partitionLifecycle.revoke(partition, { waitForInflight: !closing }),
+            ),
           );
         },
       });
@@ -306,7 +312,10 @@ class TopologyRunnerInstance {
       );
       envelopes = subscription.stream.onFinalize(
         fromPromise(
-          () => subscription.close(),
+          () => {
+            closing = true;
+            return subscription.close();
+          },
           (error) => error,
         ),
       );
@@ -711,8 +720,10 @@ class TopologyRunnerInstance {
       await this.drainPromise;
       await this.checkpointInFlight;
       await this.checkpointAllState();
+      // Processing has stopped, so records still counted as in flight will
+      // never finish; don't wait for them.
       for (const partition of this.partitionLifecycle.contexts.keys())
-        await this.partitionLifecycle.revoke(partition);
+        await this.partitionLifecycle.revoke(partition, { waitForInflight: false });
     })();
     return this.shutdownPromise;
   }
