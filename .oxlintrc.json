@@ -5,6 +5,7 @@
     "unicorn/no-new-array": "off",
     "unicorn/no-thenable": "off",
     "require-yield": "off",
-    "@typescript-eslint/no-this-alias": "off"
+    "@typescript-eslint/no-this-alias": "off",
+    "no-unused-vars": ["warn", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_", "caughtErrorsIgnorePattern": "^_" }]
   }
 }
