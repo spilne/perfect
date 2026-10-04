@@ -438,7 +438,8 @@ Built-in sinks:
 | `Sinks.last<A>()`           | last element                                   |
 | `Sinks.count<A>()`          | element count                                  |
 
-Sinks are composable values:
+Sinks are composable values. `contramap` changes what goes in, `map`
+changes the result, and `flatMap` runs an effect with the result:
 
 ```ts
 const sink = Sinks.fold(0, (acc: number, n: number) => acc + n)
@@ -466,6 +467,35 @@ const rows = csvText.through(
 `Pipes.base64Decode` restores `Uint8Array`. `base64EncodeText` and
 `base64DecodeText` are the UTF-8 string conveniences. Each input chunk is one
 independent base64 value, preserving message boundaries.
+
+The other text pipes split the input into lines first, so they also work on
+text that arrives in pieces:
+
+| Pipe | Turns text into |
+| --- | --- |
+| `Pipes.lines` | one string per line (`\n` or `\r\n`) |
+| `Pipes.tsv` | `string[]` per line, split on tabs; double quotes work like in CSV |
+| `Pipes.ssv` | `string[]` per line, split on runs of spaces (log files, CLI output) |
+| `Pipes.fixedWidth([{ name, start, end }])` | a record per line, cut at fixed columns (trimmed unless `trim: false`) |
+| `Pipes.regex(/(?<name>...)/)` | a record of the named groups per matching line; other lines are dropped |
+| `Pipes.jsonl` | one parsed value per line. **Lines that aren't valid JSON are dropped silently**; use `lines` + `parseAs` if you need to know |
+| `Pipes.xml` | SAX-style events: `open`, `close`, `selfClose`, `text` (entities like `&amp;` are not decoded) |
+
+For bytes and validation:
+
+| Pipe | What it does |
+| --- | --- |
+| `Pipes.utf8Decode` / `Pipes.utf8Encode` | bytes ↔ text; a character split across two chunks is joined correctly |
+| `Pipes.lengthPrefixed({ headerBytes?, littleEndian?, maxFrameBytes? })` | cut a byte stream into messages that each start with their length (4-byte big-endian by default). Set `maxFrameBytes` so a corrupt header fails with `FrameTooLargeError` instead of waiting for gigabytes |
+| `Pipes.binaryDecode(decode)` | decode each message, e.g. after `lengthPrefixed` |
+| `Pipes.parseAs(schema)` | validate each value; the stream fails with `SchemaParseError` on the first bad one |
+| `Pipes.parseAsLenient(schema)` | validate each value and drop the bad ones |
+
+`schema` is anything with a `safeParse(data)` method, so Zod, Valibot and
+ArkType schemas work as they are.
+
+There are also pipe versions of common operators (`Pipes.take`, `drop`,
+`filter`, `mapPipe`, `grouped`, `scan`) for building reusable pipes.
 
 ## Examples
 

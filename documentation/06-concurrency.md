@@ -177,6 +177,61 @@ console.log(names); // → ["user-1", "user-2", "user-3", "user-4", "user-5"]
 To cap a list of effects you already have, map with the identity function:
 `forEachPar(effects, (e) => e, { concurrency: 4 })`.
 
+## CPU-heavy work — `WorkerPool`
+
+Fibers share one JavaScript thread. That is fine for I/O, but a long
+calculation blocks every other fiber. `WorkerPool` runs functions on worker
+threads instead, so they use other CPU cores.
+
+<!-- @embed packages/core/examples/17-runtime-utilities.ts#worker-pool -->
+
+```ts
+import { eff, run, WorkerPool } from "@spilne/perfect-core";
+
+// The function is sent to the worker as source text, so it can only use its
+// argument: no variables or imports from outside the function.
+const fib = (n: number): number => {
+  let [a, b] = [0, 1];
+  for (let i = 0; i < n; i++) [a, b] = [b, a + b];
+  return a;
+};
+
+const results = await eff(function* () {
+  const pool = yield* WorkerPool.make(2); // omit the size to use one worker per CPU
+  try {
+    return yield* pool.parMap([10, 20, 30], fib);
+  } finally {
+    yield* pool.shutdown();
+  }
+})
+  .orDie()
+  .run();
+console.log(results); // → [55, 6765, 832040]
+```
+
+<!-- @end -->
+
+| API | What it does |
+| --- | --- |
+| `WorkerPool.make(size?, { tasksPerWorker? })` | start `size` workers (default: one per CPU) |
+| `pool.execute(fn, arg)` | run `fn(arg)` on a worker |
+| `pool.parMap(items, fn)` | run `fn` on every item, spread over the workers |
+| `pool.shutdown()` | stop the workers; waiting tasks fail with `WorkerError` |
+
+Things to know:
+
+- **The function must stand alone.** It is sent as source text, so it can't
+  use variables or imports from outside itself. Pass what it needs as the
+  argument; the argument and result must be copyable to another thread
+  (plain data, no functions or class instances).
+- **A failing task fails with `WorkerError`.** If a worker thread crashes,
+  the pool fails every later task instead of handing work to a dead worker.
+- **Shut the pool down** when you're done, or the workers keep the process
+  running.
+- `tasksPerWorker` (default 2) is how many tasks one worker holds at a time.
+  Raise it for many tiny tasks, where sending each task costs more than
+  running it.
+
 ## Structured teardown
 
 `all`, `race`, `forEachPar` and the combinators built on them (`allSettled`,
@@ -397,6 +452,7 @@ Available fiber diagnostics:
 | `interruptible(eff)` | restore interruptibility |
 | `yieldNow` | give other fibers a turn |
 | `addFiberSupervisor(hooks)` | attach diagnostic fiber lifecycle hooks |
+| `WorkerPool.make(size?)` | run CPU-heavy functions on worker threads (see above) |
 
 ## Pitfalls
 
