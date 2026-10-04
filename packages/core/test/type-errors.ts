@@ -29,6 +29,8 @@ import {
   run,
   runSync,
   all,
+  cached,
+  Layer,
   forEachPar,
   race,
   fork,
@@ -463,6 +465,21 @@ const _okSink3: Eff<void, never> = Stream.of(1, 2, 3).runSink(
   Sinks.forEachWhile((n) => succeed(n < 2)),
 );
 const _okSink4: Eff<string, never> = Stream.of(1, 2, 3).runSink(Sinks.drainWith(succeed("done")));
+// Without an annotation the result type is still exact, so .run() accepts it
+// (it used to infer `unknown` errors, which .run() refused).
+const _okSinkRun = () => Stream.of(1, 2, 3).runSink(Sinks.collectAll()).run();
+// A sink's own error stays in the result.
+const _okSinkError: Eff<number, Throws<NotFound>> = Stream.of(1, 2, 3).runSink(
+  Sinks.foldEffect(0, (acc, n) => (n > 2 ? fail(new NotFound()) : succeed(acc + n))),
+);
+// @ts-expect-error the sink's error must be handled before run()
+const _badSinkRun = () => _okSinkError.run();
+// A cached effect is still a normal effect: it can be run, passed to all(),
+// and assigned to Eff.
+const _cachedNumber = cached(succeed(1));
+const _okCachedRun = () => _cachedNumber.run();
+const _okCachedAll: Eff<readonly number[], never> = all([_cachedNumber, _cachedNumber]);
+const _okCachedEff: Eff<number, never> = _cachedNumber;
 const _okSink5: Eff<number, never> = Stream.of(1, 2, 3).runSink(Sinks.fromEffect(succeed(42)));
 const _okSink6: Eff<string, never> = Stream.of("a", "bb").runSink(
   Sinks.fold(0, (acc: number, n: number) => acc + n)
@@ -620,4 +637,23 @@ const _err8 = run(
   const _plain: Eff<Fiber<number>, never> = fork(failing);
   // @ts-expect-error — the error is not dropped
   const _dropped: Eff<number, never> = fork(failing).flatMap(join);
+}
+
+// Layer.build: a requirement met by another layer in the same build is gone
+// from the result; one that nothing in the build provides stays.
+{
+  const BuildDb = service<{ name: string }>()("BuildDb");
+  const BuildLog = service<{ line: string }>()("BuildLog");
+  const DbLive = Layer.describe({ provides: ["BuildDb"] }, succeed({ BuildDb: { name: "pg" } }));
+  const CacheLive = Layer.describe(
+    { provides: ["BuildCache"], requires: ["BuildDb"] },
+    BuildDb.get.map((db) => ({ BuildCache: { backedBy: db.name } })),
+  );
+  const CacheWithLog = BuildDb.get
+    .flatMap(() => BuildLog.get)
+    .map(() => ({ BuildCache: { backedBy: "x" } }));
+  const _built: Eff<{ BuildDb: { name: string } } & { BuildCache: { backedBy: string } }, never> =
+    Layer.build(CacheLive, DbLive);
+  // @ts-expect-error BuildLog is not provided by any layer in the build
+  const _stillNeedsLog: Eff<unknown, never> = Layer.build(CacheWithLog, DbLive);
 }

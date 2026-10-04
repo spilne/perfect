@@ -182,7 +182,9 @@ function depsOf(layer: unknown): LayerDeps {
  */
 export function build<L extends readonly Layer<any, any>[]>(
   ...layers: L
-): Layer<MergedServices<L>, MergedEffects<L>> {
+  // Every layer sees the services built before it, so a requirement that
+  // another layer in this call provides is not a requirement of the result.
+): Layer<MergedServices<L>, ProvidedByLayer<MergedEffects<L>, MergedServices<L>>> {
   const nodes = layers.map((layer, index) => ({ layer, index, deps: depsOf(layer) }));
 
   // service name -> the node that provides it (last declaration wins, matching

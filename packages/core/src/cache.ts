@@ -60,7 +60,11 @@ interface SingleEntry<A> {
   readonly expiresAt: number; // Infinity if no TTL
 }
 
-export interface CachedEff<A, S> extends Eff<A, S> {
+// An intersection, not `interface ... extends Eff`: an interface re-reads
+// Suspend's iterator method with its own `this` type, which then no longer
+// matches Eff, so `.run()`, `all([...])` and `const e: Eff<A, S> = c` all
+// failed to type-check.
+export type CachedEff<A, S> = Eff<A, S> & {
   /** Invalidate the cache — next run will re-execute the source. */
   readonly invalidate: Eff<void, never>;
   /** Peek at the current cached value without running anything. Returns
@@ -68,7 +72,7 @@ export interface CachedEff<A, S> extends Eff<A, S> {
   readonly current: Eff<A | undefined, never>;
   /** Is there a fresh cached value right now? */
   readonly isFresh: Eff<boolean, never>;
-}
+};
 
 /**
  * Memoize the first successful result of `eff`. Each call to `cached()`

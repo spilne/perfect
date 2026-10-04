@@ -7,6 +7,7 @@
 // Consumer drives: upstream only runs when downstream pulls.
 // Backpressure is structural — no buffering, no highWaterMark.
 
+import type { Sink } from "./sink.js";
 import {
   type Eff,
   type EffectCheck,
@@ -2620,8 +2621,8 @@ export class Stream<A, S = never> {
     return pipe(this) as any;
   }
 
-  runSink<B, S2>(sink: { run<S3>(input: Stream<A, S3>): Eff<B, S2 | S3> }): Eff<B, S | S2> {
-    return sink.run(this) as any;
+  runSink<B, S2>(sink: Sink<A, B, S2>): Eff<B, S | S2> {
+    return sink.run(this);
   }
 
   // ── Error handling ───────────────────────────────────────────────
