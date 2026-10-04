@@ -2,15 +2,13 @@
 
 Platformatic Kafka driver adapter for `@spilne/perfect-kafka`. The native message stream is bridged into Perfect through a bounded `data`/`error`/`end` event queue with pause/resume backpressure.
 
-`@platformatic/kafka` 2.9 requires Node 22.22+ or Node 24.6+. Its consumer is not supported on Bun; use `@spilne/perfect-kafka-kafkajs` for a Bun-native Kafka client.
+`@platformatic/kafka` 2.12 requires Node 22.22+ or Node 24.6+. Its consumer is not supported on Bun; use `@spilne/perfect-kafka-kafkajs` for a Bun-native Kafka client.
 
 ## Install
 
 ```bash
 bun add @spilne/perfect-kafka @spilne/perfect-kafka-platformatic @platformatic/kafka
 ```
-
-> Not yet published to npm — install from the workspace for now.
 
 ## Quickstart
 

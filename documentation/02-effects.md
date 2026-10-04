@@ -22,7 +22,7 @@ Read `Eff<A, S>` as “produces `A`, with requirements `S`.”
 | `fail(e)` | typed failure, `Eff<never, Throws<E>>` |
 | `die(e)` | unrecoverable defect (a bug); not in the typed channel |
 | `async(register)` | bridge a callback-based async API |
-| `tryPromise(() => p)` | bridge a Promise, errors caught into `Throws<unknown>` |
+| `tryPromise(() => p, (e) => err)` | bridge a Promise; `onReject` turns the rejection into your typed error |
 | `sleep(ms)` | suspend for `ms` according to the Clock service |
 
 ```ts
@@ -31,7 +31,7 @@ import { succeed, fail, sync, tryPromise } from "@spilne/perfect-core";
 const a = succeed(42);                              // Eff<number, never>
 const b = sync(() => Date.now());                   // Eff<number, never>
 const c = fail("nope");                             // Eff<never, Throws<string>>
-const d = tryPromise(() => fetch("/api/users"));    // Eff<Response, Throws<unknown>>
+const d = tryPromise(() => fetch("/api/users"), (e) => e); // Eff<Response, Throws<unknown>>
 ```
 
 ## Running
@@ -41,7 +41,7 @@ const d = tryPromise(() => fetch("/api/users"));    // Eff<Response, Throws<unkn
 | `runSync(eff)` | synchronous-only programs (throws if the effect suspends) |
 | `run(eff)` | returns `Promise<A>`, rejects with squashed cause on failure |
 | `runExit(eff)` | returns `Promise<Exit<unknown, A>>` — preserves the full failure cause; you switch on the exit |
-| `runFiber(eff)` | returns a `Fiber<A>` you can join, interrupt, race externally |
+| `runFiber(eff)` | returns a `Fiber` you can join, interrupt, race externally |
 
 Use `runExit` when you need to inspect the failure structure (typed error,
 defect, interrupt) instead of catching squashed exceptions.

@@ -14,8 +14,6 @@ driver model) lives here; the queue-agnostic layer (`Envelope`,
 bun add @spilne/perfect-kafka @spilne/perfect-kafka-kafkajs kafkajs
 ```
 
-> Not yet published to npm — install from the workspace for now.
-
 **No driver is bundled.** Install `@spilne/perfect-kafka-kafkajs` for KafkaJS on Bun
 or Node.js, or `@spilne/perfect-kafka-platformatic` for Platformatic Kafka on Node.js.
 You can also implement the small `KafkaClient` driver interface directly.
@@ -44,8 +42,8 @@ const orders = kafkaConfig<Order>()
   .consumer({ sessionTimeout: 30_000 })
   .build();
 
-// produce — JSON codec by default, pass codec: to override
-await run(orders.publish({ id: "o-1", amount: 42 }, { key: "o-1" }));
+// produce — JSON codec by default; call .codec(myCodec) on the builder to override
+await orders.publish({ id: "o-1", amount: 42 }, { key: "o-1" }).orDie().run();
 
 // consume — decoded values as a core Stream; take() closes the consumer
 const first = await orders.subscribe().take(1).toArray().orDie().run();
@@ -66,7 +64,7 @@ await run(
 );
 ```
 
-For explicit fs2-kafka-style batched commits, create a
+For explicit batched commits, create a
 `startingOffsets: Map<PartitionId, KafkaOffset>` from the partition positions before
 processing begins. Pass it to `commitBatchWithin` so out-of-order completions cannot
 commit past unfinished records. Recreate the pipe after seeking or reassignment.

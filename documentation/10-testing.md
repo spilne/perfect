@@ -21,11 +21,11 @@ const program = eff(function* () {
   return clock.now() - start;
 });
 
-const fiber = run(provide(program, Clock, clock));
-await tick(); // let the fiber register the sleep
+const result = run(provide(program, Clock, clock)); // a Promise, started now
+await tick(); // let the program reach its sleep
 clock.advance(1000); // fire the sleep
 // 1000ms elapsed in virtual time, ~0ms real
-console.log(await fiber); // → 1000
+console.log(await result); // → 1000
 ```
 
 <!-- @end -->
@@ -121,14 +121,16 @@ console.log(captured.logs()); // → ["hello", "world"]
 Lightweight property testing built on the same Random service:
 
 ```ts
-import { Gen, forAll, run, provide, Random, TestRandom } from "@spilne/perfect-core";
+import { Gen, forAll, provide, Random, TestRandom } from "@spilne/perfect-core";
 
 const positiveInts = Gen.int(1, 1000);
 
 const property = forAll(positiveInts, 100, (n) => n + 0 === n);
 
-await run(provide(property, Random, new TestRandom(42)));
-// passes for all 100 generated values, or fails with the counterexample
+// .orDie() because a failed property is a typed PropertyFailure, and run()
+// only accepts effects whose errors are handled.
+await provide(property, Random, new TestRandom(42)).orDie().run();
+// passes for all 100 generated values, or rejects with the counterexample
 ```
 
 No shrinking yet — counterexamples are reported as generated. For richer

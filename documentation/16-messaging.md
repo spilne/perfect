@@ -50,7 +50,7 @@ connector automatically. Use `subscribeAck()` for at-least-once processing:
 
 ```ts
 const handled = source.subscribeAck().evalMap((envelope) =>
-  process(envelope.value).flatMap(() => envelope.ack()),
+  handle(envelope.value).flatMap(() => envelope.ack()),
 );
 ```
 

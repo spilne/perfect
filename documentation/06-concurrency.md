@@ -22,7 +22,7 @@ console.log(await forkExample.orDie().run()); // → 42
 
 <!-- @end -->
 
-`fork(eff)` returns an effect producing `Fiber<A>`. It retains the child's
+`fork(eff)` returns an effect producing `Fiber<A, E>`, where `E` is the typed errors the child can fail with. It retains the child's
 service requirements, but child failures are observed through the fiber.
 The scheduler starts the child. The fiber remembers the typed errors its
 effect can fail with (`Fiber<A, E>`), and `join(fiber)` awaits it and raises
@@ -231,12 +231,16 @@ fiber is interrupted. Use `forkDaemon(eff)` for long-running background work
 that should outlive its spawning context.
 
 ```ts
-import { forkDaemon, sleep, succeed } from "@spilne/perfect-core";
+import { forkDaemon, sleep, sync } from "@spilne/perfect-core";
 
-// Background job — keeps running after parent returns
-forkDaemon(
-  sleep(60_000).flatMap(() => succeed(console.log("tick"))),
-);
+// Background job — keeps running after the parent returns.
+// sync(() => ...) logs when the effect runs; succeed(console.log(...))
+// would log right away, while the effect is being built.
+const fiber = await forkDaemon(
+  sleep(60_000).flatMap(() => sync(() => console.log("tick"))),
+).run();
+
+// later: fiber.interrupt() to stop it
 ```
 
 ## Interruption
@@ -278,12 +282,11 @@ A callback that could not be unregistered — a promise that settles late, a
 child that finishes after its parent was interrupted — is ignored, so it
 cannot resume a cancelled fiber or cut its finalizers short.
 
-A fiber that runs for long yields to others every `DEFAULT_BUDGET` (2048)
-interpreter steps, including steps that only pass a value to the next
-`.map` or `.flatMap`. An interrupt that arrives while a fiber is paused
-between a value and the continuation that receives it is delivered at the
-fiber's next effect, once the value has arrived. If that value is the fiber's
-result, the fiber completes normally: the interrupt came too late.
+A busy fiber pauses every 2048 steps (`DEFAULT_BUDGET`) to let other fibers
+run. Even passing a value on to the next `.map` or `.flatMap` counts as a
+step. If an interrupt arrives during that pause, the fiber sees it at its
+next effect. If the fiber had already produced its final value, it simply
+finishes: the interrupt came too late.
 
 ### Handoff to waiting fibers
 
@@ -383,6 +386,12 @@ Available fiber diagnostics:
 | `all(effects[])` | parallel + collect tuple |
 | `all({ a, b })` | parallel + collect record |
 | `forEachPar(items, f, { concurrency })` | map items to effects, at most N in flight, results in order |
+| `a.zip(b)` / `a.zipWith(b, f)` | run `a` then `b`, and pair (or combine) the results |
+| `a.parZip(b)` / `a.parZipWith(b, f)` | the same, but `a` and `b` run at the same time |
+| `validate(effects[])` | like `all`, but runs every effect to the end and fails with all the errors, not just the first |
+| `hedged(eff, { replicas, staggerMs })` | start `eff`, and another copy every `staggerMs` if none has succeeded yet; the first success wins and the rest are interrupted |
+| `timeout(eff, ms, () => err)` / `eff.timeout(ms, () => err)` | fail with your typed `err` if `eff` takes longer than `ms` (`timeoutFail` is the same) |
+| `timeoutOption(eff, ms)` | `undefined` instead of failing when time runs out |
 | `uninterruptible(eff)` | block interruption |
 | `uninterruptibleMask((restore) => eff)` | block interruption; `restore` reinstates the caller's interruptibility |
 | `interruptible(eff)` | restore interruptibility |

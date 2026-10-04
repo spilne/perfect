@@ -14,7 +14,7 @@ Lazy, fused, effect-typed sequences. Adjacent pure operators (`map` /
 | `Stream.fromEffect(eff)`                  | one element produced by an effect                         |
 | `Stream.range(start, end, step?)`         | numeric range                                             |
 | `Stream.iterate(seed, f)`                 | infinite — `seed, f(seed), f(f(seed)), …`                 |
-| `Stream.unfold(seed, f)`                  | finite — `f` returns `null` to stop                       |
+| `Stream.unfold(seed, f)`                  | `f` returns the next value, or `null` to stop (see below) |
 | `Stream.fromQueue(q)`                     | bridge from a Queue                                       |
 | `Stream.fromCallback(register)`           | bridge from a callback API                                |
 | `Stream.fromEventEmitter(emitter, event)` | EventEmitter bridge                                       |
@@ -26,6 +26,21 @@ Lazy, fused, effect-typed sequences. Adjacent pure operators (`map` /
 | `Stream.repeatForever(factory)`            | reacquire a whole source until downstream stops            |
 | `Stream.mergeAll(...streams)`              | concurrently merge any number of streams                   |
 | `Stream.tick(ms)`                         | a `void` every `ms`                                       |
+| `Stream.succeed(a)` / `Stream.empty()`    | one value / no values                                     |
+| `Stream.fail(e)`                          | a stream that fails with a typed error                    |
+| `Stream.fromChunk(chunk)`                 | the values of one `Chunk`                                 |
+| `Stream.unfoldEffect(seed, f)`            | like `unfold`, but `f` returns an effect                  |
+| `Stream.repeat(eff)`                      | run `eff` again for every value, forever                  |
+| `Stream.repeatValue(a)`                   | the same value, forever                                   |
+| `Stream.suspend(() => stream)`            | build the stream fresh each time it runs                  |
+
+`Stream.unfold` makes values a batch at a time, so `f` can be called a few
+more times than the number of values you take. Keep `f` free of side effects
+and use `unfoldEffect` when it has some.
+
+`Stream.suspend` is how a stream gets its own state for each run. Anything
+created inside the function (a counter, a buffer) is new every time the
+stream is run, instead of being shared by every run of the same stream value.
 
 `Stream.fromQueue` treats `QueueClosed` as normal stream completion and
 preserves every other queue backend effect. A `RedisQueue<A>`, for example,
@@ -52,6 +67,21 @@ becomes `Stream<A, Throws<RedisError>>` rather than losing its error type.
 | `.tapEffectFork(f)` | detached, fire-and-forget effect per element      |
 | `.pauseWhen(ref, pollMs?)` | pause delivery while a shared boolean Ref is true |
 | `.through(pipe)` | run a `Pipe<A, B>` stream-to-stream transformer     |
+| `.collect(f)`    | map and filter in one go: return `undefined` to drop |
+| `.unNone()`      | drop `null` and `undefined` values                  |
+| `.scanEffect(zero, f)` | running total, where `f` returns an effect    |
+| `.mapChunks(f)` / `.rechunk(n)` | work on whole chunks / regroup into chunks of `n` |
+
+Combining streams:
+
+| Operator | Semantics |
+| --- | --- |
+| `.concat(other)` | all of this stream, then all of `other` |
+| `.zip(other)` / `.zipWith(other, f)` | pair values up one by one; ends when the shorter stream ends |
+| `.zipWithIndex()` | `[value, index]` pairs |
+| `.zipWithPrevious()` | `[previous, value]` pairs (`previous` is `undefined` for the first) |
+| `.interleave(other)` | one from this stream, one from `other`, and so on; stops when either one ends |
+| `.orElse(() => other)` | if this stream fails, carry on with `other` |
 
 ## Stateful, concurrent, and reactive operators
 
@@ -80,17 +110,22 @@ stream whose effect type contains both errors.
 
 `merge`, `parJoin`, `switchMap`, `exhaustMap`, `parEvalMap`, `combineLatest`,
 `withLatest`, `broadcastThrough`, `observe`, and `takeUntil` run background
-fibers, as do `groupWithin`, `debounce`, `sample`, `audit`, and `buffer`. Those
-fibers belong to the stream, not to whichever fiber pulls it. They start on the
-first pull. When the stream completes, fails, stops early, or its consumer is
-interrupted, its finalizer interrupts them and waits for them to finish before
-it releases the sources. A failure raised while they stop, such as an inner
-stream's finalizer failing, fails the stream instead of being dropped. So does
-a failure while `switchMap` finalizes the inner stream it switches away from;
-the next inner stream then does not start. A source that fails with an
-interruption of its own, rather than being stopped, fails the stream with that
-interruption instead of leaving the consumer waiting. No callback or timer
-escapes structured concurrency.
+fibers, as do `groupWithin`, `debounce`, `sample`, `audit`, and `buffer`.
+
+- **The fibers belong to the stream**, not to whichever fiber pulls it. They
+  start on the first pull.
+- **They are always cleaned up.** When the stream completes, fails, stops
+  early, or its consumer is interrupted, the stream's finalizer interrupts
+  them and waits for them to finish before it releases the sources.
+- **Failures while stopping are not lost.** If something fails while they
+  stop (say an inner stream's finalizer), the stream fails with it. The same
+  goes for `switchMap` closing the inner stream it switches away from; the
+  next inner stream then does not start.
+- **A source interrupted on its own** (not because the stream is stopping)
+  fails the stream with that interruption, so the consumer isn't left
+  waiting.
+
+No callback or timer escapes structured concurrency.
 
 Because the finalizer owns these fibers, consume the stream with a terminal
 operator such as `toArray`, `drain`, `forEach`, or `runSink`. Pulling `step` by
@@ -163,17 +198,19 @@ stays alive as a fiber until its output is consumed, so memory grows with the
 number of inner streams the outer stream emits. Use `parJoin(n)` unless that
 number is bounded.
 
-A failure in the outer stream or any inner stream, including an inner
-finalizer that fails, immediately interrupts all the others. The consumer first
-receives the chunks already queued (at most 16), then the failure, followed by
-any failures raised while the join tears down, such as another inner stream
-failing at the same time or a finalizer failing when its inner stream is
-interrupted. If downstream stops before it reaches the failure, the failure is
-dropped like any other element it did not pull, as with `merge`; finalizers
-that fail while the stream is being stopped still fail it. Every inner stream
-pulled from the outer stream is finalized, including one that was never
-started. The outer finalizer runs last, so inner streams may use resources the
-outer stream acquired.
+When the outer stream or any inner stream fails (including an inner
+finalizer), all the others are interrupted right away. Then:
+
+- The consumer first gets the chunks already queued (at most 16), then the
+  failure, then any failures from the teardown (another inner stream failing
+  at the same time, or a finalizer failing while its stream is interrupted).
+- If downstream stops before it reaches the failure, the failure is dropped,
+  like any other element it didn't pull (the same as `merge`). Finalizers that
+  fail while the stream is being stopped still fail it.
+- Every inner stream taken from the outer stream is finalized, even one that
+  never started.
+- The outer finalizer runs last, so inner streams can use resources the outer
+  stream acquired.
 
 Under `retry`, `parJoin` follows the rules for operators with background fibers
 described in [Retry](#retry): an interrupted pull resumes the same join, a
@@ -645,8 +682,9 @@ rather than silently ending the stream.
 
 - **Pulling is lazy; input construction may not be.** `Stream.range` builds
   chunks on demand, while `Stream.fromArray(buildLargeArray())` builds its
-  array immediately and `fromIterable` materializes the iterable. `take(1)`
-  can still evaluate a full upstream chunk.
+  array immediately. `fromIterable` reads a generator or other iterable
+  lazily, a small batch at a time, so `take(1)` reads one value. Other
+  sources can still produce a full chunk before `take(1)` stops them.
 - **`Pipe` is not terminal.** If you need a final value, use a terminal
   operator or `runSink`.
 - **`forEach` doesn't collect.** If you need both side effects AND a result,
@@ -663,7 +701,7 @@ rather than silently ending the stream.
   `pauseWhen`) take a finite, non-negative number of milliseconds; `sample`,
   `audit`, and `pauseWhen` wait at least 1 ms. Any other value throws
   `RangeError` instead of being rounded or firing immediately.
-- **Fusion stops at non-fusible ops.** `mapEffect`, `flatMap`, and `take`
+- **Fusion stops at non-fusible ops.** `evalMap`, `flatMap`, and `take`
   break a fused chain; benchmark the actual pipeline if throughput matters.
 
 ## Next

@@ -16,8 +16,6 @@ client tracing (CLIENT spans per request, `traceparent` propagation on
 bun add @spilne/perfect-otel @opentelemetry/api
 ```
 
-> Not yet published to npm — install from the workspace for now.
-
 ## Quickstart
 
 ### Tracing

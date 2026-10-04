@@ -47,13 +47,88 @@ console.log(resolveMs(Duration.hours(1))); // → 3_600_000
 **Tip**: in your own APIs, accept `DurationInput` and use `resolveMs`:
 
 ```ts
-function delay(eff: Eff<A, S>, time: DurationInput): Eff<A, S> {
+function delayBy<A, S>(eff: Eff<A, S>, time: DurationInput): Eff<A, S> {
   return sleep(resolveMs(time)).flatMap(() => eff);
 }
-delay(myEff, 500);              // ms number
-delay(myEff, "5s");             // string
-delay(myEff, Duration.minutes(2)); // Duration
+delayBy(myEff, 500);                // ms number
+delayBy(myEff, "5s");               // string
+delayBy(myEff, Duration.minutes(2)); // Duration
 ```
+
+## cached and cachedBy
+
+`cached(eff)` runs an effect once and remembers its result. It is the
+simplest way to load something expensive (a config, a token) only once.
+
+<!-- @embed packages/core/examples/16-basic-primitives.ts#cached -->
+
+```ts
+import { sync, all, cached } from "@spilne/perfect-core";
+
+// cached(eff) runs eff once and remembers the result. Failures are not
+// remembered, so a failed run is tried again next time. Callers that ask
+// at the same time share one run.
+let loads = 0;
+const config = cached(
+  sync(() => {
+    loads++;
+    return { region: "eu" };
+  }),
+  { ttlMs: 60_000 }, // optional: forget the value after a minute
+);
+
+await all([config, config, config]).run();
+console.log(loads); // → 1
+
+await config.invalidate.run(); // forget it now
+await config.run();
+console.log(loads); // → 2
+```
+
+<!-- @end -->
+
+- Only successes are remembered. If the effect fails, the next run tries
+  again.
+- `ttlMs` makes the value expire after that many milliseconds.
+- `.invalidate` forgets the value now; `.current` reads it without running
+  anything (`undefined` when there is none); `.isFresh` says whether a value
+  is there and not expired.
+
+`cachedBy(build)` does the same per key:
+
+<!-- @embed packages/core/examples/16-basic-primitives.ts#cached-by -->
+
+```ts
+import { sync, cachedBy } from "@spilne/perfect-core";
+
+// cachedBy keeps one cached value per key. maxSize drops the least recently
+// used key when the cache is full.
+const fetched: string[] = [];
+const users = cachedBy(
+  (id: string) =>
+    sync(() => {
+      fetched.push(id);
+      return { id, name: `user ${id}` };
+    }),
+  { ttlMs: 30_000, maxSize: 1_000 },
+);
+
+await users.get("a").run();
+await users.get("a").run();
+await users.get("b").run();
+console.log(fetched); // → ["a", "b"]
+```
+
+<!-- @end -->
+
+| option | what it does |
+| --- | --- |
+| `ttlMs` | expiry in ms, or a function `(value) => ms` to pick it per value |
+| `maxSize` | keep at most this many keys; the least recently used one is dropped |
+| `keyFn` | turn a key into the string used to store it (for object keys) |
+
+The keyed cache has `get(key)`, `invalidate(key)`, `invalidateAll`,
+`has(key)` and `size`.
 
 ## CacheStore
 
@@ -63,7 +138,7 @@ interface is `Eff`-typed; in-process implementation ships with
 same interface.
 
 This is the **storage layer** — different from the
-`cached` / `cachedBy` *combinators* in `cache.ts`, which provide
+`cached` / `cachedBy` *combinators*, which provide
 closed-over memoization built on a private Map. Use `cached(eff)` for
 "memoize this one effect"; use `CacheStore` when you need a pluggable
 key-value backend.

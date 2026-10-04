@@ -13,8 +13,6 @@ directly; so does an in-memory test double.
 bun add @spilne/perfect-topology
 ```
 
-> Not yet published to npm — install from the workspace for now.
-
 ## Quickstart
 
 ```ts

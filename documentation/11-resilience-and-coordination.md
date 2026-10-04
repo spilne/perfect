@@ -13,12 +13,166 @@ implementations keep their failures visible, such as `Throws<RedisError>` or
 `Throws<PostgresError>`, without changing callers that depend on the shared
 interface.
 
+## Queue
+
+A queue passes values from producers to consumers. `Queue.bounded(n)` holds
+at most `n` values: `offer` waits while it is full and `take` waits while it
+is empty, so a fast producer can't run far ahead. `Queue.unbounded()` never
+makes `offer` wait.
+
+<!-- @embed packages/core/examples/16-basic-primitives.ts#queue -->
+
+```ts
+import { eff, fork, join, Queue } from "@spilne/perfect-core";
+
+// A bounded queue: offer waits while the queue is full, take waits while it
+// is empty. close() means "no more values"; takers then fail with QueueClosed.
+const received = await eff(function* () {
+  const queue = yield* Queue.bounded<number>(2);
+
+  const producer = yield* fork(
+    eff(function* () {
+      for (const n of [1, 2, 3, 4]) yield* queue.offer(n);
+      yield* queue.close();
+    }),
+  );
+
+  const got: number[] = [];
+  for (let i = 0; i < 4; i++) got.push(yield* queue.take());
+  yield* join(producer);
+  return got;
+})
+  .orDie()
+  .run();
+console.log(received); // → [1, 2, 3, 4]
+```
+
+<!-- @end -->
+
+| API | What it does |
+| --- | --- |
+| `Queue.bounded<A>(n)` / `Queue.unbounded<A>()` | create a queue |
+| `q.offer(a)` / `q.offerAll(as)` | add values, waiting for room |
+| `q.take()` | remove one value, waiting for one to arrive |
+| `q.takeAll()` | remove everything that is there now, without waiting |
+| `q.close()` | no more values: waiting `offer`s fail, and `take` fails with `QueueClosed` once the queue is empty |
+| `q.size` / `q.isClosed` / `q.awaitClose` | inspect the queue, or wait until it is closed |
+
+`Stream.fromQueue(q)` turns a queue into a stream that ends when the queue
+is closed.
+
+## Semaphore
+
+A semaphore limits how many things run at once. Each task takes a permit
+and gives it back when done, even if it fails or is interrupted.
+
+<!-- @embed packages/core/examples/16-basic-primitives.ts#semaphore -->
+
+```ts
+import { eff, sync, sleep, all, Semaphore } from "@spilne/perfect-core";
+
+// At most 2 tasks run at the same time; the others wait for a permit.
+let running = 0;
+let mostAtOnce = 0;
+const task = (ms: number) =>
+  sync(() => {
+    running++;
+    mostAtOnce = Math.max(mostAtOnce, running);
+  })
+    .flatMap(() => sleep(ms))
+    .flatMap(() => sync(() => void running--));
+
+await eff(function* () {
+  const permits = yield* Semaphore.make(2);
+  yield* all([10, 10, 10, 10].map((ms) => permits.withPermit(task(ms))));
+}).run();
+console.log(mostAtOnce); // → 2
+```
+
+<!-- @end -->
+
+| API | What it does |
+| --- | --- |
+| `Semaphore.make(n)` | `n` permits |
+| `s.withPermit(eff)` | take a permit, run `eff`, give it back |
+| `s.withPermits(k, eff)` | the same with `k` permits, for heavier tasks |
+| `s.acquire()` / `s.release()` | manual control; prefer `withPermit` |
+| `s.available` | permits free right now |
+
+## Ref
+
+A `Ref` holds one value that many fibers can read and change. Each update
+happens as one step, so concurrent updates don't get lost.
+
+<!-- @embed packages/core/examples/16-basic-primitives.ts#ref -->
+
+```ts
+import { eff, all, Ref } from "@spilne/perfect-core";
+
+// A Ref is a mutable cell that fibers can share safely.
+const finalCount = await eff(function* () {
+  const counter = yield* Ref.make(0);
+  yield* all(Array.from({ length: 100 }, () => counter.update((n) => n + 1)));
+  // modify returns a value and sets a new state in one step
+  const before = yield* counter.modify((n) => [n, 0] as [number, number]);
+  return [before, yield* counter.get];
+}).run();
+console.log(finalCount); // → [100, 0]
+```
+
+<!-- @end -->
+
+| API | What it does |
+| --- | --- |
+| `Ref.make(initial)` | create |
+| `ref.get` / `ref.set(a)` | read / replace |
+| `ref.update(f)` | change the value with `f` |
+| `ref.modify(f)` | `f` returns `[result, newValue]`: change the value and get a result in one step |
+| `ref.getAndSet(a)` / `ref.getAndUpdate(f)` / `ref.updateAndGet(f)` | change it and get the old or new value |
+
+## Deferred
+
+A `Deferred` is a value that is set once, later. Fibers that `await` it wait
+until it is set. Use it to signal "this is ready" from one fiber to another.
+
+<!-- @embed packages/core/examples/16-basic-primitives.ts#deferred -->
+
+```ts
+import { eff, sleep, fork, join, Deferred } from "@spilne/perfect-core";
+
+// A Deferred is a value that will be set once, later. Fibers that await it
+// wait until someone sets it.
+const answer = await eff(function* () {
+  const ready = yield* Deferred.make<string>();
+  const waiter = yield* fork(ready.await);
+  yield* sleep(10);
+  yield* ready.succeed("done"); // returns false if it was already set
+  return yield* join(waiter);
+}).run();
+console.log(answer); // → "done"
+```
+
+<!-- @end -->
+
+| API | What it does |
+| --- | --- |
+| `Deferred.make<A, E>()` | create, empty |
+| `d.succeed(a)` / `d.fail(e)` | set it; returns `false` if it was already set |
+| `d.await` | wait for the value (or fail with `e`) |
+| `d.isDone` | has it been set? |
+
 ## CircuitBreaker
 
-Classic 3-state breaker. While **Open**, calls reject fast with a typed
-`CircuitOpen` error instead of running the protected effect. Transitions
-to **HalfOpen** after `resetTimeoutMs`, and to **Closed** on the first
-success.
+A breaker has three states (`cb.state`):
+
+- `"closed"`: calls run normally. After `failureThreshold` failures in a
+  row, the breaker opens.
+- `"open"`: calls fail right away with a typed `CircuitOpen` error, without
+  running the protected effect.
+- `"half-open"`: after `resetTimeoutMs` the breaker lets **one** trial call
+  through. If it succeeds, the breaker is `"closed"` again; if it fails, it
+  goes back to `"open"` and the timer starts over. Other calls made during the trial fail with
+  `CircuitOpen`.
 
 <!-- @embed packages/core/examples/14-primitives.ts#circuit-breaker -->
 
@@ -92,7 +246,7 @@ console.log(users[0]!.id); // → 7
 | `sf.do(key, eff)`     | dedupe by key |
 
 **No caching** — once the eff settles, the key is cleared so the next
-call re-runs. For caching, use `cached` / `cachedBy` (see [Cache](./12-utilities.md#cachestore)).
+call re-runs. For caching, use [`cached` / `cachedBy`](./12-utilities.md#cached-and-cachedby).
 
 ## RateLimiter
 

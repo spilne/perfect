@@ -58,8 +58,10 @@ The config form takes:
 | `times` | required | max retry count |
 | `delay` | 0 | base delay in ms |
 | `backoff` | `"fixed"` | `"fixed"` or `"exponential"` |
-| `maxDelay` | none | cap exponential growth |
+| `maxDelay` | `30_000` | no single wait is longer than this |
 | `when` | always | predicate `(error: E) => boolean` |
+| `jitter` | `false` | make each wait a random 0.5x–1.5x of its delay, so many clients don't retry at the same moment |
+| `timeBudgetMs` | none | give up once this much wall-clock time has passed in total (waiting plus the attempts themselves) |
 
 ## Fluent RetryPolicy
 
@@ -94,9 +96,8 @@ console.log(calls); // → 3
 | API / concept | Behavior |
 |---|---|
 | `RetryPolicy.recurs(n)` | retry up to n times, no delay |
-| `RetryPolicy.spaced(ms)` | fixed delay between retries |
-| `RetryPolicy.constant(ms)` / `.spaced(ms)` | fixed delay between retries |
-| `RetryPolicy.exponential({ initial, factor? })` | exponential backoff |
+| `RetryPolicy.spaced(ms)` / `.constant(ms)` | fixed delay between retries |
+| `RetryPolicy.exponential({ initial, factor? })` / `.exponential(initial, factor?)` | exponential backoff (`factor` defaults to 2) |
 | `RetryPolicy.fibonacci(initial)` | fibonacci sequence delays |
 | `RetryPolicy.linear(initial)` | linearly increasing delays |
 | `RetryPolicy.forever` / `.none` | retry without a limit / never retry |
@@ -108,7 +109,8 @@ console.log(calls); // → 3
 |---|---|
 | `.withMaxRetries(n)` | cap retry count |
 | `.withMaxDelay(ms)` | cap per-retry delay |
-| `.withTimeBudget(ms)` | cap cumulative scheduled retry delay |
+| `.withTimeBudget(ms)` | stop once the waits between retries add up to `ms` (time spent in the attempts doesn't count) |
+| `.withWallClockBudget(ms)` | stop once `ms` of real time has passed since the first attempt, counting the attempts too. An attempt already running is not cut short; add `timeout()` for that |
 | `.withFullJitter()` | randomize each delay in `[0, computed]` |
 | `.withEqualJitter()` | randomize in `[computed/2, computed]` |
 | `.withJitter(min, max)` | multiply delays by a custom random range |
@@ -197,6 +199,43 @@ import { repeat, run, Schedule, sync } from "@spilne/perfect-core";
 const heartbeat = sync(() => console.log("alive"));
 await run(repeat(heartbeat, Schedule.spaced(1000)));
 ```
+
+| Schedule | Delays |
+|---|---|
+| `Schedule.forever` / `Schedule.once` | no delay, without end / just once more |
+| `Schedule.recurs(n)` | no delay, `n` times |
+| `Schedule.spaced(ms)` / `Schedule.fixed(ms)` | the same delay every time |
+| `Schedule.exponential(base, factor = 2)` | `base`, `base * 2`, `base * 4`, … |
+| `Schedule.linear(base)` | `base`, `2 * base`, `3 * base`, … |
+| `Schedule.fibonacci(base)` | `base`, `base`, `2 * base`, `3 * base`, `5 * base`, … |
+| `Schedule.jittered(s, min?, max?)` | `s` with each delay multiplied by a random factor |
+| `Schedule.intersect(a, b)` / `Schedule.union(a, b)` | continue while both / either continue |
+
+`retryWith(eff, schedule, { while?, onRetry? })` retries on a schedule. Unlike
+`retry`, it also retries defects (a `throw` inside `sync`); `while` gets the
+typed error or the thrown value and decides. It never retries an interrupt.
+`retryAllCause(eff, { shouldRetry, times, ... })` is the same idea with the
+config style of `retry`, deciding from the whole `Cause`.
+
+## Polling until something is ready
+
+`repeatUntil` runs an effect again and again until its result passes a check.
+It fails with a typed `RepeatTimeoutError` (with `reason`, `attempts`,
+`elapsedMs` and the `lastResult`) if it runs out of attempts or time:
+
+```ts
+import { repeatUntil } from "@spilne/perfect-core";
+
+const ready = repeatUntil(checkJobStatus, {
+  until: (status) => status === "done",
+  intervalMs: 500,        // wait between checks (default 1000)
+  maxDurationMs: 60_000,  // give up after a minute
+});
+```
+
+`repeatUntilWithBackoff` does the same, but the wait starts at
+`initialIntervalMs` (default 100) and doubles up to `maxIntervalMs`
+(default 30 000).
 
 ## Pitfalls
 

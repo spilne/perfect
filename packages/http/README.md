@@ -12,8 +12,6 @@ so failures are visible in the type and handled with `.catch` / `.catchTag`.
 bun add @spilne/perfect-http
 ```
 
-> Not yet published to npm — install from the workspace for now.
-
 ## Quickstart
 
 ```ts

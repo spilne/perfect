@@ -27,9 +27,9 @@ Point directly at the built file — no npm install needed:
 const PLUGIN = new URL("./packages/swc-plugin/dist/plugin.wasm", import.meta.url).pathname;
 ```
 
-### After publishing or `npm link` (package import)
+### From npm (package import)
 
-Once this package is on npm or linked into `node_modules/@spilne/perfect-swc-plugin`:
+After `bun add -d @spilne/perfect-swc-plugin` (or `npm link` while developing it):
 
 ```js
 // Next.js

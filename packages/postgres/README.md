@@ -7,8 +7,6 @@ coordination primitives, and durable topology state.
 bun add @spilne/perfect-postgres drizzle-orm postgres
 ```
 
-> Not yet published to npm — install from the workspace for now.
-
 ## Atomic topology delivery
 
 `PgPartitionedStateBackend` stores state by topology, stage, and partition. It
