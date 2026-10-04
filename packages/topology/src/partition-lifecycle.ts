@@ -90,17 +90,28 @@ export class PartitionLifecycle {
     return this.contexts.get(partition) ?? this.activations.get(partition);
   }
 
-  async revoke(partition: Partition): Promise<void> {
+  /**
+   * Save the partition's progress and give up its lease.
+   *
+   * While the topology runs, records already being processed are allowed to
+   * finish first, so their state is saved before another instance takes
+   * over. Pass `waitForInflight: false` once processing has stopped (on
+   * shutdown): those records will never finish, and they were not acked, so
+   * they are delivered again to whoever owns the partition next.
+   */
+  async revoke(partition: Partition, options: { waitForInflight?: boolean } = {}): Promise<void> {
     const pending = this.activations.get(partition);
     if (pending) await pending;
     const context = this.contexts.get(partition);
     if (!context) return;
-    const deadline = Date.now() + this.options.leaseMs;
-    while (context.inflight > 0 && Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
-    if (context.inflight > 0) {
-      throw new Error(`partition ${partition} did not drain before lease revocation`);
+    if (options.waitForInflight !== false) {
+      const deadline = Date.now() + this.options.leaseMs;
+      while (context.inflight > 0 && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      if (context.inflight > 0) {
+        throw new Error(`partition ${partition} did not drain before lease revocation`);
+      }
     }
     const checkpoint = await this.options.stateBackend.commit({
       lease: context.lease,
