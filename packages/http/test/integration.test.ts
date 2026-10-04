@@ -13,6 +13,7 @@ import {
   httpRequestText,
   HTTP_RETRYABLE,
 } from "../src";
+import { runUnchecked } from "./run-unchecked";
 
 /**
  * Transport whose response sequence can be scripted per call.
@@ -43,9 +44,9 @@ describe(".retry with HTTP_RETRYABLE", () => {
       new Response("ok"),
     ]);
     const result = await run(
-      httpRequestText({ url: "/x", transport: t }).retry(
-        RetryPolicy.recurs(5).whenError((e: HttpClientError) => HTTP_RETRYABLE(e)),
-      ),
+      httpRequestText({ url: "/x", transport: t })
+        .retry(RetryPolicy.recurs(5).whenError((e: HttpClientError) => HTTP_RETRYABLE(e)))
+        .orDie(),
     );
     expect(result).toBe("ok");
     expect(t.calls).toBe(3);
@@ -54,10 +55,10 @@ describe(".retry with HTTP_RETRYABLE", () => {
   test("does NOT retry 404", async () => {
     const t = new ScriptedTransport([new Response("nope", { status: 404 })]);
     await expect(
-      run(
+      runUnchecked(
         httpRequestText({ url: "/x", transport: t }).retry(
           RetryPolicy.recurs(5).whenError((e: HttpClientError) => HTTP_RETRYABLE(e)),
-        ) as any,
+        ),
       ),
     ).rejects.toMatchObject({ _tag: "HttpStatusError", status: 404 });
     expect(t.calls).toBe(1);
@@ -70,9 +71,9 @@ describe(".catchTag for targeted recovery", () => {
       new HttpNetworkError({ url: "/x", cause: null, message: "down" }),
     ]);
     const recovered = await run(
-      httpFetchOk({ url: "/x", transport: t }).catchTag("HttpNetworkError", () =>
-        succeed(new Response("fallback")),
-      ),
+      httpFetchOk({ url: "/x", transport: t })
+        .catchTag("HttpNetworkError", () => succeed(new Response("fallback")))
+        .orDie(),
     );
     expect(await recovered.text()).toBe("fallback");
   });
@@ -82,11 +83,13 @@ describe(".catchTags for multi-case dispatch", () => {
   test("routes by tag", async () => {
     const run404 = (t: HttpTransport) =>
       run(
-        httpRequestText({ url: "/x", transport: t }).catchTags({
-          HttpStatusError: (e: HttpStatusError) =>
-            succeed(e.status === 404 ? "missing" : "server-error"),
-          HttpNetworkError: () => succeed("offline"),
-        }),
+        httpRequestText({ url: "/x", transport: t })
+          .catchTags({
+            HttpStatusError: (e: HttpStatusError) =>
+              succeed(e.status === 404 ? "missing" : "server-error"),
+            HttpNetworkError: () => succeed("offline"),
+          })
+          .orDie(),
       );
 
     const t404 = new ScriptedTransport([new Response("", { status: 404 })]);

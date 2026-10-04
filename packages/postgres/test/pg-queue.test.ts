@@ -2,6 +2,7 @@ import { describe, it, expect } from "bun:test";
 import { run } from "@spilne/perfect-core";
 import { PgQueue } from "../src/lib/pg-queue";
 import { fakeDb } from "./fake-db";
+import { runUnchecked } from "./run-unchecked";
 // These tests await effects directly (await queue.publish(x)).
 import "@spilne/perfect-core/thenable";
 
@@ -130,7 +131,7 @@ describe("PgQueue (fake db)", () => {
       },
     });
 
-    await expect(run(queue.subscribe().take(1).toArray())).rejects.toMatchObject({
+    await expect(runUnchecked(queue.subscribe().take(1).toArray())).rejects.toMatchObject({
       _tag: "PostgresError",
     });
   });

@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { fail, fromPromise, run, succeed, type Eff } from "@spilne/perfect-core";
+import { fail, fromPromise, run, succeed } from "@spilne/perfect-core";
 import {
   CheckpointName,
+  LeaseEpoch,
   Partition,
   SourceRecordId,
   StageId,
@@ -31,6 +32,7 @@ import {
   RedisThrottle,
   type RedisClient,
 } from "../src";
+import { runUnchecked } from "./run-unchecked";
 // These tests await effects directly (await queue.publish(x)).
 import "@spilne/perfect-core/thenable";
 
@@ -46,8 +48,6 @@ const dockerAvailable = (() => {
     return false;
   }
 })();
-
-const unsafeRun = <A>(effect: Eff<A, unknown>): Promise<A> => run(effect as any);
 
 describe.skipIf(!dockerAvailable)("integration — redis:7-alpine", () => {
   let container: StartedTestContainer;
@@ -78,28 +78,28 @@ describe.skipIf(!dockerAvailable)("integration — redis:7-alpine", () => {
   });
 
   test("ref mutations are atomic across concurrent callers", async () => {
-    const ref = await unsafeRun(RedisRef.make({ redis, key: "ref", initial: 0 }));
+    const ref = await runUnchecked(RedisRef.make({ redis, key: "ref", initial: 0 }));
 
-    await Promise.all(Array.from({ length: 40 }, () => unsafeRun(ref.update((n) => n + 1))));
+    await Promise.all(Array.from({ length: 40 }, () => runUnchecked(ref.update((n) => n + 1))));
 
-    expect(await unsafeRun(ref.get)).toBe(40);
-    expect(await unsafeRun(ref.getAndSet(10))).toBe(40);
-    expect(await unsafeRun(ref.updateAndGet((n) => n + 5))).toBe(15);
+    expect(await runUnchecked(ref.get)).toBe(40);
+    expect(await runUnchecked(ref.getAndSet(10))).toBe(40);
+    expect(await runUnchecked(ref.updateAndGet((n) => n + 5))).toBe(15);
   });
 
   test("deferred broadcasts one success to multiple waiters", async () => {
     const deferred = RedisDeferred.make<number>({ redis, key: "deferred" });
-    const first = unsafeRun(deferred.await);
-    const second = unsafeRun(deferred.await);
+    const first = runUnchecked(deferred.await);
+    const second = runUnchecked(deferred.await);
 
     await Bun.sleep(25);
-    expect(await unsafeRun(deferred.succeed(42))).toBe(true);
+    expect(await runUnchecked(deferred.succeed(42))).toBe(true);
     expect(await Promise.all([first, second])).toEqual([42, 42]);
-    expect(await unsafeRun(deferred.succeed(0))).toBe(false);
+    expect(await runUnchecked(deferred.succeed(0))).toBe(false);
   });
 
   test("semaphore acquires weighted permits and restores capacity", async () => {
-    const semaphore = await unsafeRun(
+    const semaphore = await runUnchecked(
       RedisSemaphore.make({ redis, key: "semaphore", permits: 2, pollIntervalMs: 10 }),
     );
     let active = 0;
@@ -114,36 +114,36 @@ describe.skipIf(!dockerAvailable)("integration — redis:7-alpine", () => {
         }, String),
       );
 
-    await Promise.all([unsafeRun(work()), unsafeRun(work()), unsafeRun(work())]);
+    await Promise.all([runUnchecked(work()), runUnchecked(work()), runUnchecked(work())]);
     expect(maximum).toBe(2);
-    expect(await unsafeRun(semaphore.available)).toBe(2);
+    expect(await runUnchecked(semaphore.available)).toBe(2);
   });
 
   test("latch and barrier release every waiter", async () => {
-    const latch = await unsafeRun(RedisLatch.make({ redis, key: "latch", count: 2 }));
-    const latchWaiters = [unsafeRun(latch.await), unsafeRun(latch.await)];
-    await unsafeRun(latch.countDown);
-    expect(await unsafeRun(latch.remaining)).toBe(1);
-    await unsafeRun(latch.countDown);
+    const latch = await runUnchecked(RedisLatch.make({ redis, key: "latch", count: 2 }));
+    const latchWaiters = [runUnchecked(latch.await), runUnchecked(latch.await)];
+    await runUnchecked(latch.countDown);
+    expect(await runUnchecked(latch.remaining)).toBe(1);
+    await runUnchecked(latch.countDown);
     await Promise.all(latchWaiters);
 
-    const barrier = await unsafeRun(RedisBarrier.make({ redis, key: "barrier", parties: 3 }));
+    const barrier = await runUnchecked(RedisBarrier.make({ redis, key: "barrier", parties: 3 }));
     await Promise.all([
-      unsafeRun(barrier.await),
-      unsafeRun(barrier.await),
-      unsafeRun(barrier.await),
+      runUnchecked(barrier.await),
+      runUnchecked(barrier.await),
+      runUnchecked(barrier.await),
     ]);
-    expect(await unsafeRun(barrier.arrived)).toBe(3);
+    expect(await runUnchecked(barrier.arrived)).toBe(3);
   });
 
   test("rate limiter and throttle share limits across instances", async () => {
     const first = RedisRateLimiter.make({ redis, key: "rate", limit: 2, windowMs: 120 });
     const second = RedisRateLimiter.make({ redis, key: "rate", limit: 2, windowMs: 120 });
 
-    expect(await unsafeRun(first.tryAcquire)).toBe(true);
-    expect(await unsafeRun(second.tryAcquire)).toBe(true);
-    expect(await unsafeRun(first.tryAcquire)).toBe(false);
-    expect(await unsafeRun(first.remaining)).toBe(0);
+    expect(await runUnchecked(first.tryAcquire)).toBe(true);
+    expect(await runUnchecked(second.tryAcquire)).toBe(true);
+    expect(await runUnchecked(first.tryAcquire)).toBe(false);
+    expect(await runUnchecked(first.remaining)).toBe(0);
 
     const throttle = RedisThrottle.make({
       redis,
@@ -151,9 +151,9 @@ describe.skipIf(!dockerAvailable)("integration — redis:7-alpine", () => {
       permits: 1,
       windowMs: 60,
     });
-    await unsafeRun(throttle.acquire);
+    await runUnchecked(throttle.acquire);
     const started = performance.now();
-    await unsafeRun(throttle.acquire);
+    await runUnchecked(throttle.acquire);
     expect(performance.now() - started).toBeGreaterThanOrEqual(35);
   });
 
@@ -163,14 +163,14 @@ describe.skipIf(!dockerAvailable)("integration — redis:7-alpine", () => {
       prefix: "cache:",
       ttlMs: 50,
     });
-    await unsafeRun(cache.set("a", { n: 1 }, 500));
-    await unsafeRun(cache.set("b", { n: 2 }));
-    expect(await unsafeRun(cache.get("a"))).toEqual({ n: 1 });
-    expect(await unsafeRun(cache.size)).toBe(2);
+    await runUnchecked(cache.set("a", { n: 1 }, 500));
+    await runUnchecked(cache.set("b", { n: 2 }));
+    expect(await runUnchecked(cache.get("a"))).toEqual({ n: 1 });
+    expect(await runUnchecked(cache.size)).toBe(2);
     await Bun.sleep(70);
-    expect(await unsafeRun(cache.has("b"))).toBe(false);
-    await unsafeRun(cache.clear());
-    expect(await unsafeRun(cache.size)).toBe(0);
+    expect(await runUnchecked(cache.has("b"))).toBe(false);
+    await runUnchecked(cache.clear());
+    expect(await runUnchecked(cache.size)).toBe(0);
   });
 
   test("bounded queue applies backpressure, preserves FIFO, and closes remotely", async () => {
@@ -180,49 +180,49 @@ describe.skipIf(!dockerAvailable)("integration — redis:7-alpine", () => {
       capacity: 2,
       pollIntervalMs: 20,
     });
-    await unsafeRun(queue.offer(1));
-    await unsafeRun(queue.offer(2));
-    const third = unsafeRun(queue.offer(3));
+    await runUnchecked(queue.offer(1));
+    await runUnchecked(queue.offer(2));
+    const third = runUnchecked(queue.offer(3));
     await Bun.sleep(40);
-    expect(await unsafeRun(queue.take())).toBe(1);
+    expect(await runUnchecked(queue.take())).toBe(1);
     await third;
-    expect(await unsafeRun(queue.takeAll())).toEqual([2, 3]);
-    await unsafeRun(queue.close());
-    expect(await unsafeRun(queue.isClosed)).toBe(true);
-    await expect(unsafeRun(queue.take())).rejects.toMatchObject({ _tag: "QueueClosed" });
+    expect(await runUnchecked(queue.takeAll())).toEqual([2, 3]);
+    await runUnchecked(queue.close());
+    expect(await runUnchecked(queue.isClosed)).toBe(true);
+    await expect(runUnchecked(queue.take())).rejects.toMatchObject({ _tag: "QueueClosed" });
   });
 
   test("pubsub and subscription ref stream distributed changes", async () => {
     const pubsub = RedisPubSub.make<{ n: number }>({ redis, channel: "events" });
-    const stream = await unsafeRun(pubsub.subscribe);
-    const received = unsafeRun(stream.take(1).toArray());
-    expect(await unsafeRun(pubsub.subscriberCount)).toBe(1);
-    expect(await unsafeRun(pubsub.publish({ n: 1 }))).toBe(true);
+    const stream = await runUnchecked(pubsub.subscribe);
+    const received = runUnchecked(stream.take(1).toArray());
+    expect(await runUnchecked(pubsub.subscriberCount)).toBe(1);
+    expect(await runUnchecked(pubsub.publish({ n: 1 }))).toBe(true);
     expect(await received).toEqual([{ n: 1 }]);
 
-    const ref = await unsafeRun(RedisSubscriptionRef.make({ redis, key: "signal", initial: 0 }));
-    const changes = await unsafeRun(ref.changes);
-    const values = unsafeRun(changes.take(2).toArray());
+    const ref = await runUnchecked(RedisSubscriptionRef.make({ redis, key: "signal", initial: 0 }));
+    const changes = await runUnchecked(ref.changes);
+    const values = runUnchecked(changes.take(2).toArray());
     await Bun.sleep(10);
-    await unsafeRun(ref.set(1));
+    await runUnchecked(ref.set(1));
     expect(await values).toEqual([0, 1]);
-    await unsafeRun(ref.shutdown());
-    await unsafeRun(pubsub.shutdown());
+    await runUnchecked(ref.shutdown());
+    await runUnchecked(pubsub.shutdown());
   });
 
   test("pubsub pattern subscriptions receive every matching channel", async () => {
     const owner = RedisPubSub.make<{ n: number }>({ redis, channel: "pattern-events:one" });
     const second = RedisPubSub.make<{ n: number }>({ redis, channel: "pattern-events:two" });
-    const stream = await unsafeRun(owner.subscribePattern("pattern-events:*"));
-    const received = unsafeRun(stream.take(2).toArray());
+    const stream = await runUnchecked(owner.subscribePattern("pattern-events:*"));
+    const received = runUnchecked(stream.take(2).toArray());
 
-    expect(await unsafeRun(owner.patternSubscriberCount)).toBeGreaterThanOrEqual(1);
-    expect(await unsafeRun(owner.publish({ n: 1 }))).toBe(true);
-    expect(await unsafeRun(second.publish({ n: 2 }))).toBe(true);
+    expect(await runUnchecked(owner.patternSubscriberCount)).toBeGreaterThanOrEqual(1);
+    expect(await runUnchecked(owner.publish({ n: 1 }))).toBe(true);
+    expect(await runUnchecked(second.publish({ n: 2 }))).toBe(true);
 
     expect(await received).toEqual([{ n: 1 }, { n: 2 }]);
-    await unsafeRun(owner.shutdown());
-    await unsafeRun(second.shutdown());
+    await runUnchecked(owner.shutdown());
+    await runUnchecked(second.shutdown());
   });
 
   test("stream connector supports durable replay, acknowledgement, and claiming", async () => {
@@ -324,7 +324,7 @@ describe.skipIf(!dockerAvailable)("integration — redis:7-alpine", () => {
       ownerId: TopologyInstanceId("worker-b"),
       leaseMs: 30_000,
     });
-    expect(second?.epoch).toBe(first!.epoch + 1);
+    expect(second?.epoch).toBe(LeaseEpoch(first!.epoch + 1));
     expect(await state.commit({ lease: first!, mutations: [] })).toBe("fenced");
     await state.release(second!);
   });
@@ -376,8 +376,8 @@ describe.skipIf(!dockerAvailable)("integration — redis:7-alpine", () => {
       );
 
     const [a, b] = await Promise.all([
-      unsafeRun(first.do("key", work())),
-      unsafeRun(second.do("key", work())),
+      runUnchecked(first.do("key", work())),
+      runUnchecked(second.do("key", work())),
     ]);
     expect([a, b]).toEqual([42, 42]);
     expect(calls).toBe(1);
@@ -401,20 +401,20 @@ describe.skipIf(!dockerAvailable)("integration — redis:7-alpine", () => {
       resetTimeoutMs: RESET_MS,
     });
 
-    await expect(unsafeRun(first.protect(fail<Boom>({ _tag: "Boom" })))).rejects.toEqual({
+    await expect(runUnchecked(first.protect(fail<Boom>({ _tag: "Boom" })))).rejects.toEqual({
       _tag: "Boom",
     });
-    await expect(unsafeRun(second.protect(fail<Boom>({ _tag: "Boom" })))).rejects.toEqual({
+    await expect(runUnchecked(second.protect(fail<Boom>({ _tag: "Boom" })))).rejects.toEqual({
       _tag: "Boom",
     });
-    expect(await unsafeRun(first.state)).toBe("open");
+    expect(await runUnchecked(first.state)).toBe("open");
     const blocked = second
       .protect(succeed("ran"))
       .catchTag("CircuitOpen", () => succeed("blocked"));
-    expect(await unsafeRun(blocked)).toBe("blocked");
+    expect(await runUnchecked(blocked)).toBe("blocked");
 
     await driver.hincrby("breaker", "openedAt", -RESET_MS);
-    expect(await unsafeRun(first.state)).toBe("half-open");
+    expect(await runUnchecked(first.state)).toBe("half-open");
     let releaseProbe!: () => void;
     let probeStarted!: () => void;
     const started = new Promise<void>((resolve) => {
@@ -423,24 +423,27 @@ describe.skipIf(!dockerAvailable)("integration — redis:7-alpine", () => {
     const release = new Promise<void>((resolve) => {
       releaseProbe = resolve;
     });
-    const probe = unsafeRun(
+    const probe = runUnchecked(
       first.protect(
-        fromPromise(async () => {
-          probeStarted();
-          await release;
-          return "probe";
-        }),
+        fromPromise(
+          async () => {
+            probeStarted();
+            await release;
+            return "probe";
+          },
+          (e) => e,
+        ),
       ),
     );
     try {
       await started;
-      expect(await unsafeRun(blocked)).toBe("blocked");
+      expect(await runUnchecked(blocked)).toBe("blocked");
     } finally {
       releaseProbe();
       await probe;
     }
     expect(await probe).toBe("probe");
-    expect(await unsafeRun(second.state)).toBe("closed");
+    expect(await runUnchecked(second.state)).toBe("closed");
 
     type Filtered = { readonly _tag: "Counted" } | { readonly _tag: "Ignored" };
     const filtered = RedisCircuitBreaker.make<Filtered>({
@@ -450,13 +453,17 @@ describe.skipIf(!dockerAvailable)("integration — redis:7-alpine", () => {
       resetTimeoutMs: RESET_MS,
       isFailure: (error) => error._tag === "Counted",
     });
-    await expect(unsafeRun(filtered.protect(fail<Filtered>({ _tag: "Counted" })))).rejects.toEqual({
+    await expect(
+      runUnchecked(filtered.protect(fail<Filtered>({ _tag: "Counted" }))),
+    ).rejects.toEqual({
       _tag: "Counted",
     });
     await driver.hincrby("filtered-breaker", "openedAt", -RESET_MS);
-    await expect(unsafeRun(filtered.protect(fail<Filtered>({ _tag: "Ignored" })))).rejects.toEqual({
+    await expect(
+      runUnchecked(filtered.protect(fail<Filtered>({ _tag: "Ignored" }))),
+    ).rejects.toEqual({
       _tag: "Ignored",
     });
-    expect(await unsafeRun(filtered.protect(succeed("next probe")))).toBe("next probe");
+    expect(await runUnchecked(filtered.protect(succeed("next probe")))).toBe("next probe");
   });
 });

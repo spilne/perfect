@@ -381,7 +381,8 @@ describe("TopologyRunner — compiles and runs a topology", () => {
           metadata: { topic: "input", partition: 0, offset: "1" },
         },
       ]);
-    const sink = createTestSink<number>();
+    // This sink's publish fails, so its type has to admit an error.
+    const sink: Sinkable<number, Throws<Error>> = createTestSink<number>();
     sink.publish = () => fail(new Error("publish failed"));
 
     const handle = await TopologyRunner.run(StreamTopology.source(source).to(sink), {
@@ -418,7 +419,9 @@ describe("TopologyRunner — compiles and runs a topology", () => {
         return memory.commit(change);
       },
     };
-    const source = createTestSource([1]);
+    // The non-transactional ack fails, so the source's type has to admit an error.
+    const source: Acknowledgeable<number, Throws<Error>> & Streamable<number, Throws<Error>> =
+      createTestSource([1]);
     source.subscribeAck = () =>
       Stream.fromIterable([
         {
@@ -465,7 +468,9 @@ describe("TopologyRunner — compiles and runs a topology", () => {
       transaction: async (work) => work(domain),
       commitInTransaction: async () => "duplicate",
     };
-    const source = createTestSource([1]);
+    // The non-transactional ack fails, so the source's type has to admit an error.
+    const source: Acknowledgeable<number, Throws<Error>> & Streamable<number, Throws<Error>> =
+      createTestSource([1]);
     source.subscribeAck = () =>
       Stream.fromIterable([
         {

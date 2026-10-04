@@ -20,7 +20,7 @@ describe("parseNDJSON", () => {
           : { success: false as const, error: "no n" },
     };
     const out = await run(
-      Stream.of('{"n":1}', "  ", '{"n":2}').through(parseNDJSON(schema)).toArray(),
+      Stream.of('{"n":1}', "  ", '{"n":2}').through(parseNDJSON(schema)).toArray().orDie(),
     );
     expect(out).toEqual([{ n: 1 }, { n: 2 }]);
   });

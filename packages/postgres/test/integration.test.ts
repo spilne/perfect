@@ -13,6 +13,7 @@ import postgres from "postgres";
 import { run } from "@spilne/perfect-core";
 import {
   CheckpointName,
+  LeaseEpoch,
   Partition,
   SourceRecordId,
   StageId,
@@ -348,7 +349,7 @@ describe.skipIf(!dockerAvailable)("integration — postgres:17-alpine", () => {
       ownerId: TopologyInstanceId("worker-b"),
       leaseMs: 30_000,
     });
-    expect(second?.epoch).toBe(first!.epoch + 1);
+    expect(second?.epoch).toBe(LeaseEpoch(first!.epoch + 1));
     expect(await backend.commit({ lease: first!, mutations: [] })).toBe("fenced");
     await backend.release(second!);
   }, 20_000);
@@ -356,22 +357,24 @@ describe.skipIf(!dockerAvailable)("integration — postgres:17-alpine", () => {
   it("rate limiter: grants up to the limit, then fails typed", async () => {
     const rl = await PgRateLimiter.create({ db, key: "api", limit: 2, windowMs: 60_000 });
 
-    expect(await run(rl.tryAcquire)).toBe(true);
-    expect(await run(rl.tryAcquire)).toBe(true);
+    expect(await run(rl.tryAcquire.orDie())).toBe(true);
+    expect(await run(rl.tryAcquire.orDie())).toBe(true);
 
     const third = await run(rl.acquire.either());
     expect(third._tag).toBe("Left");
     if (third._tag === "Left") {
       expect(third.left._tag).toBe("RateLimitExceeded");
-      expect(third.left.retryAfterMs).toBeGreaterThan(0);
+      if (third.left._tag === "RateLimitExceeded") {
+        expect(third.left.retryAfterMs).toBeGreaterThan(0);
+      }
     }
-    expect(await run(rl.remaining)).toBe(0);
+    expect(await run(rl.remaining.orDie())).toBe(0);
   }, 20_000);
 
   it("rate limiter: many callers at once never get more than the limit", async () => {
     const rl = await PgRateLimiter.create({ db, key: "burst", limit: 5, windowMs: 60_000 });
 
-    const results = await Promise.all(Array.from({ length: 30 }, () => run(rl.tryAcquire)));
+    const results = await Promise.all(Array.from({ length: 30 }, () => run(rl.tryAcquire.orDie())));
 
     expect(results.filter(Boolean)).toHaveLength(5);
   }, 20_000);
@@ -379,12 +382,12 @@ describe.skipIf(!dockerAvailable)("integration — postgres:17-alpine", () => {
   it("pg-ref: transactional modify is atomic across concurrent updates", async () => {
     const ref = await PgRef.make<number>({ db, name: "counter", initial: 0 });
 
-    await Promise.all(Array.from({ length: 10 }, () => run(ref.update((n) => n + 1))));
-    expect(await run(ref.get)).toBe(10);
+    await Promise.all(Array.from({ length: 10 }, () => run(ref.update((n) => n + 1).orDie())));
+    expect(await run(ref.get.orDie())).toBe(10);
 
-    const previous = await run(ref.getAndSet(100));
+    const previous = await run(ref.getAndSet(100).orDie());
     expect(previous).toBe(10);
-    expect(await run(ref.get)).toBe(100);
+    expect(await run(ref.get.orDie())).toBe(100);
   }, 20_000);
 
   it("singleflight: concurrent callers share one execution", async () => {

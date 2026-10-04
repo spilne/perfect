@@ -81,7 +81,7 @@ describe("KafkaTopic offsets on a topic with several partitions", () => {
   test("commitOffset commits each partition in a partition map", async () => {
     const fake = fakeKafka({ partitions: 2 });
     await makeTopic(fake.client).commitOffset({ group, offset: "0:5,1:9" });
-    expect(fake.commits[0]!.map((c) => [c.partition, c.offset])).toEqual([
+    expect<unknown>(fake.commits[0]!.map((c) => [c.partition, c.offset])).toEqual([
       [0, "5"],
       [1, "9"],
     ]);
@@ -102,7 +102,7 @@ describe("KafkaTopic offsets on a single-partition topic", () => {
     const kt = makeTopic(fake.client);
     expect(await kt.getCommittedOffset({ group })).toBe("7");
     await kt.commitOffset({ group, offset: "8" });
-    expect(fake.commits[0]!.map((c) => [c.partition, c.offset])).toEqual([[0, "8"]]);
+    expect<unknown>(fake.commits[0]!.map((c) => [c.partition, c.offset])).toEqual([[0, "8"]]);
   });
 
   test("nothing committed yet is null", async () => {
@@ -121,7 +121,11 @@ describe("KafkaTopic clients", () => {
   test("publishes that start together share one producer", async () => {
     const fake = fakeKafka({ partitions: 1 });
     const kt = makeTopic(fake.client);
-    await Promise.all([run(kt.publish(1)), run(kt.publish(2)), run(kt.publish(3))]);
+    await Promise.all([
+      run(kt.publish(1).orDie()),
+      run(kt.publish(2).orDie()),
+      run(kt.publish(3).orDie()),
+    ]);
     expect(fake.producersMade()).toBe(1);
   });
 });

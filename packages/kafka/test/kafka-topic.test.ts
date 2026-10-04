@@ -181,7 +181,7 @@ describe("KafkaTopic — subscribe", () => {
       groupId: GroupId("g"),
     });
 
-    const values = await run(topic.subscribe().take(2).toArray());
+    const values = await run(topic.subscribe().take(2).toArray().orDie());
     expect(values.map((v) => v.n)).toEqual([1, 2]);
     expect(dispatchedVia.current).toBe("eachMessage");
   });
@@ -213,7 +213,8 @@ describe("KafkaTopic — subscribe", () => {
         .subscribe()
         .take(5)
         .mapChunks((chunk) => Chunk.single(chunk.length))
-        .toArray(),
+        .toArray()
+        .orDie(),
     );
 
     expect(chunkSizes).toEqual([2, 3]);
@@ -241,7 +242,7 @@ describe("KafkaTopic — subscribe", () => {
       groupId: GroupId("g"),
     });
 
-    const values = await run(topic.subscribe().take(4).toArray());
+    const values = await run(topic.subscribe().take(4).toArray().orDie());
     expect(values.map((v) => v.n)).toEqual([10, 20, 30, 40]);
   });
 
@@ -259,7 +260,7 @@ describe("KafkaTopic — subscribe", () => {
       topic: TopicName("t"),
       groupId: GroupId("g"),
     });
-    const values = await run(topic.subscribe().take(1).toArray());
+    const values = await run(topic.subscribe().take(1).toArray().orDie());
     expect(values).toEqual([{ n: 1 }]);
     expect(dispatchedVia.current).toBe("eachMessage");
   });
@@ -303,9 +304,10 @@ describe("KafkaTopic — subscribeAck", () => {
           return envelope;
         })
         .take(1)
-        .toArray(),
+        .toArray()
+        .orDie(),
     );
-    await run(envelopes[0]!.ack());
+    await run(envelopes[0]!.ack().orDie());
     await subscription.close();
 
     expect(events).toEqual([
@@ -345,7 +347,8 @@ describe("KafkaTopic — subscribeAck", () => {
           chunkSizes.push(chunk.length);
           return chunk;
         })
-        .toArray(),
+        .toArray()
+        .orDie(),
     );
 
     expect(envelopes.map((envelope) => envelope.value.n)).toEqual([1, 2, 3]);
@@ -374,7 +377,7 @@ describe("KafkaTopic — subscribeAck", () => {
       offset: { type: "earliest" },
     });
     expect(subscription.consumer).toBe(consumer);
-    expect(await run(subscription.stream.take(1).toArray())).toHaveLength(1);
+    expect(await run(subscription.stream.take(1).toArray().orDie())).toHaveLength(1);
     expect(subscriptions[0]?.fromBeginning).toBe(true);
     await subscription.close();
   });
@@ -395,7 +398,8 @@ describe("KafkaTopic — subscribeAck", () => {
       topic
         .subscribeAck({ offset: { type: "specific", value: "7" } })
         .take(1)
-        .toArray(),
+        .toArray()
+        .orDie(),
     );
 
     expect(sought).toEqual([
@@ -422,7 +426,7 @@ describe("KafkaTopic — subscribeAck", () => {
       groupId: GroupId("g"),
     });
 
-    const envelopes = await run(topic.subscribeAck().take(2).toArray());
+    const envelopes = await run(topic.subscribeAck().take(2).toArray().orDie());
     expect(envelopes.map((e) => e.value.n)).toEqual([1, 2]);
     expect(envelopes[0]!.metadata.offset).toBe("0");
     expect(envelopes[1]!.metadata.offset).toBe("1");
@@ -463,7 +467,8 @@ describe("KafkaTopic — subscribeAck", () => {
           ),
         )
         .take(2)
-        .toArray(),
+        .toArray()
+        .orDie(),
     );
     expect(values.map((v) => v.n)).toEqual([1, 2]);
 
@@ -487,7 +492,7 @@ describe("KafkaTopic — subscribeAck", () => {
       groupId: GroupId("g"),
     });
 
-    await run(topic.subscribeAck().take(1).toArray());
+    await run(topic.subscribeAck().take(1).toArray().orDie());
     await new Promise((r) => setTimeout(r, 20));
 
     expect(committed).toEqual([]);
@@ -540,7 +545,7 @@ describe("KafkaTopic — stream-mode driver", () => {
       topic: TopicName("t"),
       groupId: GroupId("g"),
     });
-    const values = await run(topic.subscribe().take(3).toArray());
+    const values = await run(topic.subscribe().take(3).toArray().orDie());
     expect(values.map((v) => v.n)).toEqual([1, 2, 3]);
   });
 });

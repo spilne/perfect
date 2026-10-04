@@ -35,7 +35,9 @@ describe("httpStream timeouts", () => {
   test("a stream that lasts longer than timeoutMs is not cut off", async () => {
     // 8 ticks, 30 ms apart: about 240 ms in total, with timeoutMs 100.
     const text = await run(
-      httpStreamText({ url: `${base}/?every=30&count=8`, timeoutMs: 100 }).toArray(),
+      httpStreamText({ url: `${base}/?every=30&count=8`, timeoutMs: 100 })
+        .toArray()
+        .orDie(),
     );
     expect(text.join("").trim().split(" ")).toHaveLength(8);
   });

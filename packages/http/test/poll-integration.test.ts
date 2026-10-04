@@ -19,6 +19,7 @@ import {
   type HttpResponse,
   jsonDecoder,
 } from "../src";
+import { runUnchecked } from "./run-unchecked";
 
 /** Step through a list of pre-built Responses; each invocation returns a fresh one. */
 class ScriptedTransport implements HttpTransport {
@@ -60,7 +61,8 @@ describe(".repeatUntil on client.getResponse — the async job pattern", () => {
           until: (res: HttpResponse<unknown>) => res.status === 200,
           intervalMs: 1,
           maxAttempts: 10,
-        }),
+        })
+        .orDie(),
     );
 
     expect(final.status).toBe(200);
@@ -87,7 +89,7 @@ describe(".repeatUntil on client.getResponse — the async job pattern", () => {
         maxAttempts: 3,
       });
 
-    await expect(run(program as any)).rejects.toMatchObject({
+    await expect(runUnchecked(program)).rejects.toMatchObject({
       _tag: "RepeatTimeoutError",
       attempts: 3,
       reason: "maxAttempts",
@@ -114,7 +116,8 @@ describe(".repeatUntil on client.getResponse — the async job pattern", () => {
             lastStatus: e.lastResult.status,
             lastBody: e.lastResult.body,
           }),
-        ) as any,
+        )
+        .orDie(),
     );
     expect(outcome).toEqual({
       timedOut: true,
