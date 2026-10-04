@@ -43,13 +43,7 @@ import { BuiltTopology } from "./stream-topology.js";
 import { WindowManager } from "./window-manager.js";
 import { JoinBuffer } from "./join-buffer.js";
 import { PartitionLifecycle, type PartitionContext } from "./partition-lifecycle.js";
-import type {
-  TopologyConfig,
-  TopologyHandle,
-  TopologyMetrics,
-  TopologyNode,
-  WindowType,
-} from "./types.js";
+import type { TopologyConfig, TopologyHandle, TopologyMetrics, TopologyNode } from "./types.js";
 
 export class TopologyRunner {
   static async run(topology: BuiltTopology, config: TopologyConfig): Promise<TopologyHandle> {
@@ -126,6 +120,19 @@ interface TopologyRecord {
   readonly skip: boolean;
   /** Set by an eventTime() step; otherwise read from the value when needed. */
   readonly eventTime?: number;
+  /**
+   * A marker sent after the last record of a source that has ended: window
+   * steps emit what they still have open. It is skipped by every other step.
+   */
+  readonly endOfInput?: boolean;
+}
+
+/** A window step's working state for one partition. */
+class WindowOperatorState {
+  /** Newest event time seen in the partition; the watermark follows it. */
+  newestEventTime = -Infinity;
+
+  constructor(readonly manager: WindowManager<any, any, any>) {}
 }
 
 class TopologyRunnerInstance {
@@ -153,6 +160,10 @@ class TopologyRunnerInstance {
   private checkpointSequence = 0;
 
   private itemsProcessed = 0;
+  // How many sources the topology reads, and how many have ended.
+  private sources = 0;
+  private endedSources = 0;
+  private lateRecords = 0;
   private readonly metricsStartTime = Date.now();
   private readonly rateLimiter: RateLimiter | null;
 
@@ -339,6 +350,7 @@ class TopologyRunnerInstance {
     }
 
     const managed = isManagedAcknowledgeable(source);
+    this.sources += 1;
     return envelopes
       .evalMap((envelope) =>
         fromPromise(
@@ -346,7 +358,36 @@ class TopologyRunnerInstance {
           (error) => error,
         ),
       )
-      .collect((record) => record);
+      .collect((record) => record)
+      .concat(Stream.suspend(() => Stream.fromArray(this.endOfInputMarkers())));
+  }
+
+  /**
+   * Called when a source has no more records. Once every source of the
+   * topology has ended, send one end marker per partition so window steps
+   * emit what they still have open. (A source stopped by shutdown or a
+   * failure never gets here: it is interrupted, not ended.)
+   */
+  private endOfInputMarkers(): TopologyRecord[] {
+    this.endedSources += 1;
+    if (this.endedSources < this.sources) return [];
+    return [...this.partitionLifecycle.contexts].map(([partition, context]) => {
+      context.inflight += 1;
+      return {
+        value: undefined,
+        partition,
+        skip: true,
+        endOfInput: true,
+        completion: {
+          pending: 1,
+          context,
+          mutations: new Map(),
+          knownDuplicate: false,
+          tracksSource: false,
+          outputs: [],
+        },
+      };
+    });
   }
 
   private compileProcess(
@@ -377,14 +418,17 @@ class TopologyRunnerInstance {
   private compileAggregate(
     node: Extract<TopologyNode, { type: "aggregate" }>,
   ): Stream<TopologyRecord, any> {
-    const { windowType, keyFn } = this.findWindowAndKey(node.parent);
+    const { window, keyFn } = this.findWindowAndKey(node.parent);
+    const lateness = window.allowedLatenessMs ?? 0;
     const operatorId = this.operatorId(node, "window");
 
     // Each key's windows are saved under their own state entry, so a record
-    // only rewrites its own key's windows. (Before, every record saved every
-    // window of the partition under one entry.)
+    // only rewrites the keys whose windows changed.
     const windowsEntry = (key: string) => `${operatorId}:windows:${encodeURIComponent(key)}`;
     const windowsPrefix = `${operatorId}:windows:`;
+    // The newest event time the partition has seen, saved so that a restart
+    // doesn't reopen windows that were already emitted.
+    const newestEntry = `${operatorId}:newest-event-time`;
     // Partitions restored from the old single-entry format. Their first
     // record writes every key in the new format, removes the old entry and
     // sets a marker. The marker matters because the old entry can sit where
@@ -393,40 +437,67 @@ class TopologyRunnerInstance {
     const migrating = new WeakSet<PartitionContext>();
     const migratedMarker = `${operatorId}:windows-migrated`;
 
-    return this.compile(node.parent).flatMap((record) => {
-      if (record.skip) return Stream.fromArray([record]);
-      const context = record.completion.context;
-      let manager = context.operatorCaches.get(operatorId) as
-        | WindowManager<unknown, unknown, unknown>
-        | undefined;
-      if (!manager) {
-        manager = new WindowManager(windowType, node.spec);
-        const legacy = context.values.get(operatorId);
-        if (Array.isArray(legacy) && context.values.get(migratedMarker) !== true) {
-          manager.restore(legacy as any);
-          migrating.add(context);
-        }
-        for (const [entryKey, saved] of context.values) {
-          if (entryKey.startsWith(windowsPrefix) && Array.isArray(saved))
-            manager.restore(saved as any);
-        }
-        context.operatorCaches.set(operatorId, manager);
+    const windowsOf = (context: PartitionContext): WindowOperatorState => {
+      let state = context.operatorCaches.get(operatorId) as WindowOperatorState | undefined;
+      if (state) return state;
+      state = new WindowOperatorState(new WindowManager(window.windowType, node.spec));
+      const legacy = context.values.get(operatorId);
+      if (Array.isArray(legacy) && context.values.get(migratedMarker) !== true) {
+        state.manager.restore(legacy as any);
+        migrating.add(context);
       }
-
-      const key = keyFn(record.value);
-      const now = this.timeOf(record);
-      const outputs = [...manager.add(key, record.value, now), ...manager.flush(key, now)];
-
-      if (migrating.delete(context)) {
-        for (const openKey of manager.keys()) {
-          this.putMutation(record, windowsEntry(openKey), manager.snapshotKey(openKey));
+      for (const [entryKey, saved] of context.values) {
+        if (entryKey.startsWith(windowsPrefix) && Array.isArray(saved)) {
+          state.manager.restore(saved as any);
         }
+      }
+      const newest = context.values.get(newestEntry);
+      if (typeof newest === "number") state.newestEventTime = newest;
+      context.operatorCaches.set(operatorId, state);
+      return state;
+    };
+
+    const saveChangedWindows = (record: TopologyRecord, manager: WindowManager<any, any, any>) => {
+      const context = record.completion.context;
+      const changed = new Set(manager.takeChangedKeys());
+      if (migrating.delete(context)) {
+        for (const openKey of manager.keys()) changed.add(openKey);
         this.deleteMutation(record, operatorId);
         this.putMutation(record, migratedMarker, true);
       }
-      const windows = manager.snapshotKey(key);
-      if (windows.length > 0) this.putMutation(record, windowsEntry(key), windows);
-      else this.deleteMutation(record, windowsEntry(key));
+      for (const key of changed) {
+        const windows = manager.snapshotKey(key);
+        if (windows.length > 0) this.putMutation(record, windowsEntry(key), windows);
+        else this.deleteMutation(record, windowsEntry(key));
+      }
+    };
+
+    return this.compile(node.parent).flatMap((record) => {
+      if (record.endOfInput) {
+        // No more input: every open window is complete.
+        const { manager } = windowsOf(record.completion.context);
+        const outputs = manager.flushAll();
+        saveChangedWindows(record, manager);
+        return Stream.fromArray(this.emitBeforeEnd(record, outputs));
+      }
+      if (record.skip) return Stream.fromArray([record]);
+
+      const state = windowsOf(record.completion.context);
+      const time = this.timeOf(record);
+      if (state.manager.isLate(time, state.newestEventTime - lateness)) {
+        this.lateRecords += 1;
+        return Stream.fromArray([this.skipped(record)]);
+      }
+
+      state.manager.add(keyFn(record.value), record.value, time);
+      if (time > state.newestEventTime) {
+        state.newestEventTime = time;
+        this.putMutation(record, newestEntry, time);
+      }
+      // Close the windows of every key, not just this record's, that ended
+      // before the watermark.
+      const outputs = state.manager.close(state.newestEventTime - lateness);
+      saveChangedWindows(record, state.manager);
       return Stream.fromArray(this.branch(record, outputs));
     });
   }
@@ -633,6 +704,11 @@ class TopologyRunnerInstance {
     }
     record.completion.pending = 0;
     const completion = record.completion;
+    // An end marker that had nothing open to flush has nothing to save.
+    if (record.endOfInput && completion.mutations.size === 0 && completion.outputs.length === 0) {
+      this.recordDone(completion);
+      return succeed(undefined);
+    }
     const checkpointId = StateCheckpointId(`${this.instanceId}:${++this.checkpointSequence}`);
 
     const commit = exactlyOnce
@@ -659,7 +735,8 @@ class TopologyRunnerInstance {
         if (completion.sourceOffset !== undefined) {
           completion.context.sourceOffset = completion.sourceOffset;
         }
-        this.itemsProcessed += 1;
+        // End markers are not source records.
+        if (completion.envelope) this.itemsProcessed += 1;
       })
       .ensuring(sync(() => this.recordDone(completion)));
   }
@@ -675,12 +752,16 @@ class TopologyRunnerInstance {
     checkpointId: StateCheckpointId,
   ): Promise<void> {
     const backend = this.stateBackend as TransactionalPartitionedStateBackend<unknown, unknown>;
+    // An end marker has no source record: its flushed windows are saved and
+    // published in one transaction, with nothing to ack.
     const envelope = completion.envelope;
-    if (!envelope || !isTransactionalEnvelope(envelope)) {
-      throw new TypeError("exactly-once delivery requires transactional source envelopes");
-    }
-    if (envelope.transactionDomain !== backend.transactionDomain) {
-      throw new TypeError("source and state backend do not share a transaction domain");
+    if (envelope !== undefined) {
+      if (!isTransactionalEnvelope(envelope)) {
+        throw new TypeError("exactly-once delivery requires transactional source envelopes");
+      }
+      if (envelope.transactionDomain !== backend.transactionDomain) {
+        throw new TypeError("source and state backend do not share a transaction domain");
+      }
     }
 
     await backend.transaction(async (transaction) => {
@@ -701,7 +782,7 @@ class TopologyRunnerInstance {
           await sink.publishInTransaction(transaction, output.value);
         }
       }
-      await envelope.ackInTransaction(transaction);
+      if (envelope !== undefined) await envelope.ackInTransaction(transaction);
     });
   }
 
@@ -796,13 +877,14 @@ class TopologyRunnerInstance {
         cache instanceof InsertionOrderSet ? cache.size : 0,
       ),
       activeWindows: sum(this.operatorCaches(), (cache) =>
-        cache instanceof WindowManager ? cache.size : 0,
+        cache instanceof WindowOperatorState ? cache.manager.size : 0,
       ),
       joinBufferSize: sum(this.operatorCaches(), (cache) => {
         if (!(cache instanceof JoinBuffer)) return 0;
         const stats = cache.stats();
         return stats.leftItems + stats.rightItems;
       }),
+      lateRecords: this.lateRecords,
     };
   }
 
@@ -834,6 +916,13 @@ class TopologyRunnerInstance {
     return { ...record, skip: true };
   }
 
+  /** The flushed results as records, then the end marker itself, which goes on. */
+  private emitBeforeEnd(marker: TopologyRecord, values: readonly unknown[]): TopologyRecord[] {
+    marker.completion.pending += values.length;
+    const results = values.map((value) => ({ ...marker, value, skip: false, endOfInput: false }));
+    return [...results, marker];
+  }
+
   private branch(record: TopologyRecord, values: readonly unknown[]): TopologyRecord[] {
     if (values.length === 0) return [this.skipped(record)];
     record.completion.pending += values.length - 1;
@@ -841,23 +930,23 @@ class TopologyRunnerInstance {
   }
 
   private findWindowAndKey(node: TopologyNode): {
-    windowType: WindowType;
+    window: Extract<TopologyNode, { type: "window" }>;
     keyFn: (value: unknown) => string;
   } {
-    let windowType: WindowType | undefined;
+    let window: Extract<TopologyNode, { type: "window" }> | undefined;
     let keyFn: ((value: unknown) => string) | undefined;
     let current: TopologyNode | undefined = node;
     while (current) {
-      if (current.type === "window" && !windowType) windowType = current.windowType;
+      if (current.type === "window" && !window) window = current;
       if (current.type === "keyBy" && !keyFn) {
         keyFn = current.keyFn as (value: unknown) => string;
       }
-      if (windowType && keyFn) break;
+      if (window && keyFn) break;
       current = "parent" in current ? (current.parent as TopologyNode) : undefined;
     }
-    if (!windowType) throw new Error("aggregate requires a window");
+    if (!window) throw new Error("aggregate requires a window");
     if (!keyFn) throw new Error("windowed aggregate requires keyBy");
-    return { windowType, keyFn };
+    return { window, keyFn };
   }
 
   private findKeyBy(node: TopologyNode): { keyFn: (value: unknown) => string } {

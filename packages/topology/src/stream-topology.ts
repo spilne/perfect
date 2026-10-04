@@ -23,6 +23,7 @@ import type {
   ProcessSpec,
   JoinConfig,
   CompiledTopology,
+  WindowOptions,
 } from "./types.js";
 
 // ---------------------------------------------------------------------------
@@ -174,29 +175,33 @@ export class KeyedTopology<K extends string, T> {
   }
 
   /** Tumbling window — fixed-size, non-overlapping. */
-  tumbling(windowMs: number): WindowedTopology<K, T> {
+  tumbling(windowMs: number, options: WindowOptions = {}): WindowedTopology<K, T> {
     return new WindowedTopology({
       type: "window",
       parent: this.node,
       windowType: { type: "tumbling", windowMs },
+      allowedLatenessMs: options.allowedLatenessMs,
     });
   }
 
   /** Sliding window — fixed-size, overlapping. */
-  sliding(params: { windowMs: number; slideMs: number }): WindowedTopology<K, T> {
+  sliding(params: { windowMs: number; slideMs: number } & WindowOptions): WindowedTopology<K, T> {
+    const { windowMs, slideMs, allowedLatenessMs } = params;
     return new WindowedTopology({
       type: "window",
       parent: this.node,
-      windowType: { type: "sliding", ...params },
+      windowType: { type: "sliding", windowMs, slideMs },
+      allowedLatenessMs,
     });
   }
 
-  /** Session window — closes after inactivity gap. */
-  session(gapMs: number): WindowedTopology<K, T> {
+  /** Session window — a key's session ends after `gapMs` without records. */
+  session(gapMs: number, options: WindowOptions = {}): WindowedTopology<K, T> {
     return new WindowedTopology({
       type: "window",
       parent: this.node,
       windowType: { type: "session", gapMs },
+      allowedLatenessMs: options.allowedLatenessMs,
     });
   }
 
@@ -263,6 +268,7 @@ export class WindowedTopology<K extends string, T> {
     return this.aggregate({
       init: () => ({ count: 0 }),
       add: (state) => ({ count: state.count + 1 }),
+      merge: (a, b) => ({ count: a.count + b.count }),
       emit: (key, window, state) => ({ key: key as K, window, count: state.count }),
     });
   }
@@ -274,6 +280,7 @@ export class WindowedTopology<K extends string, T> {
     return this.aggregate({
       init: () => ({ sum: 0 }),
       add: (state, value) => ({ sum: state.sum + fn(value) }),
+      merge: (a, b) => ({ sum: a.sum + b.sum }),
       emit: (key, window, state) => ({ key: key as K, window, sum: state.sum }),
     });
   }

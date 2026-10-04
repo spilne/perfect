@@ -64,7 +64,11 @@ describe("eventTime()", () => {
     await runner.awaitExit();
     await runner.shutdown();
 
-    expect(out.items).toEqual([{ key: "ann", window: { start, end: start + 1_000 }, count: 2 }]);
+    expect(out.items).toEqual([
+      { key: "ann", window: { start, end: start + 1_000 }, count: 2 },
+      // emitted when the source ends
+      { key: "ann", window: { start: start + 1_000, end: start + 2_000 }, count: 1 },
+    ]);
   });
 
   test("a time that isn't a number fails the topology clearly", async () => {

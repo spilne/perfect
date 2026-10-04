@@ -27,6 +27,23 @@ export interface AggregateSpec<S, T, U> {
   init: () => S;
   add: (state: S, value: T) => S;
   emit: (key: string, window: TimeWindow, state: S) => U;
+  /**
+   * Combine two partial results. Session windows need it when a record
+   * arrives between two sessions and joins them into one; without it the
+   * sessions stay separate.
+   */
+  merge?: (a: S, b: S) => S;
+}
+
+/** Options shared by the window steps. */
+export interface WindowOptions {
+  /**
+   * How long to wait for records that arrive out of order. A window closes
+   * once the partition has seen a record this much past the window's end.
+   * Records for windows that already closed are dropped (and counted in
+   * `metrics().lateRecords`). Default: 0.
+   */
+  allowedLatenessMs?: number;
 }
 
 export interface ProcessSpec<S, T, U> {
@@ -115,6 +132,8 @@ export interface TopologyMetrics {
   activeWindows: number;
   /** Number of buffered join items (left + right). */
   joinBufferSize: number;
+  /** Records dropped because the windows they belong to had already closed. */
+  lateRecords: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -183,6 +202,7 @@ export interface WindowNode<_T> {
   type: "window";
   parent: TopologyNode;
   windowType: WindowType;
+  allowedLatenessMs?: number;
 }
 
 export interface AggregateNode<T> {
