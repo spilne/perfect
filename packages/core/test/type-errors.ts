@@ -644,7 +644,6 @@ const _err8 = run(
 {
   const BuildDb = service<{ name: string }>()("BuildDb");
   const BuildLog = service<{ line: string }>()("BuildLog");
-  const BuildCache = service<{ backedBy: string }>()("BuildCache");
   const DbLive = Layer.describe({ provides: ["BuildDb"] }, succeed({ BuildDb: { name: "pg" } }));
   const CacheLive = Layer.describe(
     { provides: ["BuildCache"], requires: ["BuildDb"] },
