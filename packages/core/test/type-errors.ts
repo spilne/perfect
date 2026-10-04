@@ -29,6 +29,7 @@ import {
   run,
   runSync,
   all,
+  cached,
   forEachPar,
   race,
   fork,
@@ -472,6 +473,12 @@ const _okSinkError: Eff<number, Throws<NotFound>> = Stream.of(1, 2, 3).runSink(
 );
 // @ts-expect-error the sink's error must be handled before run()
 const _badSinkRun = () => _okSinkError.run();
+// A cached effect is still a normal effect: it can be run, passed to all(),
+// and assigned to Eff.
+const _cachedNumber = cached(succeed(1));
+const _okCachedRun = () => _cachedNumber.run();
+const _okCachedAll: Eff<readonly number[], never> = all([_cachedNumber, _cachedNumber]);
+const _okCachedEff: Eff<number, never> = _cachedNumber;
 const _okSink5: Eff<number, never> = Stream.of(1, 2, 3).runSink(Sinks.fromEffect(succeed(42)));
 const _okSink6: Eff<string, never> = Stream.of("a", "bb").runSink(
   Sinks.fold(0, (acc: number, n: number) => acc + n)
