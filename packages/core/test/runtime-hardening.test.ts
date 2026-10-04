@@ -113,7 +113,7 @@ describe("interruption hardening", () => {
 
     // interrupt() takes a Fiber<unknown>, which rejects typed fibers because
     // Fiber is invariant in its result type.
-    await run(interrupt(fiber as Fiber<any>));
+    await run(interrupt(fiber));
     await fiber.await();
 
     expect(cancelled).toBe(1);
@@ -136,7 +136,7 @@ describe("interruption hardening", () => {
         ),
       );
 
-      await run(interrupt(fiber as Fiber<any>));
+      await run(interrupt(fiber));
       const exit = await fiber.await();
 
       expect(exit._tag).toBe("Failure");

@@ -182,9 +182,7 @@ describe("Pipes", () => {
 
   test("csv pipe", async () => {
     const result = await run(
-      // Bare Pipes.csv is overloaded, so .through() can't infer its output
-      // type on its own.
-      Stream.of("name,age\n", "alice,30\nbob,25\n").through<string[], never>(Pipes.csv).toArray(),
+      Stream.of("name,age\n", "alice,30\nbob,25\n").through(Pipes.csv).toArray(),
     );
     expect(result).toEqual([
       ["name", "age"],

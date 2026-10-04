@@ -21,7 +21,6 @@ import {
   run,
   Cause,
   Exit,
-  type Fiber,
 } from "../src";
 import { runUnchecked } from "./run-unchecked";
 
@@ -147,7 +146,7 @@ describe("Interruption masks", () => {
     );
     const eff = fork(work).flatMap((f) =>
       sleep(5)
-        .flatMap(() => interrupt(f as Fiber<any>))
+        .flatMap(() => interrupt(f))
         .flatMap(() => awaitFiber(f)),
     );
     const exit = await run(eff);
@@ -173,7 +172,7 @@ describe("Interruption masks", () => {
     );
     const eff = fork(work).flatMap((f) =>
       sleep(5)
-        .flatMap(() => interrupt(f as Fiber<any>))
+        .flatMap(() => interrupt(f))
         .flatMap(() => awaitFiber(f)),
     );
     const exit = await run(eff);
@@ -191,7 +190,7 @@ describe("Interruption masks", () => {
     );
     const eff = fork(work).flatMap((f) =>
       sleep(5)
-        .flatMap(() => interrupt(f as Fiber<any>))
+        .flatMap(() => interrupt(f))
         .flatMap(() => awaitFiber(f)),
     );
     await run(eff);

@@ -14,7 +14,7 @@ import {
   type Semaphore,
   type CircuitBreaker,
   type CircuitOpen,
-  type Singleflight,
+  Singleflight,
   type RateLimiter,
   type RateLimitExceeded,
   type Pool,
@@ -30,6 +30,12 @@ import {
   runSync,
   all,
   cached,
+  interrupt,
+  validate,
+  retry,
+  Pipes,
+  ensuring,
+  sync,
   Layer,
   forEachPar,
   race,
@@ -656,4 +662,37 @@ const _err8 = run(
     Layer.build(CacheLive, DbLive);
   // @ts-expect-error BuildLog is not provided by any layer in the build
   const _stillNeedsLog: Eff<unknown, never> = Layer.build(CacheWithLog, DbLive);
+}
+
+// ── Typing gaps found by type-checking the tests ───────────────────
+{
+  // An effect whose only error type is Throws<never> can't fail, so run()
+  // accepts it (a Deferred<A> that can't fail, failCause(interrupt)).
+  const _okDeferred = (d: Deferred<number>) => run(d.await);
+  // Singleflight.do with an effect that can't fail can't fail either.
+  const _okSingleflight = () => run(Singleflight.make().do("k", succeed(1)));
+  // @ts-expect-error a real error still has to be handled
+  const _badSingleflight = () => run(Singleflight.make().do("k", fail("boom")));
+  // interrupt() takes any fiber.
+  const _okInterrupt = (f: Fiber<string, never>) => interrupt(f);
+  // Empty lists have no effects.
+  const _okValidate = () => run(validate([]));
+  const _okMerge = () => run(succeed(1).with(Layer.merge()));
+  // retry's `when` gets the effect's real error type.
+  const busy: Eff<number, Throws<"busy" | "gone">> = succeed(1);
+  const _okWhen = retry(busy, { times: 3, when: (e) => e === "busy" });
+  // @ts-expect-error "nope" is not one of this effect's errors
+  const _badWhen = retry(busy, { times: 3, when: (e) => e === "nope" });
+  // Passing Pipes.csv itself to through() keeps the row type and adds no effects.
+  const _okCsv: Stream<string[], never> = Stream.of("a,b\n").through(Pipes.csv);
+  // Fluent runFiber has the same type as runFiber().
+  const _okFiber: Fiber<number, never> = succeed(1).runFiber();
+  // Finalizers can return any value; it is thrown away.
+  const log: string[] = [];
+  const _okEnsuring = ensuring(
+    succeed(1),
+    sync(() => log.push("done")),
+  );
+  const _okRelease = acquireRelease(succeed(1), () => sync(() => log.push("released")));
+  const _okOnFinalize = Stream.of(1).onFinalize(sync(() => log.push("closed")));
 }

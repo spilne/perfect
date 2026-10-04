@@ -23,10 +23,6 @@ import {
   type Throws,
 } from "../src";
 
-// Deferred.await is typed Throws<never> even when the deferred cannot fail, and
-// run()/runFiber() treat that as an unhandled error. These deferreds never fail.
-const awaitDeferred = <A>(deferred: Deferred<A>): Eff<A> => deferred.await as Eff<A>;
-
 class InnerFailure extends TaggedError("InnerFailure")<{}>() {}
 class OuterFailure extends TaggedError("OuterFailure")<{}>() {}
 class FinalizerFailure extends TaggedError("FinalizerFailure")<{ readonly stream: string }>() {}
@@ -95,7 +91,7 @@ describe("Stream.parJoin", () => {
       Stream.suspend(() => {
         open++;
         maxOpen = Math.max(maxOpen, open);
-        return Stream.fromEffect(awaitDeferred(gate).map(() => value));
+        return Stream.fromEffect(gate.await.map(() => value));
       }).onFinalize(
         sync(() => {
           open--;
@@ -133,14 +129,14 @@ describe("Stream.parJoin", () => {
     const seen: number[] = [];
 
     const waitsForInner = runFiber(
-      Stream.of(Stream.of(1), Stream.fromEffect(awaitDeferred(innerGate).map(() => 2)))
+      Stream.of(Stream.of(1), Stream.fromEffect(innerGate.await.map(() => 2)))
         .parJoin(2)
         .toArray(),
       scheduler,
     );
     const waitsForOuter = runFiber(
       Stream.of(Stream.of(1))
-        .concat(Stream.fromEffect(awaitDeferred(outerGate).map(() => Stream.of(2))))
+        .concat(Stream.fromEffect(outerGate.await.map(() => Stream.of(2))))
         .parJoin(2)
         .forEach((value) =>
           sync(() => {
@@ -221,7 +217,7 @@ describe("Stream.parJoin", () => {
           events.push("failing");
         }),
       );
-    const sibling = Stream.fromEffect(awaitDeferred(never).map(() => 2)).onFinalize(
+    const sibling = Stream.fromEffect(never.await.map(() => 2)).onFinalize(
       sync(() => {
         events.push("sibling");
       }),
@@ -230,7 +226,7 @@ describe("Stream.parJoin", () => {
     // The inner failure is left unhandled on purpose: the fiber's result is checked below.
     const program = Stream.of(sibling, failing)
       .parJoinUnbounded()
-      .forEach(() => awaitDeferred(consumerGate));
+      .forEach(() => consumerGate.await);
     const fiber = runFiber(program as Eff<void>, scheduler);
     scheduler.flush();
 
@@ -397,7 +393,7 @@ describe("Stream.parJoin", () => {
     const fiber = runFiber(
       Stream.of(inner(), inner(), inner())
         .parJoinUnbounded()
-        .forEach(() => awaitDeferred(gate)),
+        .forEach(() => gate.await),
     );
     await drainScheduler();
     const bufferedAfterStall = produced;
@@ -708,7 +704,7 @@ describe("Stream.parJoin under operators that race each pull", () => {
         const outer = Stream.of("a", "b")
           .map((label) =>
             ticks({ label, everyMs: 10, count: 5 })
-              .concat(Stream.fromEffect(awaitDeferred(never)))
+              .concat(Stream.fromEffect(never.await))
               .onFinalize(
                 sync(() => {
                   events.push(label);
@@ -745,7 +741,7 @@ describe("Stream.parJoinUnbounded", () => {
         .map((value) =>
           Stream.suspend(() => {
             open++;
-            return Stream.fromEffect(awaitDeferred(gate).map(() => value));
+            return Stream.fromEffect(gate.await.map(() => value));
           }),
         )
         .parJoinUnbounded()

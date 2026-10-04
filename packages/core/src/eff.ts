@@ -100,6 +100,9 @@ export type InferEffects<T> = T extends Eff<unknown, infer S> ? S : never;
 /** Union of typed error payloads in S. */
 export type ErrorsOf<S> = S extends Throws<infer E> ? E : never;
 
+/** S plus a typed failure E, leaving S untouched when E is never. */
+export type WithError<S, E> = [E] extends [never] ? S : S | Throws<E>;
+
 /**
  * S with the given error tags removed. Distributes over S so the union
  * shape is preserved; a Throws whose payload empties collapses to never.
@@ -122,7 +125,9 @@ export type EffectCheck<S> = [S] extends [never]
   ? unknown // all handled — no constraint
   : [ExtractErrors<S>] extends [never]
     ? [ExtractServices<S>] extends [never]
-      ? { "Unhandled effects — resolve before calling run()": ExtractOther<S> }
+      ? [ExtractOther<S>] extends [never]
+        ? unknown // only Throws<never> left, e.g. a Deferred that can't fail
+        : { "Unhandled effects — resolve before calling run()": ExtractOther<S> }
       : { "Missing services — use provide() to supply": ExtractServices<S> }
     : [ExtractServices<S>] extends [never]
       ? { "Unhandled errors — use .catch() or .catchTag()": ExtractErrors<S> }

@@ -248,7 +248,6 @@ describe("RetryPolicy.fromConfig — the config dict is sugar, not a second engi
     let attempts = 0;
     const eff = sync(() => ++attempts).flatMap(() => fail("fatal"));
     await expect(
-      // retry() takes a RetryConfig<unknown>, so `when` sees the error as unknown.
       runUnchecked(retry(eff, { times: 5, delay: 0, when: (e) => e === "transient" })),
     ).rejects.toBe("fatal");
     expect(attempts).toBe(1);

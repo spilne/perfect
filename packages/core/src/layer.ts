@@ -17,7 +17,7 @@
 // frame. Any `acquireRelease` inside the layer has its release tied to
 // that scope, so resources clean up after the program exits.
 
-import { type Eff, type Needs, Suspend, Op } from "./eff.js";
+import { type Eff, type InferEffects, type Needs, Suspend, Op } from "./eff.js";
 import { scoped } from "./constructors.js";
 import type { Scope } from "./scope.js";
 
@@ -59,8 +59,9 @@ type MergedServices<L extends readonly Layer<any, any>[]> =
       : Record<string, any>
     : Record<string, any>;
 
-type MergedEffects<L extends readonly Layer<any, any>[]> =
-  L[number] extends Eff<any, infer E> ? E : never;
+// InferEffects distributes over the union of layers, so merging no layers
+// gives never instead of unknown.
+type MergedEffects<L extends readonly Layer<any, any>[]> = InferEffects<L[number]>;
 
 /**
  * Combine multiple layers horizontally. Each layer is built in sequence;

@@ -24,7 +24,6 @@ import {
   addFiberSupervisor,
   type Eff,
   type Throws,
-  type Fiber,
 } from "../src";
 import { runUnchecked } from "./run-unchecked";
 
@@ -58,7 +57,7 @@ describe("fiber", () => {
     // interrupt() takes a plain Fiber, which is Fiber<unknown>, and Fiber is
     // invariant in its result type, so a Fiber<void> needs the cast.
     const program = fork(sleep(1000)).flatMap((fiber) =>
-      sleep(10).flatMap(() => interrupt(fiber as Fiber).as("done")),
+      sleep(10).flatMap(() => interrupt(fiber).as("done")),
     );
 
     expect(await run(program)).toBe("done");

@@ -1,7 +1,7 @@
 // Deferred<A, E> — write-once promise/handle.
 // Eff-typed contract; in-process implementation by default.
 
-import { type Eff, type Throws } from "./eff.js";
+import { type Eff, type WithError } from "./eff.js";
 import { succeed, fail, sync, async } from "./constructors.js";
 
 export type DeferredState<A, E> =
@@ -17,8 +17,8 @@ export interface Deferred<A, E = never, S = never> {
   succeed(value: A): Eff<boolean, S>;
   /** Complete with failure. Returns true if this call set the error, false if already done. */
   fail(error: E): Eff<boolean, S>;
-  /** Block until completed. */
-  readonly await: Eff<A, S | Throws<E>>;
+  /** Block until completed. A deferred that can't fail (E = never) can't fail here either. */
+  readonly await: Eff<A, WithError<S, E>>;
   /** True if already settled. */
   readonly isDone: Eff<boolean, S>;
 }
@@ -53,7 +53,7 @@ export class InProcessDeferred<A, E = never> implements Deferred<A, E> {
     });
   }
 
-  get await(): Eff<A, Throws<E>> {
+  get await(): Eff<A, WithError<never, E>> {
     return async<A, E>((resume) => {
       if (this.state._tag === "Done") {
         const r = this.state.result;

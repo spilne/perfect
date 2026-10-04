@@ -1,7 +1,7 @@
 // Ported from promin's Pipeline: combinators that go beyond the core algebra.
 // These are standalone functions, not methods — they take an Eff and return an Eff.
 
-import { type Eff, type Throws, type ErrorsOf, Suspend, Op } from "./eff.js";
+import { type Eff, type Throws, type ErrorsOf, type InferEffects, Suspend, Op } from "./eff.js";
 import { Cause } from "./cause.js";
 import { succeed, fail, sleep, die, retry, raceSuccess } from "./constructors.js";
 import { clockNow } from "./clock.js";
@@ -48,7 +48,8 @@ export function validate<const T extends readonly Eff<unknown, unknown>[]>(
   effects: T,
 ): Eff<
   { [K in keyof T]: T[K] extends Eff<infer A, unknown> ? A : never },
-  T[number] extends Eff<unknown, infer S> ? S : never
+  // InferEffects distributes, so an empty list gives never, not unknown.
+  InferEffects<T[number]>
 > {
   if (effects.length === 0) return succeed([] as any) as any;
 

@@ -83,8 +83,7 @@ describe("validate", () => {
   });
 
   test("empty array returns empty tuple", async () => {
-    // validate([]) comes out typed with unknown effects, though it cannot fail.
-    expect(await runUnchecked(validate([]))).toEqual([]);
+    expect(await run(validate([]))).toEqual([]);
   });
 });
 

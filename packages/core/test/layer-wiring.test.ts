@@ -10,7 +10,6 @@ import {
   sync,
   type Eff,
 } from "../src";
-import { runUnchecked } from "./run-unchecked";
 
 interface Db {
   name: string;
@@ -173,8 +172,6 @@ describe("Layer.build — automatic wiring", () => {
   });
 
   test("build with no layers is an empty layer", async () => {
-    // Layer.build() with no layers is typed as having unknown effects
-    // (MergedEffects of an empty list infers unknown, not never).
-    expect(await runUnchecked(succeed(1).with(Layer.build()))).toBe(1);
+    expect(await run(succeed(1).with(Layer.build()))).toBe(1);
   });
 });

@@ -667,8 +667,8 @@ export class Stream<A, S = never> {
     return pushStream<A, Chunk<A>, S>({ chunked: true, options: pushOptions(options), register });
   }
 
-  static bracket<A, S>(acquire: Eff<A, S>, release: (a: A) => Eff<void, never>): Stream<A, S> {
-    let activeFinalizer: Eff<void, never> | null = null;
+  static bracket<A, S>(acquire: Eff<A, S>, release: (a: A) => Eff<unknown, never>): Stream<A, S> {
+    let activeFinalizer: Eff<unknown, never> | null = null;
     return new Stream(
       (acquire as any).map((resource: A) => {
         activeFinalizer = release(resource);
@@ -677,7 +677,8 @@ export class Stream<A, S = never> {
       suspend(() => {
         const finalizer = activeFinalizer;
         activeFinalizer = null;
-        return finalizer ?? succeed(undefined);
+        // The release's value is never used, so it is fine to treat it as void.
+        return (finalizer ?? succeed(undefined)) as Eff<void, never>;
       }),
     );
   }
@@ -2617,7 +2618,7 @@ export class Stream<A, S = never> {
 
   // ── Pipe ─────────────────────────────────────────────────────────
 
-  through<B, S2>(pipe: Pipe<A, B, S2>): Stream<B, S | S2> {
+  through<B, S2 = never>(pipe: Pipe<A, B, S2>): Stream<B, S | S2> {
     return pipe(this) as any;
   }
 
@@ -2820,8 +2821,9 @@ export class Stream<A, S = never> {
     return this.catch(() => that());
   }
 
-  onFinalize<S2>(finalizer: Eff<void, S2>): Stream<A, S | S2> {
-    return this._withFinalizer(finalizer);
+  onFinalize<S2>(finalizer: Eff<unknown, S2>): Stream<A, S | S2> {
+    // The finalizer's value is never used, so it is fine to treat it as void.
+    return this._withFinalizer(finalizer as Eff<void, S2>);
   }
 
   /**

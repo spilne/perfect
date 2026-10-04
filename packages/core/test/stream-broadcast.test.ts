@@ -11,7 +11,6 @@ import {
   runFiber,
   sleep,
   sync,
-  type Eff,
 } from "../src";
 
 class BranchFailure extends TaggedError("BranchFailure")<{}>() {}
@@ -70,9 +69,7 @@ describe("Stream.broadcastThrough", () => {
     const fiber = runFiber(
       source
         .broadcastThrough(
-          // Deferred.await types a deferred that cannot fail as failing with
-          // Throws<never>, which runFiber() rejects.
-          (stream) => stream.evalMap((value) => (gate.await as Eff<void, never>).map(() => value)),
+          (stream) => stream.evalMap((value) => gate.await.map(() => value)),
           (stream) => stream,
         )
         .drain(),
