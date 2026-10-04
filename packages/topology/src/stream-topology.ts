@@ -84,6 +84,19 @@ export class StreamTopology<T> {
     });
   }
 
+  /**
+   * Set each record's event time: when it happened, in milliseconds since
+   * the epoch. Windows and joins after this step use it. The time stays with
+   * the record, so a later `map` that drops the field doesn't lose it.
+   *
+   * Without this step, the time is read from the value's `ts`, `timestamp`
+   * or `eventTime` number, or its `createdAt` date string, falling back to
+   * the current time.
+   */
+  eventTime(fn: (value: T) => number): StreamTopology<T> {
+    return new StreamTopology({ type: "eventTime", parent: this.node, fn: fn as any });
+  }
+
   /** Partition by key — enables stateful per-key processing, windows, and joins. */
   keyBy<K extends string>(fn: (value: T) => K): KeyedTopology<K, T> {
     return new KeyedTopology({ type: "keyBy", parent: this.node, keyFn: fn as any });
@@ -131,6 +144,19 @@ export class KeyedTopology<K extends string, T> {
       parent: this.node,
       topicName: params?.topicName,
     });
+  }
+
+  /**
+   * Set each record's event time: when it happened, in milliseconds since
+   * the epoch. Windows and joins after this step use it. The time stays with
+   * the record, so a later `map` that drops the field doesn't lose it.
+   *
+   * Without this step, the time is read from the value's `ts`, `timestamp`
+   * or `eventTime` number, or its `createdAt` date string, falling back to
+   * the current time.
+   */
+  eventTime(fn: (value: T) => number): KeyedTopology<K, T> {
+    return new KeyedTopology({ type: "eventTime", parent: this.node, fn: fn as any });
   }
 
   /** Deduplicate by a key derived from each item. */

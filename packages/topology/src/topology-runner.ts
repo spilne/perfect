@@ -124,6 +124,8 @@ interface TopologyRecord {
   readonly partition: Partition;
   readonly completion: RecordCompletion;
   readonly skip: boolean;
+  /** Set by an eventTime() step; otherwise read from the value when needed. */
+  readonly eventTime?: number;
 }
 
 class TopologyRunnerInstance {
@@ -268,6 +270,17 @@ class TopologyRunnerInstance {
                 (error) => error,
               ).map((value) => this.withValue(record, value)),
         );
+      case "eventTime":
+        return this.compile(node.parent).map((record) => {
+          if (record.skip) return record;
+          const eventTime = node.fn(record.value);
+          if (!Number.isFinite(eventTime)) {
+            throw new TypeError(
+              `eventTime() must return milliseconds as a finite number, got ${String(eventTime)}`,
+            );
+          }
+          return { ...record, eventTime };
+        });
       case "keyBy":
       case "shuffle":
       case "window":
@@ -401,7 +414,7 @@ class TopologyRunnerInstance {
       }
 
       const key = keyFn(record.value);
-      const now = this.extractTimestamp(record.value);
+      const now = this.timeOf(record);
       const outputs = [...manager.add(key, record.value, now), ...manager.flush(key, now)];
 
       if (migrating.delete(context)) {
@@ -462,13 +475,13 @@ class TopologyRunnerInstance {
       record,
       side: "left",
       key: leftKeyFn(record.value),
-      ts: this.extractTimestamp(record.value),
+      ts: this.timeOf(record),
     }));
     const right = this.compile(node.right).map((record): Tagged => ({
       record,
       side: "right",
       key: rightKeyFn(record.value),
-      ts: this.extractTimestamp(record.value),
+      ts: this.timeOf(record),
     }));
 
     return left.merge(right).flatMap((tagged) => {
@@ -856,6 +869,11 @@ class TopologyRunnerInstance {
       current = "parent" in current ? (current.parent as TopologyNode) : undefined;
     }
     throw new Error("stateful operator requires keyBy");
+  }
+
+  /** The record's event time: from an eventTime() step, else from its value. */
+  private timeOf(record: TopologyRecord): number {
+    return record.eventTime ?? this.extractTimestamp(record.value);
   }
 
   private extractTimestamp(value: unknown): number {

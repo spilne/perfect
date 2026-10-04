@@ -87,10 +87,25 @@ before stateful operators. (`TopologyRunner` ignores `shuffle()`.)
 
 ## Event time and when windows close
 
-Windows and joins use each record's **event time**, read from the value
-itself: the first of `ts`, `timestamp` or `eventTime` that is a number, or
-`createdAt` as an ISO date string. A value without any of these uses the
-current time instead, so keep the field when you `map` before a window.
+Windows and joins use each record's **event time**: when it happened, not
+when it was processed. Say where it comes from with `eventTime`:
+
+```ts
+StreamTopology.source(clicks)
+  .eventTime((click) => Date.parse(click.occurredAt))
+  .keyBy((click) => click.userId)
+  .tumbling(60_000)
+  .count();
+```
+
+The time stays with the record, so a later `map` can drop the field. A
+function that returns something other than a finite number fails the
+topology. With `DistributedRunner`, call `eventTime` after `shuffle()`: only
+the value travels through the repartition channel.
+
+Without `eventTime`, the time is read from the value: the first of `ts`,
+`timestamp` or `eventTime` that is a number, or `createdAt` as an ISO date
+string, and otherwise the current time.
 
 A key's windows close when **that key** gets a record whose time is past the
 window's end:
