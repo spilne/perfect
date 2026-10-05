@@ -18,6 +18,12 @@ import {
   BrandError,
   createGracefulShutdown,
   SyncScheduler,
+  FiberLocal,
+  Log,
+  Logger,
+  TestLogger,
+  all,
+  sleep,
   type Brand,
   Config,
   ConfigProvider,
@@ -161,5 +167,27 @@ const broken = await provide(settings, ConfigProvider, new TestConfigProvider({ 
 assertEq(
   broken._tag === "Left" ? broken.left.message : "",
   'DATABASE_URL is not set; APP_ENV: "qa" is not one of dev, prod; API_KEY is not set',
+);
+// <<< example
+
+// >>> example: fiber-local
+// A FiberLocal carries a value through everything a request runs, including
+// fibers it forks, without passing it as an argument. logAs also puts it on
+// every log line.
+const RequestId = FiberLocal.make<string | undefined>(undefined, { logAs: "requestId" });
+
+const loadOrders = sleep(1).flatMap(() =>
+  RequestId.get.flatMap((id) => Log.info("loading orders").map(() => `orders for ${id}`)),
+);
+const handleRequest = (id: string) => RequestId.locally(id, loadOrders);
+
+const logger = new TestLogger();
+const orders = await provide(all([handleRequest("r-1"), handleRequest("r-2")]), Logger, logger)
+  .orDie()
+  .run();
+assertEq(orders, ["orders for r-1", "orders for r-2"]);
+assertEq(
+  logger.entries.map((e) => e.annotations.requestId),
+  ["r-1", "r-2"],
 );
 // <<< example

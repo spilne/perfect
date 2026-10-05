@@ -376,6 +376,53 @@ program runs:
 Layers without `Layer.describe` count as providing and needing nothing, so
 they are built first.
 
+## Values that follow a request — `FiberLocal`
+
+Some values, such as a request id or the current tenant, are needed deep
+inside the code a request runs, and passing them through every function is
+noise. A `FiberLocal` holds such a value for a region of code: everything run
+inside `locally(value, effect)`, including fibers it forks, reads it with
+`get`. Outside the region it is the initial value again, and requests running
+at the same time each see their own.
+
+<!-- @embed packages/core/examples/17-runtime-utilities.ts#fiber-local -->
+
+```ts
+import { provide, run, FiberLocal, Log, Logger, TestLogger, all, sleep } from "@spilne/perfect-core";
+
+// A FiberLocal carries a value through everything a request runs, including
+// fibers it forks, without passing it as an argument. logAs also puts it on
+// every log line.
+const RequestId = FiberLocal.make<string | undefined>(undefined, { logAs: "requestId" });
+
+const loadOrders = sleep(1).flatMap(() =>
+  RequestId.get.flatMap((id) => Log.info("loading orders").map(() => `orders for ${id}`)),
+);
+const handleRequest = (id: string) => RequestId.locally(id, loadOrders);
+
+const logger = new TestLogger();
+const orders = await provide(all([handleRequest("r-1"), handleRequest("r-2")]), Logger, logger)
+  .orDie()
+  .run();
+console.log(orders); // → ["orders for r-1", "orders for r-2"]
+assertEq(
+  logger.entries.map((e) => e.annotations.requestId),
+  ["r-1", "r-2"],
+);
+```
+
+<!-- @end -->
+
+| API | What it does |
+| --- | --- |
+| `FiberLocal.make(initial, { name?, logAs? })` | create one; `logAs` also adds it to log annotations |
+| `local.get` | the current value |
+| `local.locally(value, effect)` | run `effect` with the value set |
+| `local.locallyWith(f, effect)` | run `effect` with the value changed by `f` |
+
+The value can't be changed in place, only set for a region, so it never leaks
+out of a request into the next one.
+
 ## API summary
 
 | API / concept | Behavior |
