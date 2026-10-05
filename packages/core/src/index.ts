@@ -92,6 +92,18 @@ export type { FileEvent, FileStat } from "./filesystem.js";
 export { Random, RealRandom, TestRandom, realRandom } from "./random.js";
 export { Console, RealConsole, TestConsole, realConsole } from "./console.js";
 export {
+  Config,
+  ConfigError,
+  ConfigProvider,
+  Secret,
+  TestConfigProvider,
+  envConfigProvider,
+  type ConfigOptions,
+  type ConfigProblem,
+  type ConfigReader,
+  type NumberOptions,
+} from "./config.js";
+export {
   Logger,
   Log,
   ConsoleLogger,

@@ -19,6 +19,9 @@ import {
   createGracefulShutdown,
   SyncScheduler,
   type Brand,
+  Config,
+  ConfigProvider,
+  TestConfigProvider,
 } from "../src";
 import { assertEq } from "./_assert";
 
@@ -124,4 +127,39 @@ assertEq(steps, []); // nothing yet
 scheduler.flush();
 assertEq(steps, ["ran"]);
 assertEq(await run(join(fiber)), 1);
+// <<< example
+
+// >>> example: config
+// Read settings as typed values. Config.all reports every missing or invalid
+// setting at once. In tests, provide a TestConfigProvider instead of the
+// environment.
+const settings = Config.all({
+  port: Config.number("PORT", { default: 3000 }),
+  database: Config.url("DATABASE_URL"),
+  env: Config.oneOf("APP_ENV", ["dev", "prod"]),
+  apiKey: Config.secret("API_KEY"),
+});
+
+const loaded = await provide(
+  settings,
+  ConfigProvider,
+  new TestConfigProvider({
+    DATABASE_URL: "postgres://db:5432/app",
+    APP_ENV: "prod",
+    API_KEY: "s3cr3t",
+  }),
+)
+  .orDie()
+  .run();
+assertEq(loaded.port, 3000);
+assertEq(loaded.env, "prod");
+assertEq(String(loaded.apiKey), "<secret>"); // safe to log
+
+const broken = await provide(settings, ConfigProvider, new TestConfigProvider({ APP_ENV: "qa" }))
+  .either()
+  .run();
+assertEq(
+  broken._tag === "Left" ? broken.left.message : "",
+  'DATABASE_URL is not set; APP_ENV: "qa" is not one of dev, prod; API_KEY is not set',
+);
 // <<< example

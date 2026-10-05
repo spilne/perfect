@@ -14,6 +14,7 @@ import { type Scheduler, SyncScheduler, DEFAULT_BUDGET, getDefaultScheduler } fr
 import { Clock, realClock } from "./clock.js";
 import { Random, realRandom } from "./random.js";
 import { Console, realConsole } from "./console.js";
+import { ConfigProvider, envConfigProvider } from "./config.js";
 import { Logger, defaultLogger, LOG_ANNOTATIONS_KEY } from "./logger.js";
 import { Tracer, noopTracer, CURRENT_SPAN_KEY, NO_SPAN } from "./tracing.js";
 import { Metrics, defaultMetricsRegistry } from "./metrics.js";
@@ -25,6 +26,7 @@ import type { Exit } from "./exit.js";
 if (!emptyContext.has(Clock.key)) emptyContext.set(Clock.key, realClock);
 if (!emptyContext.has(Random.key)) emptyContext.set(Random.key, realRandom);
 if (!emptyContext.has(Console.key)) emptyContext.set(Console.key, realConsole);
+if (!emptyContext.has(ConfigProvider.key)) emptyContext.set(ConfigProvider.key, envConfigProvider);
 if (!emptyContext.has(Logger.key)) emptyContext.set(Logger.key, defaultLogger);
 if (!emptyContext.has(LOG_ANNOTATIONS_KEY)) emptyContext.set(LOG_ANNOTATIONS_KEY, {});
 if (!emptyContext.has(Tracer.key)) emptyContext.set(Tracer.key, noopTracer);

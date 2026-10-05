@@ -246,6 +246,71 @@ The implementation uses prefix-scoped scanning for `clear()` and supports a
 custom value codec and key encoder. See
 [Distributed backends](./17-distributed-backends.md#redis).
 
+## Config
+
+`Config` reads settings, from environment variables by default, as typed
+values. A missing or invalid setting is a typed `ConfigError`, and
+`Config.all` lists every problem at once, so a misconfigured deploy is fixed
+in one go.
+
+<!-- @embed packages/core/examples/17-runtime-utilities.ts#config -->
+
+```ts
+import { provide, run, Config, ConfigProvider, TestConfigProvider } from "@spilne/perfect-core";
+
+// Read settings as typed values. Config.all reports every missing or invalid
+// setting at once. In tests, provide a TestConfigProvider instead of the
+// environment.
+const settings = Config.all({
+  port: Config.number("PORT", { default: 3000 }),
+  database: Config.url("DATABASE_URL"),
+  env: Config.oneOf("APP_ENV", ["dev", "prod"]),
+  apiKey: Config.secret("API_KEY"),
+});
+
+const loaded = await provide(
+  settings,
+  ConfigProvider,
+  new TestConfigProvider({
+    DATABASE_URL: "postgres://db:5432/app",
+    APP_ENV: "prod",
+    API_KEY: "s3cr3t",
+  }),
+)
+  .orDie()
+  .run();
+console.log(loaded.port); // → 3000
+console.log(loaded.env); // → "prod"
+// safe to log
+console.log(String(loaded.apiKey)); // → "<secret>"
+
+const broken = await provide(settings, ConfigProvider, new TestConfigProvider({ APP_ENV: "qa" }))
+  .either()
+  .run();
+assertEq(
+  broken._tag === "Left" ? broken.left.message : "",
+  'DATABASE_URL is not set; APP_ENV: "qa" is not one of dev, prod; API_KEY is not set',
+);
+```
+
+<!-- @end -->
+
+| Reader | Gives |
+| --- | --- |
+| `Config.string(name)` | the text |
+| `Config.number(name, { integer?, min?, max? })` | a number |
+| `Config.boolean(name)` | `true` for true/1/yes/on, `false` for false/0/no/off |
+| `Config.url(name)` | a `URL` |
+| `Config.duration(name)` | milliseconds, from `500`, `"30s"`, `"5m"`… |
+| `Config.oneOf(name, ["dev", "prod"])` | one of the listed words |
+| `Config.secret(name)` | a `Secret` that prints as `<secret>`; `.value()` gives the text |
+| `Config.optional(reader)` | `undefined` when the setting isn't set |
+| `Config.all({ ... })` | an object of all of them |
+
+Every reader takes `{ default }`, used when the setting isn't set. A value
+that is set but invalid is still an error. In tests, provide
+`new TestConfigProvider({ NAME: "value" })` for `ConfigProvider`.
+
 ## FileSystem
 
 `FileSystem` is a service for reading and writing files. Every operation
