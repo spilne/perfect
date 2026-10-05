@@ -87,8 +87,10 @@ async function runToEnd(
     instanceId: TopologyInstanceId(instance),
     ackBatchSize,
   });
-  await runner.awaitExit();
+  const exits = await runner.awaitExit();
   await runner.shutdown();
+  // Every branch must end cleanly, including when the input ends.
+  expect(exits.every((exit) => exit._tag === "Success")).toBe(true);
 }
 
 describe("join state", () => {
