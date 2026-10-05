@@ -574,18 +574,20 @@ class TopologyRunnerInstance {
     const rightKeyFn = this.findKeyBy(node.right).keyFn;
 
     type Tagged = { record: TopologyRecord; side: "left" | "right"; key: string; ts: number };
-    const left = this.compile(node.left).map((record): Tagged => ({
-      record,
-      side: "left",
-      key: leftKeyFn(record.value),
-      ts: this.timeOf(record),
-    }));
-    const right = this.compile(node.right).map((record): Tagged => ({
-      record,
-      side: "right",
-      key: rightKeyFn(record.value),
-      ts: this.timeOf(record),
-    }));
+    // Skipped records (filtered out, duplicates, the end-of-input marker)
+    // pass through untouched: their value may not be a record at all, so the
+    // key function must not see it.
+    const tag = (record: TopologyRecord, side: Tagged["side"]): Tagged =>
+      record.skip
+        ? { record, side, key: "", ts: 0 }
+        : {
+            record,
+            side,
+            key: (side === "left" ? leftKeyFn : rightKeyFn)(record.value),
+            ts: this.timeOf(record),
+          };
+    const left = this.compile(node.left).map((record) => tag(record, "left"));
+    const right = this.compile(node.right).map((record) => tag(record, "right"));
 
     return left.merge(right).flatMap((tagged) => {
       const record = tagged.record;
