@@ -91,6 +91,7 @@ export {
 export type { FileEvent, FileStat } from "./filesystem.js";
 export { Random, RealRandom, TestRandom, realRandom } from "./random.js";
 export { Console, RealConsole, TestConsole, realConsole } from "./console.js";
+export { FiberLocal, type FiberLocalOptions } from "./fiber-local.js";
 export {
   Config,
   ConfigError,

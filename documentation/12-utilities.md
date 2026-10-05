@@ -256,7 +256,7 @@ in one go.
 <!-- @embed packages/core/examples/17-runtime-utilities.ts#config -->
 
 ```ts
-import { provide, run, Config, ConfigProvider, TestConfigProvider } from "@spilne/perfect-core";
+import { provide, run, all, Config, ConfigProvider, TestConfigProvider } from "@spilne/perfect-core";
 
 // Read settings as typed values. Config.all reports every missing or invalid
 // setting at once. In tests, provide a TestConfigProvider instead of the
