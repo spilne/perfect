@@ -1,3 +1,56 @@
+## 0.4.0 (2026-10-05)
+
+### 🚀 Features
+
+- **topology:** set event time explicitly with eventTime() ([b56400c](https://github.com/spilne/perfect/commit/b56400c))
+- ⚠️  **topology:** close windows by watermark, drop late records ([b240b8d](https://github.com/spilne/perfect/commit/b240b8d))
+- **topology:** name stateful steps so their state survives changes ([d0d599e](https://github.com/spilne/perfect/commit/d0d599e))
+
+### 🩹 Fixes
+
+- **core:** fix runSink, cached() and Layer.build typings ([0d604f7](https://github.com/spilne/perfect/commit/0d604f7))
+- **core:** let Pipes.xml read tags split across pieces ([9d5b93e](https://github.com/spilne/perfect/commit/9d5b93e))
+- **core:** fix typing gaps that the tests ran into ([4383d07](https://github.com/spilne/perfect/commit/4383d07))
+- **http:** make MockHttpClient.getResponse decode like the real client ([4d68df4](https://github.com/spilne/perfect/commit/4d68df4))
+- **release:** list dependency updates in the changelog ([89d3074](https://github.com/spilne/perfect/commit/89d3074))
+- **topology:** start fresh when a partition comes back after a rebalance ([026f4e0](https://github.com/spilne/perfect/commit/026f4e0))
+- **topology:** don't hang on shutdown waiting for interrupted work ([7f9b341](https://github.com/spilne/perfect/commit/7f9b341))
+- **topology:** count each source record once ([882b960](https://github.com/spilne/perfect/commit/882b960))
+- **topology:** run windows, process and dedupe after shuffle() ([cb10d61](https://github.com/spilne/perfect/commit/cb10d61))
+- **topology:** be honest about options and how windows behave ([db6ad15](https://github.com/spilne/perfect/commit/db6ad15))
+
+### 🔥 Performance
+
+- **topology:** save join state per key ([928d2bc](https://github.com/spilne/perfect/commit/928d2bc))
+- **topology:** commit and ack records in batches with ackBatchSize ([6f3a8ec](https://github.com/spilne/perfect/commit/6f3a8ec))
+- **topology:** batch commits by default (ackBatchSize 100) ([973f714](https://github.com/spilne/perfect/commit/973f714))
+
+### 📦 Dependencies
+
+- bump effect to 4, swc_core to 81 and testcontainers ([6a6e5fc](https://github.com/spilne/perfect/commit/6a6e5fc))
+
+### ⚠️  Breaking Changes
+
+- **topology:** close windows by watermark, drop late records  ([b240b8d](https://github.com/spilne/perfect/commit/b240b8d))
+  windows close on the partition's watermark instead of
+  per key, finite sources emit their open windows at the end, late records
+  are dropped, and WindowManager.add no longer returns closed sessions
+  (use close(watermark) or flush()).
+  * style(topology): format"
+  M	documentation/18-topologies.md
+  M	packages/topology/src/distributed-runner.ts
+  M	packages/topology/src/index.ts
+  M	packages/topology/src/stream-topology.ts
+  M	packages/topology/src/topology-runner.ts
+  M	packages/topology/src/types.ts
+  M	packages/topology/src/window-manager.ts
+  M	packages/topology/test/distributed-stateful.test.ts
+  M	packages/topology/test/event-time.test.ts
+  M	packages/topology/test/rebalance.test.ts
+  M	packages/topology/test/stream-topology.test.ts
+  A	packages/topology/test/watermarks.test.ts
+  M	packages/topology/test/window-and-join-state.test.ts
+
 ## 0.3.1 (2026-10-04)
 
 ### 📦 Dependencies
