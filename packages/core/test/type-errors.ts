@@ -30,6 +30,7 @@ import {
   runSync,
   all,
   cached,
+  RequestResolver,
   Config,
   type ConfigError,
   type Secret,
@@ -737,4 +738,16 @@ const _err8 = run(
   > = settings;
   // @ts-expect-error a missing or invalid setting has to be handled
   const _badConfigRun = () => settings.run();
+}
+
+// ── RequestResolver ────────────────────────────────────────────────
+{
+  const resolver = RequestResolver.make({
+    load: (_ids: readonly string[]) =>
+      fail("db down" as const).flatMap(() => succeed(new Map<string, number>())),
+  });
+  // The value may be missing, and the load's error is the caller's error.
+  const _okGet: Eff<number | undefined, Throws<"db down">> = resolver.get("a");
+  // @ts-expect-error the load's error has to be handled
+  const _badGetRun = () => resolver.get("a").run();
 }

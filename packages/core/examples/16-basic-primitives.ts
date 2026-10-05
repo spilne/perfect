@@ -16,6 +16,7 @@ import {
   Semaphore,
   Ref,
   Deferred,
+  RequestResolver,
 } from "../src";
 import { assertEq } from "./_assert";
 
@@ -124,4 +125,25 @@ await users.get("a").run();
 await users.get("a").run();
 await users.get("b").run();
 assertEq(fetched, ["a", "b"]);
+// <<< example
+
+// >>> example: request-resolver
+// Lookups made together become one load: here three orders need their
+// customers, and the load runs once, for the two distinct ids.
+const queries: string[][] = [];
+const CustomerById = RequestResolver.make({
+  load: (ids: readonly string[]) =>
+    sync(() => {
+      queries.push([...ids]); // e.g. select * from customers where id = any($1)
+      return new Map(ids.map((id) => [id, { id, name: `customer ${id}` }] as const));
+    }),
+});
+
+const orders = [{ customer: "c1" }, { customer: "c2" }, { customer: "c1" }];
+const customers = await all(orders.map((order) => CustomerById.get(order.customer))).run();
+assertEq(
+  customers.map((customer) => customer?.name),
+  ["customer c1", "customer c2", "customer c1"],
+);
+assertEq(queries, [["c1", "c2"]]);
 // <<< example

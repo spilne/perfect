@@ -169,6 +169,7 @@ export type { CircuitState, CircuitOpen, CircuitBreakerOptions } from "./circuit
 export { Latch } from "./latch.js";
 export { Barrier } from "./barrier.js";
 export { Singleflight } from "./singleflight.js";
+export { RequestResolver, type RequestResolverOptions } from "./request-resolver.js";
 export { PubSub } from "./pubsub.js";
 export { SubscriptionRef } from "./subscription-ref.js";
 export { RateLimiter } from "./rate-limiter.js";
