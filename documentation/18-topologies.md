@@ -209,6 +209,31 @@ topology that has both `shuffle()` and `join`. Run such a topology with
 analyzer reports suspicious DAGs such as keyed state without a preceding
 shuffle.
 
+## Records a step fails on
+
+By default, an exception in a step (a `map` that meets a malformed record,
+say) fails the topology, and after a restart the same record fails again.
+Give it a dead-letter sink to set such records aside instead:
+
+```ts
+await TopologyRunner.run(topology, {
+  group: ConsumerGroup("orders"),
+  deadLetter: deadLetterTopic, // a Sinkable<DeadLetter>
+});
+```
+
+The record is published there as a `DeadLetter` (its original value, the
+error's name and message, its topic, partition and offset, and when it
+failed), then committed and acked, and the topology carries on. This covers
+errors thrown by `map`, `filter`, `mapAsync`, `eventTime`, key functions,
+`process`, `dedupe`, window functions and joins; `metrics().deadLetters`
+counts them. State changes made by steps before the failing one are kept.
+
+A sink that fails (including the dead-letter sink) still fails the topology,
+since retrying makes sense there. With exactly-once delivery the dead letter
+is published in the record's transaction, so the dead-letter sink must share
+the transaction domain.
+
 ## Delivery guarantees
 
 The default is `"at-least-once"`:

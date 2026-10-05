@@ -52,6 +52,7 @@ export type {
   ProcessSpec,
   JoinConfig,
   TopologyConfig,
+  DeadLetter,
   TopologyHandle,
   TopologyMetrics,
   BackpressureStats,
