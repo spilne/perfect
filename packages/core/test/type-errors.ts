@@ -696,3 +696,27 @@ const _err8 = run(
   const _okRelease = acquireRelease(succeed(1), () => sync(() => log.push("released")));
   const _okOnFinalize = Stream.of(1).onFinalize(sync(() => log.push("closed")));
 }
+
+// ── eff(($) => ...) types ──────────────────────────────────────────
+{
+  // Effects that can't fail need nothing extra; the value is the return type.
+  const _okDollar: Eff<number, never> = eff(($) => {
+    const a = $(succeed(1));
+    const b = $(succeed(2));
+    return a + b;
+  });
+  // @ts-expect-error binding an effect that can fail needs its error declared
+  const _badDollar = eff(($) => $(fail("boom")));
+  // Declared up front, it type-checks and the error stays in the type.
+  const _okDeclared: Eff<number, Throws<"boom">> = eff<number, Throws<"boom">>(($) => {
+    const a = $(succeed(1));
+    $(fail("boom" as const));
+    return a;
+  });
+  // @ts-expect-error the declared error has to be handled before run()
+  const _badRun = () => _okDeclared.run();
+  // Generator functions still pick the generator overloads.
+  const _okGen: Eff<number, never> = eff(function* () {
+    return (yield* succeed(1)) + 1;
+  });
+}

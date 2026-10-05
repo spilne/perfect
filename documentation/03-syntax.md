@@ -110,6 +110,23 @@ object/array destructuring, expression bodies, and `if`/`else` branches that
 contain `$()`. Unsupported placements are build diagnostics rather than code
 containing a dangling `$`.
 
+### Types
+
+`tsc` checks the source before the plugin rewrites it, and it can't see which
+effects the `$(...)` calls bind. So `$` accepts effects whose failures you
+declared up front. Effects that can't fail need nothing; for ones that can,
+pass the value and effect types:
+
+```ts
+const user = eff<User, Throws<NotFound>>(($) => {
+  const id = $(parseId(input)); // can't fail
+  return $(findUser(id)); // Eff<User, Throws<NotFound>>
+});
+```
+
+Binding an effect whose failure isn't declared is a type error, so a failure
+can't disappear from the type.
+
 The Bun source-text rewriter intentionally supports a narrower subset and
 directs unsupported control flow to the SWC plugin. The separate
 `for { x <- e } yield x` syntax is Bun-rewriter-only because it is not valid
@@ -133,10 +150,8 @@ runSync(two); // 20
 - **`yield*` not `yield`** — `yield effect` yields the effect to the driver,
   but you usually want the value, which requires `yield*`. (`yield*` calls
   the effect's `[Symbol.iterator]`, threads the value back through.)
-- **`eff($)` needs the plugin.** Without it, the code fails at runtime.
-  `eff` only accepts generator functions in its types, so `tsc` also reports
-  an error (TS2769) on `eff(($) => …)`, even when the plugin compiles it
-  fine. If you type-check with `tsc`, or can't add the plugin, use
+- **`eff($)` needs the plugin.** Without it, `eff(($) => …)` throws a
+  `TypeError` that says so. If you can't add the plugin, use
   `eff(function* () { … })`.
 
 ## Next
