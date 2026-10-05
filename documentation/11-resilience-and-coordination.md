@@ -248,6 +248,52 @@ console.log(users[0]!.id); // → 7
 **No caching** — once the eff settles, the key is cleared so the next
 call re-runs. For caching, use [`cached` / `cachedBy`](./12-utilities.md#cached-and-cachedby).
 
+## RequestResolver
+
+Code that looks things up one at a time (a customer for each order) makes
+one query per item. `RequestResolver` collects the `get` calls that happen
+together, such as the fibers of one `all`, and runs a single `load` for all
+their keys, each key once:
+
+<!-- @embed packages/core/examples/16-basic-primitives.ts#request-resolver -->
+
+```ts
+import { sync, all, RequestResolver } from "@spilne/perfect-core";
+
+// Lookups made together become one load: here three orders need their
+// customers, and the load runs once, for the two distinct ids.
+const queries: string[][] = [];
+const CustomerById = RequestResolver.make({
+  load: (ids: readonly string[]) =>
+    sync(() => {
+      queries.push([...ids]); // e.g. select * from customers where id = any($1)
+      return new Map(ids.map((id) => [id, { id, name: `customer ${id}` }] as const));
+    }),
+});
+
+const orders = [{ customer: "c1" }, { customer: "c2" }, { customer: "c1" }];
+const customers = await all(orders.map((order) => CustomerById.get(order.customer))).run();
+assertEq(
+  customers.map((customer) => customer?.name),
+  ["customer c1", "customer c2", "customer c1"],
+);
+console.log(queries); // → [["c1", "c2"]]
+```
+
+<!-- @end -->
+
+- `load(keys)` returns a `Map` from key to value; a key it leaves out gives
+  `undefined`.
+- If `load` fails, every caller in that batch fails with the same error,
+  which stays in the type.
+- `windowMs` also waits that long for more calls, which helps when requests
+  arrive a little apart. `maxBatchSize` caps the keys per load.
+- The load runs with the services of the caller that started the batch, and
+  keeps going if that caller is interrupted.
+
+`Singleflight` shares one run of the *same* request; `RequestResolver` turns
+*different* requests into one load. They combine well with `cachedBy`.
+
 ## RateLimiter
 
 Three strategies — `slidingWindow`, `fixedWindow`, `tokenBucket`. Each
