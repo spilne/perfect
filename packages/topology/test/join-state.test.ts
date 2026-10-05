@@ -79,11 +79,13 @@ async function runToEnd(
   topology: ReturnType<typeof joinTopology>,
   state: InMemoryPartitionedState<unknown>,
   instance = "A",
+  ackBatchSize?: number,
 ): Promise<void> {
   const runner = await TopologyRunner.run(topology, {
     group: ConsumerGroup("joins"),
     partitionedStateBackend: state,
     instanceId: TopologyInstanceId(instance),
+    ackBatchSize,
   });
   await runner.awaitExit();
   await runner.shutdown();
@@ -94,7 +96,8 @@ describe("join state", () => {
     const { state, writes } = recordingState();
     const out = listSink<Joined>();
     const orders = ["a", "b", "c"].map((customer, i) => ({ customer, amount: i, ts: 1_000 + i }));
-    await runToEnd(joinTopology(orders, [], out), state);
+    // One commit per record, to see what each record writes.
+    await runToEnd(joinTopology(orders, [], out), state, "A", 1);
 
     const joinWrites = writes.map((keys) => keys.filter((key) => key.includes("join")));
     expect(joinWrites).toEqual([

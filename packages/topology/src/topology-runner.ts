@@ -215,7 +215,7 @@ class TopologyRunnerInstance {
         StateCheckpointId(`${this.instanceId}:revoke:${++this.checkpointSequence}`),
     });
     this.rateLimiter = config.maxItemsPerSecond ? new RateLimiter(config.maxItemsPerSecond) : null;
-    this.batchSize = config.ackBatchSize ?? 1;
+    this.batchSize = config.ackBatchSize ?? 100;
     this.batchWaitMs = config.ackMaxWaitMs ?? 1_000;
   }
 
@@ -1074,7 +1074,12 @@ class TopologyRunnerInstance {
 
   private putMutation(record: TopologyRecord, key: string, value: unknown): void {
     record.completion.context.values.set(key, value);
-    record.completion.mutations.set(key, { type: "put", key, value });
+    // With batching, the commit happens after later records have run, and
+    // operators keep changing the same objects (an open window, say). Save a
+    // copy as it is now, so a later record's change, which may never be
+    // committed, can't sneak into this one.
+    const saved = this.batchSize > 1 ? structuredClone(value) : value;
+    record.completion.mutations.set(key, { type: "put", key, value: saved });
   }
 
   private deleteMutation(record: TopologyRecord, key: string): void {
