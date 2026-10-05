@@ -30,6 +30,9 @@ import {
   runSync,
   all,
   cached,
+  Config,
+  type ConfigError,
+  type Secret,
   interrupt,
   validate,
   retry,
@@ -719,4 +722,19 @@ const _err8 = run(
   const _okGen: Eff<number, never> = eff(function* () {
     return (yield* succeed(1)) + 1;
   });
+}
+
+// ── Config ─────────────────────────────────────────────────────────
+{
+  const settings = Config.all({
+    port: Config.number("PORT"),
+    env: Config.oneOf("ENV", ["dev", "prod"]),
+    apiKey: Config.optional(Config.secret("API_KEY")),
+  });
+  const _okConfig: Eff<
+    { port: number; env: "dev" | "prod"; apiKey: Secret | undefined },
+    Throws<ConfigError>
+  > = settings;
+  // @ts-expect-error a missing or invalid setting has to be handled
+  const _badConfigRun = () => settings.run();
 }

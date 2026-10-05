@@ -125,6 +125,7 @@ The other built-in services have test versions too:
 | Service | Test version | Check with |
 | --- | --- | --- |
 | `FileSystem` | `new TestFileSystem({ "/path": "contents" })` | read the files back through the service |
+| `ConfigProvider` | `new TestConfigProvider({ PORT: "8080" })` | the settings your code reads |
 | `Logger` | `new TestLogger()` | `.entries`, `.messages`, `.atLevel("warn")`, `.clear()` |
 | `Tracer` | `new TestTracer()` | `.finished` (ended spans, children first), `.find(name)`, `.clear()` |
 
