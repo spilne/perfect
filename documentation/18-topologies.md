@@ -221,19 +221,20 @@ The default is `"at-least-once"`:
 A crash between these steps can replay an already-published output, so sinks
 must be idempotent.
 
-By default every record is committed and acked on its own: two or more round
-trips to Redis or Postgres per record. `ackBatchSize` commits up to that many
-records of a partition together, in one round trip, and then acks them:
+Records of a partition are committed and acked in **batches**: one round
+trip to Redis or Postgres saves up to 100 records, instead of two or more round
+trips per record. Tune it with:
 
 ```ts
 await TopologyRunner.run(topology, {
   group: ConsumerGroup("analytics"),
   partitionedStateBackend: state,
-  ackBatchSize: 100,   // commit up to 100 records at once
-  ackMaxWaitMs: 1_000, // or whatever has gathered after 1 s
+  ackBatchSize: 100,   // commit up to 100 records at once (the default)
+  ackMaxWaitMs: 1_000, // or whatever has gathered after 1 s (the default)
 });
 ```
 
+Set `ackBatchSize: 1` to commit and ack every record on its own.
 Outputs are still published right away; only the commit and the ack wait for
 the batch. A batch is also committed when the input ends, on shutdown, and
 before a partition is handed to another instance. Exactly-once delivery

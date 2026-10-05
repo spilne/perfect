@@ -114,8 +114,8 @@ export interface TopologyConfig {
   /**
    * Commit and ack up to this many records of a partition together: one
    * state commit (one round trip to Redis or Postgres) for the whole batch,
-   * then the acks. Default: 1, every record on its own. Larger batches are
-   * much faster on remote stores; acks then wait until the batch commits.
+   * then the acks. Default: 100. Acks wait until their batch is committed
+   * (at most ackMaxWaitMs); set 1 to commit and ack every record on its own.
    * Not used with exactly-once delivery, which commits each record in its own
    * transaction.
    */

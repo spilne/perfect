@@ -75,45 +75,51 @@ describe("each source record counts once", () => {
     expect(acked).toEqual([0, 0, 1]); // the second copy is still acked
   });
 
-  test("state that was never committed doesn't come back after a restart", async () => {
-    const state = new InMemoryPartitionedState<unknown>();
-    const clicks: Array<[Click, number]> = [
-      [{ key: "k", ts: 0 }, 0],
-      [{ key: "k", ts: 1_000 }, 1],
-      [{ key: "k", ts: 2_000 }, 2],
-      [{ key: "k", ts: 3_000 }, 3],
-    ];
-    const countWindows = <S>(sink: Sinkable<WindowCount, S>) =>
-      StreamTopology.source(listSource(clicks))
-        .keyBy((click) => click.key)
-        .sliding({ windowMs: 2_000, slideMs: 1_000 })
-        .count()
-        .to(sink);
-    const config = (instance: string) => ({
-      group: ConsumerGroup("windows"),
-      partitionedStateBackend: state,
-      instanceId: TopologyInstanceId(instance),
-      partitionLeaseMs: 2_000,
-    });
+  // With batches, the commit happens later, after the failing record has
+  // already changed the open window; it must not be saved with the batch.
+  test.each([1, 100])(
+    "state that was never committed doesn't come back after a restart (ackBatchSize %i)",
+    async (ackBatchSize) => {
+      const state = new InMemoryPartitionedState<unknown>();
+      const clicks: Array<[Click, number]> = [
+        [{ key: "k", ts: 0 }, 0],
+        [{ key: "k", ts: 1_000 }, 1],
+        [{ key: "k", ts: 2_000 }, 2],
+        [{ key: "k", ts: 3_000 }, 3],
+      ];
+      const countWindows = <S>(sink: Sinkable<WindowCount, S>) =>
+        StreamTopology.source(listSource(clicks))
+          .keyBy((click) => click.key)
+          .sliding({ windowMs: 2_000, slideMs: 1_000 })
+          .count()
+          .to(sink);
+      const config = (instance: string) => ({
+        group: ConsumerGroup("windows"),
+        partitionedStateBackend: state,
+        instanceId: TopologyInstanceId(instance),
+        partitionLeaseMs: 2_000,
+        ackBatchSize,
+      });
 
-    // The first run fails while publishing the window that the click at 2000
-    // closes, so that click's changes are never committed.
-    let publishes = 0;
-    const failingSink = {
-      codec,
-      publish: () => (++publishes === 1 ? fail("sink down") : succeed(undefined)),
-    } as unknown as Sinkable<WindowCount, Throws<string>>;
-    const first = await TopologyRunner.run(countWindows(failingSink), config("first"));
-    await first.awaitExit();
-    await first.shutdown();
+      // The first run fails while publishing the window that the click at 2000
+      // closes, so that click's changes are never committed.
+      let publishes = 0;
+      const failingSink = {
+        codec,
+        publish: () => (++publishes === 1 ? fail("sink down") : succeed(undefined)),
+      } as unknown as Sinkable<WindowCount, Throws<string>>;
+      const first = await TopologyRunner.run(countWindows(failingSink), config("first"));
+      await first.awaitExit();
+      await first.shutdown();
 
-    // The restart reads every click again from the last committed one.
-    const out = listSink<WindowCount>();
-    const second = await TopologyRunner.run(countWindows(out), config("second"));
-    await second.awaitExit();
-    await second.shutdown();
+      // The restart reads every click again from the last committed one.
+      const out = listSink<WindowCount>();
+      const second = await TopologyRunner.run(countWindows(out), config("second"));
+      await second.awaitExit();
+      await second.shutdown();
 
-    const window1000 = out.items.find((w) => w.window.start === 1_000);
-    expect(window1000?.count).toBe(2); // the clicks at 1000 and 2000, not 3
-  });
+      const window1000 = out.items.find((w) => w.window.start === 1_000);
+      expect(window1000?.count).toBe(2); // the clicks at 1000 and 2000, not 3
+    },
+  );
 });
