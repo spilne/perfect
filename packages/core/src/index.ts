@@ -191,5 +191,5 @@ export type {
   StatefulMapOptions,
 } from "./stream/index.js";
 
-export { eff } from "./syntax/index.js";
+export { eff, type Bind } from "./syntax/index.js";
 import "./syntax/index.js";

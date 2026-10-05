@@ -39,11 +39,40 @@ declare module "../eff.js" {
 
 type EffGenFn<A, S> = () => Generator<Eff<any, S>, A, any>;
 
+/** The `$` of `eff(($) => ...)`: takes an effect and gives back its value. */
+export type Bind<S> = <A>(effect: Eff<A, S>) => A;
+
+/**
+ * The `$` form, `eff(($) => { const x = $(effect); return x; })`. It needs
+ * the Bun or SWC plugin, which rewrites it into flatMap calls; this overload
+ * only gives it types.
+ *
+ * TypeScript can't see which effects the `$(...)` calls inside the body bind,
+ * so they are declared up front: `S` is what `$` accepts. It defaults to
+ * `never`, so effects that can't fail need nothing; for ones that can, write
+ * the types, e.g. `eff<User, Throws<NotFound>>(($) => ...)`.
+ *
+ * It is listed first so TypeScript types `$` before trying the generator
+ * forms; a generator function can't match it, because its return type
+ * would have to be a Generator.
+ */
+export function eff<A, S = never>(
+  fn: ($: Bind<S>) => A extends Generator<any, any, any> ? never : A,
+): Eff<A, S>;
 export function eff<Y extends Eff<any, any>, A>(
   fn: () => Generator<Y, A, any>,
 ): Eff<A extends Eff<infer B, any> ? B : A, InferEffects<Y> | InferEffects<A>>;
 export function eff<A, S = never>(fn: EffGenFn<A, S>): Eff<A, S>;
-export function eff(fn: EffGenFn<any, any>): Eff<any, any> {
+export function eff(fn: EffGenFn<any, any> | (($: Bind<any>) => unknown)): Eff<any, any> {
+  // The $ form only works after the Bun or SWC plugin has rewritten it; here
+  // it would fail later with a confusing "$ is not a function".
+  if (fn.length > 0) {
+    throw new TypeError(
+      "eff(($) => ...) needs the Bun or SWC plugin from @spilne/perfect-transform or " +
+        "@spilne/perfect-swc-plugin; without one, use eff(function* () { ... })",
+    );
+  }
+  const body = fn as EffGenFn<any, any>;
   // Lazy: build the generator inside a Sync so the fn runs on each execution.
   // The closing finalizer is in place before the first next() enters the body,
   // so no interrupt can land between entering a `try` and its `finally` being
@@ -54,7 +83,7 @@ export function eff(fn: EffGenFn<any, any>): Eff<any, any> {
       let gen: Generator<Eff<any, any>, any, any> | null = null;
       return new Suspend(
         Op.Ensuring,
-        new Suspend(Op.Sync, () => drive((gen = fn()), undefined, null), null),
+        new Suspend(Op.Sync, () => drive((gen = body()), undefined, null), null),
         () => (gen === null ? null : closeGenerator(gen)),
       );
     },

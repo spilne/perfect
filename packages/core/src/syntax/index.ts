@@ -7,4 +7,4 @@ import "./fiber.js";
 import "./generator.js";
 import "./runners.js";
 
-export { eff } from "./generator.js";
+export { eff, type Bind } from "./generator.js";
