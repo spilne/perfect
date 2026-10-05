@@ -722,7 +722,7 @@ const _err8 = run(
   const _okGen: Eff<number, never> = eff(function* () {
     return (yield* succeed(1)) + 1;
   });
-||||||| parent of 024129c (feat(core): read settings as typed effects with Config)
+}
 
 // ── Config ─────────────────────────────────────────────────────────
 {
