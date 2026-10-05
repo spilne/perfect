@@ -5,6 +5,7 @@ import {
   type Throws,
   Cause,
   Exit,
+  fail,
   fromPromise,
   runExit,
   runFiber,
@@ -46,7 +47,13 @@ import { BuiltTopology } from "./stream-topology.js";
 import { WindowManager } from "./window-manager.js";
 import { JoinBuffer } from "./join-buffer.js";
 import { PartitionLifecycle, type PartitionContext } from "./partition-lifecycle.js";
-import type { TopologyConfig, TopologyHandle, TopologyMetrics, TopologyNode } from "./types.js";
+import type {
+  DeadLetter,
+  TopologyConfig,
+  TopologyHandle,
+  TopologyMetrics,
+  TopologyNode,
+} from "./types.js";
 
 export class TopologyRunner {
   static async run(topology: BuiltTopology, config: TopologyConfig): Promise<TopologyHandle> {
@@ -114,6 +121,10 @@ interface RecordCompletion {
   /** This record put its sourceId in the context's inflightSources. */
   readonly tracksSource: boolean;
   readonly outputs: { readonly sink: Sinkable<unknown, unknown>; readonly value: unknown }[];
+  /** Set when a step threw on this record and it goes to the dead-letter sink. */
+  failure?: { readonly error: unknown };
+  /** The dead letter was sent (records branched into several reach the sink more than once). */
+  deadLettered?: boolean;
 }
 
 interface TopologyRecord {
@@ -181,6 +192,7 @@ class TopologyRunnerInstance {
   private sources = 0;
   private endedSources = 0;
   private lateRecords = 0;
+  private deadLetters = 0;
   private readonly metricsStartTime = Date.now();
   private readonly rateLimiter: RateLimiter | null;
 
@@ -232,6 +244,9 @@ class TopologyRunnerInstance {
         let pipeline = this.compile(sink.parent);
         const sinkTarget = sink.sink as Sinkable<unknown, unknown>;
         this.validateSink(sinkTarget);
+        if (this.config.deadLetter) {
+          this.validateSink(this.config.deadLetter as Sinkable<unknown, unknown>);
+        }
         if (this.config.maxBufferSize) pipeline = pipeline.buffer(this.config.maxBufferSize);
 
         drains.push(
@@ -296,31 +311,41 @@ class TopologyRunnerInstance {
         return this.compileSource(node);
       case "map":
         return this.compile(node.parent).map((record) =>
-          record.skip ? record : this.withValue(record, node.fn(record.value)),
+          record.skip
+            ? record
+            : this.guard(record, () => this.withValue(record, node.fn(record.value))),
         );
       case "filter":
         return this.compile(node.parent).map((record) =>
-          record.skip || node.fn(record.value) ? record : this.skipped(record),
+          record.skip
+            ? record
+            : this.guard(record, () => (node.fn(record.value) ? record : this.skipped(record))),
         );
       case "mapAsync":
         return this.compile(node.parent).parEvalMap(node.concurrency, (record) =>
           record.skip
             ? succeed(record)
             : fromPromise(
-                () => node.fn(record.value),
+                async () => node.fn(record.value),
                 (error) => error,
-              ).map((value) => this.withValue(record, value)),
+              )
+                .map((value) => this.withValue(record, value))
+                .catch((error) =>
+                  this.config.deadLetter ? succeed(this.failed(record, error)) : fail(error),
+                ),
         );
       case "eventTime":
         return this.compile(node.parent).map((record) => {
           if (record.skip) return record;
-          const eventTime = node.fn(record.value);
-          if (!Number.isFinite(eventTime)) {
-            throw new TypeError(
-              `eventTime() must return milliseconds as a finite number, got ${String(eventTime)}`,
-            );
-          }
-          return { ...record, eventTime };
+          return this.guard(record, () => {
+            const eventTime = node.fn(record.value);
+            if (!Number.isFinite(eventTime)) {
+              throw new TypeError(
+                `eventTime() must return milliseconds as a finite number, got ${String(eventTime)}`,
+              );
+            }
+            return { ...record, eventTime };
+          });
         });
       case "keyBy":
       case "shuffle":
@@ -429,8 +454,7 @@ class TopologyRunnerInstance {
     const operatorId = this.operatorId(node, "process");
     const legacyIndex = Number(operatorId.split(":")[1]);
 
-    return this.compile(node.parent).map((record) => {
-      if (record.skip) return record;
+    const step = (record: TopologyRecord): TopologyRecord => {
       const context = record.completion.context;
       const key = keyFn(record.value);
       const stateKey = `${operatorId}:key:${encodeURIComponent(key)}`;
@@ -444,7 +468,10 @@ class TopologyRunnerInstance {
       const result = node.spec.process(current ?? node.spec.init(), record.value);
       this.putMutation(record, stateKey, result.state);
       return result.emit === undefined ? this.skipped(record) : this.withValue(record, result.emit);
-    });
+    };
+    return this.compile(node.parent).map((record) =>
+      record.skip ? record : this.guard(record, () => step(record)),
+    );
   }
 
   private compileAggregate(
@@ -513,24 +540,27 @@ class TopologyRunnerInstance {
         return Stream.fromArray(this.emitBeforeEnd(record, outputs));
       }
       if (record.skip) return Stream.fromArray([record]);
+      return Stream.fromArray(
+        this.guardMany(record, () => {
+          const state = windowsOf(record.completion.context);
+          const time = this.timeOf(record);
+          if (state.manager.isLate(time, state.newestEventTime - lateness)) {
+            this.lateRecords += 1;
+            return [this.skipped(record)];
+          }
 
-      const state = windowsOf(record.completion.context);
-      const time = this.timeOf(record);
-      if (state.manager.isLate(time, state.newestEventTime - lateness)) {
-        this.lateRecords += 1;
-        return Stream.fromArray([this.skipped(record)]);
-      }
-
-      state.manager.add(keyFn(record.value), record.value, time);
-      if (time > state.newestEventTime) {
-        state.newestEventTime = time;
-        this.putMutation(record, newestEntry, time);
-      }
-      // Close the windows of every key, not just this record's, that ended
-      // before the watermark.
-      const outputs = state.manager.close(state.newestEventTime - lateness);
-      saveChangedWindows(record, state.manager);
-      return Stream.fromArray(this.branch(record, outputs));
+          state.manager.add(keyFn(record.value), record.value, time);
+          if (time > state.newestEventTime) {
+            state.newestEventTime = time;
+            this.putMutation(record, newestEntry, time);
+          }
+          // Close the windows of every key, not just this record's, that ended
+          // before the watermark.
+          const outputs = state.manager.close(state.newestEventTime - lateness);
+          saveChangedWindows(record, state.manager);
+          return this.branch(record, outputs);
+        }),
+      );
     });
   }
 
@@ -540,8 +570,7 @@ class TopologyRunnerInstance {
     const operatorId = this.operatorId(node, "dedupe");
     const maxSize = this.config.maxDedupeSize ?? 100_000;
 
-    return this.compile(node.parent).map((record) => {
-      if (record.skip) return record;
+    const step = (record: TopologyRecord): TopologyRecord => {
       const context = record.completion.context;
       let seen = context.operatorCaches.get(operatorId) as InsertionOrderSet | undefined;
       if (!seen) {
@@ -561,7 +590,10 @@ class TopologyRunnerInstance {
         this.deleteMutation(record, `${operatorId}:item:${encodeURIComponent(evicted)}`);
       }
       return record;
-    });
+    };
+    return this.compile(node.parent).map((record) =>
+      record.skip ? record : this.guard(record, () => step(record)),
+    );
   }
 
   private compileJoin(node: Extract<TopologyNode, { type: "join" }>): Stream<TopologyRecord, any> {
@@ -577,59 +609,71 @@ class TopologyRunnerInstance {
     // Skipped records (filtered out, duplicates, the end-of-input marker)
     // pass through untouched: their value may not be a record at all, so the
     // key function must not see it.
-    const tag = (record: TopologyRecord, side: Tagged["side"]): Tagged =>
-      record.skip
-        ? { record, side, key: "", ts: 0 }
-        : {
-            record,
-            side,
-            key: (side === "left" ? leftKeyFn : rightKeyFn)(record.value),
-            ts: this.timeOf(record),
-          };
+    const tag = (record: TopologyRecord, side: Tagged["side"]): Tagged => {
+      if (record.skip) return { record, side, key: "", ts: 0 };
+      try {
+        return {
+          record,
+          side,
+          key: (side === "left" ? leftKeyFn : rightKeyFn)(record.value),
+          ts: this.timeOf(record),
+        };
+      } catch (error) {
+        if (!this.config.deadLetter) throw error;
+        return { record: this.failed(record, error), side, key: "", ts: 0 };
+      }
+    };
     const left = this.compile(node.left).map((record) => tag(record, "left"));
     const right = this.compile(node.right).map((record) => tag(record, "right"));
 
     return left.merge(right).flatMap((tagged) => {
       const record = tagged.record;
       if (record.skip) return Stream.fromArray([record]);
-      const context = record.completion.context;
-      let buffer = context.operatorCaches.get(operatorId) as
-        | JoinBuffer<unknown, unknown>
-        | undefined;
-      if (!buffer) {
-        buffer = new JoinBuffer(node.config.windowMs);
-        for (const [entryKey, saved] of context.values) {
-          if (entryKey.startsWith(keyPrefix)) {
-            buffer.restoreKey(decodeURIComponent(entryKey.slice(keyPrefix.length)), saved as any);
+      return Stream.fromArray(
+        this.guardMany(record, () => {
+          const context = record.completion.context;
+          let buffer = context.operatorCaches.get(operatorId) as
+            | JoinBuffer<unknown, unknown>
+            | undefined;
+          if (!buffer) {
+            buffer = new JoinBuffer(node.config.windowMs);
+            for (const [entryKey, saved] of context.values) {
+              if (entryKey.startsWith(keyPrefix)) {
+                buffer.restoreKey(
+                  decodeURIComponent(entryKey.slice(keyPrefix.length)),
+                  saved as any,
+                );
+              }
+            }
+            // State saved before keys had their own entries: load it, and the
+            // first record below saves every key in the new format.
+            const legacy = context.values.get(operatorId);
+            if (legacy !== undefined) {
+              buffer.restore(legacy as any);
+              migrating.add(context);
+            }
+            context.operatorCaches.set(operatorId, buffer);
           }
-        }
-        // State saved before keys had their own entries: load it, and the
-        // first record below saves every key in the new format.
-        const legacy = context.values.get(operatorId);
-        if (legacy !== undefined) {
-          buffer.restore(legacy as any);
-          migrating.add(context);
-        }
-        context.operatorCaches.set(operatorId, buffer);
-      }
-      const outputs =
-        tagged.side === "left"
-          ? buffer.addLeft(tagged.key, record.value, tagged.ts)
-          : buffer.addRight(tagged.key, record.value, tagged.ts);
+          const outputs =
+            tagged.side === "left"
+              ? buffer.addLeft(tagged.key, record.value, tagged.ts)
+              : buffer.addRight(tagged.key, record.value, tagged.ts);
 
-      // Save only the keys that changed. (Before, every record saved the
-      // whole buffer under one entry, so the cost grew with the buffer.)
-      const changed = new Set(buffer.takeChangedKeys());
-      if (migrating.delete(context)) {
-        for (const key of buffer.keys()) changed.add(key);
-        this.deleteMutation(record, operatorId);
-      }
-      for (const key of changed) {
-        const saved = buffer.snapshotKey(key);
-        if (saved) this.putMutation(record, keyEntry(key), saved);
-        else this.deleteMutation(record, keyEntry(key));
-      }
-      return Stream.fromArray(this.branch(record, outputs as unknown[]));
+          // Save only the keys that changed. (Before, every record saved the
+          // whole buffer under one entry, so the cost grew with the buffer.)
+          const changed = new Set(buffer.takeChangedKeys());
+          if (migrating.delete(context)) {
+            for (const key of buffer.keys()) changed.add(key);
+            this.deleteMutation(record, operatorId);
+          }
+          for (const key of changed) {
+            const saved = buffer.snapshotKey(key);
+            if (saved) this.putMutation(record, keyEntry(key), saved);
+            else this.deleteMutation(record, keyEntry(key));
+          }
+          return this.branch(record, outputs as unknown[]);
+        }),
+      );
     });
   }
 
@@ -691,6 +735,38 @@ class TopologyRunnerInstance {
     };
   }
 
+  /**
+   * The dead letter to send for a record a step failed on, once per source
+   * record (a record that branched reaches the sink more than once).
+   */
+  private takeDeadLetter(
+    record: TopologyRecord,
+  ): { readonly sink: Sinkable<unknown, unknown>; readonly value: DeadLetter } | undefined {
+    const completion = record.completion;
+    const sink = this.config.deadLetter;
+    if (!sink || !completion.failure || completion.deadLettered) return undefined;
+    completion.deadLettered = true;
+    this.deadLetters += 1;
+    const { error } = completion.failure;
+    const metadata = completion.envelope?.metadata;
+    return {
+      sink: sink as Sinkable<unknown, unknown>,
+      value: {
+        value: completion.envelope?.value,
+        error:
+          error instanceof Error
+            ? { name: error.name, message: error.message }
+            : { name: "Error", message: String(error) },
+        source: {
+          topic: metadata?.topic === undefined ? undefined : String(metadata.topic),
+          partition: record.partition,
+          offset: completion.sourceOffset,
+        },
+        failedAt: Date.now(),
+      },
+    };
+  }
+
   private deliverRecord(
     record: TopologyRecord,
     sink?: Sinkable<unknown, unknown>,
@@ -703,18 +779,26 @@ class TopologyRunnerInstance {
           )
         : succeed(undefined);
 
+    const deadLetter = this.takeDeadLetter(record);
+
     if (this.config.deliveryGuarantee === "exactly-once") {
       if (!record.skip && sink) {
         record.completion.outputs.push({ sink, value: record.value });
       }
+      // Published in the record's transaction, with its other outputs.
+      if (deadLetter) record.completion.outputs.push(deadLetter);
       // maxItemsPerSecond limits outputs here too (it used to be ignored).
       return waitForRate.flatMap(() => this.finishRecord(record, true));
     }
 
-    const publish =
+    const publishDeadLetter = deadLetter
+      ? deadLetter.sink.publish(deadLetter.value)
+      : succeed(undefined);
+    const publish = publishDeadLetter.flatMap(() =>
       record.skip || !sink
         ? succeed(undefined)
-        : waitForRate.flatMap(() => sink.publish(record.value));
+        : waitForRate.flatMap(() => sink.publish(record.value)),
+    );
     // A finalizer, not tapErrorCause: the in-flight count must drop even when
     // the publish is interrupted.
     return publish
@@ -1017,6 +1101,7 @@ class TopologyRunnerInstance {
         return stats.leftItems + stats.rightItems;
       }),
       lateRecords: this.lateRecords,
+      deadLetters: this.deadLetters,
     };
   }
 
@@ -1095,6 +1180,36 @@ class TopologyRunnerInstance {
 
   private skipped(record: TopologyRecord): TopologyRecord {
     return { ...record, skip: true };
+  }
+
+  /**
+   * Run a step's code for one record. If it throws and there is a
+   * dead-letter sink, the record is set aside for it instead of failing the
+   * topology.
+   */
+  private guard(record: TopologyRecord, run: () => TopologyRecord): TopologyRecord {
+    if (!this.config.deadLetter) return run();
+    try {
+      return run();
+    } catch (error) {
+      return this.failed(record, error);
+    }
+  }
+
+  /** guard() for steps that can produce several records. */
+  private guardMany(record: TopologyRecord, run: () => TopologyRecord[]): TopologyRecord[] {
+    if (!this.config.deadLetter) return run();
+    try {
+      return run();
+    } catch (error) {
+      return [this.failed(record, error)];
+    }
+  }
+
+  /** Mark the source record as failed (the first error wins); it skips the remaining steps. */
+  private failed(record: TopologyRecord, error: unknown): TopologyRecord {
+    record.completion.failure ??= { error };
+    return this.skipped(record);
   }
 
   /** The flushed results as records, then the end marker itself, which goes on. */

@@ -3,6 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import type {
+  Sinkable,
   ChannelName,
   ConsumerGroup,
   StageId,
@@ -73,6 +74,22 @@ export interface StepOptions {
   name?: string;
 }
 
+/** A record that a step failed on, as sent to the dead-letter sink. */
+export interface DeadLetter {
+  /** The record's value as it came from the source. */
+  readonly value: unknown;
+  /** What the step threw. */
+  readonly error: { readonly name: string; readonly message: string };
+  /** Where the record came from, to find or replay it. */
+  readonly source: {
+    readonly topic?: string;
+    readonly partition: number;
+    readonly offset?: string;
+  };
+  /** When it failed, in ms since the epoch. */
+  readonly failedAt: number;
+}
+
 export interface TopologyConfig {
   group: ConsumerGroup;
   /** Requires source, sink, and partition state to share one transaction domain. */
@@ -109,6 +126,15 @@ export interface TopologyConfig {
    * console.warn.
    */
   onWarning?: (message: string) => void;
+  /**
+   * Where records go when a step throws on them (map, filter, mapAsync,
+   * keyBy, process, a window's functions, ...). The record is published
+   * here as a DeadLetter and then committed and acked, so one bad record
+   * doesn't stop the topology. Without it, such an error fails the topology.
+   * A failing sink still fails the topology either way. With exactly-once
+   * delivery the sink must share the transaction domain.
+   */
+  deadLetter?: Sinkable<DeadLetter, unknown>;
   /** @deprecated Not called yet; it has no effect. */
   onBackpressure?: (stats: BackpressureStats) => void;
   /**
@@ -162,6 +188,8 @@ export interface TopologyMetrics {
   joinBufferSize: number;
   /** Records dropped because the windows they belong to had already closed. */
   lateRecords: number;
+  /** Records sent to the dead-letter sink because a step failed on them. */
+  deadLetters: number;
 }
 
 // ---------------------------------------------------------------------------

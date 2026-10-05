@@ -195,6 +195,7 @@ export class DistributedRunner {
           activeWindows: allMetrics.reduce((s, m) => s + m.activeWindows, 0),
           joinBufferSize: allMetrics.reduce((s, m) => s + m.joinBufferSize, 0),
           lateRecords: allMetrics.reduce((s, m) => s + m.lateRecords, 0),
+          deadLetters: allMetrics.reduce((s, m) => s + m.deadLetters, 0),
         };
       },
     };
