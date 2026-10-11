@@ -3,7 +3,7 @@
 //
 // Run: bun packages/net/examples/03-cluster.ts
 
-import { eff, provide, scoped, sleep } from "@spilne/perfect-core";
+import { eff, provide, sleep } from "@spilne/perfect-core";
 import { Discovery, Gossip, HashRing, Tcp, Transport, type Address } from "../src";
 import { assertEq } from "./_assert";
 
@@ -42,19 +42,17 @@ const join = (id: string, seeds: readonly Address[]) =>
     Tcp,
   );
 
-const members = await scoped(
-  eff(function* () {
-    const first = yield* join("worker-1", []);
-    const seed = (yield* first.self).address;
-    yield* join("worker-2", [seed]);
-    yield* join("worker-3", [seed]);
-    yield* sleep(500);
+const members = await eff(function* () {
+  const first = yield* join("worker-1", []);
+  const seed = (yield* first.self).address;
+  yield* join("worker-2", [seed]);
+  yield* join("worker-3", [seed]);
+  yield* sleep(500);
 
-    const members = yield* first.members;
-    const ring = HashRing.of(members.map((member) => member.id));
-    return { ids: ring.nodes, owner: ring.owner("customer-42") };
-  }),
-)
+  const members = yield* first.members;
+  const ring = HashRing.of(members.map((member) => member.id));
+  return { ids: ring.nodes, owner: ring.owner("customer-42") };
+})
   .orDie()
   .run();
 assertEq(members.ids, ["worker-1", "worker-2", "worker-3"]);

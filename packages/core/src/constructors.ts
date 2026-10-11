@@ -372,6 +372,18 @@ export function scoped<A, S>(eff: Eff<A, S>): Eff<A, S> {
   return new Suspend(Op.Scoped, eff, null) as any;
 }
 
+/**
+ * Acquire a resource, use it, and release it as soon as `f` is done, rather
+ * than when the surrounding scope ends:
+ *
+ *   Tcp.connect(address, { codec }).use((connection) => connection.send(message))
+ *
+ * The same as `scoped(resource.flatMap(f))`.
+ */
+export function use<A, S, B, S2>(resource: Eff<A, S>, f: (a: A) => Eff<B, S2>): Eff<B, S | S2> {
+  return scoped(resource.flatMap(f));
+}
+
 // ── Retry ──────────────────────────────────────────────────────────
 
 export interface RetryConfig<E = unknown> {

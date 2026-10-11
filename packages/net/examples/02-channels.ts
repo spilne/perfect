@@ -2,7 +2,7 @@
 //
 // Run: bun packages/net/examples/02-channels.ts
 
-import { RetryPolicy, eff, fork, scoped, sleep } from "@spilne/perfect-core";
+import { RetryPolicy, eff, fork, sleep } from "@spilne/perfect-core";
 import { BinaryCodec, Multiplexer, Resilient, Tcp, type Connection } from "../src";
 import { assertEq } from "./_assert";
 
@@ -12,36 +12,32 @@ import { assertEq } from "./_assert";
 const codec = BinaryCodec.utf8;
 
 const shout = (connection: Connection<Uint8Array>) =>
-  scoped(
-    eff(function* () {
-      const mux = yield* Multiplexer.make(connection, { side: "server", codec });
-      yield* mux.incoming.forEach((channel) =>
-        fork(channel.messages.forEach((text) => channel.send(text.toUpperCase()))).map(
-          () => undefined,
-        ),
-      );
-    }),
-  );
-
-const shouted = await scoped(
   eff(function* () {
-    const listener = yield* Tcp.listen(
-      { host: "127.0.0.1", port: 0 },
-      { codec: BinaryCodec.bytes, handle: shout },
+    const mux = yield* Multiplexer.make(connection, { side: "server", codec });
+    yield* mux.incoming.forEach((channel) =>
+      fork(channel.messages.forEach((text) => channel.send(text.toUpperCase()))).map(
+        () => undefined,
+      ),
     );
-    const connection = yield* Tcp.connect(listener.address, { codec: BinaryCodec.bytes });
-    const mux = yield* Multiplexer.make(connection, { side: "client", codec });
+  });
 
-    const greetings = yield* mux.open;
-    const farewells = yield* mux.open;
-    yield* greetings.send("hello");
-    yield* farewells.send("bye");
-    return [
-      ...(yield* greetings.messages.take(1).toArray()),
-      ...(yield* farewells.messages.take(1).toArray()),
-    ];
-  }),
-)
+const shouted = await eff(function* () {
+  const listener = yield* Tcp.listen(
+    { host: "127.0.0.1", port: 0 },
+    { codec: BinaryCodec.bytes, handle: shout },
+  );
+  const connection = yield* Tcp.connect(listener.address, { codec: BinaryCodec.bytes });
+  const mux = yield* Multiplexer.make(connection, { side: "client", codec });
+
+  const greetings = yield* mux.open;
+  const farewells = yield* mux.open;
+  yield* greetings.send("hello");
+  yield* farewells.send("bye");
+  return [
+    ...(yield* greetings.messages.take(1).toArray()),
+    ...(yield* farewells.messages.take(1).toArray()),
+  ];
+})
   .orDie()
   .run();
 assertEq(shouted, ["HELLO", "BYE"]);
@@ -56,21 +52,19 @@ const once = (connection: Connection<string>) =>
     .forEach((text) => connection.send(`got ${text}`))
     .flatMap(() => connection.close);
 
-const answers = await scoped(
-  eff(function* () {
-    const listener = yield* Tcp.listen({ host: "127.0.0.1", port: 0 }, { codec, handle: once });
-    const connection = yield* Resilient.connect(Tcp.connect(listener.address, { codec }), {
-      retry: RetryPolicy.exponential({ initial: 10 }).withMaxRetries(5),
-    });
-    const answers: string[] = [];
-    for (const text of ["a", "b"]) {
-      yield* connection.send(text);
-      answers.push(...(yield* connection.messages.take(1).toArray()));
-      yield* sleep(20); // the server hangs up
-    }
-    return answers;
-  }),
-)
+const answers = await eff(function* () {
+  const listener = yield* Tcp.listen({ host: "127.0.0.1", port: 0 }, { codec, handle: once });
+  const connection = yield* Resilient.connect(Tcp.connect(listener.address, { codec }), {
+    retry: RetryPolicy.exponential({ initial: 10 }).withMaxRetries(5),
+  });
+  const answers: string[] = [];
+  for (const text of ["a", "b"]) {
+    yield* connection.send(text);
+    answers.push(...(yield* connection.messages.take(1).toArray()));
+    yield* sleep(20); // the server hangs up
+  }
+  return answers;
+})
   .orDie()
   .run();
 assertEq(answers, ["got a", "got b"]);

@@ -11,6 +11,7 @@ import {
   raceFirst,
   raceEither,
   scoped,
+  use,
   acquireRelease,
   retry,
   type RetryConfig,
@@ -51,6 +52,11 @@ declare module "../eff.js" {
     ): Eff<{ _tag: "Left"; left: A } | { _tag: "Right"; right: B }, S1 | S2>;
     delay<A, S>(this: Eff<A, S>, ms: number): Eff<A, S>;
     scoped<A, S>(this: Eff<A, S>): Eff<A, S>;
+    /**
+     * Use this resource in `f`, and release it as soon as `f` is done:
+     * `scoped(this.flatMap(f))`.
+     */
+    use<A, S, B, S2>(this: Eff<A, S>, f: (a: A) => Eff<B, S2>): Eff<B, S | S2>;
     /**
      * Pair this acquire effect with a release function — the release fires
      * when the surrounding `scoped` block ends.
@@ -161,6 +167,10 @@ Suspend.prototype.delay = function (ms: any) {
 
 Suspend.prototype.scoped = function () {
   return scoped(this as any) as any;
+};
+
+Suspend.prototype.use = function <A, S, B, S2>(this: Eff<A, S>, f: (a: A) => Eff<B, S2>) {
+  return use(this, f);
 };
 
 Suspend.prototype.acquireRelease = function (release: any) {

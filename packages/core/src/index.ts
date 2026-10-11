@@ -49,6 +49,7 @@ export {
   onExit,
   acquireRelease,
   scoped,
+  use,
   retry,
 } from "./constructors.js";
 export type { RetryConfig } from "./constructors.js";
