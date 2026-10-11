@@ -1,3 +1,33 @@
+## 0.5.0 (2026-10-11)
+
+### 🚀 Features
+
+- **core:** make eff(($) => ...) type-check under tsc ([325f28d](https://github.com/spilne/perfect/commit/325f28d))
+- **core:** read settings as typed effects with Config ([00847ee](https://github.com/spilne/perfect/commit/00847ee))
+- **core:** carry request-scoped values with FiberLocal ([15c9543](https://github.com/spilne/perfect/commit/15c9543))
+- **core:** batch lookups made together with RequestResolver ([4486e97](https://github.com/spilne/perfect/commit/4486e97))
+- **core:** read the Clock and Random in use with currentClock and currentRandom ([f4b14b2](https://github.com/spilne/perfect/commit/f4b14b2))
+- **core:** cancel with an AbortSignal, and hand one to tryPromise ([87bd49c](https://github.com/spilne/perfect/commit/87bd49c))
+- **core:** resources and using declarations, both ways ([4559e82](https://github.com/spilne/perfect/commit/4559e82))
+- **core:** Bulkhead, bounded concurrency with a bounded waiting line ([fb66b94](https://github.com/spilne/perfect/commit/fb66b94))
+- **core:** cron schedules ([0f6a3d5](https://github.com/spilne/perfect/commit/0f6a3d5))
+- **core:** TestRuntime, every test service in one call ([e09fd9e](https://github.com/spilne/perfect/commit/e09fd9e))
+- **net:** add @spilne/perfect-net with typed connections and a network simulator ([fc47579](https://github.com/spilne/perfect/commit/fc47579))
+- **net:** run channels over one connection and reconnect by themselves ([f75425b](https://github.com/spilne/perfect/commit/f75425b))
+- **net:** cluster membership by gossip, consistent hashing and discovery ([17dd5b0](https://github.com/spilne/perfect/commit/17dd5b0))
+- **net:** record a conversation and replay it in tests ([3ee84e1](https://github.com/spilne/perfect/commit/3ee84e1))
+- **topology:** set records a step fails on aside with deadLetter ([6cf548d](https://github.com/spilne/perfect/commit/6cf548d))
+
+### 🩹 Fixes
+
+- **net:** drop needless type casts, test the failure paths, document the API ([fa3ba17](https://github.com/spilne/perfect/commit/fa3ba17))
+- **topology:** don't run join key functions on skipped records ([2661110](https://github.com/spilne/perfect/commit/2661110))
+- **topology:** a partition waiting for its lease no longer holds up the others; analyzer checks joins ([b00254c](https://github.com/spilne/perfect/commit/b00254c))
+
+### 📦 Dependencies
+
+- bump the dev-minor-patch group with 2 updates ([4d853a6](https://github.com/spilne/perfect/commit/4d853a6))
+
 ## 0.4.0 (2026-10-05)
 
 ### 🚀 Features

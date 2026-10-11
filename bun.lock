@@ -27,7 +27,7 @@
     },
     "packages/core": {
       "name": "@spilne/perfect-core",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "devDependencies": {
         "effect": "^4.0.0",
         "mitata": "^1.0.34",
@@ -35,7 +35,7 @@
     },
     "packages/http": {
       "name": "@spilne/perfect-http",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "dependencies": {
         "@spilne/perfect-core": "^0.3.0",
       },
@@ -50,7 +50,7 @@
     },
     "packages/http-otel": {
       "name": "@spilne/perfect-http-otel",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "dependencies": {
         "@opentelemetry/api": "^1.9.0",
         "@spilne/perfect-core": "^0.1.0",
@@ -77,14 +77,14 @@
     },
     "packages/kafka": {
       "name": "@spilne/perfect-kafka",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "dependencies": {
         "@spilne/perfect-core": "^0.3.1",
       },
     },
     "packages/kafka-kafkajs": {
       "name": "@spilne/perfect-kafka-kafkajs",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "dependencies": {
         "@spilne/perfect-kafka": "^0.3.1",
       },
@@ -97,7 +97,7 @@
     },
     "packages/kafka-platformatic": {
       "name": "@spilne/perfect-kafka-platformatic",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "dependencies": {
         "@spilne/perfect-kafka": "^0.3.1",
       },
@@ -110,9 +110,9 @@
     },
     "packages/net": {
       "name": "@spilne/perfect-net",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "dependencies": {
-        "@spilne/perfect-core": "^0.4.0",
+        "@spilne/perfect-core": "^0.5.0",
       },
       "devDependencies": {
         "@bufbuild/protobuf": "^2.2.0",
@@ -123,15 +123,17 @@
       "peerDependencies": {
         "@bufbuild/protobuf": "^2.0.0",
         "msgpackr": "^1.11.0",
+        "multicast-dns": "^7.2.0",
       },
       "optionalPeers": [
         "@bufbuild/protobuf",
         "msgpackr",
+        "multicast-dns",
       ],
     },
     "packages/otel": {
       "name": "@spilne/perfect-otel",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "dependencies": {
         "@opentelemetry/api": "^1.9.0",
         "@spilne/perfect-core": "^0.1.0",
@@ -139,7 +141,7 @@
     },
     "packages/postgres": {
       "name": "@spilne/perfect-postgres",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "dependencies": {
         "@spilne/perfect-core": "^0.3.1",
         "drizzle-orm": "0.45.3",
@@ -151,7 +153,7 @@
     },
     "packages/redis": {
       "name": "@spilne/perfect-redis",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "dependencies": {
         "@spilne/perfect-core": "^0.3.1",
       },
@@ -162,25 +164,25 @@
     },
     "packages/swc-plugin": {
       "name": "@spilne/perfect-swc-plugin",
-      "version": "0.4.0",
+      "version": "0.5.0",
     },
     "packages/topology": {
       "name": "@spilne/perfect-topology",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "dependencies": {
         "@spilne/perfect-core": "^0.1.0",
       },
     },
     "packages/transform": {
       "name": "@spilne/perfect-transform",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "devDependencies": {
         "@swc/core": "1.16.13",
       },
     },
     "templates/stackblitz": {
       "name": "perfect-stackblitz-playground",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "dependencies": {
         "@spilne/perfect-core": "^0.4.0",
       },
