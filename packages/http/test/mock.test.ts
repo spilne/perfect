@@ -2,16 +2,17 @@ import { describe, test, expect } from "bun:test";
 import { run, succeed } from "@spilne/perfect-core";
 import { MockHttpClient, jsonDecoder, mockHttpClient, type ResponseParser } from "../src";
 import { runUnchecked } from "./run-unchecked";
+import { isRecord } from "./is-record";
 
 interface User {
   id: number;
   name: string;
 }
+const isUser = (d: unknown): d is User =>
+  isRecord(d) && typeof d.id === "number" && typeof d.name === "string";
 const UserParser: ResponseParser<User> = {
-  safeParse: (d: any) =>
-    d && typeof d.id === "number" && typeof d.name === "string"
-      ? { success: true, data: d as User }
-      : { success: false, error: "bad shape" },
+  safeParse: (d: unknown) =>
+    isUser(d) ? { success: true, data: d } : { success: false, error: "bad shape" },
 };
 
 describe("MockHttpClient — static .on routes", () => {

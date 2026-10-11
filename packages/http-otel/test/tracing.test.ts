@@ -5,6 +5,8 @@ import {
   type Span,
   type Tracer,
   type SpanContext,
+  type SpanOptions,
+  type TextMapPropagator,
   SpanKind,
   SpanStatusCode,
   context as otelContext,
@@ -44,7 +46,7 @@ interface RecordedSpan {
 function makeInMemTracer(): { tracer: Tracer; spans: RecordedSpan[] } {
   const spans: RecordedSpan[] = [];
   const tracer: Tracer = {
-    startSpan(name: string, options?: any): Span {
+    startSpan(name: string, options?: SpanOptions): Span {
       const record: RecordedSpan = {
         name,
         kind: options?.kind ?? SpanKind.INTERNAL,
@@ -80,8 +82,8 @@ function makeInMemTracer(): { tracer: Tracer; spans: RecordedSpan[] } {
         isRecording() {
           return !record.ended;
         },
-        recordException(e: any) {
-          record.exceptions.push({ name: e.name, message: e.message });
+        recordException(e) {
+          record.exceptions.push(typeof e === "string" ? {} : { name: e.name, message: e.message });
         },
         addLink() {
           return span;
@@ -99,8 +101,8 @@ function makeInMemTracer(): { tracer: Tracer; spans: RecordedSpan[] } {
       } as Span;
       return span;
     },
-    startActiveSpan: (_name: string, ...args: any[]): any => {
-      const fn = args.find((a) => typeof a === "function");
+    startActiveSpan: (_name: string, ...args: unknown[]): unknown => {
+      const fn = args.find((a): a is (span: Span) => unknown => typeof a === "function");
       return fn?.(tracer.startSpan(_name));
     },
   } as Tracer;
@@ -126,11 +128,12 @@ interface User {
   id: number;
   name: string;
 }
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null;
+const isUser = (d: unknown): d is User =>
+  isRecord(d) && typeof d.id === "number" && typeof d.name === "string";
 const UserParser: ResponseParser<User> = {
-  safeParse: (d: any) =>
-    d && typeof d.id === "number" && typeof d.name === "string"
-      ? { success: true, data: d as User }
-      : { success: false, error: "bad" },
+  safeParse: (d: unknown) =>
+    isUser(d) ? { success: true, data: d } : { success: false, error: "bad" },
 };
 
 const json = (body: unknown, status = 200): Response =>
@@ -322,12 +325,12 @@ describe("TracingFetchTransport — W3C traceparent injection", () => {
 describe("tracingMiddleware + TracingFetchTransport together", () => {
   // A propagator that writes the parent span's id into a header, so the test
   // can see which span the downstream service would attach to.
-  const spanIdPropagator = {
-    inject(ctx: any, carrier: any, setter: any) {
+  const spanIdPropagator: TextMapPropagator<Record<string, string>> = {
+    inject(ctx, carrier, setter) {
       const span = trace.getSpan(ctx);
       if (span) setter.set(carrier, "x-parent-span", span.spanContext().spanId);
     },
-    extract: (ctx: any) => ctx,
+    extract: (ctx) => ctx,
     fields: () => ["x-parent-span"],
   };
 

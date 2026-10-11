@@ -5,6 +5,7 @@
 // against the same fake (no isolation — these are unit tests of SQL shape
 // and driver-adjacent logic, not of Postgres semantics).
 
+import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import type { DrizzleDb } from "../src/lib/drizzle-db";
 
@@ -18,8 +19,8 @@ export class FakeDb {
 
   constructor(private readonly responder: Responder = () => []) {}
 
-  async execute(query: unknown): Promise<unknown[]> {
-    const { sql, params } = dialect.sqlToQuery(query as any);
+  async execute(query: SQL): Promise<unknown[]> {
+    const { sql, params } = dialect.sqlToQuery(query);
     this.queries.push({ sql, params });
     return this.responder(sql, params) ?? [];
   }

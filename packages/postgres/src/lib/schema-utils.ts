@@ -38,7 +38,7 @@ export async function ensureTable(db: DrizzleDb, table: PgTable): Promise<void> 
       const def = col.default;
       if (def && typeof def === "object" && "toQuery" in def) {
         // SQL expression default (e.g., now())
-        const query = (def as { toQuery: (config: any) => { sql: string } }).toQuery({
+        const query = (def as { toQuery: (config: QueryEscapes) => { sql: string } }).toQuery({
           escapeName: (n: string) => `"${n}"`,
           escapeParam: (_p: unknown, i: number) => `$${i}`,
           escapeString: (s: string) => `'${s}'`,
@@ -78,12 +78,11 @@ export async function ensureTable(db: DrizzleDb, table: PgTable): Promise<void> 
     const uniquePrefix = idx.config.unique ? sql.raw("UNIQUE ") : sql.raw("");
     const name = sql.raw(
       `"${
-        idx.config.name ??
-        `idx_${config.name}_${idx.config.columns.map((c: any) => c.name).join("_")}`
+        idx.config.name ?? `idx_${config.name}_${idx.config.columns.map(columnName).join("_")}`
       }"`,
     );
     const table = sql.raw(`"${config.name}"`);
-    const colList = sql.raw(`(${idx.config.columns.map((c: any) => `"${c.name}"`).join(", ")})`);
+    const colList = sql.raw(`(${idx.config.columns.map((c) => `"${columnName(c)}"`).join(", ")})`);
     const methodClause =
       idx.config.method && idx.config.method !== "btree"
         ? sql.raw(` USING ${idx.config.method}`)
@@ -93,4 +92,21 @@ export async function ensureTable(db: DrizzleDb, table: PgTable): Promise<void> 
       sql`CREATE ${uniquePrefix}INDEX IF NOT EXISTS ${name} ON ${table}${methodClause} ${colList}${whereClause}`,
     );
   }
+}
+
+/** What drizzle's `toQuery` needs to print an SQL default. */
+interface QueryEscapes {
+  escapeName(name: string): string;
+  escapeParam(param: unknown, index: number): string;
+  escapeString(value: string): string;
+}
+
+/** The name of an index column; only plain columns are supported here. */
+function columnName(column: unknown): string {
+  if (column && typeof column === "object" && "name" in column && typeof column.name === "string") {
+    return column.name;
+  }
+  throw new TypeError(
+    "schema-utils: index columns must be plain columns (an SQL expression was given)",
+  );
 }

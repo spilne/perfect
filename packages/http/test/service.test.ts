@@ -11,6 +11,7 @@ import {
   type ResponseParser,
   HttpClientService,
 } from "../src";
+import { isRecord } from "./is-record";
 
 class StubTransport implements HttpTransport {
   constructor(private readonly reply: () => Response) {}
@@ -22,11 +23,10 @@ class StubTransport implements HttpTransport {
 interface User {
   id: number;
 }
+const isUser = (d: unknown): d is User => isRecord(d) && typeof d.id === "number";
 const UserParser: ResponseParser<User> = {
-  safeParse: (d: any) =>
-    d && typeof d.id === "number"
-      ? { success: true, data: d as User }
-      : { success: false, error: "shape" },
+  safeParse: (d: unknown) =>
+    isUser(d) ? { success: true, data: d } : { success: false, error: "shape" },
 };
 
 describe("HttpClientService — Layer-based DI", () => {

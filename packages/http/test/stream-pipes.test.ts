@@ -14,6 +14,7 @@ import {
   parseNDJSON,
   type ResponseParser,
 } from "../src";
+import { isRecord } from "./is-record";
 
 function streamingResponse(chunks: string[]): Response {
   const enc = new TextEncoder();
@@ -88,9 +89,10 @@ describe("httpStream + ad-hoc pipe composition", () => {
     interface Row {
       n: number;
     }
+    const isRow = (d: unknown): d is Row => isRecord(d) && typeof d.n === "number";
     const parser: ResponseParser<Row> = {
-      safeParse: (d: any) =>
-        typeof d?.n === "number" ? { success: true, data: d } : { success: false, error: "x" },
+      safeParse: (d: unknown) =>
+        isRow(d) ? { success: true, data: d } : { success: false, error: "x" },
     };
     const transport = new OneShot(() => streamingResponse([`{"n":1}\n{"n":2}\n\n{"n":3}\n`]));
     const rows = await run(

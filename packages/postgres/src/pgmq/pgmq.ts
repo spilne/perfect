@@ -12,17 +12,24 @@ import type { PgmqMessage, PgmqRecord, ReadMode } from "./types.js";
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-function parseRecords<T>(rows: any[]): PgmqRecord<T>[] {
+type Row = Record<string, unknown>;
+
+/** A timestamp column: drivers return a Date or an ISO string. */
+const toDate = (value: unknown): Date => (value instanceof Date ? value : new Date(String(value)));
+
+function parseRecords<T>(rows: readonly Row[]): PgmqRecord<T>[] {
   return rows.map((r) => ({
     msgId: Number(r.msg_id),
-    readCt: r.read_ct,
-    enqueuedAt: r.enqueued_at instanceof Date ? r.enqueued_at : new Date(r.enqueued_at),
-    vt: r.vt instanceof Date ? r.vt : new Date(r.vt),
-    message: r.message,
+    readCt: Number(r.read_ct),
+    enqueuedAt: toDate(r.enqueued_at),
+    vt: toDate(r.vt),
+    // The JSON this queue was sent, so the caller's type.
+    message: r.message as T,
     headers: r.headers
-      ? typeof r.headers === "string"
-        ? JSON.parse(r.headers)
-        : r.headers
+      ? ((typeof r.headers === "string" ? JSON.parse(r.headers) : r.headers) as Record<
+          string,
+          unknown
+        >)
       : undefined,
   }));
 }
@@ -58,11 +65,11 @@ export async function listQueues(
   db: DrizzleDb,
 ): Promise<{ queueName: string; createdAt: Date; isPartitioned: boolean; isUnlogged: boolean }[]> {
   const rows = await exec(db, sql`SELECT * FROM pgmq.list_queues()`);
-  return rows.map((r: any) => ({
-    queueName: r.queue_name,
-    createdAt: r.created_at instanceof Date ? r.created_at : new Date(r.created_at),
-    isPartitioned: r.is_partitioned ?? false,
-    isUnlogged: r.is_unlogged ?? false,
+  return rows.map((r) => ({
+    queueName: String(r.queue_name),
+    createdAt: toDate(r.created_at),
+    isPartitioned: r.is_partitioned === true,
+    isUnlogged: r.is_unlogged === true,
   }));
 }
 
@@ -121,7 +128,7 @@ export async function sendBatch<T>(
         db,
         sql`SELECT * FROM pgmq.send_batch(${queue}::text, ${bodies}, ${delay}::integer)`,
       );
-  return rows.map((row: any) => Number(row.send_batch ?? row.msg_id));
+  return rows.map((row) => Number(row.send_batch ?? row.msg_id));
 }
 
 // ---------------------------------------------------------------------------
@@ -133,7 +140,7 @@ export async function read<T>(
   queue: string,
   mode: ReadMode,
 ): Promise<PgmqRecord<T>[]> {
-  let rows: any[];
+  let rows: Row[];
 
   switch (mode._tag) {
     case "standard":
@@ -222,7 +229,7 @@ export async function deleteBatch(
 ): Promise<number[]> {
   const arr = msgIds.map(BigInt);
   const rows = await exec(db, sql`SELECT * FROM pgmq.delete(${queue}, ${arr}::bigint[])`);
-  return rows.map((r: any) => Number(r.delete));
+  return rows.map((r) => Number(r.delete));
 }
 
 export async function archive(db: DrizzleDb, queue: string, msgId: number): Promise<boolean> {
@@ -240,7 +247,7 @@ export async function archiveBatch(
 ): Promise<number[]> {
   const arr = msgIds.map(BigInt);
   const rows = await exec(db, sql`SELECT * FROM pgmq.archive(${queue}, ${arr}::bigint[])`);
-  return rows.map((r: any) => Number(r.archive));
+  return rows.map((r) => Number(r.archive));
 }
 
 // ---------------------------------------------------------------------------

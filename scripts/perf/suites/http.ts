@@ -94,13 +94,13 @@ export const httpSuite: Suite = {
         unit: "ns/op",
         divisor: 1,
         run: async () =>
-          do_not_optimize(await run(httpRequestJson({ url: `${base}/json` }) as any)),
+          do_not_optimize(await run(httpRequestJson({ url: `${base}/json` }).orDie())),
       },
       {
         name: "GET @spilne/perfect-http client",
         unit: "ns/op",
         divisor: 1,
-        run: async () => do_not_optimize(await run(client!.get("/json", identityParser) as any)),
+        run: async () => do_not_optimize(await run(client!.get("/json", identityParser).orDie())),
       },
       {
         name: "POST fetch (baseline)",
@@ -128,7 +128,7 @@ export const httpSuite: Suite = {
         unit: "ns/op",
         divisor: 1,
         run: async () =>
-          do_not_optimize(await run(client!.post("/echo", identityParser, { json: body }) as any)),
+          do_not_optimize(await run(client!.post("/echo", identityParser, { json: body }).orDie())),
       },
     ];
   },

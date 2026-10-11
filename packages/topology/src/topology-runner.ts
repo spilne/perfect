@@ -160,7 +160,7 @@ class WindowOperatorState {
   /** Newest event time seen in the partition; the watermark follows it. */
   newestEventTime = -Infinity;
 
-  constructor(readonly manager: WindowManager<any, any, any>) {}
+  constructor(readonly manager: WindowManager<unknown, unknown, unknown>) {}
 }
 
 class TopologyRunnerInstance {
@@ -311,7 +311,7 @@ class TopologyRunnerInstance {
     };
   }
 
-  private compile(node: TopologyNode): Stream<TopologyRecord, any> {
+  private compile(node: TopologyNode): Stream<TopologyRecord, unknown> {
     switch (node.type) {
       case "source":
         return this.compileSource(node);
@@ -370,9 +370,9 @@ class TopologyRunnerInstance {
     }
   }
 
-  private compileSource(node: { source: unknown }): Stream<TopologyRecord, any> {
-    const source = node.source as Streamable<unknown, any> & Acknowledgeable<unknown, any>;
-    let envelopes: Stream<Envelope<unknown, unknown>, any>;
+  private compileSource(node: { source: unknown }): Stream<TopologyRecord, unknown> {
+    const source = node.source as Streamable<unknown, unknown> & Acknowledgeable<unknown, unknown>;
+    let envelopes: Stream<Envelope<unknown, unknown>, unknown>;
 
     if (isManagedAcknowledgeable(source)) {
       const subscription = source.subscribeAckManaged({ group: this.config.group });
@@ -432,9 +432,9 @@ class TopologyRunnerInstance {
    * for the new owner to process.
    */
   private prepareRecords(
-    envelopes: Stream<Envelope<unknown, unknown>, any>,
+    envelopes: Stream<Envelope<unknown, unknown>, unknown>,
     managed: boolean,
-  ): Stream<TopologyRecord, any> {
+  ): Stream<TopologyRecord, unknown> {
     type Item =
       | { readonly record: TopologyRecord }
       | { readonly error: unknown }
@@ -546,7 +546,7 @@ class TopologyRunnerInstance {
 
   private compileProcess(
     node: Extract<TopologyNode, { type: "process" }>,
-  ): Stream<TopologyRecord, any> {
+  ): Stream<TopologyRecord, unknown> {
     const keyFn = this.findKeyBy(node.parent).keyFn;
     const operatorId = this.operatorId(node, "process");
     const legacyIndex = Number(operatorId.split(":")[1]);
@@ -573,7 +573,7 @@ class TopologyRunnerInstance {
 
   private compileAggregate(
     node: Extract<TopologyNode, { type: "aggregate" }>,
-  ): Stream<TopologyRecord, any> {
+  ): Stream<TopologyRecord, unknown> {
     const { window, keyFn } = this.findWindowAndKey(node.parent);
     const lateness = window.allowedLatenessMs ?? 0;
     const operatorId = this.operatorId(node, "window");
@@ -599,12 +599,13 @@ class TopologyRunnerInstance {
       state = new WindowOperatorState(new WindowManager(window.windowType, node.spec));
       const legacy = context.values.get(operatorId);
       if (Array.isArray(legacy) && context.values.get(migratedMarker) !== true) {
-        state.manager.restore(legacy as any);
+        // Saved by this step in the old format; read back as written.
+        state.manager.restore(legacy as Parameters<typeof state.manager.restore>[0]);
         migrating.add(context);
       }
       for (const [entryKey, saved] of context.values) {
         if (entryKey.startsWith(windowsPrefix) && Array.isArray(saved)) {
-          state.manager.restore(saved as any);
+          state.manager.restore(saved as Parameters<typeof state.manager.restore>[0]);
         }
       }
       const newest = context.values.get(newestEntry);
@@ -613,7 +614,10 @@ class TopologyRunnerInstance {
       return state;
     };
 
-    const saveChangedWindows = (record: TopologyRecord, manager: WindowManager<any, any, any>) => {
+    const saveChangedWindows = (
+      record: TopologyRecord,
+      manager: WindowManager<unknown, unknown, unknown>,
+    ) => {
       const context = record.completion.context;
       const changed = new Set(manager.takeChangedKeys());
       if (migrating.delete(context)) {
@@ -663,7 +667,7 @@ class TopologyRunnerInstance {
 
   private compileDedupe(
     node: Extract<TopologyNode, { type: "dedupe" }>,
-  ): Stream<TopologyRecord, any> {
+  ): Stream<TopologyRecord, unknown> {
     const operatorId = this.operatorId(node, "dedupe");
     const maxSize = this.config.maxDedupeSize ?? 100_000;
 
@@ -693,7 +697,9 @@ class TopologyRunnerInstance {
     );
   }
 
-  private compileJoin(node: Extract<TopologyNode, { type: "join" }>): Stream<TopologyRecord, any> {
+  private compileJoin(
+    node: Extract<TopologyNode, { type: "join" }>,
+  ): Stream<TopologyRecord, unknown> {
     const operatorId = this.operatorId(node, "join");
     // Each key's buffered items are saved under their own state entry.
     const keyPrefix = `${operatorId}:key:`;
@@ -738,7 +744,7 @@ class TopologyRunnerInstance {
               if (entryKey.startsWith(keyPrefix)) {
                 buffer.restoreKey(
                   decodeURIComponent(entryKey.slice(keyPrefix.length)),
-                  saved as any,
+                  saved as Parameters<JoinBuffer<unknown, unknown>["restoreKey"]>[1],
                 );
               }
             }
@@ -746,7 +752,7 @@ class TopologyRunnerInstance {
             // first record below saves every key in the new format.
             const legacy = context.values.get(operatorId);
             if (legacy !== undefined) {
-              buffer.restore(legacy as any);
+              buffer.restore(legacy as Parameters<JoinBuffer<unknown, unknown>["restore"]>[0]);
               migrating.add(context);
             }
             context.operatorCaches.set(operatorId, buffer);

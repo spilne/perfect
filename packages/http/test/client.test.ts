@@ -19,6 +19,7 @@ import {
   type HttpClientConfig,
   type HttpClientError,
   type HttpMiddleware,
+  type HttpRequestContext,
   type HttpRequestOptions,
   type HttpRequestParams,
   type HttpResponse,
@@ -29,6 +30,7 @@ import {
   textDecoder,
 } from "../src";
 import { runUnchecked } from "./run-unchecked";
+import { isRecord } from "./is-record";
 
 /** Captures every request for assertion; returns canned responses. */
 class RecordingTransport implements HttpTransport {
@@ -54,11 +56,11 @@ interface User {
   id: number;
   name: string;
 }
+const isUser = (d: unknown): d is User =>
+  isRecord(d) && typeof d.id === "number" && typeof d.name === "string";
 const UserParser: ResponseParser<User> = {
-  safeParse: (d: any) =>
-    d && typeof d.id === "number" && typeof d.name === "string"
-      ? { success: true, data: d as User }
-      : { success: false, error: "shape" },
+  safeParse: (d: unknown) =>
+    isUser(d) ? { success: true, data: d } : { success: false, error: "shape" },
 };
 
 describe("DefaultHttpClient — baseUrl + path resolution", () => {
@@ -201,7 +203,7 @@ describe("DefaultHttpClient — getResponse + decoders", () => {
 
 describe("Middleware — sync hooks with duration tracking", () => {
   test("onRequest + onResponse fire with context + duration", async () => {
-    const events: any[] = [];
+    const events: Array<HttpRequestContext & { kind: string; durationMs?: number }> = [];
     const mw: HttpMiddleware = {
       onRequest: (ctx) => events.push({ kind: "req", ...ctx }),
       onResponse: (ctx) => events.push({ kind: "res", ...ctx }),
@@ -220,18 +222,19 @@ describe("Middleware — sync hooks with duration tracking", () => {
       tag: "user.lookup",
     });
     expect(events[1]).toMatchObject({ kind: "res", tag: "user.lookup" });
-    expect(events[1].durationMs).toBeGreaterThanOrEqual(0);
+    expect(events[1]!.durationMs).toBeGreaterThanOrEqual(0);
   });
 
   test("onError fires on typed failure", async () => {
-    const seen: any[] = [];
+    const seen: Array<{ ctx: HttpRequestContext & { durationMs: number }; e: HttpClientError }> =
+      [];
     const mw: HttpMiddleware = { onError: (ctx, e) => seen.push({ ctx, e }) };
     const t = new RecordingTransport(() => new Response("boom", { status: 500 }));
     const c = new DefaultHttpClient({ transport: t, middleware: [mw] });
     await expect(runUnchecked(c.getJson("/x"))).rejects.toMatchObject({ _tag: "HttpStatusError" });
     expect(seen.length).toBe(1);
-    expect(seen[0].e._tag).toBe("HttpStatusError");
-    expect(seen[0].ctx.durationMs).toBeGreaterThanOrEqual(0);
+    expect(seen[0]!.e._tag).toBe("HttpStatusError");
+    expect(seen[0]!.ctx.durationMs).toBeGreaterThanOrEqual(0);
   });
 
   test("onInterrupt fires for an interrupted request, instead of onResponse or onError", async () => {
@@ -288,11 +291,15 @@ describe("Extension pattern — custom subclass", () => {
 
 describe("AbstractHttpClient — minimal subclass", () => {
   class MinimalClient extends AbstractHttpClient {
-    constructor(private readonly responder: (p: HttpRequestParams<any, any>) => Eff<any, any>) {
+    constructor(
+      private readonly responder: (
+        p: HttpRequestParams<unknown, unknown>,
+      ) => Eff<unknown, Throws<HttpClientError>>,
+    ) {
       super();
     }
     request<T, E = string>(params: HttpRequestParams<T, E>): Eff<T, Throws<HttpClientError>> {
-      return this.responder(params);
+      return this.responder(params) as Eff<T, Throws<HttpClientError>>;
     }
     getText<E = string>(_path: string | URL, _options?: RequestOptions<E>) {
       return succeed("minimal-text");
@@ -313,7 +320,7 @@ describe("AbstractHttpClient — minimal subclass", () => {
   }
 
   test("convenience methods delegate to request()", async () => {
-    const calls: HttpRequestParams<any>[] = [];
+    const calls: HttpRequestParams<unknown, unknown>[] = [];
     const client = new MinimalClient((p) => {
       calls.push(p);
       return succeed({ id: 1, name: "x" });
@@ -333,7 +340,7 @@ describe("postMultipart", () => {
     const { sync: syncFn } = await import("@spilne/perfect-core");
     let captured: { body?: unknown; method?: string; contentType?: string | undefined } = {};
     const transport = {
-      execute: (options: any) =>
+      execute: (options: HttpRequestOptions) =>
         syncFn(() => {
           captured = {
             body: options.body,
@@ -349,8 +356,8 @@ describe("postMultipart", () => {
 
     const client = new DefaultHttpClient({ baseUrl: "http://x", transport });
     const okParser = {
-      safeParse: (d: any) =>
-        d && d.ok === true
+      safeParse: (d: unknown) =>
+        isRecord(d) && d.ok === true
           ? { success: true as const, data: d }
           : { success: false as const, error: "bad" },
     };
@@ -382,7 +389,7 @@ describe("postMultipart", () => {
     const { sync: syncFn } = await import("@spilne/perfect-core");
     let fd: FormData | undefined;
     const transport = {
-      execute: (options: any) =>
+      execute: (options: HttpRequestOptions) =>
         syncFn(() => {
           fd = options.body as FormData;
           return new Response("{}", {

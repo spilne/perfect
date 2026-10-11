@@ -278,11 +278,14 @@ export class MockHttpClient extends AbstractHttpClient {
 
   private recordCall(call: RecordedCall): void {
     // Omit undefined fields so assertions are tidy
-    const entry: any = { method: call.method, path: call.path };
-    if (call.json !== undefined) entry.json = call.json;
-    if (call.body !== undefined) entry.body = call.body;
-    if (call.headers !== undefined) entry.headers = call.headers;
-    if (call.tag !== undefined) entry.tag = call.tag;
+    const entry: RecordedCall = {
+      method: call.method,
+      path: call.path,
+      ...(call.json !== undefined && { json: call.json }),
+      ...(call.body !== undefined && { body: call.body }),
+      ...(call.headers !== undefined && { headers: call.headers }),
+      ...(call.tag !== undefined && { tag: call.tag }),
+    };
     this.calls.push(entry);
   }
 

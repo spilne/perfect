@@ -191,7 +191,7 @@ export class FetchTransport implements HttpTransport {
             },
           );
         }),
-    ) as any;
+    );
   }
 }
 

@@ -1,3 +1,13 @@
+/** The client events this package listens to, and what each one passes. */
+export interface RedisClientEvents {
+  /** A message on a subscribed channel. */
+  message: (channel: string, message: string) => void;
+  /** A message on a channel matching a subscribed pattern. */
+  pmessage: (pattern: string, channel: string, message: string) => void;
+  error: (error: Error) => void;
+  close: () => void;
+}
+
 export interface RedisClient {
   get(key: string): Promise<string | null>;
   set(key: string, value: string, ...args: Array<string | number>): Promise<unknown>;
@@ -48,9 +58,12 @@ export interface RedisClient {
   unsubscribe(...channels: string[]): Promise<unknown>;
   psubscribe(...patterns: string[]): Promise<unknown>;
   punsubscribe(...patterns: string[]): Promise<unknown>;
-  on(event: string, listener: (...args: any[]) => void): unknown;
-  off?(event: string, listener: (...args: any[]) => void): unknown;
-  removeListener?(event: string, listener: (...args: any[]) => void): unknown;
+  on<K extends keyof RedisClientEvents>(event: K, listener: RedisClientEvents[K]): unknown;
+  off?<K extends keyof RedisClientEvents>(event: K, listener: RedisClientEvents[K]): unknown;
+  removeListener?<K extends keyof RedisClientEvents>(
+    event: K,
+    listener: RedisClientEvents[K],
+  ): unknown;
 
   eval(script: string, numKeys: number, ...args: Array<string | number>): Promise<unknown>;
   duplicate(): RedisClient | Promise<RedisClient>;

@@ -7,6 +7,7 @@
 import {
   type Span,
   type SpanContext,
+  type SpanOptions,
   type Tracer,
   SpanKind,
   SpanStatusCode,
@@ -36,7 +37,7 @@ interface RecordedSpan {
 function inMemTracer(): { tracer: Tracer; spans: RecordedSpan[] } {
   const spans: RecordedSpan[] = [];
   const tracer: Tracer = {
-    startSpan(name: string, options?: any): Span {
+    startSpan(name: string, options?: SpanOptions): Span {
       const rec: RecordedSpan = {
         name,
         kind: options?.kind ?? SpanKind.INTERNAL,
@@ -84,8 +85,8 @@ function inMemTracer(): { tracer: Tracer; spans: RecordedSpan[] } {
       } as Span;
       return span;
     },
-    startActiveSpan: (_n: string, ...args: any[]): any => {
-      const fn = args.find((a) => typeof a === "function");
+    startActiveSpan: (_n: string, ...args: unknown[]): unknown => {
+      const fn = args.find((a): a is (span: Span) => unknown => typeof a === "function");
       return fn?.(tracer.startSpan(_n));
     },
   } as Tracer;

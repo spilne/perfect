@@ -14,6 +14,7 @@ import {
   type ResponseParser,
 } from "../src";
 import { runUnchecked } from "./run-unchecked";
+import { isRecord } from "./is-record";
 
 /**
  * Build a `Response` whose body is a `ReadableStream` pushing the given chunks
@@ -143,11 +144,11 @@ interface User {
   id: number;
   name: string;
 }
+const isUser = (d: unknown): d is User =>
+  isRecord(d) && typeof d.id === "number" && typeof d.name === "string";
 const UserParser: ResponseParser<User> = {
-  safeParse: (d: any) =>
-    d && typeof d.id === "number" && typeof d.name === "string"
-      ? { success: true, data: d as User }
-      : { success: false, error: "bad shape" },
+  safeParse: (d: unknown) =>
+    isUser(d) ? { success: true, data: d } : { success: false, error: "bad shape" },
 };
 
 describe("httpStreamNDJSON", () => {
