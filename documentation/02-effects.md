@@ -23,6 +23,7 @@ Read `Eff<A, S>` as “produces `A`, with requirements `S`.”
 | `die(e)` | unrecoverable defect (a bug); not in the typed channel |
 | `async(register)` | bridge a callback-based async API |
 | `tryPromise(() => p, (e) => err)` | bridge a Promise; `onReject` turns the rejection into your typed error |
+| `tryPromise((signal) => p, (e) => err)` | the same, and `signal` aborts when the effect is interrupted |
 | `sleep(ms)` | suspend for `ms` according to the Clock service |
 
 ```ts
@@ -32,6 +33,9 @@ const a = succeed(42);                              // Eff<number, never>
 const b = sync(() => Date.now());                   // Eff<number, never>
 const c = fail("nope");                             // Eff<never, Throws<string>>
 const d = tryPromise(() => fetch("/api/users"), (e) => e); // Eff<Response, Throws<unknown>>
+
+// Interrupting e (a timeout, a lost race) cancels the request.
+const e = tryPromise((signal) => fetch("/api/users", { signal }), (e) => e);
 ```
 
 ## Running
@@ -45,6 +49,17 @@ const d = tryPromise(() => fetch("/api/users"), (e) => e); // Eff<Response, Thro
 
 Use `runExit` when you need to inspect the failure structure (typed error,
 defect, interrupt) instead of catching squashed exceptions.
+
+`run` and `runExit` take `{ signal }`: aborting the signal interrupts the
+effect, and its finalizers run. `run` then rejects with an `Error`
+"Interrupted", and `runExit` returns a failure whose cause is `Interrupt`.
+This connects an effect to whatever already cancels work with an
+AbortSignal, such as a request handler:
+
+```ts
+// Stop the work when the client goes away.
+const report = await run(buildReport(id), { signal: request.signal });
+```
 
 ## Effect tags
 

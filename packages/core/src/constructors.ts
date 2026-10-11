@@ -81,12 +81,31 @@ export const PROMISE_SOURCES = new WeakMap<
   { readonly promise: () => Promise<unknown>; readonly onReject: (e: unknown) => unknown }
 >();
 
+/**
+ * An effect from a promise; a rejection becomes the typed error
+ * `onReject(reason)`. If `promise` takes a parameter, it gets an AbortSignal
+ * that aborts when the effect is interrupted, for `fetch` and other APIs
+ * that can be cancelled:
+ *
+ *   tryPromise((signal) => fetch(url, { signal }), (e) => new FetchError(e))
+ */
 export function tryPromise<A, E>(
-  promise: () => Promise<A>,
+  promise: (signal: AbortSignal) => Promise<A>,
   onReject: (e: unknown) => E,
 ): Eff<A, Throws<E>> {
+  // Only pay for an AbortController when the promise wants a signal.
+  if (promise.length > 0) {
+    return async<A, E>((resume) => {
+      const controller = new AbortController();
+      promise(controller.signal).then(
+        (a) => resume(succeed(a) as any),
+        (e) => resume(fail(onReject(e)) as any),
+      );
+      return () => controller.abort();
+    }) as any;
+  }
   const eff = async<A, E>((resume) => {
-    promise().then(
+    (promise as () => Promise<A>)().then(
       (a) => resume(succeed(a) as any),
       (e) => resume(fail(onReject(e)) as any),
     );
@@ -99,7 +118,7 @@ export function tryPromise<A, E>(
   // This lives in a WeakMap rather than as extra properties on the node:
   // extra properties would give these nodes a different shape from every
   // other effect node, which slows down the interpreter's hot loop.
-  PROMISE_SOURCES.set(eff, { promise, onReject });
+  PROMISE_SOURCES.set(eff, { promise: promise as () => Promise<A>, onReject });
   return eff;
 }
 
