@@ -210,12 +210,77 @@ await run(repeat(heartbeat, Schedule.spaced(1000)));
 | `Schedule.fibonacci(base)` | `base`, `base`, `2 * base`, `3 * base`, `5 * base`, … |
 | `Schedule.jittered(s, min?, max?)` | `s` with each delay multiplied by a random factor |
 | `Schedule.intersect(a, b)` / `Schedule.union(a, b)` | continue while both / either continue |
+| `Schedule.cron(expression, { utc? })` | until each time a cron expression matches |
 
 `retryWith(eff, schedule, { while?, onRetry? })` retries on a schedule. Unlike
 `retry`, it also retries defects (a `throw` inside `sync`); `while` gets the
 typed error or the thrown value and decides. It never retries an interrupt.
 `retryAllCause(eff, { shouldRetry, times, ... })` is the same idea with the
 config style of `retry`, deciding from the whole `Cause`.
+
+## Cron schedules
+
+`Cron.parse(expression)` reads a cron expression, and `cron.next(after)`
+gives the next matching time. `Schedule.cron(expression)` repeats on it, and
+`cron.untilNext` waits for the next matching time. Both go by the Clock in
+use, so a `TestClock` drives them in tests.
+
+<!-- @embed packages/core/examples/09-retry-schedule.ts#cron -->
+
+```ts
+import { sync, Clock, Cron, Schedule, TestClock, provide, repeat, runFiber } from "@spilne/perfect-core";
+
+// A job on a cron expression: here every 15 minutes, in UTC. `repeat` runs
+// it once right away, then at each matching time. (A TestClock stands in
+// for the real clock, so the example doesn't take an hour.)
+const clock = new TestClock(Date.parse("2026-01-01T10:07:00Z"));
+const ranAt: string[] = [];
+const report = sync(() => void ranAt.push(new Date(clock.now()).toISOString().slice(11, 16)));
+const reports = runFiber(
+  provide(
+    repeat(
+      report,
+      Schedule.intersect(Schedule.cron("*/15 * * * *", { utc: true }), Schedule.recurs(3)),
+    ),
+    Clock,
+    clock,
+  ),
+);
+// Move the clock to 10:15, 10:30 and 10:45.
+for (const minutes of [8, 15, 15]) {
+  await new Promise((resolve) => setTimeout(resolve, 1));
+  clock.advance(minutes * 60_000);
+}
+await reports.await();
+console.log(ranAt); // → ["10:07", "10:15", "10:30", "10:45"]
+
+// To run only at the matching times, wait for the next one first.
+const nightly = Cron.parse("30 2 * * *"); // 02:30 every day, local time
+const nextRun = new Date(nightly.next(Date.now()));
+console.log([nextRun.getHours(), nextRun.getMinutes()]); // → [2, 30]
+// forever(nightly.untilNext.flatMap(() => backup))
+```
+
+<!-- @end -->
+
+The expression has five fields, `minute hour day-of-month month
+day-of-week`, or six with seconds first. Each field takes `*`, a number, a
+range `1-5`, a step `*/15` or `10-50/10`, or a list `1,15,30`. Months and
+days can be named (`JAN`, `MON`), and day-of-week 7 is Sunday like 0.
+`@yearly`, `@monthly`, `@weekly`, `@daily` and `@hourly` are shorthands. A
+malformed expression throws a `SyntaxError` saying which field is wrong.
+
+As in classic cron:
+- When both day-of-month and day-of-week are restricted, a day matching
+  either one counts: `0 0 15 * MON` runs on the 15th and on every Monday.
+- Times are local unless `{ utc: true }`. When the clocks go forward, a
+  time that doesn't exist that day is skipped. When they go back, a job at a
+  fixed hour runs once. Jobs with a wildcard hour, like `*/15 * * * *`,
+  keep running by real time.
+
+The next run is worked out after the job finishes. If a job takes longer
+than the gap between matching times, the times it overran are skipped, not
+run back to back.
 
 ## Polling until something is ready
 

@@ -1,6 +1,8 @@
 import { type Eff, Suspend, Op } from "./eff.js";
 import { Cause } from "./cause.js";
 import { succeed, sleep, suspend } from "./constructors.js";
+import { currentClock } from "./clock.js";
+import { Cron, type CronOptions } from "./cron.js";
 
 // A Schedule<In, Out> decides whether to continue and what delay to use.
 // Each step receives the input and returns either a delay + output, or done.
@@ -10,7 +12,11 @@ import { succeed, sleep, suspend } from "./constructors.js";
 // it never escapes the step/initial pair. `unknown` here would reject every
 // implementation whose step annotates its own state type.
 export interface Schedule<In = unknown, Out = unknown> {
-  readonly step: (input: In, state: any) => ScheduleDecision<Out>;
+  /**
+   * Decide what happens next. `now` is the current time (ms) by the Clock in
+   * use; schedules that depend on the time of day, like `cron`, use it.
+   */
+  readonly step: (input: In, state: any, now?: number) => ScheduleDecision<Out>;
   readonly initial: any;
 }
 
@@ -72,6 +78,22 @@ export const Schedule = {
     return counting((state) => base * (state + 1));
   },
 
+  /**
+   * Continue at each time a cron expression matches (see `Cron`). The output
+   * is the time of the next run, in ms. With `repeat`, the effect runs once
+   * right away; use `Cron.parse(...).untilNext` to wait for the first time.
+   */
+  cron(expression: string | Cron, options?: CronOptions): Schedule<unknown, number> {
+    const cron = typeof expression === "string" ? Cron.parse(expression, options) : expression;
+    return {
+      initial: undefined,
+      step: (_input, state, now = Date.now()) => {
+        const at = cron.next(now);
+        return { _tag: "Continue", delay: at - now, output: at, state };
+      },
+    };
+  },
+
   // ── Combinators ────────────────────────────────────────────────
 
   intersect<In, Out1, Out2>(
@@ -80,9 +102,9 @@ export const Schedule = {
   ): Schedule<In, [Out1, Out2]> {
     return {
       initial: [s1.initial, s2.initial],
-      step: (input, [state1, state2]: [any, any]) => {
-        const d1 = s1.step(input, state1);
-        const d2 = s2.step(input, state2);
+      step: (input, [state1, state2]: [any, any], now) => {
+        const d1 = s1.step(input, state1, now);
+        const d2 = s2.step(input, state2, now);
         if (d1._tag === "Done" || d2._tag === "Done") {
           return { _tag: "Done", output: [d1.output, d2.output] as [Out1, Out2] };
         }
@@ -102,9 +124,9 @@ export const Schedule = {
   ): Schedule<In, [Out1, Out2]> {
     return {
       initial: [s1.initial, s2.initial],
-      step: (input, [state1, state2]: [any, any]) => {
-        const d1 = s1.step(input, state1);
-        const d2 = s2.step(input, state2);
+      step: (input, [state1, state2]: [any, any], now) => {
+        const d1 = s1.step(input, state1, now);
+        const d2 = s2.step(input, state2, now);
         if (d1._tag === "Done" && d2._tag === "Done") {
           return { _tag: "Done", output: [d1.output, d2.output] as [Out1, Out2] };
         }
@@ -126,8 +148,8 @@ export const Schedule = {
   jittered<In, Out>(schedule: Schedule<In, Out>, min = 0.8, max = 1.2): Schedule<In, Out> {
     return {
       initial: schedule.initial,
-      step: (input, state) => {
-        const decision = schedule.step(input, state);
+      step: (input, state, now) => {
+        const decision = schedule.step(input, state, now);
         if (decision._tag === "Done") return decision;
         const jitter = min + Math.random() * (max - min);
         return { ...decision, delay: Math.round(decision.delay * jitter) };
@@ -138,8 +160,8 @@ export const Schedule = {
   map<In, Out, Out2>(schedule: Schedule<In, Out>, f: (out: Out) => Out2): Schedule<In, Out2> {
     return {
       initial: schedule.initial,
-      step: (input, state) => {
-        const decision = schedule.step(input, state);
+      step: (input, state, now) => {
+        const decision = schedule.step(input, state, now);
         return { ...decision, output: f(decision.output) };
       },
     };
@@ -151,9 +173,9 @@ export const Schedule = {
   ): Schedule<In, Out> {
     return {
       initial: schedule.initial,
-      step: (input, state) => {
-        if (!pred(input)) return { _tag: "Done", output: schedule.step(input, state).output };
-        return schedule.step(input, state);
+      step: (input, state, now) => {
+        if (!pred(input)) return { _tag: "Done", output: schedule.step(input, state, now).output };
+        return schedule.step(input, state, now);
       },
     };
   },
@@ -164,8 +186,8 @@ export const Schedule = {
   ): Schedule<In, Out> {
     return {
       initial: schedule.initial,
-      step: (input, state) => {
-        const decision = schedule.step(input, state);
+      step: (input, state, now) => {
+        const decision = schedule.step(input, state, now);
         if (!pred(decision.output)) return { _tag: "Done", output: decision.output };
         return decision;
       },
@@ -175,8 +197,8 @@ export const Schedule = {
   maxDelay<In, Out>(schedule: Schedule<In, Out>, max: number): Schedule<In, Out> {
     return {
       initial: schedule.initial,
-      step: (input, state) => {
-        const decision = schedule.step(input, state);
+      step: (input, state, now) => {
+        const decision = schedule.step(input, state, now);
         if (decision._tag === "Done") return decision;
         return { ...decision, delay: Math.min(decision.delay, max) };
       },
@@ -206,8 +228,8 @@ export const Schedule = {
   fullJitter<In, Out>(schedule: Schedule<In, Out>): Schedule<In, Out> {
     return {
       initial: schedule.initial,
-      step: (input, state) => {
-        const decision = schedule.step(input, state);
+      step: (input, state, now) => {
+        const decision = schedule.step(input, state, now);
         if (decision._tag === "Done") return decision;
         return { ...decision, delay: Math.round(Math.random() * decision.delay) };
       },
@@ -220,8 +242,8 @@ export const Schedule = {
   cumulativeDelay<In, Out>(schedule: Schedule<In, Out>): Schedule<In, number> {
     return {
       initial: { inner: schedule.initial, total: 0 },
-      step: (input, state: { inner: any; total: number }) => {
-        const decision = schedule.step(input, state.inner);
+      step: (input, state: { inner: any; total: number }, now) => {
+        const decision = schedule.step(input, state.inner, now);
         if (decision._tag === "Done") return { _tag: "Done", output: state.total };
         const total = state.total + decision.delay;
         return {
@@ -270,36 +292,38 @@ export function retryWith<A, S, In, Out = unknown>(
         return new Suspend(Op.Fail, cause, null);
       }
       const input = toInput ? toInput(cause) : (error as In);
-      const decision = schedule.step(input, state);
-      if (decision._tag === "Done") {
+      return currentClock.flatMap((clock) => {
+        const decision = schedule.step(input, state, clock.now());
+        if (decision._tag === "Done") {
+          if (onRetry) {
+            const details: RetryDetails<In, Out> = {
+              attempts: attempts + 1,
+              upcomingDelayMs: 0,
+              input,
+              output: decision.output,
+              givingUp: true,
+            };
+            return (onRetry(details) as any).flatMap(() => new Suspend(Op.Fail, cause, null));
+          }
+          return new Suspend(Op.Fail, cause, null);
+        }
+        const next = () => {
+          const wait: Eff<void, never> =
+            decision.delay > 0 ? (sleep(decision.delay) as any) : (succeed(undefined) as any);
+          return (wait as any).flatMap(() => loop(decision.state, attempts + 1));
+        };
         if (onRetry) {
           const details: RetryDetails<In, Out> = {
             attempts: attempts + 1,
-            upcomingDelayMs: 0,
+            upcomingDelayMs: decision.delay,
             input,
             output: decision.output,
-            givingUp: true,
+            givingUp: false,
           };
-          return (onRetry(details) as any).flatMap(() => new Suspend(Op.Fail, cause, null));
+          return (onRetry(details) as any).flatMap(next);
         }
-        return new Suspend(Op.Fail, cause, null);
-      }
-      const next = () => {
-        const wait: Eff<void, never> =
-          decision.delay > 0 ? (sleep(decision.delay) as any) : (succeed(undefined) as any);
-        return (wait as any).flatMap(() => loop(decision.state, attempts + 1));
-      };
-      if (onRetry) {
-        const details: RetryDetails<In, Out> = {
-          attempts: attempts + 1,
-          upcomingDelayMs: decision.delay,
-          input,
-          output: decision.output,
-          givingUp: false,
-        };
-        return (onRetry(details) as any).flatMap(next);
-      }
-      return next();
+        return next();
+      });
     }) as any;
   }
   return loop(schedule.initial, 0);
@@ -307,14 +331,16 @@ export function retryWith<A, S, In, Out = unknown>(
 
 export function repeat<A, S>(eff: Eff<A, S>, schedule: Schedule<A, unknown>): Eff<A, S> {
   function loop(state: any): Eff<A, S> {
-    return (eff as any).flatMap((value: A) => {
-      const decision = schedule.step(value, state);
-      if (decision._tag === "Done") return succeed(value);
-      if (decision.delay > 0) {
-        return (sleep(decision.delay) as any).flatMap(() => loop(decision.state));
-      }
-      return suspend(() => loop(decision.state));
-    }) as any;
+    return (eff as any).flatMap((value: A) =>
+      currentClock.flatMap((clock) => {
+        const decision = schedule.step(value, state, clock.now());
+        if (decision._tag === "Done") return succeed(value);
+        if (decision.delay > 0) {
+          return (sleep(decision.delay) as any).flatMap(() => loop(decision.state));
+        }
+        return suspend(() => loop(decision.state));
+      }),
+    ) as any;
   }
   return loop(schedule.initial);
 }

@@ -10,6 +10,13 @@ import {
   sync,
   RetryPolicy,
   RetryDecision,
+  Clock,
+  Cron,
+  Schedule,
+  TestClock,
+  provide,
+  repeat,
+  runFiber,
   type Eff,
   type Throws,
 } from "../src";
@@ -97,4 +104,36 @@ const recovered = await mayFail
   .run();
 
 assertEq(recovered, "ok");
+// <<< example
+
+// >>> example: cron
+// A job on a cron expression: here every 15 minutes, in UTC. `repeat` runs
+// it once right away, then at each matching time. (A TestClock stands in
+// for the real clock, so the example doesn't take an hour.)
+const clock = new TestClock(Date.parse("2026-01-01T10:07:00Z"));
+const ranAt: string[] = [];
+const report = sync(() => void ranAt.push(new Date(clock.now()).toISOString().slice(11, 16)));
+const reports = runFiber(
+  provide(
+    repeat(
+      report,
+      Schedule.intersect(Schedule.cron("*/15 * * * *", { utc: true }), Schedule.recurs(3)),
+    ),
+    Clock,
+    clock,
+  ),
+);
+// Move the clock to 10:15, 10:30 and 10:45.
+for (const minutes of [8, 15, 15]) {
+  await new Promise((resolve) => setTimeout(resolve, 1));
+  clock.advance(minutes * 60_000);
+}
+await reports.await();
+assertEq(ranAt, ["10:07", "10:15", "10:30", "10:45"]);
+
+// To run only at the matching times, wait for the next one first.
+const nightly = Cron.parse("30 2 * * *"); // 02:30 every day, local time
+const nextRun = new Date(nightly.next(Date.now()));
+assertEq([nextRun.getHours(), nextRun.getMinutes()], [2, 30]);
+// forever(nightly.untilNext.flatMap(() => backup))
 // <<< example
