@@ -76,6 +76,7 @@ export default defineConfig({
           { text: "Messaging and Kafka", link: "/16-messaging" },
           { text: "Redis and PostgreSQL", link: "/17-distributed-backends" },
           { text: "Stateful topologies", link: "/18-topologies" },
+          { text: "Networking", link: "/20-networking" },
           { text: "Package map", link: "/19-packages" },
         ],
       },

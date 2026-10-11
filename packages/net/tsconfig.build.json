@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "noEmit": false,
+    "emitDeclarationOnly": true,
+    "rootDir": "src",
+    "declarationDir": "dist/types",
+    "paths": {
+      "@spilne/perfect-core": ["../core/dist/types/index.d.ts"],
+      "@spilne/perfect-core/*": ["../core/dist/types/*"]
+    }
+  },
+  "include": ["src"]
+}

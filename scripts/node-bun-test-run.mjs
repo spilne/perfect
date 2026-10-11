@@ -17,6 +17,7 @@ const ALL_TEST_ROOTS = [
   "packages/core/test",
   "packages/http/test",
   "packages/http-otel/test",
+  "packages/net/test",
   "packages/otel/test",
   "packages/topology/test",
   "packages/transform/test",

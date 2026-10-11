@@ -27,7 +27,7 @@
     },
     "packages/core": {
       "name": "@spilne/perfect-core",
-      "version": "0.3.1",
+      "version": "0.4.0",
       "devDependencies": {
         "effect": "^4.0.0",
         "mitata": "^1.0.34",
@@ -35,7 +35,7 @@
     },
     "packages/http": {
       "name": "@spilne/perfect-http",
-      "version": "0.3.1",
+      "version": "0.4.0",
       "dependencies": {
         "@spilne/perfect-core": "^0.3.0",
       },
@@ -50,7 +50,7 @@
     },
     "packages/http-otel": {
       "name": "@spilne/perfect-http-otel",
-      "version": "0.3.1",
+      "version": "0.4.0",
       "dependencies": {
         "@opentelemetry/api": "^1.9.0",
         "@spilne/perfect-core": "^0.1.0",
@@ -77,14 +77,14 @@
     },
     "packages/kafka": {
       "name": "@spilne/perfect-kafka",
-      "version": "0.3.1",
+      "version": "0.4.0",
       "dependencies": {
         "@spilne/perfect-core": "^0.3.1",
       },
     },
     "packages/kafka-kafkajs": {
       "name": "@spilne/perfect-kafka-kafkajs",
-      "version": "0.3.1",
+      "version": "0.4.0",
       "dependencies": {
         "@spilne/perfect-kafka": "^0.3.1",
       },
@@ -97,7 +97,7 @@
     },
     "packages/kafka-platformatic": {
       "name": "@spilne/perfect-kafka-platformatic",
-      "version": "0.3.1",
+      "version": "0.4.0",
       "dependencies": {
         "@spilne/perfect-kafka": "^0.3.1",
       },
@@ -108,9 +108,28 @@
         "@platformatic/kafka": "^2.12.1",
       },
     },
+    "packages/net": {
+      "name": "@spilne/perfect-net",
+      "version": "0.4.0",
+      "dependencies": {
+        "@spilne/perfect-core": "^0.4.0",
+      },
+      "devDependencies": {
+        "@bufbuild/protobuf": "^2.2.0",
+        "msgpackr": "^1.11.0",
+      },
+      "peerDependencies": {
+        "@bufbuild/protobuf": "^2.0.0",
+        "msgpackr": "^1.11.0",
+      },
+      "optionalPeers": [
+        "@bufbuild/protobuf",
+        "msgpackr",
+      ],
+    },
     "packages/otel": {
       "name": "@spilne/perfect-otel",
-      "version": "0.3.1",
+      "version": "0.4.0",
       "dependencies": {
         "@opentelemetry/api": "^1.9.0",
         "@spilne/perfect-core": "^0.1.0",
@@ -118,7 +137,7 @@
     },
     "packages/postgres": {
       "name": "@spilne/perfect-postgres",
-      "version": "0.3.1",
+      "version": "0.4.0",
       "dependencies": {
         "@spilne/perfect-core": "^0.3.1",
         "drizzle-orm": "0.45.3",
@@ -130,7 +149,7 @@
     },
     "packages/redis": {
       "name": "@spilne/perfect-redis",
-      "version": "0.3.1",
+      "version": "0.4.0",
       "dependencies": {
         "@spilne/perfect-core": "^0.3.1",
       },
@@ -141,25 +160,25 @@
     },
     "packages/swc-plugin": {
       "name": "@spilne/perfect-swc-plugin",
-      "version": "0.3.1",
+      "version": "0.4.0",
     },
     "packages/topology": {
       "name": "@spilne/perfect-topology",
-      "version": "0.3.1",
+      "version": "0.4.0",
       "dependencies": {
         "@spilne/perfect-core": "^0.1.0",
       },
     },
     "packages/transform": {
       "name": "@spilne/perfect-transform",
-      "version": "0.3.1",
+      "version": "0.4.0",
       "devDependencies": {
         "@swc/core": "1.16.13",
       },
     },
     "templates/stackblitz": {
       "name": "perfect-stackblitz-playground",
-      "version": "0.3.1",
+      "version": "0.4.0",
       "dependencies": {
         "@spilne/perfect-core": "^0.3.0",
       },
@@ -402,6 +421,8 @@
 
     "@balena/dockerignore": ["@balena/dockerignore@1.0.2", "", {}, "sha512-wMue2Sy4GAVTk6Ic4tJVcnfdau+gx2EnG7S+uAEe+TWJFqE4YoWN4/H8MSLj4eYJKxGg26lZwboEniNiNwZQ6Q=="],
 
+    "@bufbuild/protobuf": ["@bufbuild/protobuf@2.16.0", "", {}, "sha512-FWa0sPlqYGJgpTs6OxBRcL/AW4JT0OIO+W1ajerluoTVh8CV0B7XM1qsNCRgnkSCkRCgOICKHRQlY17jrsm0+Q=="],
+
     "@clack/core": ["@clack/core@1.4.3", "", { "dependencies": { "fast-wrap-ansi": "^0.2.0", "sisteransi": "^1.0.5" } }, "sha512-/kr3UWNtdJfxZtPgDqUOmG2pvwlmcLGheex5yiZKdwbzZJxhV+HMNR9QNmyY5cGwTNV6LrR7Jtp+KjhUAP1qBQ=="],
 
     "@clack/prompts": ["@clack/prompts@1.7.0", "", { "dependencies": { "@clack/core": "1.4.3", "fast-string-width": "^3.0.2", "fast-wrap-ansi": "^0.2.0", "sisteransi": "^1.0.5" } }, "sha512-y7/yvZ2TPAnR9+jnc00klvNNLkJiXFFrQA/hlLCcxA9a2A4zQIOimyFQ9XfwYKiGD1fb5GY8vbKIIgO8d5Tb2A=="],
@@ -511,6 +532,18 @@
     "@js-sdsl/ordered-map": ["@js-sdsl/ordered-map@4.4.2", "", {}, "sha512-iUKgm52T8HOE/makSxjqoWhe95ZJA1/G1sYsGev2JDKUSS14KAgg1LHb+Ba+IPow0xflbnSkOsZcO08C7w1gYw=="],
 
     "@kwsites/file-exists": ["@kwsites/file-exists@1.1.1", "", { "dependencies": { "debug": "^4.1.1" } }, "sha512-m9/5YGR18lIwxSFDwfE3oA7bWuq9kdau6ugN4H2rJeyhFQZcG9AgSHkQtSD15a8WvTgfz9aikZMrKPHvbpqFiw=="],
+
+    "@msgpackr-extract/msgpackr-extract-darwin-arm64": ["@msgpackr-extract/msgpackr-extract-darwin-arm64@3.0.4", "", { "os": "darwin", "cpu": "arm64" }, "sha512-LCkGo6JDfaBhgST7UpPWgNgLINpcpabaHfyz5OBx75nUYxBsaEPxjnyNjWpeb/xBup/682QnBfRBy2/LvPutZQ=="],
+
+    "@msgpackr-extract/msgpackr-extract-darwin-x64": ["@msgpackr-extract/msgpackr-extract-darwin-x64@3.0.4", "", { "os": "darwin", "cpu": "x64" }, "sha512-zExlW9zUJKZH/tOtVMttwjKa4Xm/3KcNjnE3dPN92uCktwavMxpgCA3MoJK/DOnTWsQgo224OaST27/mPNAf+w=="],
+
+    "@msgpackr-extract/msgpackr-extract-linux-arm": ["@msgpackr-extract/msgpackr-extract-linux-arm@3.0.4", "", { "os": "linux", "cpu": "arm" }, "sha512-Tg3yX65f5GbtXLkrYEHE5oibZG9epyYWas7FogTTEJeDEF9JlXJzKgXaNhT3UXlTOeA+AfZpYZYZ0uPj7Cfquw=="],
+
+    "@msgpackr-extract/msgpackr-extract-linux-arm64": ["@msgpackr-extract/msgpackr-extract-linux-arm64@3.0.4", "", { "os": "linux", "cpu": "arm64" }, "sha512-dgX0P/9wGPJeHFBG+ZmhgE6bmtMt7NP5CRBGyyktpopdk/mW4POnrpQsSLtKI1dwpc+pPLuXHDh6vvskyQE/sw=="],
+
+    "@msgpackr-extract/msgpackr-extract-linux-x64": ["@msgpackr-extract/msgpackr-extract-linux-x64@3.0.4", "", { "os": "linux", "cpu": "x64" }, "sha512-8TNXMEjJc3QEy7R/x1INhgiU+XakDAFUzBhaz7+Rbrs8NH5UQeHQxxmzsSBJGyV6I1jW79undiQm8tOI+D+8FQ=="],
+
+    "@msgpackr-extract/msgpackr-extract-win32-x64": ["@msgpackr-extract/msgpackr-extract-win32-x64@3.0.4", "", { "os": "win32", "cpu": "x64" }, "sha512-CmCXPQrkbwExx3j946/PtHWHbYJiCRBRDl4BlkRQcJB/YOwQxJRTpoo7aTsortjgoJ1x7opzTSxn7C+ASSLVjQ=="],
 
     "@napi-rs/wasm-runtime": ["@napi-rs/wasm-runtime@0.2.4", "", { "dependencies": { "@emnapi/core": "^1.1.0", "@emnapi/runtime": "^1.1.0", "@tybys/wasm-util": "^0.9.0" } }, "sha512-9zESzOO5aDByvhIAsOy9TbpZ0Ur2AJbUI7UT73kcUTS2mxAMHOBaa1st/jAymNoCtvrit99kkzT1FZuXVcgfIQ=="],
 
@@ -787,6 +820,8 @@
     "@spilne/perfect-kafka-kafkajs": ["@spilne/perfect-kafka-kafkajs@workspace:packages/kafka-kafkajs"],
 
     "@spilne/perfect-kafka-platformatic": ["@spilne/perfect-kafka-platformatic@workspace:packages/kafka-platformatic"],
+
+    "@spilne/perfect-net": ["@spilne/perfect-net@workspace:packages/net"],
 
     "@spilne/perfect-otel": ["@spilne/perfect-otel@workspace:packages/otel"],
 
@@ -1414,6 +1449,10 @@
 
     "ms": ["ms@2.1.3", "", {}, "sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA=="],
 
+    "msgpackr": ["msgpackr@1.12.1", "", { "optionalDependencies": { "msgpackr-extract": "^3.0.2" } }, "sha512-4EUH9tQHnMmEgzW/MdAP0KIfa1T9AF+htl0ffe2n5vb2EKn9y2co8ccpgWko6S52Jy1PQZKwRnx5/KkYjtd9MQ=="],
+
+    "msgpackr-extract": ["msgpackr-extract@3.0.4", "", { "dependencies": { "node-gyp-build-optional-packages": "5.2.2" }, "optionalDependencies": { "@msgpackr-extract/msgpackr-extract-darwin-arm64": "3.0.4", "@msgpackr-extract/msgpackr-extract-darwin-x64": "3.0.4", "@msgpackr-extract/msgpackr-extract-linux-arm": "3.0.4", "@msgpackr-extract/msgpackr-extract-linux-arm64": "3.0.4", "@msgpackr-extract/msgpackr-extract-linux-x64": "3.0.4", "@msgpackr-extract/msgpackr-extract-win32-x64": "3.0.4" }, "bin": { "download-msgpackr-prebuilds": "bin/download-prebuilds.js" } }, "sha512-4kmO/MdyUIkLIvTPr8VHLil4AtoKIoniWPIEk5+CDy0xnWC84azhSFmuJ7PxZdsYtiP5kEeQsORAVIeMgxT+Hw=="],
+
     "nan": ["nan@2.28.0", "", {}, "sha512-fTsDz99OTq2sVePhGdp4qQhggZFtKr64ZNVyVajRKtMOkJxYekplBh577PiJB12v/D3s2E5cGtOI45LWp6rnLQ=="],
 
     "nanoid": ["nanoid@3.3.18", "", { "bin": { "nanoid": "bin/nanoid.cjs" } }, "sha512-DTg4MJbGMWkfi6VZFdNt2/caMbQy4Ou+Op/hJQvGEWcnVfoA1QA+xzRKAzw9jD6+GVOOeYr/mIcuDSdug6F6+w=="],
@@ -1425,6 +1464,8 @@
     "node-domexception": ["node-domexception@1.0.0", "", {}, "sha512-/jKZoMpw0F8GRwl4/eLROPA3cfcXtLApP0QzLmUT/HuPCZWyB7IY9ZrMeKw2O/nFIqPQB3PVM9aYm0F312AXDQ=="],
 
     "node-fetch": ["node-fetch@3.3.2", "", { "dependencies": { "data-uri-to-buffer": "^4.0.0", "fetch-blob": "^3.1.4", "formdata-polyfill": "^4.0.10" } }, "sha512-dRB78srN/l6gqWulah9SrxeYnxeddIG30+GOqK/9OlLVyLg3HPnr6SqOWTWOXKRwC2eGYCkZ59NNuSgvSrpgOA=="],
+
+    "node-gyp-build-optional-packages": ["node-gyp-build-optional-packages@5.2.2", "", { "dependencies": { "detect-libc": "^2.0.1" }, "bin": { "node-gyp-build-optional-packages": "bin.js", "node-gyp-build-optional-packages-optional": "optional.js", "node-gyp-build-optional-packages-test": "build-test.js" } }, "sha512-s+w+rBWnpTMwSFbaE0UXsRlg7hU4FjekKU4eyAih5T8nJuNZT1nNsskXpxmeqSK9UzkBl6UgRlnKc8hz8IEqOw=="],
 
     "node-releases": ["node-releases@2.0.37", "", {}, "sha512-1h5gKZCF+pO/o3Iqt5Jp7wc9rH3eJJ0+nh/CIoiRwjRxde/hAHyLPXYN4V3CqKAbiZPSeJFSWHmJsbkicta0Eg=="],
 
