@@ -19,7 +19,7 @@ workspace package to its detailed guide and package reference.
 | `@spilne/perfect-kafka-platformatic` | Platformatic Kafka driver adapter and bounded native-stream bridge for Node.js | [Kafka drivers](./16-messaging.md#drivers), [package reference](../packages/kafka-platformatic/README.md) |
 | `@spilne/perfect-redis` | Distributed coordination primitives, cache/state backends, Redis Streams, and Pub/Sub | [Redis backend](./17-distributed-backends.md#redis), [package reference](../packages/redis/README.md) |
 | `@spilne/perfect-postgres` | PostgreSQL coordination, queues, change streams, state, and the `@spilne/perfect-postgres/pgmq` subpath | [PostgreSQL backend](./17-distributed-backends.md#postgresql), [package reference](../packages/postgres/README.md) |
-| `@spilne/perfect-net` | TCP, Unix-socket and TLS connections as effects, typed message codecs (JSON, MessagePack, Protobuf), and a network simulator for tests | [Networking](./20-networking.md), [package reference](../packages/net/README.md) |
+| `@spilne/perfect-net` | TCP, Unix-socket and TLS connections as effects, typed message codecs (JSON, MessagePack, Protobuf), channels over one connection, reconnecting connections, cluster membership by gossip, consistent hashing, and a network simulator for tests | [Networking](./20-networking.md), [package reference](../packages/net/README.md) |
 | `@spilne/perfect-topology` | Stateful event-processing DAGs, windows, joins, shuffle stages, partition state, and delivery guarantees | [Stateful topologies](./18-topologies.md), [package reference](../packages/topology/README.md) |
 | `@spilne/perfect-swc-plugin` | Canonical SWC WASM compiler for `eff(($) => ...)` | [Syntax](./03-syntax.md#eff-rewriter), [package reference](../packages/swc-plugin/README.md) |
 | `@spilne/perfect-transform` | Bun preload/plugin and source-text compiler for `eff($)` and `for { ... } yield` | [Syntax](./03-syntax.md#eff-rewriter), [package reference](../packages/transform/README.md) |
@@ -57,6 +57,7 @@ part of this map.
 | `@spilne/perfect-transform/bun-plugin` | Alias of `/plugin` |
 | `@spilne/perfect-net/msgpack` | `msgpackCodec`, a MessagePack codec (needs `msgpackr`) |
 | `@spilne/perfect-net/protobuf` | `protobufCodec`, a Protocol Buffers codec (needs `@bufbuild/protobuf`) |
+| `@spilne/perfect-net/mdns` | `Mdns.announce` and `Mdns.discover`, finding members on the local network (needs `multicast-dns`) |
 
 The documentation build checks this package map against every
 `packages/*/package.json` and requires each workspace package to have a

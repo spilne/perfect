@@ -40,6 +40,12 @@ const program = scoped(
 - **Codecs:** `BinaryCodec.bytes`, `.utf8`, `.json<T>()`; MessagePack from
   `@spilne/perfect-net/msgpack` (with `msgpackr`) and Protobuf from
   `@spilne/perfect-net/protobuf` (with `@bufbuild/protobuf`).
+- **Channels and reconnecting:** `Multiplexer` runs many channels over one
+  connection, each with its own flow control; `Resilient.connect` reopens a
+  broken connection with retries and an optional circuit breaker.
+- **Clusters:** `Gossip.join` keeps a SWIM membership list, `HashRing`
+  assigns keys to members, and `Discovery` (DNS, SRV, or mDNS from
+  `@spilne/perfect-net/mdns` with `multicast-dns`) finds the first members.
 - **Testing:** depend on the `Transport` service and provide
   `SimulatedNetwork` nodes in tests, with latency, message loss and
   partitions under the test's control (deterministic with `TestClock` and

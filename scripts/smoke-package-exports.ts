@@ -20,7 +20,10 @@ const packages = [
   { dir: "packages/kafka-kafkajs", imports: ["dist/index.js"] },
   { dir: "packages/kafka-platformatic", imports: ["dist/index.js"] },
   { dir: "packages/otel", imports: ["dist/index.js"] },
-  { dir: "packages/net", imports: ["dist/index.js", "dist/msgpack.js", "dist/protobuf.js"] },
+  {
+    dir: "packages/net",
+    imports: ["dist/index.js", "dist/msgpack.js", "dist/protobuf.js", "dist/mdns.js"],
+  },
   { dir: "packages/postgres", imports: ["dist/index.js", "dist/pgmq/index.js"] },
   { dir: "packages/redis", imports: ["dist/index.js"] },
   { dir: "packages/topology", imports: ["dist/index.js"] },
