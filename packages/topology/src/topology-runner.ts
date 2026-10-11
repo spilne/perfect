@@ -6,10 +6,16 @@ import {
   Cause,
   Exit,
   fail,
+  all,
+  awaitFiber,
+  forkDaemon,
   fromPromise,
+  join,
+  Queue,
   runExit,
   runFiber,
   succeed,
+  suspend,
   sync,
 } from "@spilne/perfect-core";
 import { Stream } from "@spilne/perfect-core/stream";
@@ -408,15 +414,106 @@ class TopologyRunnerInstance {
 
     const managed = isManagedAcknowledgeable(source);
     this.sources += 1;
-    return envelopes
-      .evalMap((envelope) =>
+    return this.prepareRecords(envelopes, managed).concat(
+      Stream.suspend(() => Stream.fromArray(this.endOfInputMarkers())),
+    );
+  }
+
+  /**
+   * Turn envelopes into records, without letting one partition hold up the
+   * others.
+   *
+   * A partition can't be processed until this instance holds its lease. While
+   * it takes the lease over (the previous owner may still be finishing, for up
+   * to `leaseMs`), that partition's records wait in a backlog of their own and
+   * the other partitions' records keep going. When the lease is ours, the
+   * backlog follows in order. Each record is checked again then: if the
+   * partition was taken away in the meantime, it is dropped without an ack,
+   * for the new owner to process.
+   */
+  private prepareRecords(
+    envelopes: Stream<Envelope<unknown, unknown>, any>,
+    managed: boolean,
+  ): Stream<TopologyRecord, any> {
+    type Item =
+      | { readonly record: TopologyRecord }
+      | { readonly error: unknown }
+      | { readonly end: true };
+
+    const start = Queue.bounded<Item>(64).flatMap((queue) => {
+      const backlogs = new Map<Partition, Envelope<unknown, unknown>[]>();
+      const waiting = new Set<Fiber<void, never>>();
+      const offer = (item: Item) => queue.offer(item).catch(() => succeed(false));
+
+      const emit = (envelope: Envelope<unknown, unknown>): Eff<void, Throws<unknown>> =>
         fromPromise(
           () => this.prepareEnvelope(envelope, managed),
           (error) => error,
-        ),
-      )
-      .collect((record) => record)
-      .concat(Stream.suspend(() => Stream.fromArray(this.endOfInputMarkers())));
+        ).flatMap((record) =>
+          record ? offer({ record }).map(() => undefined) : succeed(undefined),
+        );
+
+      const drainBacklog = (partition: Partition): Eff<void, Throws<unknown>> =>
+        suspend(() => {
+          const next = backlogs.get(partition)?.shift();
+          if (next === undefined) {
+            backlogs.delete(partition);
+            return succeed(undefined);
+          }
+          return emit(next).flatMap(() => drainBacklog(partition));
+        });
+
+      const handle = (envelope: Envelope<unknown, unknown>): Eff<void, Throws<unknown>> =>
+        suspend(() => {
+          const partition = partitionOf(envelope);
+          const backlog = backlogs.get(partition);
+          if (backlog) {
+            backlog.push(envelope);
+            return succeed(undefined);
+          }
+          const owned =
+            this.partitionLifecycle.owned(partition) ??
+            (managed ? undefined : this.partitionLifecycle.activate(partition));
+          // Not ours (a managed source just took it away): leave it unacked.
+          if (owned === undefined) return succeed(undefined);
+          if (!(owned instanceof Promise)) return emit(envelope);
+          backlogs.set(partition, [envelope]);
+          const waitForLease = fromPromise(
+            () => owned,
+            (error) => error,
+          )
+            .flatMap(() => drainBacklog(partition))
+            .catch((error) => offer({ error }).map(() => undefined));
+          return forkDaemon(waitForLease).map((fiber) => {
+            waiting.add(fiber);
+          });
+        });
+
+      const produce = envelopes
+        .forEach(handle)
+        // Once the source has ended, the backlogs still have to go out.
+        .flatMap(() => all([...waiting].map((fiber) => join(fiber))))
+        .flatMap(() => offer({ end: true }))
+        .catch((error) => offer({ error }));
+
+      return forkDaemon(produce).map((producer) => ({ queue, producer, waiting }));
+    });
+
+    return Stream.bracket(start, ({ producer, waiting }) =>
+      suspend(() => {
+        producer.interrupt();
+        for (const fiber of waiting) fiber.interrupt();
+        return awaitFiber(producer).flatMap(() =>
+          all([...waiting].map((fiber) => awaitFiber(fiber))),
+        );
+      }),
+    ).flatMap(({ queue }) =>
+      Stream.unfoldEffect(undefined, () =>
+        queue.take().map((item) => ("end" in item ? null : ([item, undefined] as const))),
+      ).flatMap((item) =>
+        "error" in item ? Stream.fail(item.error) : Stream.fromArray([item.record]),
+      ),
+    );
   }
 
   /**
@@ -689,10 +786,7 @@ class TopologyRunnerInstance {
     envelope: Envelope<unknown, unknown>,
     managed: boolean,
   ): Promise<TopologyRecord | undefined> {
-    const rawPartition = envelope.metadata.partition;
-    const partition = Partition(
-      typeof rawPartition === "number" && Number.isInteger(rawPartition) ? rawPartition : 0,
-    );
+    const partition = partitionOf(envelope);
     const owned = managed
       ? this.partitionLifecycle.owned(partition)
       : this.partitionLifecycle.activate(partition);
@@ -1458,4 +1552,10 @@ class LegacyPartitionedStateBackend implements PartitionedStateBackend<unknown> 
   private prefix(scope: StatePartitionScope): string {
     return `@partition/${encodeURIComponent(scope.topologyId)}/${encodeURIComponent(scope.stageId)}/${scope.partition}/`;
   }
+}
+
+/** The partition an envelope belongs to; 0 when the source doesn't say. */
+function partitionOf(envelope: Envelope<unknown, unknown>): Partition {
+  const raw = envelope.metadata.partition;
+  return Partition(typeof raw === "number" && Number.isInteger(raw) ? raw : 0);
 }

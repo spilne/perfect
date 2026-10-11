@@ -172,6 +172,12 @@ Durable state is namespaced by topology, stage, operator, source partition,
 and key. Assignment restores a partition before delivery; revocation drains
 in-flight work, checkpoints, and releases its fenced lease.
 
+A partition's lease can still be held by its previous owner, for instance
+while that owner finishes its last records during a rebalance. Its records
+then wait, in order, and the other partitions carry on. If the lease isn't
+free within `partitionLeaseMs` (default 30 s), the topology fails with
+"partition N is owned by another instance".
+
 Use `RedisPartitionedStateBackend` or `PgPartitionedStateBackend` for
 multi-instance state. A legacy unpartitioned `StateBackend` is suitable for a
 single process but is rejected for stateful multi-stage distributed runs.
@@ -207,7 +213,7 @@ topology that has both `shuffle()` and `join`. Run such a topology with
 `planStages({ compiled: topology.compiled, group })` and
 `analyzeTopology(topology.compiled)` are available for inspection. The
 analyzer reports suspicious DAGs such as keyed state without a preceding
-shuffle.
+shuffle, including a `join` with a side that isn't shuffled.
 
 ## Records a step fails on
 
