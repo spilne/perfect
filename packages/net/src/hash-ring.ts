@@ -16,7 +16,9 @@ const DEFAULT_VNODES = 128;
 /** A key that changed owner between two rings. */
 export interface Move {
   readonly key: string;
+  /** The owner before; undefined if the ring was empty. */
   readonly from: string | undefined;
+  /** The owner after; undefined if the ring is now empty. */
   readonly to: string | undefined;
 }
 
@@ -25,6 +27,7 @@ interface Point {
   readonly node: string;
 }
 
+/** Which node owns a key, by consistent hashing. Build one with `HashRing.of`. */
 export class HashRing {
   private constructor(
     /** The nodes on the ring, sorted. */

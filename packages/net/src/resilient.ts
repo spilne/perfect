@@ -31,6 +31,7 @@ import { Stream } from "@spilne/perfect-core/stream";
 import type { Connection } from "./connection.js";
 import { ConnectError, ConnectionError, type NetError } from "./errors.js";
 
+/** Options for `Resilient.connect`. */
 export interface ResilientOptions {
   /**
    * How to retry opening a connection. Default: from 100 ms, doubling up to
@@ -78,9 +79,10 @@ function hold<M>(
         })),
       ),
     ),
-  ) as Eff<Held<M>, Throws<ConnectError>>;
+  );
 }
 
+/** Connections that reopen themselves when they break. */
 export const Resilient = {
   /**
    * A connection that reopens itself with `open` when it breaks. It is
@@ -99,11 +101,11 @@ export const Resilient = {
     let remote = "";
 
     const openOnce: Eff<Held<M>, Throws<ConnectError>> = breaker
-      ? (breaker
+      ? breaker
           .protect(hold(open))
           .catchTag("CircuitOpen", () =>
             fail(new ConnectError({ address: remote, message: "the circuit breaker is open" })),
-          ) as Eff<Held<M>, Throws<ConnectError>>)
+          )
       : hold(open);
 
     const reconnect: Eff<Held<M>, Throws<ConnectError>> = suspend(() => {
@@ -121,7 +123,7 @@ export const Resilient = {
             .catch((error) => result.fail(error))
             .ensuring(sync(() => (reconnecting = undefined))),
         ).flatMap(() => result.await),
-      ) as Eff<Held<M>, Throws<ConnectError>>;
+      );
       return reconnecting;
     });
 
@@ -157,7 +159,7 @@ export const Resilient = {
                 .flatMap((fresh) => fresh.send(message)),
             ),
           ),
-        ) as Eff<void, Throws<NetError>>;
+        );
 
     // The messages of one connection after another, until closed. A broken
     // or closed connection is replaced; a message that can't be decoded still
@@ -165,13 +167,13 @@ export const Resilient = {
     const messagesFrom = (): Stream<M, Throws<NetError>> =>
       closed
         ? Stream.empty()
-        : (Stream.fromEffect(connection.catch((error) => fail(asNetError(error)))).flatMap((c) =>
+        : Stream.fromEffect(connection.catch((error) => fail(asNetError(error)))).flatMap((c) =>
             c.messages
               .catch((error): Stream<M, Throws<NetError>> =>
                 error._tag === "ConnectionError" ? Stream.empty() : Stream.fail(error),
               )
               .concat(Stream.suspend(() => Stream.fromEffect(drop(c)).flatMap(messagesFrom))),
-          ) as Stream<M, Throws<NetError>>);
+          );
 
     const close: Eff<void, never> = suspend(() => {
       closed = true;

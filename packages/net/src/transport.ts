@@ -34,6 +34,7 @@ export function formatAddress(address: Address): string {
   return "path" in address ? address.path : `${address.host}:${address.port}`;
 }
 
+/** Options for `connect`. */
 export interface ConnectOptions<M> extends ConnectionOptions<M> {
   /**
    * Use TLS. `true` checks the server's certificate against the system's
@@ -45,6 +46,7 @@ export interface ConnectOptions<M> extends ConnectionOptions<M> {
   readonly timeoutMs?: number;
 }
 
+/** Options for `listen`. */
 export interface ListenOptions<M, S> extends ConnectionOptions<M> {
   /**
    * Called for every connection, on its own fiber, with the listener's
@@ -199,10 +201,7 @@ export function serveConnections<M, S>(params: {
       }),
     );
 
-  return acquireRelease(open, (listener) => listener.close) as Eff<
-    Listener,
-    Throws<ListenError> | Exclude<S, Throws<unknown>>
-  >;
+  return acquireRelease(open, (listener) => listener.close);
 }
 
 function listenOnSockets<M, S>(
