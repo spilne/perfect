@@ -15,6 +15,7 @@ import {
   httpRequestText,
 } from "../src";
 import { runUnchecked } from "./run-unchecked";
+import { isRecord } from "./is-record";
 
 /** In-memory transport: returns a canned Response per call. */
 class MockTransport implements HttpTransport {
@@ -101,10 +102,12 @@ describe("httpRequest<T> — full pipeline with parser", () => {
     id: number;
     name: string;
   }
+  const isUser = (d: unknown): d is User =>
+    isRecord(d) && typeof d.id === "number" && typeof d.name === "string";
   const UserParser: ResponseParser<User> = {
-    safeParse: (d: any) =>
-      d && typeof d.id === "number" && typeof d.name === "string"
-        ? { success: true, data: d as User }
+    safeParse: (d: unknown) =>
+      isUser(d)
+        ? { success: true, data: d }
         : { success: false, error: `bad user shape: ${JSON.stringify(d)}` },
   };
 

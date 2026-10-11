@@ -16,6 +16,7 @@ import {
   ConsumerGroup,
   CheckpointName,
   InMemoryState,
+  type TimeWindow,
 } from "../src";
 
 // ---------------------------------------------------------------------------
@@ -525,7 +526,8 @@ describe("TopologyRunner — compiles and runs a topology", () => {
   });
 
   test("reports acknowledgement failures through awaitExit", async () => {
-    const source = createTestSource([1]);
+    const source: Streamable<number, Throws<Error>> & Acknowledgeable<number, Throws<Error>> =
+      createTestSource([1]);
     source.subscribeAck = () =>
       Stream.fromIterable([
         {
@@ -534,7 +536,7 @@ describe("TopologyRunner — compiles and runs a topology", () => {
           nack: () => succeed(undefined),
           metadata: {},
         },
-      ]) as any;
+      ]);
     const handle = await TopologyRunner.run(
       StreamTopology.source(source).to(createTestSink<number>()),
       { group: ConsumerGroup("test-ack-failure"), ackBatchSize: 1 },
@@ -916,7 +918,10 @@ describe("WindowManager — checkpoint and restore", () => {
     const spec = {
       init: () => ({ count: 0 }),
       add: (state: { count: number }) => ({ count: state.count + 1 }),
-      emit: (key: string, _w: any, state: { count: number }) => ({ key, count: state.count }),
+      emit: (key: string, _w: TimeWindow, state: { count: number }) => ({
+        key,
+        count: state.count,
+      }),
     };
 
     const manager = new WindowManager({ type: "tumbling", windowMs: 1000 }, spec);

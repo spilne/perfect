@@ -19,6 +19,7 @@ import {
   httpRequest,
 } from "../src";
 import { runUnchecked } from "./run-unchecked";
+import { isRecord } from "./is-record";
 
 class MockTransport implements HttpTransport {
   constructor(private readonly respond: () => Response | HttpClientError) {}
@@ -33,23 +34,24 @@ interface ApiError {
   code: "NOT_FOUND" | "FORBIDDEN" | "RATE_LIMITED";
   detail: string;
 }
+const isApiError = (d: unknown): d is ApiError =>
+  isRecord(d) &&
+  (d.code === "NOT_FOUND" || d.code === "FORBIDDEN" || d.code === "RATE_LIMITED") &&
+  typeof d.detail === "string";
 const ApiErrorParser: ResponseParser<ApiError> = {
-  safeParse: (d: any) =>
-    d &&
-    (d.code === "NOT_FOUND" || d.code === "FORBIDDEN" || d.code === "RATE_LIMITED") &&
-    typeof d.detail === "string"
-      ? { success: true, data: d as ApiError }
+  safeParse: (d: unknown) =>
+    isApiError(d)
+      ? { success: true, data: d }
       : { success: false, error: "does not match ApiError" },
 };
 
 interface User {
   id: number;
 }
+const isUser = (d: unknown): d is User => isRecord(d) && typeof d.id === "number";
 const UserParser: ResponseParser<User> = {
-  safeParse: (d: any) =>
-    d && typeof d.id === "number"
-      ? { success: true, data: d as User }
-      : { success: false, error: "bad" },
+  safeParse: (d: unknown) =>
+    isUser(d) ? { success: true, data: d } : { success: false, error: "bad" },
 };
 
 describe("httpFetchOk — errorSchema → HttpStatusError<B>", () => {
@@ -223,11 +225,11 @@ describe("DefaultHttpClient — errorSchema per-request + client-level", () => {
           headers: { "content-type": "application/json" },
         }),
     );
+    const isDifferent = (d: unknown): d is { different: string } =>
+      isRecord(d) && typeof d.different === "string";
     const Permissive: ResponseParser<{ different: string }> = {
-      safeParse: (d: any) =>
-        d && typeof d.different === "string"
-          ? { success: true, data: d }
-          : { success: false, error: "no" },
+      safeParse: (d: unknown) =>
+        isDifferent(d) ? { success: true, data: d } : { success: false, error: "no" },
     };
     const client = new DefaultHttpClient({ transport, errorSchema: ApiErrorParser });
     let caught: HttpStatusError<{ different: string }> | undefined;

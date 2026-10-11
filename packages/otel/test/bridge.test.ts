@@ -9,6 +9,7 @@ import {
   withSpan,
   MetricsRegistry,
 } from "@spilne/perfect-core";
+import type { Meter, Tracer as OtelApiTracer } from "@opentelemetry/api";
 import { OtelTracer, OtelMetricsExporter } from "../src";
 
 // ── Fakes over the otel API surface we touch ───────────────────────
@@ -51,7 +52,8 @@ function makeFakeOtelTracer() {
       };
     },
   };
-  return { tracer: tracer as any, spans };
+  // only the span methods the bridge calls are faked
+  return { tracer: tracer as unknown as OtelApiTracer, spans };
 }
 
 function makeFakeMeter() {
@@ -70,7 +72,8 @@ function makeFakeMeter() {
     createHistogram: (name: string) => ({ record: recordInto(histograms, name) }),
     createUpDownCounter: (name: string) => ({ add: recordInto(counters, name) }),
   };
-  return { meter: meter as any, counters, gauges, histograms };
+  // only the instrument factories the exporter calls are faked
+  return { meter: meter as unknown as Meter, counters, gauges, histograms };
 }
 
 // ── OtelTracer ─────────────────────────────────────────────────────
@@ -79,7 +82,7 @@ describe("OtelTracer bridge", () => {
   test("success span gets OK status, attributes, and ends", async () => {
     const { tracer, spans } = makeFakeOtelTracer();
     const program = withSpan(succeed(1), "op", { route: "/x" });
-    await run(provide(program, Tracer, new OtelTracer(tracer)) as any);
+    await run(provide(program, Tracer, new OtelTracer(tracer)));
 
     expect(spans.length).toBe(1);
     expect(spans[0]!.name).toBe("op");
@@ -92,7 +95,7 @@ describe("OtelTracer bridge", () => {
     const { tracer, spans } = makeFakeOtelTracer();
     const err = new Error("kaput");
     const program = withSpan(fail(err), "failing");
-    await runExit(provide(program, Tracer, new OtelTracer(tracer)) as any);
+    await runExit(provide(program, Tracer, new OtelTracer(tracer)));
 
     expect(spans[0]!.status?.code).toBe(2); // SpanStatusCode.ERROR
     expect(spans[0]!.status?.message).toBe("kaput");
@@ -103,7 +106,7 @@ describe("OtelTracer bridge", () => {
   test("nested spans both end", async () => {
     const { tracer, spans } = makeFakeOtelTracer();
     const program = withSpan(withSpan(succeed(2), "child"), "parent");
-    await run(provide(program, Tracer, new OtelTracer(tracer)) as any);
+    await run(provide(program, Tracer, new OtelTracer(tracer)));
 
     expect(spans.map((s) => s.name).sort()).toEqual(["child", "parent"]);
     expect(spans.every((s) => s.ended)).toBe(true);

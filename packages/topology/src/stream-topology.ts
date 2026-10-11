@@ -58,6 +58,15 @@ import type {
  *
  * @typeParam T - The item type in the stream
  */
+/**
+ * A step's function as its node stores it. The node only ever gets the
+ * values of the step before it, which the builder has typed as `T`, so
+ * widening the parameter to `unknown` loses nothing.
+ */
+function erase<T, R>(fn: (value: T) => R): (value: unknown) => R {
+  return fn as (value: unknown) => R;
+}
+
 export class StreamTopology<T> {
   constructor(readonly node: TopologyNode<T>) {}
 
@@ -68,12 +77,12 @@ export class StreamTopology<T> {
 
   /** Transform each item. */
   map<U>(fn: (value: T) => U): StreamTopology<U> {
-    return new StreamTopology({ type: "map", parent: this.node, fn: fn as any });
+    return new StreamTopology({ type: "map", parent: this.node, fn: erase(fn) });
   }
 
   /** Filter items by predicate. */
   filter(fn: (value: T) => boolean): StreamTopology<T> {
-    return new StreamTopology({ type: "filter", parent: this.node, fn: fn as any });
+    return new StreamTopology({ type: "filter", parent: this.node, fn: erase(fn) });
   }
 
   /** Async transform with bounded concurrency. */
@@ -82,7 +91,7 @@ export class StreamTopology<T> {
       type: "mapAsync",
       parent: this.node,
       concurrency,
-      fn: fn as any,
+      fn: erase(fn),
     });
   }
 
@@ -96,12 +105,12 @@ export class StreamTopology<T> {
    * the current time.
    */
   eventTime(fn: (value: T) => number): StreamTopology<T> {
-    return new StreamTopology({ type: "eventTime", parent: this.node, fn: fn as any });
+    return new StreamTopology({ type: "eventTime", parent: this.node, fn: erase(fn) });
   }
 
   /** Partition by key — enables stateful per-key processing, windows, and joins. */
   keyBy<K extends string>(fn: (value: T) => K): KeyedTopology<K, T> {
-    return new KeyedTopology({ type: "keyBy", parent: this.node, keyFn: fn as any });
+    return new KeyedTopology({ type: "keyBy", parent: this.node, keyFn: erase(fn) });
   }
 
   /** Sink to any Sinkable. Returns a BuiltTopology ready to run. */
@@ -158,7 +167,7 @@ export class KeyedTopology<K extends string, T> {
    * the current time.
    */
   eventTime(fn: (value: T) => number): KeyedTopology<K, T> {
-    return new KeyedTopology({ type: "eventTime", parent: this.node, fn: fn as any });
+    return new KeyedTopology({ type: "eventTime", parent: this.node, fn: erase(fn) });
   }
 
   /** Deduplicate by a key derived from each item. */
@@ -166,7 +175,7 @@ export class KeyedTopology<K extends string, T> {
     return new KeyedTopology({
       type: "dedupe",
       parent: this.node,
-      keyFn: fn as any,
+      keyFn: erase(fn),
       name: options.name,
     });
   }
@@ -227,12 +236,12 @@ export class KeyedTopology<K extends string, T> {
 
   /** Transform each item (preserves keying). */
   map<U>(fn: (value: T) => U): KeyedTopology<K, U> {
-    return new KeyedTopology({ type: "map", parent: this.node, fn: fn as any });
+    return new KeyedTopology({ type: "map", parent: this.node, fn: erase(fn) });
   }
 
   /** Filter items (preserves keying). */
   filter(fn: (value: T) => boolean): KeyedTopology<K, T> {
-    return new KeyedTopology({ type: "filter", parent: this.node, fn: fn as any });
+    return new KeyedTopology({ type: "filter", parent: this.node, fn: erase(fn) });
   }
 
   /** Sink to any Sinkable. */

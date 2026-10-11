@@ -33,6 +33,7 @@ docs/                    Design docs, comparisons, research
 - Classes: PascalCase (`WorkerPool`)
 - Interfaces: PascalCase, no `I` prefix
 - Prefer objects for 2+ parameters
+- No `any` (lint error `typescript/no-explicit-any`). Use real types, `unknown` with narrowing, or `as unknown as T` for a deliberately partial test double. Core files that still use `any` are listed in the `overrides` of `.oxlintrc.json`; when you clean one, remove it from the list, and never add to it
 - No comments unless the WHY is non-obvious
 
 ## Testing

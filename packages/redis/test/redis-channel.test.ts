@@ -5,11 +5,12 @@ import type { Stream } from "@spilne/perfect-core/stream";
 import { RedisChannel } from "../src/redis-channel";
 import type { RedisClient } from "../src/redis-client";
 import { RedisError } from "../src/redis-error";
+import { fakeListeners } from "./fake-listeners";
 // These tests await effects directly (await queue.publish(x)).
 import "@spilne/perfect-core/thenable";
 
 test("RedisChannel bridges Redis Pub/Sub to the connect contracts", async () => {
-  const listeners = new Set<(...args: any[]) => void>();
+  const listeners = fakeListeners();
   let subscribed = false;
   const subscriber: Partial<RedisClient> = {
     async subscribe() {
@@ -17,10 +18,10 @@ test("RedisChannel bridges Redis Pub/Sub to the connect contracts", async () => 
     },
     async unsubscribe() {},
     on(event, listener) {
-      if (event === "message") listeners.add(listener);
+      listeners[event].add(listener);
     },
     off(event, listener) {
-      if (event === "message") listeners.delete(listener);
+      listeners[event].delete(listener);
     },
     disconnect() {},
   };
@@ -29,11 +30,11 @@ test("RedisChannel bridges Redis Pub/Sub to the connect contracts", async () => 
       return subscriber as RedisClient;
     },
     async publish(channel, message) {
-      for (const listener of listeners) listener(channel, message);
-      return listeners.size;
+      for (const listener of listeners.message) listener(channel, message);
+      return listeners.message.size;
     },
     async pubsub() {
-      return ["events", listeners.size];
+      return ["events", listeners.message.size];
     },
   };
   const channel = RedisChannel.make<{ n: number }>({
@@ -47,11 +48,11 @@ test("RedisChannel bridges Redis Pub/Sub to the connect contracts", async () => 
   await channel.publish({ n: 1 });
 
   expect(await received).toEqual([{ n: 1 }]);
-  expect(listeners.size).toBe(0);
+  expect(listeners.message.size).toBe(0);
 });
 
 test("RedisChannel supports pattern subscriptions", async () => {
-  const listeners = new Set<(...args: any[]) => void>();
+  const listeners = fakeListeners();
   let subscribed = false;
   const subscriber: Partial<RedisClient> = {
     async psubscribe() {
@@ -59,10 +60,10 @@ test("RedisChannel supports pattern subscriptions", async () => {
     },
     async punsubscribe() {},
     on(event, listener) {
-      if (event === "pmessage") listeners.add(listener);
+      listeners[event].add(listener);
     },
     off(event, listener) {
-      if (event === "pmessage") listeners.delete(listener);
+      listeners[event].delete(listener);
     },
     disconnect() {},
   };
@@ -72,9 +73,9 @@ test("RedisChannel supports pattern subscriptions", async () => {
     },
     async publish(channel, message) {
       if (channel.startsWith("events:")) {
-        for (const listener of listeners) listener("events:*", channel, message);
+        for (const listener of listeners.pmessage) listener("events:*", channel, message);
       }
-      return listeners.size;
+      return listeners.pmessage.size;
     },
   };
   const channel = RedisChannel.make<{ n: number }>({
@@ -87,7 +88,7 @@ test("RedisChannel supports pattern subscriptions", async () => {
   await channel.publish({ n: 2 });
 
   expect(await received).toEqual([{ n: 2 }]);
-  expect(listeners.size).toBe(0);
+  expect(listeners.pmessage.size).toBe(0);
 });
 
 test("RedisChannel exposes subscription setup failures as RedisError", async () => {

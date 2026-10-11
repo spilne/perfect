@@ -14,7 +14,7 @@
 //     claim, not a guarantee, across processes.
 // ---------------------------------------------------------------------------
 
-import { fromPromise, run } from "@spilne/perfect-core";
+import { Cause, fromPromise, runExit } from "@spilne/perfect-core";
 import type { Eff, Throws, Singleflight } from "@spilne/perfect-core";
 import { sql } from "drizzle-orm";
 import { type DrizzleDb, execRaw } from "./drizzle-db.js";
@@ -108,8 +108,11 @@ export class PgSingleflight implements Singleflight<Throws<PostgresError>> {
     return fromPromise(
       () =>
         this.doAsync(key, () =>
-          (run(eff as any) as Promise<A>).catch((error) => {
-            throw new UserEffectError(error);
+          runExit(eff).then((exit) => {
+            if (exit._tag === "Success") return exit.value;
+            // The effect's own failure (squashed as run() would): kept apart
+            // from the store's errors, so it comes back as `E`.
+            throw new UserEffectError(Cause.squash(exit.cause));
           }),
         ),
       (e) =>

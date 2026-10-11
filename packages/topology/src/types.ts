@@ -199,17 +199,17 @@ export interface TopologyMetrics {
 export type TopologyNode<_T = unknown> =
   | SourceNode<unknown>
   | MapNode<unknown>
-  | FilterNode<any>
-  | MapAsyncNode<any>
-  | KeyByNode<any>
-  | EventTimeNode<any>
-  | ShuffleNode<any>
-  | WindowNode<any>
-  | AggregateNode<any>
-  | ProcessNode<any>
-  | DedupeNode<any>
-  | JoinNode<any>
-  | SinkNode<any>;
+  | FilterNode<unknown>
+  | MapAsyncNode<unknown>
+  | KeyByNode<unknown>
+  | EventTimeNode<unknown>
+  | ShuffleNode<unknown>
+  | WindowNode<unknown>
+  | AggregateNode<unknown>
+  | ProcessNode<unknown>
+  | DedupeNode<unknown>
+  | JoinNode<unknown>
+  | SinkNode<unknown>;
 
 export interface SourceNode<_T> {
   type: "source";
@@ -222,10 +222,14 @@ export interface MapNode<T> {
   fn: (value: unknown) => T;
 }
 
-export interface FilterNode<T> {
+// Nodes are what a topology compiles to, with the element types erased: a
+// step's function takes `unknown`. The builders (StreamTopology,
+// KeyedTopology) are where the types are checked.
+
+export interface FilterNode<_T> {
   type: "filter";
   parent: TopologyNode;
-  fn: (value: T) => boolean;
+  fn: (value: unknown) => boolean;
 }
 
 export interface MapAsyncNode<T> {
@@ -235,16 +239,16 @@ export interface MapAsyncNode<T> {
   fn: (value: unknown) => Promise<T>;
 }
 
-export interface KeyByNode<T> {
+export interface KeyByNode<_T> {
   type: "keyBy";
   parent: TopologyNode;
-  keyFn: (value: T) => string;
+  keyFn: (value: unknown) => string;
 }
 
-export interface EventTimeNode<T> {
+export interface EventTimeNode<_T> {
   type: "eventTime";
   parent: TopologyNode;
-  fn: (value: T) => number;
+  fn: (value: unknown) => number;
 }
 
 export interface ShuffleNode<_T> {
@@ -275,10 +279,10 @@ export interface ProcessNode<T> {
   name?: string;
 }
 
-export interface DedupeNode<T> {
+export interface DedupeNode<_T> {
   type: "dedupe";
   parent: TopologyNode;
-  keyFn: (value: T) => string;
+  keyFn: (value: unknown) => string;
   name?: string;
 }
 

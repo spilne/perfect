@@ -1,4 +1,4 @@
-export type { RedisClient } from "./redis-client.js";
+export type { RedisClient, RedisClientEvents } from "./redis-client.js";
 export { RedisError } from "./redis-error.js";
 export { RedisRef, type RedisRefConfig } from "./redis-ref.js";
 export { RedisDeferred, type RedisDeferredConfig } from "./redis-deferred.js";

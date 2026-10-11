@@ -429,18 +429,16 @@ export class DefaultHttpClient extends AbstractHttpClient {
         transport: this.config.transport,
         proxy: this.config.proxy,
       }).flatMap((response) =>
-        (
-          sync(() => ({
-            status: response.status,
-            headers: response.headers,
-            contentType: response.headers.get("content-type"),
-            contentLength: (() => {
-              const l = response.headers.get("content-length");
-              return l === null ? null : Number(l);
-            })(),
-            response,
-          })) as any
-        ).flatMap((meta: any) =>
+        sync(() => ({
+          status: response.status,
+          headers: response.headers,
+          contentType: response.headers.get("content-type"),
+          contentLength: (() => {
+            const l = response.headers.get("content-length");
+            return l === null ? null : Number(l);
+          })(),
+          response,
+        })).flatMap((meta) =>
           // Decoder returns a Promise — bridge via tryPromise
           succeed(null).flatMap(() => {
             return decodeResponse(meta.response, decoder).map((body: T): HttpResponse<T> => ({
@@ -493,10 +491,8 @@ export class DefaultHttpClient extends AbstractHttpClient {
       // A new context for every run: the same request effect may be retried
       // or run twice at once, and middleware keys per-request state (like a
       // span) off this object. It is also handed to the transport.
-      const context: HttpRequestContext = { ...request };
+      const context: HttpRequestContext & { durationMs: number } = { ...request, durationMs: 0 };
       const eff = build(context);
-      // Mutable twin of the context, shared across the lifecycle.
-      const mut = context as any as { durationMs: number };
       let start = -1;
       const started = sync(() => {
         for (const mw of middleware) mw.onRequest?.(context);
@@ -505,16 +501,16 @@ export class DefaultHttpClient extends AbstractHttpClient {
       return onExit(started, (exit) => {
         if (start < 0) return succeed(undefined);
         return sync(() => {
-          mut.durationMs = performance.now() - start;
+          context.durationMs = performance.now() - start;
           if (exit._tag === "Success") {
-            for (const mw of middleware) mw.onResponse?.(context as any);
+            for (const mw of middleware) mw.onResponse?.(context);
             return;
           }
           const failure = Cause.firstFail(exit.cause);
           if (failure !== null) {
-            for (const mw of middleware) mw.onError?.(context as any, failure.value as E);
+            for (const mw of middleware) mw.onError?.(context, failure.value as E);
           } else if (Cause.hasInterrupt(exit.cause)) {
-            for (const mw of middleware) mw.onInterrupt?.(context as any);
+            for (const mw of middleware) mw.onInterrupt?.(context);
           }
         });
       });

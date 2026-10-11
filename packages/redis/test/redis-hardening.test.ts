@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import {
   SyncScheduler,
   async,
-  run,
   runFiber,
   sync,
   type Eff,
@@ -16,8 +15,8 @@ import { RedisCircuitBreaker } from "../src/redis-circuit-breaker";
 import { RedisStream } from "../src/redis-stream";
 import { redisKeyFamily } from "../src/internal";
 import type { RedisClient } from "../src/redis-client";
-
-const unsafeRun = <A>(effect: Eff<A, unknown>): Promise<A> => run(effect as any);
+import { fakeListeners } from "./fake-listeners";
+import { runFiberUnchecked, runUnchecked } from "./run-unchecked";
 
 describe("Redis production hardening", () => {
   test("derives Redis Cluster-safe key families", () => {
@@ -26,15 +25,15 @@ describe("Redis production hardening", () => {
   });
 
   test("fails a slow Pub/Sub subscriber instead of growing without bound", async () => {
-    const listeners = new Set<(...args: any[]) => void>();
+    const listeners = fakeListeners();
     const subscriber: Partial<RedisClient> = {
       async subscribe() {},
       async unsubscribe() {},
       on(event, listener) {
-        if (event === "message") listeners.add(listener);
+        listeners[event].add(listener);
       },
       off(event, listener) {
-        if (event === "message") listeners.delete(listener);
+        listeners[event].delete(listener);
       },
       disconnect() {},
     };
@@ -46,18 +45,18 @@ describe("Redis production hardening", () => {
       channel: "events",
       bufferCapacity: 1,
     });
-    const stream = await unsafeRun(pubsub.subscribe);
+    const stream = await runUnchecked(pubsub.subscribe);
 
-    for (const listener of listeners) {
+    for (const listener of listeners.message) {
       listener("events", "1");
       listener("events", "2");
     }
 
-    await expect(unsafeRun(stream.toArray())).rejects.toMatchObject({
+    await expect(runUnchecked(stream.toArray())).rejects.toMatchObject({
       _tag: "RedisError",
       operation: "pubsub.overflow",
     });
-    expect(listeners.size).toBe(0);
+    expect(listeners.message.size).toBe(0);
   });
 
   test("routes poison pending messages to a dead-letter stream", async () => {
@@ -93,7 +92,7 @@ describe("Redis production hardening", () => {
       group: "workers",
     });
 
-    const result = await unsafeRun(
+    const result = await runUnchecked(
       stream.recoverPending({
         minIdleMs: 5_000,
         count: 10,
@@ -142,11 +141,11 @@ describe("Redis production hardening", () => {
     };
     let started = false;
     const flights = RedisSingleflight.make({ redis: redis as RedisClient });
-    const leader = runFiber(
+    const leader = runFiberUnchecked(
       flights.do(
         "key",
         sync(() => void (started = true)).flatMap(() => async<void>(() => () => {})),
-      ) as any,
+      ),
     );
     for (let i = 0; i < 100 && !started; i++) await new Promise((r) => setTimeout(r, 0));
     expect(started).toBe(true);
@@ -264,7 +263,9 @@ describe("Redis production hardening", () => {
 
     test("RedisLatch.await interrupted as BRPOP returns the wake-up token", async () => {
       const fake = fakeRedis();
-      const latch = await unsafeRun(RedisLatch.make({ redis: fake.redis, key: "ready", count: 1 }));
+      const latch = await runUnchecked(
+        RedisLatch.make({ redis: fake.redis, key: "ready", count: 1 }),
+      );
       const scheduler = new SyncScheduler();
       const waiter = runFiber(latch.await as Eff<void, never>, scheduler);
       await settle(scheduler, fake.popping);
@@ -318,11 +319,11 @@ describe("Redis production hardening", () => {
       shutdown: () => void (queue.length = 0),
     };
     const flights = RedisSingleflight.make({ redis: redis as RedisClient });
-    const leader = runFiber(
+    const leader = runFiberUnchecked(
       flights.do(
         "key",
         async<void>(() => () => {}),
-      ) as any,
+      ),
       scheduler,
     );
     scheduler.flush();
@@ -360,12 +361,12 @@ describe("Redis production hardening", () => {
       resetTimeoutMs: 10,
     });
     let started = false;
-    const fiber = runFiber(
+    const fiber = runFiberUnchecked(
       breaker.protect(
         sync(() => {
           started = true;
         }).flatMap(() => async<void>(() => () => {})),
-      ) as any,
+      ),
     );
     for (let i = 0; i < 20 && !started; i++) await new Promise((resolve) => setTimeout(resolve, 0));
     expect(started).toBe(true);

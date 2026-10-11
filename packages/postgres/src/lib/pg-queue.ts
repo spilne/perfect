@@ -314,11 +314,11 @@ export class PgQueue<T>
         RETURNING q.id, q.payload, q.attempt_count, q.created_at, q.headers
       `,
     );
-    return rows.map((r: any) => ({
+    return rows.map((r) => ({
       id: Number(r.id),
       payload: r.payload,
-      attemptCount: r.attempt_count,
-      createdAt: r.created_at instanceof Date ? r.created_at : new Date(r.created_at),
+      attemptCount: Number(r.attempt_count),
+      createdAt: r.created_at instanceof Date ? r.created_at : new Date(String(r.created_at)),
       headers: r.headers,
       lockToken,
     }));
@@ -342,7 +342,7 @@ export class PgQueue<T>
         RETURNING id, payload
       `,
     );
-    return rows.map((r: any) => ({ id: Number(r.id), payload: r.payload }));
+    return rows.map((r) => ({ id: Number(r.id), payload: r.payload }));
   }
 
   /**

@@ -105,11 +105,11 @@ export function tracingMiddleware(opts: TracingOptions = {}): HttpMiddleware {
       span.setAttribute("error.type", error._tag);
       span.recordException({
         name: error._tag,
-        message: (error as any).message ?? String(error),
+        message: error.message ?? String(error),
       });
       span.setStatus({
         code: SpanStatusCode.ERROR as SpanStatusCodeT,
-        message: (error as any).message ?? error._tag,
+        message: error.message ?? error._tag,
       });
       span.end();
       spanByContext.delete(ctx);

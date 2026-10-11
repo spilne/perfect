@@ -1,9 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { run, type Eff } from "@spilne/perfect-core";
 import { RedisPubSub } from "../src/redis-pubsub";
 import type { RedisClient } from "../src/redis-client";
-
-const unsafeRun = <A>(effect: Eff<A, unknown>): Promise<A> => run(effect as any);
+import { fakeListeners } from "./fake-listeners";
+import { runUnchecked } from "./run-unchecked";
 
 // A fake Redis that counts subscriber connections and SUBSCRIBE calls.
 function fakeRedis() {
@@ -11,7 +10,7 @@ function fakeRedis() {
   let closed = 0;
   const subscribeCalls: string[] = [];
   const unsubscribeCalls: string[] = [];
-  const listeners = new Map<string, Set<(...args: any[]) => void>>();
+  const listeners = fakeListeners();
   const subscriber: Partial<RedisClient> = {
     async subscribe(channel) {
       subscribeCalls.push(channel);
@@ -20,12 +19,10 @@ function fakeRedis() {
       unsubscribeCalls.push(channel);
     },
     on(event, listener) {
-      const set = listeners.get(event) ?? new Set();
-      set.add(listener);
-      listeners.set(event, set);
+      listeners[event].add(listener);
     },
     off(event, listener) {
-      listeners.get(event)?.delete(listener);
+      listeners[event].delete(listener);
     },
     disconnect() {
       closed++;
@@ -37,7 +34,7 @@ function fakeRedis() {
       return subscriber as RedisClient;
     },
     async publish(channel, message) {
-      for (const listener of listeners.get("message") ?? []) listener(channel, message);
+      for (const listener of listeners.message) listener(channel, message);
       return 1;
     },
   };
@@ -55,9 +52,9 @@ describe("RedisPubSub shares one subscriber connection", () => {
     const fake = fakeRedis();
     const pubsub = RedisPubSub.make<number>({ redis: fake.client, channel: "events" });
 
-    const streams = await Promise.all([1, 2, 3].map(() => unsafeRun(pubsub.subscribe)));
-    const received = streams.map((stream) => unsafeRun(stream.take(1).toArray()));
-    await unsafeRun(pubsub.publish(42));
+    const streams = await Promise.all([1, 2, 3].map(() => runUnchecked(pubsub.subscribe)));
+    const received = streams.map((stream) => runUnchecked(stream.take(1).toArray()));
+    await runUnchecked(pubsub.publish(42));
 
     expect(await Promise.all(received)).toEqual([[42], [42], [42]]);
     expect(fake.connections()).toBe(1);
@@ -68,18 +65,18 @@ describe("RedisPubSub shares one subscriber connection", () => {
     const fake = fakeRedis();
     const pubsub = RedisPubSub.make<number>({ redis: fake.client, channel: "events" });
 
-    const first = await unsafeRun(pubsub.subscribe);
-    const second = await unsafeRun(pubsub.subscribe);
+    const first = await runUnchecked(pubsub.subscribe);
+    const second = await runUnchecked(pubsub.subscribe);
     // The first subscriber takes one message and leaves.
-    const firstDone = unsafeRun(first.take(1).toArray());
-    const secondGot = unsafeRun(second.take(2).toArray());
-    await unsafeRun(pubsub.publish(1));
+    const firstDone = runUnchecked(first.take(1).toArray());
+    const secondGot = runUnchecked(second.take(2).toArray());
+    await runUnchecked(pubsub.publish(1));
     await firstDone;
     expect(fake.unsubscribeCalls).toEqual([]);
 
     // The second still receives, then leaves too: now Redis unsubscribes
     // and the connection is closed.
-    await unsafeRun(pubsub.publish(2));
+    await runUnchecked(pubsub.publish(2));
     expect(await secondGot).toEqual([1, 2]);
     expect(fake.unsubscribeCalls).toEqual(["events"]);
     expect(fake.closed()).toBe(1);

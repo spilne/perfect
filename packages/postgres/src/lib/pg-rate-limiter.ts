@@ -188,11 +188,11 @@ export class PgRateLimiter implements RateLimiter<Throws<PostgresError>> {
   }
 
   withLimit<A, S>(eff: Eff<A, S>): Eff<A, S | Throws<PostgresError> | Throws<RateLimitExceeded>> {
-    return (this.acquire as any).flatMap(() => eff) as any;
+    return this.acquire.flatMap(() => eff);
   }
 
   withLimitWaiting<A, S>(eff: Eff<A, S>): Eff<A, S | Throws<PostgresError>> {
-    return (this.acquireWaiting as any).flatMap(() => eff) as any;
+    return this.acquireWaiting.flatMap(() => eff);
   }
 
   get remaining(): Eff<number, Throws<PostgresError>> {

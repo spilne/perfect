@@ -315,12 +315,16 @@ function identifier(value: string): string {
   return value;
 }
 
-function leaseFromRow(scope: StatePartitionScope, row: any): StatePartitionLease {
+function leaseFromRow(
+  scope: StatePartitionScope,
+  row: Record<string, unknown>,
+): StatePartitionLease {
+  const expires = row.lease_expires_at;
   return {
     scope,
     ownerId: TopologyInstanceId(String(row.owner_id)),
     epoch: LeaseEpoch(Number(row.epoch)),
-    expiresAt: new Date(row.lease_expires_at).getTime(),
+    expiresAt: (expires instanceof Date ? expires : new Date(String(expires))).getTime(),
   };
 }
 

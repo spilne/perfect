@@ -4,7 +4,7 @@
 import { describe, test, expect } from "bun:test";
 import { rewriteEffBlocks, RewriteError } from "../src/rewrite";
 
-async function exec(source: string): Promise<any> {
+async function exec(source: string): Promise<unknown> {
   const transformed = rewriteEffBlocks(source);
   const { succeed, fail, sync, run } = await import("../../core/src");
   const fn = new Function(

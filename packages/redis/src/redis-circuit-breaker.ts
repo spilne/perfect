@@ -5,6 +5,7 @@ import type {
   CircuitOpen,
   CircuitState,
   Eff,
+  ErrorsOf,
   Throws,
 } from "@spilne/perfect-core";
 import { redisEff } from "./internal.js";
@@ -162,59 +163,62 @@ export class RedisCircuitBreaker<E = unknown> implements CircuitBreaker<E, Throw
   ): Eff<A, S | Throws<RedisError> | Throws<E | CircuitOpen>> {
     // Only `eff` is interruptible. A half-open probe claimed by inspect() is
     // always released or resolved, even when `eff` is interrupted or dies.
-    return uninterruptibleMask((restore) =>
-      this.inspect(true, "circuitBreaker.protect").flatMap(
-        (inspection): Eff<A, S | Throws<RedisError> | Throws<E | CircuitOpen>> => {
-          if (!inspection.allowed) {
-            const openedAt = inspection.openedAt || inspection.now;
-            return fail<CircuitOpen>({
-              _tag: "CircuitOpen",
-              openedAt,
-              resetAtMs: openedAt + this.options.resetTimeoutMs,
-            });
-          }
-
-          const releaseProbe = redisEff("circuitBreaker.releaseProbe", async () => {
-            await this.redis.eval(RELEASE_PROBE_SCRIPT, 1, this.key, inspection.version);
-          });
-
-          const outcome = onExit(
-            restore(
-              (eff as any)
-                .map((value: A): Outcome<A, E> => ({ ok: true, value }))
-                .catch((error: E) => succeed({ ok: false, error } as Outcome<A, E>)) as Eff<
-                Outcome<A, E>,
-                S
-              >,
-            ),
-            (exit) =>
-              exit._tag === "Failure" && inspection.state === "half-open"
-                ? releaseProbe
-                : succeed(undefined),
-          );
-
-          return outcome.flatMap((result) => {
-            if (result.ok) {
-              return redisEff("circuitBreaker.success", async () => {
-                await this.redis.eval(SUCCESS_SCRIPT, 1, this.key, inspection.version);
-                return result.value;
+    return uninterruptibleMask(
+      (restore) =>
+        this.inspect(true, "circuitBreaker.protect").flatMap(
+          (inspection): Eff<A, S | Throws<RedisError> | Throws<E | CircuitOpen | ErrorsOf<S>>> => {
+            if (!inspection.allowed) {
+              const openedAt = inspection.openedAt || inspection.now;
+              return fail<CircuitOpen>({
+                _tag: "CircuitOpen",
+                openedAt,
+                resetAtMs: openedAt + this.options.resetTimeoutMs,
               });
             }
-            if (this.options.isFailure && !this.options.isFailure(result.error)) {
-              return releaseProbe.flatMap(() => fail(result.error));
-            }
-            return redisEff("circuitBreaker.failure", async () => {
-              await this.redis.eval(
-                FAILURE_SCRIPT,
-                1,
-                this.key,
-                inspection.version,
-                this.options.failureThreshold,
-              );
-            }).flatMap(() => fail(result.error));
-          });
-        },
-      ),
+
+            const releaseProbe = redisEff("circuitBreaker.releaseProbe", async () => {
+              await this.redis.eval(RELEASE_PROBE_SCRIPT, 1, this.key, inspection.version);
+            });
+
+            const outcome = onExit(
+              restore(
+                // Any typed failure counts, the breaker's `E` or one carried in `S`.
+                eff
+                  .map((value: A): Outcome<A, E | ErrorsOf<S>> => ({ ok: true, value }))
+                  .catch((error) => succeed<Outcome<A, E | ErrorsOf<S>>>({ ok: false, error })),
+              ),
+              (exit) =>
+                exit._tag === "Failure" && inspection.state === "half-open"
+                  ? releaseProbe
+                  : succeed(undefined),
+            );
+
+            return outcome.flatMap((result) => {
+              if (result.ok) {
+                return redisEff("circuitBreaker.success", async () => {
+                  await this.redis.eval(SUCCESS_SCRIPT, 1, this.key, inspection.version);
+                  return result.value;
+                });
+              }
+              // isFailure is written for `E`; errors carried in `S` reach it too,
+              // as they do the in-process breaker's.
+              if (this.options.isFailure && !this.options.isFailure(result.error as E)) {
+                return releaseProbe.flatMap(() => fail(result.error));
+              }
+              return redisEff("circuitBreaker.failure", async () => {
+                await this.redis.eval(
+                  FAILURE_SCRIPT,
+                  1,
+                  this.key,
+                  inspection.version,
+                  this.options.failureThreshold,
+                );
+              }).flatMap(() => fail(result.error));
+            });
+          },
+        ),
+      // A failure rethrown from `S` is part of `S` again; TypeScript can't
+      // see that for a generic `S`.
     ) as Eff<A, S | Throws<RedisError> | Throws<E | CircuitOpen>>;
   }
 

@@ -31,7 +31,7 @@ function fakeRedis(claimed: number) {
 
 describe("RedisStream recovery", () => {
   const recover = (stream: RedisStream<unknown>) =>
-    (stream as any).recoverPendingEntries("workers", "0-0", { minIdleMs: 0 });
+    stream["recoverPendingEntries"]("workers", "0-0", { minIdleMs: 0 });
 
   test("creates the consumer group once, not on every poll", async () => {
     const fake = fakeRedis(1);

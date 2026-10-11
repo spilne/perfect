@@ -5,7 +5,7 @@ import { rewriteEffBlocks } from "../src/rewrite";
 // then eval() the result with the real Perfect runtime to verify
 // it actually works end-to-end.
 
-async function runForComprehension(source: string): Promise<any> {
+async function runForComprehension(source: string): Promise<unknown> {
   const transformed = rewriteEffBlocks(source);
   const { succeed, fail, sync, sleep, service, provide, all, run } = await import("../../core/src");
   const fn = new Function(

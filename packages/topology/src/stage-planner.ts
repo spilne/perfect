@@ -168,7 +168,7 @@ function buildParentChain(node: TopologyNode): TopologyNode[] {
   let current: TopologyNode | undefined = node;
   while (current) {
     chain.unshift(current); // prepend — source first
-    current = "parent" in current ? (current as any).parent : undefined;
+    current = "parent" in current ? current.parent : undefined;
   }
   return chain;
 }
@@ -178,7 +178,7 @@ function findKeyFnBefore(shuffle: ShuffleNode<unknown>): ((value: unknown) => st
   let current: TopologyNode | undefined = shuffle.parent;
   while (current) {
     if (current.type === "keyBy") return current.keyFn as (value: unknown) => string;
-    current = "parent" in current ? (current as any).parent : undefined;
+    current = "parent" in current ? current.parent : undefined;
   }
   return undefined;
 }
@@ -189,7 +189,7 @@ function collectNodesBefore(shuffle: ShuffleNode<unknown>): TopologyNode[] {
   let current: TopologyNode | undefined = shuffle.parent;
   while (current) {
     nodes.unshift(current);
-    current = "parent" in current ? (current as any).parent : undefined;
+    current = "parent" in current ? current.parent : undefined;
   }
   return nodes;
 }
@@ -201,7 +201,7 @@ function collectNodesBetween(from: ShuffleNode<unknown>, to: ShuffleNode<unknown
   let current: TopologyNode | undefined = to.parent;
   while (current && current !== from) {
     nodes.unshift(current);
-    current = "parent" in current ? (current as any).parent : undefined;
+    current = "parent" in current ? current.parent : undefined;
   }
   return nodes;
 }
