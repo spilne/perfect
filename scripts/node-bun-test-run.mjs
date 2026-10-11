@@ -31,6 +31,9 @@ const EXCLUDED_FROM_NODE_CI = new Set([
   "packages/core/test/stream-operators.test.ts",
   "packages/core/test/clock-routing.test.ts",
   "packages/core/test/test-clock.test.ts",
+  // `await using`: Node 22 can't parse it, and the Bun transpiler lowers it
+  // to helpers from "bun:wrap", which Node can't load.
+  "packages/core/test/disposable-using-syntax.test.ts",
   "packages/kafka/test/commit-batch-within.test.ts",
   "packages/integration/test/kafka.test.ts",
   // Uses Bun.serve/Bun.sleep to drive a slow response body; there is no
