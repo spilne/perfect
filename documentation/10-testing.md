@@ -82,6 +82,13 @@ Use `random.setNextValues([0.1, 0.9])` to supply the next two floats in `[0, 1)`
 After that queue is consumed, generation resumes from the seeded PRNG.
 `reseed(seed)` resets the generator and clears queued values.
 
+`Random.get` and `Clock.get` add `Needs<Random>` / `Needs<Clock>` to the
+type, as any service does. But there is always a clock and a random source:
+the real ones unless a test provides others. `currentRandom` and
+`currentClock` read the one in use and need nothing, so library code can
+follow a `TestRandom` or `TestClock` without asking its callers to provide
+one.
+
 ## TestConsole
 
 Captures `log` / `warn` / `error` calls instead of writing to stdout:

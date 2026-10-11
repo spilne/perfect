@@ -80,7 +80,7 @@ export type { TaggedErrorClass, TaggedErrorInstance } from "./tagged-error.js";
 export { Layer, LayerCycleError, LayerMissingDependencyError } from "./layer.js";
 export type { Layer as LayerT } from "./layer.js";
 import "./layer.js";
-export { Clock, RealClock, TestClock, realClock } from "./clock.js";
+export { Clock, RealClock, TestClock, currentClock, realClock } from "./clock.js";
 export {
   FileSystem,
   FileSystemError,
@@ -89,7 +89,7 @@ export {
   realFileSystem,
 } from "./filesystem.js";
 export type { FileEvent, FileStat } from "./filesystem.js";
-export { Random, RealRandom, TestRandom, realRandom } from "./random.js";
+export { Random, RealRandom, TestRandom, currentRandom, realRandom } from "./random.js";
 export { Console, RealConsole, TestConsole, realConsole } from "./console.js";
 export { FiberLocal, type FiberLocalOptions } from "./fiber-local.js";
 export {
