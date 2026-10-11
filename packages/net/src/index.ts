@@ -17,3 +17,5 @@ export {
   formatAddress,
 } from "./transport.js";
 export { SimulatedNetwork, type LinkConditions } from "./simulator.js";
+export { Multiplexer, type MultiplexerOptions } from "./multiplexer.js";
+export { Resilient, type ResilientOptions } from "./resilient.js";
