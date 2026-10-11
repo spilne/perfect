@@ -1,7 +1,7 @@
 # Resilience + Coordination Primitives
 
 Interface-first primitives for production coordination: rate limiting,
-circuit breaking, request deduplication, weighted permits, queues, broadcast,
+circuit breaking, bulkheads, request deduplication, weighted permits, queues, broadcast,
 reactive state, barriers, latches, deferred values, and resource pooling.
 
 All are **interface-first** — the in-process implementation ships with
@@ -204,6 +204,50 @@ console.log(await safeCall(21).orDie().run()); // → 42
 
 **Defects don't trip the breaker** — only typed `Throws<E>` failures do.
 Pass `isFailure` to filter further (e.g. only count 5xx, not 4xx).
+
+## Bulkhead
+
+A bulkhead limits how many calls to something run at the same time, and how
+many may wait for their turn. When the waiting line is full, a call fails
+right away with a typed `BulkheadFull`. One slow dependency then can't tie
+up every fiber and fill memory with waiting calls.
+
+<!-- @embed packages/core/examples/14-primitives.ts#bulkhead -->
+
+```ts
+import { eff, succeed, sleep, fork, join, all, Bulkhead, Deferred } from "@spilne/perfect-core";
+
+// At most 2 calls run at once and 1 may wait; the next one is turned away
+// at once with a typed BulkheadFull instead of piling up.
+const payments = Bulkhead.make({ maxConcurrent: 2, maxQueued: 1 });
+const outcomes = await eff(function* () {
+  const slow = yield* Deferred.make<void>();
+  const charge = (id: number) => payments.protect(slow.await.map(() => `charged ${id}`));
+  const busy = yield* fork(all([charge(1), charge(2), charge(3)])); // 2 run, 1 waits
+  yield* sleep(5);
+  const turnedAway = yield* charge(4).either();
+  yield* slow.succeed(undefined);
+  return { charged: yield* join(busy), turnedAway: turnedAway._tag };
+})
+  .orDie()
+  .run();
+console.log(outcomes); // → { charged: ["charged 1", "charged 2", "charged 3"], turnedAway: "Left" }
+```
+
+<!-- @end -->
+
+|                                                             |                                      |
+| ----------------------------------------------------------- | ------------------------------------ |
+| `Bulkhead.make({ maxConcurrent, maxQueued?, maxWaitMs? })` | construct; `maxQueued` defaults to 0 |
+| `bulkhead.protect(eff)`                                     | run when there is room, or fail fast |
+| `bulkhead.running` / `bulkhead.queued`                      | effectful inspection                 |
+
+Waiting calls get their turn in arrival order. With `maxWaitMs`, a call
+that waited that long fails with `BulkheadFull` (`reason: "waited too
+long"`), by the Clock, so a `TestClock` drives it. A call interrupted while
+waiting leaves the line. Unlike a `Semaphore`, which makes callers wait
+however long the line gets, a bulkhead turns them away. Combine it with a
+`CircuitBreaker` to also stop calling a dependency that keeps failing.
 
 ## Singleflight
 
