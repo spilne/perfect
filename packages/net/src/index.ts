@@ -28,3 +28,11 @@ export {
   type MembershipEvent,
 } from "./gossip.js";
 export { Discovery } from "./discovery.js";
+export {
+  Recorder,
+  Replay,
+  ReplayMismatch,
+  type Recorded,
+  type ReplayOptions,
+  type Transcript,
+} from "./recorder.js";
