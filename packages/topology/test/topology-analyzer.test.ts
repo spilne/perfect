@@ -99,3 +99,46 @@ describe("analyzeTopology", () => {
     expect(warnings[0]!.message).toContain("dedupe");
   });
 });
+
+describe("analyzeTopology with joins", () => {
+  type Click = { user: string };
+  type User = { user: string; name: string };
+  const users = (shuffled: boolean) => {
+    const keyed = StreamTopology.source(mockSource<User>()).keyBy((u) => u.user);
+    return shuffled ? keyed.shuffle() : keyed;
+  };
+  const clicks = (shuffled: boolean) => {
+    const keyed = StreamTopology.source(mockSource<Click>()).keyBy((c) => c.user);
+    return shuffled ? keyed.shuffle() : keyed;
+  };
+
+  test("warns for each side of a join that isn't shuffled", () => {
+    const warnings = analyzeTopology(
+      clicks(false).join(users(false), { windowMs: 1_000 }).to(mockSink()).compiled,
+    );
+    expect(warnings.map((w) => w.message.split(" side")[0])).toEqual(["the left", "the right"]);
+    expect(warnings.every((w) => w.node.type === "join")).toBe(true);
+  });
+
+  test("names the one side that misses a shuffle", () => {
+    const warnings = analyzeTopology(
+      clicks(true).join(users(false), { windowMs: 1_000 }).to(mockSink()).compiled,
+    );
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]!.message).toStartWith("the right side");
+  });
+
+  test("no warning when both sides are shuffled", () => {
+    const topology = clicks(true).join(users(true), { windowMs: 1_000 }).to(mockSink());
+    expect(analyzeTopology(topology.compiled)).toEqual([]);
+  });
+
+  test("a stateful step after a join isn't warned about again", () => {
+    const topology = clicks(false)
+      .join(users(true), { windowMs: 1_000 })
+      .dedupe((pair) => JSON.stringify(pair))
+      .to(mockSink());
+    const warnings = analyzeTopology(topology.compiled);
+    expect(warnings.map((w) => w.node.type)).toEqual(["join"]);
+  });
+});
