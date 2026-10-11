@@ -54,4 +54,25 @@ describe("Mdns", () => {
       { host: "10.0.0.2", port: 7002 },
     ]);
   });
+
+  test("a socket that can't start fails announce, and discover finds nothing", async () => {
+    // Not an address any interface can have.
+    const bad = { ...options, interface: "300.1.1.1" };
+    const announced = await scoped(
+      Mdns.announce({ service: "x", id: "a", address: { host: "h", port: 1 } }, bad),
+    )
+      .either()
+      .run();
+    expect(announced._tag === "Left" && announced.left._tag).toBe("ListenError");
+    expect(await Mdns.discover({ service: "x", waitMs: 10 }, bad).run()).toEqual([]);
+  });
+
+  test("only host and port addresses can be announced", async () => {
+    const announced = await scoped(
+      Mdns.announce({ service: "x", id: "a", address: { path: "/tmp/socket" } }, options),
+    )
+      .either()
+      .run();
+    expect(announced._tag === "Left" && announced.left.message).toContain("host and port");
+  });
 });

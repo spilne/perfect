@@ -7,7 +7,9 @@
 
 /** Turns a message into bytes and back. `decode` may throw for bad input. */
 export interface BinaryCodec<T> {
+  /** The bytes of one message. */
   encode(message: T): Uint8Array;
+  /** The message in `bytes`; throws if they aren't one. */
   decode(bytes: Uint8Array): T;
 }
 

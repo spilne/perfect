@@ -30,7 +30,9 @@ export interface Connection<M> {
 }
 
 /** Options shared by everything that opens connections. */
+/** How a connection reads and writes messages. */
 export interface ConnectionOptions<M> {
+  /** How messages become bytes and back. */
   readonly codec: BinaryCodec<M>;
   /** The largest message accepted, in bytes. Default: 16 MiB. */
   readonly maxMessageBytes?: number;
@@ -125,7 +127,7 @@ export function connectionOver<M>(
 
   const messages = Stream.unfoldEffect(undefined, () =>
     inbox.take.map((batch) => (batch === undefined ? null : ([batch, undefined] as const))),
-  ).flatMap((batch) => Stream.fromArray(batch as M[]));
+  ).flatMap((batch) => Stream.fromArray(batch));
 
   const close: Eff<void, never> = async<void, never>((resume) => {
     if (closed || socket.destroyed) return resume(succeed(undefined));
@@ -141,7 +143,7 @@ export function connectionOver<M>(
   return {
     remote,
     send,
-    messages: messages as Stream<M, Throws<NetError>>,
+    messages: messages,
     close,
   };
 }

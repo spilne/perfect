@@ -15,8 +15,10 @@
 
 import { Duplex } from "node:stream";
 import {
-  Clock,
-  Random,
+  currentClock,
+  currentRandom,
+  type Clock,
+  type Random,
   acquireRelease,
   fail,
   runFiber,
@@ -52,6 +54,10 @@ export interface LinkConditions {
 
 const pairKey = (a: string, b: string) => (a < b ? `${a}\u0000${b}` : `${b}\u0000${a}`);
 
+/**
+ * A network in memory for tests: named nodes, links with latency and loss,
+ * and partitions. `network.node(name)` is that node's `Transport`.
+ */
 export class SimulatedNetwork {
   private readonly links = new Map<string, LinkConditions>();
   private readonly partitions = new Set<string>();
@@ -65,9 +71,9 @@ export class SimulatedNetwork {
 
   /** A new, empty network that uses the caller's Clock and Random. */
   static make(): Eff<SimulatedNetwork, never> {
-    return Clock.get.flatMap((clock) =>
-      Random.get.map((random) => new SimulatedNetwork(clock, random)),
-    ) as Eff<SimulatedNetwork, never>;
+    return currentClock.flatMap((clock) =>
+      currentRandom.map((random) => new SimulatedNetwork(clock, random)),
+    );
   }
 
   /** Set the conditions of the link between `a` and `b`. */

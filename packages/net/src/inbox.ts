@@ -57,7 +57,7 @@ export class Inbox<T, E> {
     return () => {
       if (this.waiting === resume) this.waiting = undefined;
     };
-  }) as Eff<T[] | undefined, Throws<E>>;
+  });
 
   private ready(): Eff<T[] | undefined, Throws<E>> | undefined {
     if (this.items.length > 0) {

@@ -59,6 +59,7 @@ function creditFrame(channel: number, count: number): Uint8Array {
   return frame(CREDIT, channel, payload);
 }
 
+/** Options for `Multiplexer.make`. */
 export interface MultiplexerOptions<M> {
   /** "client" if this side made the connection, "server" if it accepted it. */
   readonly side: "client" | "server";
@@ -68,6 +69,7 @@ export interface MultiplexerOptions<M> {
   readonly window?: number;
 }
 
+/** Channels over one connection, from `Multiplexer.make`. */
 export interface Multiplexer<M> {
   /** Open a new channel. The other side sees it in `incoming`. */
   readonly open: Eff<Connection<M>, Throws<NetError>>;
@@ -98,6 +100,7 @@ class Channel<M> {
   }
 }
 
+/** Many independent channels over one connection, each with its own flow control. */
 export const Multiplexer = {
   /**
    * Start multiplexing over `connection`, which must carry raw bytes
@@ -162,7 +165,7 @@ export const Multiplexer = {
                   .catch(() => succeed(undefined));
           return grant.map(() => [batch, undefined] as const);
         }),
-      ).flatMap((batch) => Stream.fromArray(batch as M[]));
+      ).flatMap((batch) => Stream.fromArray(batch));
 
       const close: Eff<void, never> = suspend(() => {
         if (channel.closedHere) return succeed(undefined);
@@ -174,7 +177,7 @@ export const Multiplexer = {
       return {
         remote: `${remote}#${channel.id}`,
         send,
-        messages: messages as Stream<M, Throws<NetError>>,
+        messages: messages,
         close,
       };
     };
@@ -265,7 +268,7 @@ export const Multiplexer = {
         }).flatMap(() => awaitFiber(fiber)),
     ).map(() => ({
       open,
-      incoming: incomingStream as Stream<Connection<M>, Throws<NetError>>,
+      incoming: incomingStream,
     }));
   },
 } as const;

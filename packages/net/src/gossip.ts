@@ -29,9 +29,9 @@
 // production and on a SimulatedNetwork in tests.
 
 import {
-  Clock,
   PubSub,
-  Random,
+  currentClock,
+  currentRandom,
   acquireRelease,
   all,
   awaitFiber,
@@ -54,13 +54,17 @@ import { Transport, formatAddress, type Address } from "./transport.js";
 /** alive → suspect → dead, or left when the member said goodbye. */
 export type MemberState = "alive" | "suspect" | "dead" | "left";
 
+/** A member of the cluster, as this member knows it. */
 export interface Member<Meta> {
+  /** Unique in the cluster. */
   readonly id: string;
   /** Where the member listens for gossip. */
   readonly address: Address;
+  /** `alive` or `suspect` while it is in the cluster. */
   readonly state: MemberState;
   /** Raised by the member itself to overrule older news about it. */
   readonly incarnation: number;
+  /** What the member tells about itself (see `setMetadata`). */
   readonly metadata: Meta;
 }
 
@@ -72,6 +76,7 @@ export type MembershipEvent<Meta> =
   /** A member died or left (see `member.state`). */
   | { readonly type: "left"; readonly member: Member<Meta> };
 
+/** Options for `Gossip.join`. Only `id`, `address` and `metadata` are required. */
 export interface GossipOptions<Meta> {
   /** This member's id, unique in the cluster. */
   readonly id: string;
@@ -99,6 +104,7 @@ export interface GossipOptions<Meta> {
   readonly suspicionMs?: number;
 }
 
+/** This member's view of the cluster, from `Gossip.join`. */
 export interface Gossip<Meta> {
   /** This member as the others see it. */
   readonly self: Eff<Member<Meta>, never>;
@@ -117,6 +123,10 @@ type Message<Meta> =
   | { readonly type: "ack"; readonly members: Member<Meta>[] }
   /** I couldn't reach the target of a ping-req either. */
   | { readonly type: "nack"; readonly members: Member<Meta>[] };
+
+const isAddressList = (
+  seeds: readonly Address[] | Eff<readonly Address[], never>,
+): seeds is readonly Address[] => Array.isArray(seeds);
 
 const isLive = (state: MemberState) => state === "alive" || state === "suspect";
 
@@ -141,6 +151,7 @@ interface Known<Meta> {
   goneAt?: number;
 }
 
+/** Cluster membership by gossip (SWIM). See the top of this file for how it works. */
 export const Gossip = {
   /**
    * Join the cluster: listen for gossip, contact the seeds, and keep
@@ -159,13 +170,11 @@ export const Gossip = {
     const forgetAfterMs = Math.max(suspicionMs * 6, intervalMs * 30);
     const codec = BinaryCodec.json<Message<Meta>>();
     const seeds = options.seeds ?? [];
-    const findSeeds: Eff<readonly Address[], never> = Array.isArray(seeds)
-      ? succeed(seeds)
-      : (seeds as Eff<readonly Address[], never>);
+    const findSeeds = isAddressList(seeds) ? succeed(seeds) : seeds;
 
     return Transport.get.flatMap((transport) =>
-      Clock.get.flatMap((clock) =>
-        Random.get.flatMap((random) =>
+      currentClock.flatMap((clock) =>
+        currentRandom.flatMap((random) =>
           PubSub.unbounded<MembershipEvent<Meta>>().flatMap((events) => {
             let self: Member<Meta> = {
               id: options.id,
@@ -373,7 +382,7 @@ export const Gossip = {
               ),
               changes: Stream.fromEffect(events.subscribe).flatMap((stream) =>
                 stream.catch(() => Stream.empty()),
-              ) as Stream<MembershipEvent<Meta>, never>,
+              ),
               setMetadata: (metadata) =>
                 sync(() => {
                   self = { ...self, metadata, incarnation: self.incarnation + 1 };
@@ -400,6 +409,6 @@ export const Gossip = {
           }),
         ),
       ),
-    ) as Eff<Gossip<Meta>, Throws<ListenError> | Needs<Transport, "Transport">>;
+    );
   },
 } as const;

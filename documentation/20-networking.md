@@ -63,6 +63,9 @@ assertEq(replies, [
 - **Errors** are typed: `ConnectError` and `ListenError` when opening fails,
   `ConnectionError` when an open connection breaks, `MessageError` when a
   message can't be decoded or is too big.
+- **Closing** sends what is still buffered first. If the other side doesn't
+  read it within 5 seconds, the socket is closed anyway, and a `send` still
+  waiting on it fails with `ConnectionError`.
 - **A failing handler** only closes its own connection (the failure is
   logged); the listener keeps serving.
 - **TLS:** `Tcp.listen(address, { ..., tls: { key, cert } })` and

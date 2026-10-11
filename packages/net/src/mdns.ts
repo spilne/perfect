@@ -24,6 +24,7 @@ import type { Discovery } from "./discovery.js";
 import { ListenError } from "./errors.js";
 import type { Address } from "./transport.js";
 
+/** Where the mDNS socket listens. The defaults are right outside tests. */
 export interface MdnsOptions {
   /** UDP port. Default: 5353, the mDNS port. */
   readonly port?: number;
@@ -71,6 +72,7 @@ function open(options: MdnsOptions): Eff<Mdns, Throws<ListenError>> {
   );
 }
 
+/** Announce and find cluster members on the local network with multicast DNS. */
 export const Mdns = {
   /**
    * Answer queries for `service` with this member's address, until the
@@ -128,6 +130,6 @@ export const Mdns = {
     });
     return scoped(ask).catch((error) =>
       Log.warn("mDNS discovery failed", { error: error.message }).map((): readonly Address[] => []),
-    ) as Discovery;
+    );
   },
 } as const;
