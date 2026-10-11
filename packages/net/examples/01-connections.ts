@@ -38,6 +38,20 @@ assertEq(replies, [
 ]);
 // <<< example
 
+// >>> example: tcp-echo-chained
+// The same client, chained instead of a generator.
+const chained = await scoped(
+  Tcp.listen({ host: "127.0.0.1", port: 0 }, { codec, handle: pongs })
+    .flatMap((listener) => Tcp.connect(listener.address, { codec }))
+    .flatMap((connection) =>
+      connection.send({ type: "ping", n: 1 }).flatMap(() => connection.messages.take(1).toArray()),
+    ),
+)
+  .orDie()
+  .run();
+assertEq(chained, [{ type: "pong", n: 1 }]);
+// <<< example
+
 // >>> example: simulated-network
 // Code that uses the Transport service runs on real sockets in production
 // and on a SimulatedNetwork in tests, where the test decides about latency,

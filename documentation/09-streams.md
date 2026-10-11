@@ -30,6 +30,7 @@ Lazy, fused, effect-typed sequences. Adjacent pure operators (`map` /
 | `Stream.fail(e)`                          | a stream that fails with a typed error                    |
 | `Stream.fromChunk(chunk)`                 | the values of one `Chunk`                                 |
 | `Stream.unfoldEffect(seed, f)`            | like `unfold`, but `f` returns an effect                  |
+| `Stream.unfoldChunkEffect(seed, f)`       | like `unfoldEffect`, but each step yields a whole batch   |
 | `Stream.repeat(eff)`                      | run `eff` again for every value, forever                  |
 | `Stream.repeatValue(a)`                   | the same value, forever                                   |
 | `Stream.suspend(() => stream)`            | build the stream fresh each time it runs                  |

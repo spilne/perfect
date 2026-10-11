@@ -7,6 +7,7 @@ import * as net from "node:net";
 import * as tls from "node:tls";
 import type { Duplex } from "node:stream";
 import {
+  Cause,
   Log,
   acquireRelease,
   async,
@@ -159,10 +160,11 @@ export function serveConnections<M, S>(params: {
       .handle(connection)
       .exit()
       .flatMap((exit) =>
-        exit._tag === "Failure"
+        // Interrupted (the listener closing) is not a failure worth a warning.
+        exit._tag === "Failure" && !Cause.isInterruptedOnly(exit.cause)
           ? Log.warn("connection handler failed", {
               remote: connection.remote,
-              cause: String(exit.cause),
+              cause: Cause.pretty(exit.cause),
             })
           : succeed(undefined),
       )

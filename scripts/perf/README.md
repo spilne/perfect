@@ -276,14 +276,15 @@ inside tolerance.
 
 ## Files
 
-| file              | role                                                   |
-| ----------------- | ------------------------------------------------------ |
-| `suites/types.ts` | `BenchCase` / `Suite` / results schema                 |
-| `suites/core.ts`  | runtime benchmarks + absolute thresholds               |
-| `suites/http.ts`  | HTTP client comparison (no thresholds — relative only) |
-| `collect.ts`      | measure suites → `results.json`                        |
-| `compare.ts`      | baseline vs current → verdict + markdown               |
-| `compare-refs.ts` | worktree + interleaved rounds, screen then confirm     |
-| `gate.ts`         | absolute-threshold check                               |
-| `history.ts`      | append a run, render the trend                         |
-| `tests/`          | the verdict logic, against fixed numbers               |
+| file              | role                                                                                            |
+| ----------------- | ----------------------------------------------------------------------------------------------- |
+| `suites/types.ts` | `BenchCase` / `Suite` / results schema                                                          |
+| `suites/core.ts`  | runtime benchmarks + absolute thresholds                                                        |
+| `suites/http.ts`  | HTTP client comparison (no thresholds — relative only)                                          |
+| `suites/net.ts`   | networking: framing, codecs, hash ring, simulated and TCP round trips (TCP cases relative only) |
+| `collect.ts`      | measure suites → `results.json`                                                                 |
+| `compare.ts`      | baseline vs current → verdict + markdown                                                        |
+| `compare-refs.ts` | worktree + interleaved rounds, screen then confirm                                              |
+| `gate.ts`         | absolute-threshold check                                                                        |
+| `history.ts`      | append a run, render the trend                                                                  |
+| `tests/`          | the verdict logic, against fixed numbers                                                        |

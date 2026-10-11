@@ -7,8 +7,10 @@ import {
   CircuitBreaker,
   Deferred,
   RetryPolicy,
+  TestRuntime,
   acquireRelease,
   eff,
+  fail,
   fork,
   join,
   scoped,
@@ -271,5 +273,36 @@ describe("Resilient.connect when things go wrong", () => {
       .run();
     expect(result[0]).not.toContain("circuit breaker");
     expect(result[1]).toContain("circuit breaker is open");
+  });
+});
+
+describe("handler failures in the log", () => {
+  test("a failing handler is logged with its cause; a listener closing logs nothing", async () => {
+    const t = TestRuntime.make();
+    await t.runAdvancing(
+      scoped(
+        eff(function* () {
+          const network = yield* SimulatedNetwork.make();
+          const codec = BinaryCodec.utf8;
+          yield* network
+            .node("server")
+            .listen(
+              { host: "server", port: 1 },
+              { codec, handle: () => fail("the handler broke") },
+            );
+          yield* network.node("server").listen(
+            { host: "server", port: 2 },
+            // Still running when the listener closes at the end of the scope.
+            { codec, handle: () => sleep(60_000) },
+          );
+          yield* network.node("client").connect({ host: "server", port: 1 }, { codec });
+          yield* network.node("client").connect({ host: "server", port: 2 }, { codec });
+          yield* sleep(0);
+        }),
+      ).orDie(),
+    );
+    const warnings = t.logger.atLevel("warn");
+    expect(warnings.map((w) => w.message)).toEqual(["connection handler failed"]);
+    expect(warnings[0]?.annotations.cause).toBe("Fail(the handler broke)");
   });
 });

@@ -87,6 +87,12 @@ export function connectionOver<M>(
     inbox.end();
   });
 
+  let corked = false;
+  const uncork = () => {
+    corked = false;
+    socket.uncork();
+  };
+
   const send = (message: M): Eff<void, Throws<NetError>> =>
     suspend(() => {
       if (closed || socket.destroyed || socket.writableEnded) {
@@ -103,6 +109,13 @@ export function connectionOver<M>(
             cause: error,
           }),
         );
+      }
+      // Messages sent in the same tick go out in one write instead of a
+      // packet each: cork the socket now, uncork it on the next tick.
+      if (!corked) {
+        corked = true;
+        socket.cork();
+        process.nextTick(uncork);
       }
       if (socket.write(encodeFrame(payload))) return succeed(undefined);
       // The socket's buffer is full: wait until it drains (or the
@@ -125,9 +138,10 @@ export function connectionOver<M>(
       });
     });
 
-  const messages = Stream.unfoldEffect(undefined, () =>
+  // One stream step per batch taken from the inbox, not one per message.
+  const messages = Stream.unfoldChunkEffect(undefined, () =>
     inbox.take.map((batch) => (batch === undefined ? null : ([batch, undefined] as const))),
-  ).flatMap((batch) => Stream.fromArray(batch));
+  );
 
   const close: Eff<void, never> = async<void, never>((resume) => {
     if (closed || socket.destroyed) return resume(succeed(undefined));

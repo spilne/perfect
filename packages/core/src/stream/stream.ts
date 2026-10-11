@@ -393,6 +393,30 @@ export class Stream<A, S = never> {
     return go(seed);
   }
 
+  /**
+   * Like unfoldEffect, but each step yields a whole batch of values, which
+   * stays one chunk of the stream. Good for pulling from a buffer that fills
+   * in batches (a socket, a queue), without a step per value. An empty batch
+   * emits nothing; `null` ends the stream.
+   */
+  static unfoldChunkEffect<A, B, S>(
+    seed: B,
+    f: (b: B) => Eff<readonly [ReadonlyArray<A>, B] | null, S>,
+  ): Stream<A, S> {
+    function go(s: B): Stream<A, S> {
+      return new Stream(
+        (f(s) as any).flatMap((result: readonly [ReadonlyArray<A>, B] | null) => {
+          if (result === null) return succeed(DONE);
+          const [values, next] = result;
+          // Nothing this time: ask again rather than emit an empty chunk.
+          if (values.length === 0) return go(next).step;
+          return succeed(emit(Chunk.fromArray(values), go(next)));
+        }),
+      );
+    }
+    return go(seed);
+  }
+
   static iterate<A>(seed: A, f: (a: A) => A): Stream<A, never> {
     return Stream.unfold(seed, (s) => [s, f(s)]);
   }
