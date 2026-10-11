@@ -26,10 +26,10 @@ console.log(await run(program)); // 42
 5. [Error handling](./05-error-handling.md) — `.catch`, `.catchTag`, `Cause`, defects vs failures
 6. [Concurrency](./06-concurrency.md) — fork, race, all, forEachPar, fibers, supervision
 7. [Resources and scopes](./07-resources-and-scopes.md) — `acquireRelease`, `scoped`, finalizer causes
-8. [Retry and schedule](./08-retry-and-schedule.md) — `RetryPolicy`, `Schedule`
+8. [Retry and schedule](./08-retry-and-schedule.md) — `RetryPolicy`, `Schedule`, cron
 9. [Streams](./09-streams.md) — fused, lazy, effect-typed streams, pipes, sinks
-10. [Testing](./10-testing.md) — `TestClock`, `TestRandom`, `TestConsole`
-11. [Resilience + Coordination Primitives](./11-resilience-and-coordination.md) — `CircuitBreaker`, `Singleflight`, `RateLimiter`, `Latch`, `Barrier`, `PubSub`, `SubscriptionRef`, `Pool`
+10. [Testing](./10-testing.md) — `TestRuntime`, `TestClock`, `TestRandom`, `TestConsole`
+11. [Resilience + Coordination Primitives](./11-resilience-and-coordination.md) — `CircuitBreaker`, `Bulkhead`, `Singleflight`, `RateLimiter`, `Latch`, `Barrier`, `PubSub`, `SubscriptionRef`, `Pool`
 12. [Utilities](./12-utilities.md) — `Duration`, `CacheStore`
 13. [HTTP](./13-http.md) — typed-effect HTTP client, retry, streaming, mock
 14. [HTTP — OpenTelemetry](./14-http-otel.md) — tracing middleware + W3C `traceparent` injection
@@ -38,6 +38,7 @@ console.log(await run(program)); // 42
 17. [Redis and PostgreSQL backends](./17-distributed-backends.md) — distributed primitives, Redis Streams, PGMQ
 18. [Stateful topologies](./18-topologies.md) — keyed state, windows, shuffle stages, delivery guarantees
 19. [Package map](./19-packages.md) — every public package, adapter, internal validation workspace, and subpath export
+20. [Networking](./20-networking.md) — typed connections, channels, reconnecting, gossip clusters, hash rings, a network simulator
 
 ## Reference
 

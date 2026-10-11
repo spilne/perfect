@@ -154,7 +154,7 @@ export const Multiplexer = {
         });
 
       // Taking messages grants the sender as many again.
-      const messages = Stream.unfoldEffect(undefined, () =>
+      const messages = Stream.unfoldChunkEffect(undefined, () =>
         channel.inbox.take.flatMap((batch) => {
           if (batch === undefined) return succeed(null);
           const grant =
@@ -165,7 +165,7 @@ export const Multiplexer = {
                   .catch(() => succeed(undefined));
           return grant.map(() => [batch, undefined] as const);
         }),
-      ).flatMap((batch) => Stream.fromArray(batch));
+      );
 
       const close: Eff<void, never> = suspend(() => {
         if (channel.closedHere) return succeed(undefined);
@@ -255,9 +255,9 @@ export const Multiplexer = {
       return connection.send(frame(OPEN, channel.id)).map(() => asConnection(channel));
     });
 
-    const incomingStream = Stream.unfoldEffect(undefined, () =>
+    const incomingStream = Stream.unfoldChunkEffect(undefined, () =>
       incoming.take.map((batch) => (batch === undefined ? null : ([batch, undefined] as const))),
-    ).flatMap((batch) => Stream.fromArray(batch));
+    );
 
     return acquireRelease(
       forkDaemon(reader).map((fiber) => ({ fiber })),

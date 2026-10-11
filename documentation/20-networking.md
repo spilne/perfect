@@ -52,6 +52,31 @@ assertEq(replies, [
 
 <!-- @end -->
 
+The examples here use generators. Everything works the same chained with
+`.flatMap`, which reads well for short pipelines like a client's
+connect-send-read (see [Syntax](./03-syntax.md) for when to pick which):
+
+<!-- @embed packages/net/examples/01-connections.ts#tcp-echo-chained -->
+
+```ts
+import { scoped } from "@spilne/perfect-core";
+import { Tcp } from "@spilne/perfect-net";
+
+// The same client, chained instead of a generator.
+const chained = await scoped(
+  Tcp.listen({ host: "127.0.0.1", port: 0 }, { codec, handle: pongs })
+    .flatMap((listener) => Tcp.connect(listener.address, { codec }))
+    .flatMap((connection) =>
+      connection.send({ type: "ping", n: 1 }).flatMap(() => connection.messages.take(1).toArray()),
+    ),
+)
+  .orDie()
+  .run();
+console.log(chained); // → [{ type: "pong", n: 1 }]
+```
+
+<!-- @end -->
+
 - **Addresses** are `{ host, port }` or `{ path }` for a Unix socket. Listen
   on port 0 to let the system pick one; `listener.address` tells which.
 - **Messages** are framed (a 4-byte length, then the bytes), so one `send`
@@ -435,6 +460,19 @@ differs from the recording fails, and so does `verify`, which names the
 message and its position. `verify` also fails when the code stops before
 the end of the recording. Sends are compared with deep equality; pass
 `equals` to compare them differently, for example to ignore timestamps.
+
+## Performance
+
+Messages sent in the same tick leave in one socket write instead of a
+packet each. Received messages are read in batches, one stream step per
+batch rather than per message. The `net` suite of the performance harness
+measures framing, the codecs, the hash ring, and round trips over the
+simulator, a multiplexer channel and loopback TCP. Its raw `node:net`
+socket shows what the typed connection costs on top:
+
+```bash
+bun scripts/perf/collect.ts --suite net
+```
 
 ## Next
 

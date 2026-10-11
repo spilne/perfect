@@ -28,9 +28,10 @@ import { dirname } from "node:path";
 import { measure } from "mitata";
 import { coreSuite } from "./suites/core";
 import { httpSuite } from "./suites/http";
+import { netSuite } from "./suites/net";
 import type { BenchResult, ResultsFile, Suite } from "./suites/types";
 
-const ALL_SUITES: readonly Suite[] = [coreSuite, httpSuite];
+const ALL_SUITES: readonly Suite[] = [coreSuite, httpSuite, netSuite];
 
 function arg(name: string, fallback?: string): string | undefined {
   const index = process.argv.indexOf(`--${name}`);
