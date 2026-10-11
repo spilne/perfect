@@ -14,6 +14,13 @@ import {
   TestRandom,
   Console,
   TestConsole,
+  TestRuntime,
+  Log,
+  RetryPolicy,
+  fail,
+  sync,
+  type Eff,
+  type Throws,
 } from "../src";
 import { assertEq } from "./_assert";
 
@@ -72,4 +79,23 @@ await provide(
   captured,
 ).run();
 assertEq(captured.logs(), ["hello", "world"]);
+// <<< example
+
+// >>> example: test-runtime
+// Every test service at once. runAdvancing moves the clock from one sleep
+// to the next, so retries with backoff finish at once, in order.
+const t = TestRuntime.make({ seed: 1 });
+let attempts = 0;
+const callApi: Eff<string, Throws<string>> = sync(() => ++attempts).flatMap((n) =>
+  n < 3 ? Log.warn(`attempt ${n} failed`).flatMap(() => fail("unavailable")) : sync(() => "ok"),
+);
+const answer = await t.runAdvancing(
+  callApi.retry(RetryPolicy.exponential({ initial: 1_000 }).withMaxRetries(5)).orDie(),
+);
+assertEq(answer, "ok");
+assertEq(t.clock.now(), 3_000); // waited 1 s, then 2 s, in test time
+assertEq(
+  t.logger.atLevel("warn").map((entry) => entry.message),
+  ["attempt 1 failed", "attempt 2 failed"],
+);
 // <<< example
