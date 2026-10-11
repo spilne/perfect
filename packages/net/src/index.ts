@@ -19,3 +19,12 @@ export {
 export { SimulatedNetwork, type LinkConditions } from "./simulator.js";
 export { Multiplexer, type MultiplexerOptions } from "./multiplexer.js";
 export { Resilient, type ResilientOptions } from "./resilient.js";
+export { HashRing, hash32, type Move } from "./hash-ring.js";
+export {
+  Gossip,
+  type GossipOptions,
+  type Member,
+  type MemberState,
+  type MembershipEvent,
+} from "./gossip.js";
+export { Discovery } from "./discovery.js";

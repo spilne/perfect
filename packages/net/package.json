@@ -40,6 +40,10 @@
     "./protobuf": {
       "types": "./dist/types/protobuf.d.ts",
       "default": "./dist/protobuf.js"
+    },
+    "./mdns": {
+      "types": "./dist/types/mdns.d.ts",
+      "default": "./dist/mdns.js"
     }
   },
   "publishConfig": {
@@ -55,17 +59,23 @@
   },
   "devDependencies": {
     "@bufbuild/protobuf": "^2.2.0",
-    "msgpackr": "^1.11.0"
+    "@types/multicast-dns": "^7.2.4",
+    "msgpackr": "^1.11.0",
+    "multicast-dns": "^7.2.5"
   },
   "peerDependencies": {
     "@bufbuild/protobuf": "^2.0.0",
-    "msgpackr": "^1.11.0"
+    "msgpackr": "^1.11.0",
+    "multicast-dns": "^7.2.0"
   },
   "peerDependenciesMeta": {
     "@bufbuild/protobuf": {
       "optional": true
     },
     "msgpackr": {
+      "optional": true
+    },
+    "multicast-dns": {
       "optional": true
     }
   }

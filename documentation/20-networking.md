@@ -194,6 +194,130 @@ twice: once on the old connection and again on the new one. If a protocol
 can't tolerate that, have the other side acknowledge messages, or make
 messages safe to repeat.
 
+## Clusters
+
+### Consistent hashing
+
+A `HashRing` decides which node owns a key. When a node joins or leaves,
+only the keys that node takes over or gives up change owner. A ring is an
+immutable value: `with` and `without` return a new one, and `moved` lists
+the keys that change owner between two rings.
+
+<!-- @embed packages/net/examples/03-cluster.ts#hash-ring -->
+
+```ts
+import { HashRing } from "@spilne/perfect-net";
+
+// Which worker handles which customer? The ring says, and adding a worker
+// only moves the customers that the new worker takes over.
+const ring = HashRing.of(["worker-1", "worker-2", "worker-3"]);
+const customers = Array.from({ length: 1_000 }, (_, i) => `customer-${i}`);
+
+const owner = ring.owner("customer-42"); // one of the workers
+const [primary, backup] = ring.owners("customer-42", 2); // for a replica
+const moves = ring.moved(ring.with("worker-4"), customers);
+console.log(primary); // → owner
+console.log(backup !== primary); // → true
+assertEq(
+  moves.every((move) => move.to === "worker-4"),
+  true,
+);
+```
+
+<!-- @end -->
+
+Each node takes `vnodes` points on the ring (default 128), so keys spread
+evenly. Every process that builds a ring from the same nodes gets the same
+owners.
+
+### Membership by gossip
+
+`Gossip.join` makes this process a member of a cluster. It needs the
+`Transport` service, so a cluster runs on `Tcp` in production and on a
+`SimulatedNetwork` in tests. `members` is the current list. `changes`
+streams `joined`, `updated` and `left` events, and the ring can follow
+them.
+
+<!-- @embed packages/net/examples/03-cluster.ts#gossip -->
+
+```ts
+import { eff, provide, scoped, sleep } from "@spilne/perfect-core";
+import { Discovery, Gossip, HashRing, Tcp, Transport, type Address } from "@spilne/perfect-net";
+
+// Three members on this machine. Each knows only the first one, and learns
+// about the others by gossip. The ring follows the membership.
+type Meta = { readonly role: string };
+
+const join = (id: string, seeds: readonly Address[]) =>
+  provide(
+    Gossip.join<Meta>({
+      id,
+      address: { host: "127.0.0.1", port: 0 },
+      seeds: Discovery.of(seeds),
+      metadata: { role: "worker" },
+      intervalMs: 50,
+    }),
+    Transport,
+    Tcp,
+  );
+
+const members = await scoped(
+  eff(function* () {
+    const first = yield* join("worker-1", []);
+    const seed = (yield* first.self).address;
+    yield* join("worker-2", [seed]);
+    yield* join("worker-3", [seed]);
+    yield* sleep(500);
+
+    const members = yield* first.members;
+    const ring = HashRing.of(members.map((member) => member.id));
+    return { ids: ring.nodes, owner: ring.owner("customer-42") };
+  }),
+)
+  .orDie()
+  .run();
+console.log(members.ids); // → ["worker-1", "worker-2", "worker-3"]
+console.log(members.owner); // → owner
+```
+
+<!-- @end -->
+
+It follows SWIM. Every `intervalMs`, a member pings another member, taking
+them in turn in a shuffled order. When the ping goes unanswered, it asks
+`indirectChecks` other members to ping instead, so a bad link between two
+members doesn't get either one thrown out. A member that nobody can reach
+is suspected. If it doesn't show it is alive within `suspicionMs`, it is
+declared dead. A suspected member that is in fact alive raises its
+incarnation number, which outranks the suspicion. Every message carries
+the sender's member list, so news reaches everyone in a few rounds.
+Members leaving at the end of their scope say goodbye, so the others don't
+have to wait for them to time out.
+
+| Option | Default | |
+| --- | --- | --- |
+| `intervalMs` | 1000 | how often to check a member |
+| `pingTimeoutMs` | 300 | how long to wait for an answer |
+| `indirectChecks` | 3 | members asked to check one that didn't answer |
+| `suspicionMs` | 5000 | how long a suspect has to show it is alive |
+
+Metadata is sent as JSON with every message, so keep it small. Clusters of
+up to a few hundred members are fine.
+
+### Finding members
+
+`seeds` takes a list of addresses or a `Discovery`, an effect that finds
+addresses. Gossip runs it again whenever it knows no other member.
+
+| Discovery | Finds |
+| --- | --- |
+| `Discovery.of(addresses)` | the given addresses |
+| `Discovery.dns({ hostname, port })` | every address of a DNS name, such as a Kubernetes headless service |
+| `Discovery.srv(name)` | the targets and ports of SRV records |
+| `Discovery.all([...])` | everything the given discoveries find |
+| `Mdns.discover({ service })` from `@spilne/perfect-net/mdns` | members that `Mdns.announce` on the local network (needs `multicast-dns`) |
+
+A failed lookup logs a warning and finds no addresses. It doesn't fail.
+
 ## Testing with a simulated network
 
 Code that gets its connections from the `Transport` service runs on real
