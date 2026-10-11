@@ -184,6 +184,7 @@ export { Pool, PoolClosed } from "./pool.js";
 export type { PoolOptions } from "./pool.js";
 export { Schedule, retryWith, repeat } from "./schedule.js";
 export { Cron, type CronOptions } from "./cron.js";
+export { TestRuntime, type TestRuntimeOptions, type RunAdvancingOptions } from "./test-runtime.js";
 export type { Scheduler } from "./scheduler.js";
 export { AsyncScheduler, BunScheduler, SyncScheduler, setDefaultScheduler } from "./scheduler.js";
 export { WorkerError, WorkerPool, type WorkerPoolOptions } from "./worker/index.js";

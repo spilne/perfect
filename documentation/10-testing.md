@@ -3,6 +3,52 @@
 Time, randomness, and IO are services in Perfect — which means tests can
 swap in deterministic implementations.
 
+## TestRuntime
+
+`TestRuntime.make()` creates all the test services below and provides them
+in one go. It has a `TestClock`, a `TestRandom` (seed 42 unless `seed`), a
+`TestConsole`, a `TestLogger`, a `TestTracer`, a `TestFileSystem` (`files`)
+and a `TestConfigProvider` (`config`). The test checks them afterwards as
+`t.clock`, `t.logger`, `t.console` and so on.
+
+<!-- @embed packages/core/examples/12-testing.ts#test-runtime -->
+
+```ts
+import { TestRuntime, Log, RetryPolicy, fail, sync, type Eff, type Throws } from "@spilne/perfect-core";
+
+// Every test service at once. runAdvancing moves the clock from one sleep
+// to the next, so retries with backoff finish at once, in order.
+const t = TestRuntime.make({ seed: 1 });
+let attempts = 0;
+const callApi: Eff<string, Throws<string>> = sync(() => ++attempts).flatMap((n) =>
+  n < 3 ? Log.warn(`attempt ${n} failed`).flatMap(() => fail("unavailable")) : sync(() => "ok"),
+);
+const answer = await t.runAdvancing(
+  callApi.retry(RetryPolicy.exponential({ initial: 1_000 }).withMaxRetries(5)).orDie(),
+);
+console.log(answer); // → "ok"
+// waited 1 s, then 2 s, in test time
+console.log(t.clock.now()); // → 3_000
+assertEq(
+  t.logger.atLevel("warn").map((entry) => entry.message),
+  ["attempt 1 failed", "attempt 2 failed"],
+);
+```
+
+<!-- @end -->
+
+| | |
+| --- | --- |
+| `t.run(eff)` / `t.runExit(eff)` | run with the test services; the clock moves only when the test moves it |
+| `t.runAdvancing(eff, { maxMs?, maxIdleMs? })` | run, moving the clock to each next sleep's end until done |
+| `t.advance(ms)` | let fibers reach their sleeps, move the clock, let them react |
+| `t.provide(eff)` | `eff` with all the test services, to run any other way |
+
+`runAdvancing` fails if the effect isn't done after `maxMs` of test time
+(default one day), or waits longer than `maxIdleMs` of real time (default
+5 s) on something other than the clock. A test that would never end fails
+instead of hanging.
+
 ## TestClock
 
 Virtual time. `sleep(ms)` doesn't actually wait — you `advance(ms)` to fire
