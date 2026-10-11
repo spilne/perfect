@@ -197,6 +197,34 @@ Layers can register finalizers via `acquireRelease` — they fire when the
 program built with `.with(layer)` ends. See
 [Services and Layers](./04-services-and-layers.md#resources).
 
+## `using` and `await using`
+
+Resources and TypeScript's `using` declarations work together both ways.
+
+`runDisposable(eff)` runs a scoped effect and keeps its scope open until
+the result is disposed. In plain async code, `await using` releases its
+resources when the block ends:
+
+```ts
+await using db = await runDisposable(openDatabase); // an acquireRelease
+await db.value.query("select 1");
+// released here, also when the block throws
+```
+
+It rejects, with nothing left open, if the effect fails. Disposing rejects
+if a release fails. Like `run`, it takes `{ signal }`: aborting closes the
+scope early.
+
+`acquireDisposable(eff)` goes the other way. It takes an object that has
+`[Symbol.asyncDispose]` or `[Symbol.dispose]` (a file handle, a
+`DisposableStack`, a library client) and makes it a resource of the
+surrounding scope:
+
+```ts
+const file = yield* acquireDisposable(tryPromise(() => fs.open(path), toError));
+// file[Symbol.asyncDispose]() runs when the scope closes
+```
+
 ## API summary
 
 | API / concept | Behavior |
@@ -205,6 +233,8 @@ program built with `.with(layer)` ends. See
 | `scoped(eff)` | define scope boundary; finalizers fire on exit |
 | `ensuring(eff, finalizer)` | always-run finalizer (no acquire pair) |
 | `onExit(eff, handler)` | finalizer that receives the Exit; the original outcome propagates |
+| `runDisposable(eff)` | run a scoped effect, keep it open until disposed (`await using`) |
+| `acquireDisposable(eff)` | a `Disposable` / `AsyncDisposable` as a resource of the scope |
 
 ## Pitfalls
 

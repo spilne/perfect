@@ -18,14 +18,7 @@ import {
   tryPromise,
   type Eff,
 } from "@spilne/perfect-core";
-import {
-  BinaryCodec,
-  Resilient,
-  SimulatedNetwork,
-  Tcp,
-  type Address,
-  type Connection,
-} from "../src";
+import { BinaryCodec, Resilient, SimulatedNetwork, Tcp, type Address } from "../src";
 
 const local: Address = { host: "127.0.0.1", port: 0 };
 
