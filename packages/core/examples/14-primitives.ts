@@ -12,6 +12,8 @@ import {
   join,
   all,
   CircuitBreaker,
+  Bulkhead,
+  Deferred,
   Singleflight,
   RateLimiter,
   Latch,
@@ -37,6 +39,24 @@ const safeCall = (n: number): Eff<number, Throws<string | { _tag: "CircuitOpen" 
   cb.protect(succeed(n * 2));
 
 assertEq(await safeCall(21).orDie().run(), 42);
+// <<< example
+
+// >>> example: bulkhead
+// At most 2 calls run at once and 1 may wait; the next one is turned away
+// at once with a typed BulkheadFull instead of piling up.
+const payments = Bulkhead.make({ maxConcurrent: 2, maxQueued: 1 });
+const outcomes = await eff(function* () {
+  const slow = yield* Deferred.make<void>();
+  const charge = (id: number) => payments.protect(slow.await.map(() => `charged ${id}`));
+  const busy = yield* fork(all([charge(1), charge(2), charge(3)])); // 2 run, 1 waits
+  yield* sleep(5);
+  const turnedAway = yield* charge(4).either();
+  yield* slow.succeed(undefined);
+  return { charged: yield* join(busy), turnedAway: turnedAway._tag };
+})
+  .orDie()
+  .run();
+assertEq(outcomes, { charged: ["charged 1", "charged 2", "charged 3"], turnedAway: "Left" });
 // <<< example
 
 // >>> example: singleflight

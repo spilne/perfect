@@ -167,6 +167,8 @@ export { Queue, QueueClosed, QueueShutdown } from "./queue.js";
 export { Semaphore } from "./semaphore.js";
 export { CircuitBreaker } from "./circuit-breaker.js";
 export type { CircuitState, CircuitOpen, CircuitBreakerOptions } from "./circuit-breaker.js";
+export { Bulkhead } from "./bulkhead.js";
+export type { BulkheadFull, BulkheadOptions } from "./bulkhead.js";
 export { Latch } from "./latch.js";
 export { Barrier } from "./barrier.js";
 export { Singleflight } from "./singleflight.js";
