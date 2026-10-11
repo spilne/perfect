@@ -244,35 +244,34 @@ export function runRetry<A, S>(eff: Eff<A, S>, policy: RetryPolicy): Eff<A, S> {
         return new Suspend(Op.Fail, cause, null);
       };
 
-      const decision = schedule.step(cause as any, state);
-      if (decision._tag === "Done") return giveUp(decision.output, 0);
+      return (clockNow as any).flatMap((now: number) => {
+        const decision = schedule.step(cause as any, state, now);
+        if (decision._tag === "Done") return giveUp(decision.output, 0);
 
-      const next = () => {
-        const wait =
-          decision.delay > 0 ? (sleep(decision.delay) as any) : (succeed(undefined) as any);
-        return (wait as any).flatMap(() => loop(decision.state, attempts + 1, deadline));
-      };
-      const retryNow = () => {
-        if (onRetry) {
-          return (
-            onRetry({
-              attempts: attempts + 1,
-              upcomingDelayMs: decision.delay,
-              input: cause,
-              output: decision.output,
-              givingUp: false,
-            }) as any
-          ).flatMap(next) as any;
-        }
-        return next();
-      };
+        const next = () => {
+          const wait =
+            decision.delay > 0 ? (sleep(decision.delay) as any) : (succeed(undefined) as any);
+          return (wait as any).flatMap(() => loop(decision.state, attempts + 1, deadline));
+        };
+        const retryNow = () => {
+          if (onRetry) {
+            return (
+              onRetry({
+                attempts: attempts + 1,
+                upcomingDelayMs: decision.delay,
+                input: cause,
+                output: decision.output,
+                givingUp: false,
+              }) as any
+            ).flatMap(next) as any;
+          }
+          return next();
+        };
 
-      if (deadline === Infinity) return retryNow();
-      // Budget is consulted before sleeping — an attempt already in flight is
-      // never interrupted by it.
-      return (clockNow as any).flatMap((now: number) =>
-        now >= deadline ? giveUp(decision.output, decision.delay) : retryNow(),
-      );
+        // Budget is consulted before sleeping — an attempt already in flight is
+        // never interrupted by it.
+        return now >= deadline ? giveUp(decision.output, decision.delay) : retryNow();
+      });
     }) as any;
   }
 
