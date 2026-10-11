@@ -38,7 +38,7 @@ console.log(await run(program)); // 42
 17. [Redis and PostgreSQL backends](./17-distributed-backends.md) — distributed primitives, Redis Streams, PGMQ
 18. [Stateful topologies](./18-topologies.md) — keyed state, windows, shuffle stages, delivery guarantees
 19. [Package map](./19-packages.md) — every public package, adapter, internal validation workspace, and subpath export
-20. [Networking](./20-networking.md) — typed connections, channels, reconnecting, gossip clusters, hash rings, a network simulator
+20. [Networking](./20-networking.md) — typed TCP and WebSocket connections, channels, reconnecting, gossip clusters, hash rings, a network simulator
 
 ## Reference
 

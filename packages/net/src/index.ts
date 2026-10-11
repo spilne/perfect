@@ -36,3 +36,4 @@ export {
   type ReplayOptions,
   type Transcript,
 } from "./recorder.js";
+export { WebSocketClient, type WebSocketOptions } from "./websocket.js";

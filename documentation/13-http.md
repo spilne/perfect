@@ -474,6 +474,10 @@ Every other helper is a composition of this base + composable `Pipe`s
 | `httpStreamNDJSON({ ...opts, schema })` | lines → `parseNDJSON(schema)` |
 | `httpStreamSSE(opts)` | lines → `parseSSE` |
 
+For a WebSocket (both directions, as messages), see
+[Networking](./20-networking.md#websockets): `WebSocketClient` in
+`@spilne/perfect-net`.
+
 A stream can stay open as long as you listen, so its timeouts differ from a
 normal request: `timeoutMs` (default 30 s) only covers waiting for the
 response headers, and `idleTimeoutMs` (default: none) fails the stream with

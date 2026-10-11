@@ -15,6 +15,7 @@
 
 import * as net from "node:net";
 import { do_not_optimize } from "mitata";
+import { WebSocketServer } from "ws";
 import {
   fork,
   join,
@@ -31,6 +32,7 @@ import {
   Multiplexer,
   SimulatedNetwork,
   Tcp,
+  WebSocketClient,
   type Connection,
   type NetError,
 } from "../../../packages/net/src";
@@ -100,6 +102,8 @@ let simulated: DisposableResource<Connection<Uint8Array>> | undefined;
 let channel: DisposableResource<Connection<Uint8Array>> | undefined;
 let tcp: DisposableResource<Connection<Uint8Array>> | undefined;
 let raw: { server: net.Server; socket: net.Socket } | undefined;
+let ws: DisposableResource<Connection<Uint8Array>> | undefined;
+let wsServer: WebSocketServer | undefined;
 
 async function openRaw(): Promise<{ server: net.Server; socket: net.Socket }> {
   const server = net.createServer((socket) => socket.pipe(socket));
@@ -177,6 +181,13 @@ export const netSuite: Suite = {
         .orDie(),
     );
     raw = await openRaw();
+    wsServer = new WebSocketServer({ port: 0 });
+    wsServer.on("connection", (socket) => socket.on("message", (data) => socket.send(data)));
+    await new Promise<void>((resolve) => wsServer!.once("listening", () => resolve()));
+    const { port } = wsServer.address() as net.AddressInfo;
+    ws = await runDisposable(
+      WebSocketClient.connect(`ws://127.0.0.1:${port}`, { codec: BinaryCodec.bytes }).orDie(),
+    );
   },
 
   async teardown(): Promise<void> {
@@ -185,7 +196,9 @@ export const netSuite: Suite = {
     await tcp?.[Symbol.asyncDispose]();
     raw?.socket.destroy();
     raw?.server.close();
-    simulated = channel = tcp = raw = undefined;
+    await ws?.[Symbol.asyncDispose]();
+    await new Promise<void>((resolve) => (wsServer ? wsServer.close(() => resolve()) : resolve()));
+    simulated = channel = tcp = raw = ws = wsServer = undefined;
   },
 
   cases(): readonly BenchCase[] {
@@ -249,6 +262,13 @@ export const netSuite: Suite = {
         divisor: ROUND_TRIPS,
         gating: false,
         run: () => rawRoundTrips(raw!.socket, ROUND_TRIPS),
+      },
+      {
+        name: "WebSocket loopback: echo x1k",
+        unit: "ns/item",
+        divisor: ROUND_TRIPS,
+        gating: false,
+        run: () => roundTrips(ws!.value, ROUND_TRIPS),
       },
       {
         name: "TCP loopback Connection: echo x1k",

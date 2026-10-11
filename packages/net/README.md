@@ -1,7 +1,7 @@
 # @spilne/perfect-net
 
 Networking for [`@spilne/perfect-core`](../core/README.md): typed messages
-over TCP, Unix domain sockets and TLS, as effects, plus a network simulator
+over TCP, Unix domain sockets, TLS and WebSockets, as effects, plus a network simulator
 for tests. Runs on Node and Bun.
 
 ## Install

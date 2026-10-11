@@ -114,6 +114,49 @@ assertEq(chained, [
   `Tcp.connect(address, { ..., tls: true })`, or `tls: { ca, cert, key, ... }`
   for a custom CA or mutual TLS.
 
+## WebSockets
+
+`WebSocketClient.connect(url, { codec })` opens a WebSocket as the same
+`Connection` as TCP, using the `WebSocket` built into Bun, Node 22+, Deno
+and browsers. So reconnecting, channels and recording below work with it
+too.
+
+<!-- @embed packages/net/examples/05-websocket.ts#websocket -->
+
+```ts
+import { BinaryCodec, WebSocketClient } from "@spilne/perfect-net";
+
+// Subscribe, then read three ticks. JSON goes as text frames (`text: true`),
+// as most WebSocket APIs expect; `.use` closes the socket afterwards.
+type Request = { readonly symbol: string };
+type Tick = { readonly symbol: string; readonly price: number };
+const codec = BinaryCodec.json<Request | Tick>();
+
+const ticks = await WebSocketClient.connect(url, { codec, text: true })
+  .use((feed) => feed.send({ symbol: "ACME" }).flatMap(() => feed.messages.take(3).toArray()))
+  .orDie()
+  .run();
+assertEq(ticks, [
+  { symbol: "ACME", price: 101 },
+  { symbol: "ACME", price: 102 },
+  { symbol: "ACME", price: 103 },
+]);
+```
+
+<!-- @end -->
+
+- **Frames:** messages go as binary frames, or as text with `text: true`
+  (the codec's bytes as UTF-8), which most JSON APIs expect. Received
+  frames of either kind are decoded.
+- **Closing:** a normal close from the server (1000, 1001) ends `messages`;
+  any other code fails it with `ConnectionError` ("closed with code 4000:
+  reason"). The client closes with 1000 when its scope ends.
+- **Backpressure:** `send` waits while more than `maxBufferedBytes`
+  (default 1 MiB) wait to go out. The WebSocket API can't pause the other
+  side, so received messages are buffered however fast they come; read
+  them promptly.
+- **Reconnecting:** `Resilient.connect(WebSocketClient.connect(url, opts))`.
+
 ## Codecs
 
 A connection's codec turns its messages into bytes and back. Built in:
