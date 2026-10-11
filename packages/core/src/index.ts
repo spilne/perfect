@@ -157,7 +157,7 @@ export { createGracefulShutdown, type GracefulShutdown } from "./graceful-shutdo
 export { type Brand, type Unbrand, nominal, refined, BrandError } from "./brand.js";
 export { Gen, forAll } from "./gen.js";
 export type { PropertyFailure } from "./gen.js";
-export { run, runSync, runFiber, runExit, runSafe } from "./runtime.js";
+export { run, runSync, runFiber, runExit, runSafe, type RunOptions } from "./runtime.js";
 export { Fiber, addFiberSupervisor } from "./fiber.js";
 export type { FiberSnapshot, FiberStatus, FiberSupervisor } from "./fiber.js";
 export { Ref } from "./ref.js";

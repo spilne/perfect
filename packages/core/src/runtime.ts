@@ -1047,9 +1047,24 @@ function runChild(child: Fiber): void {
 
 // Start a bootstrapped fiber and wrap its completion in a Promise. Callers
 // decide how to map the FiberResult into the Promise outcome.
+/** How to run an effect: on which scheduler, and what can stop it. */
+export interface RunOptions {
+  readonly scheduler?: Scheduler;
+  /** Interrupt the effect when this signal aborts. */
+  readonly signal?: AbortSignal;
+}
+
+function runOptions(options: Scheduler | RunOptions | undefined): RunOptions {
+  if (options === undefined) return {};
+  // A scheduler passed directly, as before RunOptions existed.
+  return typeof (options as Scheduler).schedule === "function"
+    ? { scheduler: options as Scheduler }
+    : (options as RunOptions);
+}
+
 function startFiberPromise<A, T>(
   eff: Eff<A, any>,
-  scheduler: Scheduler | undefined,
+  options: RunOptions,
   settle: (
     r: { ok: true; value: A } | { ok: false; cause: Cause },
     resolve: (v: T) => void,
@@ -1057,8 +1072,17 @@ function startFiberPromise<A, T>(
   ) => void,
 ): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    const fiber = bootstrapFiber(eff, scheduler);
-    fiber.onComplete((r) => settle(r, resolve, reject));
+    const fiber = bootstrapFiber(eff, options.scheduler);
+    const { signal } = options;
+    const onAbort = () => fiber.interrupt();
+    fiber.onComplete((r) => {
+      signal?.removeEventListener("abort", onAbort);
+      settle(r, resolve, reject);
+    });
+    if (signal) {
+      if (signal.aborted) fiber.interrupt();
+      else signal.addEventListener("abort", onAbort, { once: true });
+    }
     // Run the loop synchronously instead of going through scheduler.schedule.
     // Saves one microtask hop. If the fiber completes inline, the onComplete
     // listener fires synchronously and the Promise resolves on the next
@@ -1069,12 +1093,15 @@ function startFiberPromise<A, T>(
   });
 }
 
-export function run<A, S>(eff: Eff<A, S> & EffectCheck<S>, scheduler?: Scheduler): Promise<A> {
+export function run<A, S>(
+  eff: Eff<A, S> & EffectCheck<S>,
+  options?: Scheduler | RunOptions,
+): Promise<A> {
   // Literal-leaf fast path — see top-of-file comment for rationale.
   const node = eff as any;
   if (node.op === Op.Succeed) return Promise.resolve(node.a);
   if (node.op === Op.Fail) return Promise.reject(Cause.squash(node.a));
-  return startFiberPromise<A, A>(eff, scheduler, (r, resolve, reject) => {
+  return startFiberPromise<A, A>(eff, runOptions(options), (r, resolve, reject) => {
     if (r.ok) resolve(r.value);
     else reject(Cause.squash(r.cause));
   });
@@ -1122,12 +1149,15 @@ export function runFiber<A, S>(
  * Use this when you want to pattern-match on success vs every flavour of
  * failure (typed error, defect, interrupt) and inspect the full Cause tree.
  */
-export function runExit<A>(eff: Eff<A, unknown>, scheduler?: Scheduler): Promise<Exit<unknown, A>> {
+export function runExit<A>(
+  eff: Eff<A, unknown>,
+  options?: Scheduler | RunOptions,
+): Promise<Exit<unknown, A>> {
   // Literal-leaf fast path — see top-of-file comment for rationale.
   const node = eff as any;
   if (node.op === Op.Succeed) return Promise.resolve({ _tag: "Success" as const, value: node.a });
   if (node.op === Op.Fail) return Promise.resolve({ _tag: "Failure" as const, cause: node.a });
-  return startFiberPromise<A, Exit<unknown, A>>(eff, scheduler, (r, resolve) => {
+  return startFiberPromise<A, Exit<unknown, A>>(eff, runOptions(options), (r, resolve) => {
     resolve(r.ok ? { _tag: "Success", value: r.value } : { _tag: "Failure", cause: r.cause });
   });
 }
@@ -1174,7 +1204,7 @@ export function runSafe<A>(
   }
   return startFiberPromise<A, { data: A; error: null } | { data: null; error: unknown }>(
     eff,
-    scheduler,
+    { scheduler },
     (r, resolve, reject) => {
       if (r.ok) return resolve({ data: r.value, error: null });
       const typedFail = Cause.firstFail(r.cause);
