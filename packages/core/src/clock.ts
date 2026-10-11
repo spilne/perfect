@@ -13,6 +13,12 @@ export interface Clock {
 export const Clock: ServiceTag<Clock, "Clock"> = service<Clock>()("Clock");
 
 /**
+ * The Clock in use: a provided one (such as a TestClock) or the real one.
+ * Unlike `Clock.get` it needs nothing, since there is always a clock.
+ */
+export const currentClock: Eff<Clock, never> = new Suspend(Op.GetCtx, Clock.key, null) as any;
+
+/**
  * Current time in ms read from the context's Clock service — the effectful
  * counterpart of `Date.now()`. Primitives that gate behaviour on time route
  * through this so a TestClock drives them deterministically.

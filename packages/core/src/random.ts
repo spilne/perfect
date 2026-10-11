@@ -20,6 +20,12 @@ export interface Random {
 
 export const Random: ServiceTag<Random, "Random"> = service<Random>()("Random");
 
+/**
+ * The Random in use: a provided one (such as a TestRandom) or the real one.
+ * Unlike `Random.get` it needs nothing, since there is always a source.
+ */
+export const currentRandom: Eff<Random, never> = new Suspend(Op.GetCtx, Random.key, null) as any;
+
 // Helper for building Random impls — eff-wraps a sync function so users
 // don't have to write the Suspend(Op.Sync, ...) themselves.
 function effSync<A>(f: () => A): Eff<A, never> {
