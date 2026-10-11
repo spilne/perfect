@@ -1,0 +1,10 @@
+{
+  "name": "@spilne/perfect-net",
+  "sourceRoot": "packages/net/src",
+  "targets": {
+    "build": {},
+    "test": {},
+    "lint": {},
+    "typecheck": {}
+  }
+}

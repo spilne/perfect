@@ -1,0 +1,72 @@
+{
+  "name": "@spilne/perfect-net",
+  "version": "0.4.0",
+  "description": "Networking for @spilne/perfect-core: TCP, Unix socket and TLS connections as effects, typed messages, and a network simulator for tests.",
+  "keywords": [
+    "effect",
+    "networking",
+    "tcp",
+    "tls",
+    "unix-socket"
+  ],
+  "homepage": "https://github.com/spilne/perfect#readme",
+  "bugs": {
+    "url": "https://github.com/spilne/perfect/issues"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/spilne/perfect.git",
+    "directory": "packages/net"
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "main": "dist/index.js",
+  "types": "dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./msgpack": {
+      "types": "./dist/types/msgpack.d.ts",
+      "default": "./dist/msgpack.js"
+    },
+    "./protobuf": {
+      "types": "./dist/types/protobuf.d.ts",
+      "default": "./dist/protobuf.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "bun ../../scripts/build-package.ts ."
+  },
+  "dependencies": {
+    "@spilne/perfect-core": "^0.4.0"
+  },
+  "devDependencies": {
+    "@bufbuild/protobuf": "^2.2.0",
+    "msgpackr": "^1.11.0"
+  },
+  "peerDependencies": {
+    "@bufbuild/protobuf": "^2.0.0",
+    "msgpackr": "^1.11.0"
+  },
+  "peerDependenciesMeta": {
+    "@bufbuild/protobuf": {
+      "optional": true
+    },
+    "msgpackr": {
+      "optional": true
+    }
+  }
+}
