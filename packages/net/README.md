@@ -46,6 +46,8 @@ const program = scoped(
 - **Clusters:** `Gossip.join` keeps a SWIM membership list, `HashRing`
   assigns keys to members, and `Discovery` (DNS, SRV, or mDNS from
   `@spilne/perfect-net/mdns` with `multicast-dns`) finds the first members.
+- **Recording:** `Recorder.wrap` writes down a conversation and `Replay.of`
+  plays it back for tests, with no server.
 - **Testing:** depend on the `Transport` service and provide
   `SimulatedNetwork` nodes in tests, with latency, message loss and
   partitions under the test's control (deterministic with `TestClock` and

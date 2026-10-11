@@ -377,6 +377,65 @@ Messages on a link keep their order, as on TCP. `lossRate` loses whole
 messages, which TCP never does; use it to test code that must cope with lost
 messages, such as heartbeats.
 
+## Recording and replaying
+
+`Recorder.wrap(connection)` returns a connection that behaves exactly like
+the original and writes down every message sent and received. Record a
+conversation with the real server once, and save the transcript. From then
+on, `Replay.of(transcript)` plays the server's side for the code under test,
+with no server.
+
+<!-- @embed packages/net/examples/04-replay.ts#record-replay -->
+
+```ts
+import { eff, scoped } from "@spilne/perfect-core";
+import { BinaryCodec, Recorder, Replay, Tcp, type Connection } from "@spilne/perfect-net";
+
+type Message = { readonly ask: string } | { readonly answer: number };
+const codec = BinaryCodec.json<Message>();
+
+// The code under test.
+const askLength = (connection: Connection<Message>, word: string) =>
+  connection.send({ ask: word }).flatMap(() => connection.messages.take(1).toArray());
+
+const server = (connection: Connection<Message>) =>
+  connection.messages.forEach((m) =>
+    "ask" in m ? connection.send({ answer: m.ask.length }) : connection.close,
+  );
+
+// Once, against the real server: record.
+const transcript = await scoped(
+  eff(function* () {
+    const listener = yield* Tcp.listen({ host: "127.0.0.1", port: 0 }, { codec, handle: server });
+    const recording = yield* Recorder.wrap(yield* Tcp.connect(listener.address, { codec }));
+    yield* askLength(recording.connection, "hello");
+    return yield* recording.transcript;
+  }),
+)
+  .orDie()
+  .run();
+const saved = JSON.stringify(transcript); // e.g. a file next to the test
+
+// From then on: replay. The client gets the recorded answer, and `verify`
+// fails if it doesn't send exactly what was recorded.
+const replayed = await Replay.of<Message>(JSON.parse(saved))
+  .flatMap((replay) =>
+    askLength(replay.connection, "hello").flatMap((answer) => replay.verify.map(() => answer)),
+  )
+  .orDie()
+  .run();
+console.log(replayed); // → [{ answer: 5 }]
+```
+
+<!-- @end -->
+
+The replay keeps the recorded order: a recorded answer is handed over only
+after the code under test has sent the message before it. A send that
+differs from the recording fails, and so does `verify`, which names the
+message and its position. `verify` also fails when the code stops before
+the end of the recording. Sends are compared with deep equality; pass
+`equals` to compare them differently, for example to ignore timestamps.
+
 ## Next
 
 - [Package map](./19-packages.md)
