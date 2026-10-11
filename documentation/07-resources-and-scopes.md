@@ -38,6 +38,28 @@ console.log(events); // → ["opened", "closed"]
 `scoped(eff)` defines the scope boundary. When the scope ends, all
 finalizers registered inside fire in LIFO order.
 
+## When you need a scope, and `use`
+
+Every fiber has a scope of its own, which ends with the fiber. A program
+run with `run` doesn't need a `scoped(...)` around it: what it acquires is
+released, in reverse order, before `run` returns, also when it fails. A
+connection handler or any forked fiber is the same: its resources go when
+the fiber does.
+
+You need a scope only to release something **sooner**, before the fiber
+ends: a connection per request, a file per job. `resource.use(f)` is the
+short form: it acquires the resource, runs `f` with it, and releases it as
+soon as `f` is done.
+
+```ts
+// Each report gets its own connection, closed as soon as it is sent.
+const send = (report: Report) =>
+  Tcp.connect(address, { codec }).use((connection) => connection.send(report));
+```
+
+`resource.use(f)` is `scoped(resource.flatMap(f))`; a function form,
+`use(resource, f)`, is exported too.
+
 ## Release on failure
 
 The release fires whether the inner effect succeeds or fails:
@@ -231,6 +253,7 @@ const file = yield* acquireDisposable(tryPromise(() => fs.open(path), toError));
 |---|---|
 | `acquireRelease(acquire, release)` | pair acquire effect + release function |
 | `scoped(eff)` | define scope boundary; finalizers fire on exit |
+| `resource.use(f)` | acquire, run `f`, release right after (`scoped(resource.flatMap(f))`) |
 | `ensuring(eff, finalizer)` | always-run finalizer (no acquire pair) |
 | `onExit(eff, handler)` | finalizer that receives the Exit; the original outcome propagates |
 | `runDisposable(eff)` | run a scoped effect, keep it open until disposed (`await using`) |

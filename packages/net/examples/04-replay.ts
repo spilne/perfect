@@ -3,7 +3,7 @@
 //
 // Run: bun packages/net/examples/04-replay.ts
 
-import { eff, scoped } from "@spilne/perfect-core";
+import { eff } from "@spilne/perfect-core";
 import { BinaryCodec, Recorder, Replay, Tcp, type Connection } from "../src";
 import { assertEq } from "./_assert";
 
@@ -21,14 +21,12 @@ const server = (connection: Connection<Message>) =>
   );
 
 // Once, against the real server: record.
-const transcript = await scoped(
-  eff(function* () {
-    const listener = yield* Tcp.listen({ host: "127.0.0.1", port: 0 }, { codec, handle: server });
-    const recording = yield* Recorder.wrap(yield* Tcp.connect(listener.address, { codec }));
-    yield* askLength(recording.connection, "hello");
-    return yield* recording.transcript;
-  }),
-)
+const transcript = await eff(function* () {
+  const listener = yield* Tcp.listen({ host: "127.0.0.1", port: 0 }, { codec, handle: server });
+  const recording = yield* Recorder.wrap(yield* Tcp.connect(listener.address, { codec }));
+  yield* askLength(recording.connection, "hello");
+  return yield* recording.transcript;
+})
   .orDie()
   .run();
 const saved = JSON.stringify(transcript); // e.g. a file next to the test

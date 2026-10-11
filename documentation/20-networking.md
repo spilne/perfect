@@ -11,18 +11,18 @@ bun add @spilne/perfect-net
 
 A server's `handle` function gets every connection on its own fiber. A
 connection has a typed `send`, the incoming `messages` as a `Stream`, and
-`close`. Listeners and connections are scoped resources: they close when the
-surrounding scope ends.
+`close`. Listeners and connections are resources: they close when the
+surrounding scope ends, which is the end of the program unless you end it
+sooner with `.use(...)` or `scoped(...)`.
 
-<!-- @embed packages/net/examples/01-connections.ts#tcp-echo -->
+<!-- @embed packages/net/examples/01-connections.ts#tcp-messages -->
 
 ```ts
-import { eff, scoped } from "@spilne/perfect-core";
-import { BinaryCodec, Tcp, type Connection } from "@spilne/perfect-net";
+import { BinaryCodec, type Connection } from "@spilne/perfect-net";
 
 // Messages are typed; the codec turns them into bytes. A server's handler
-// gets each connection on its own fiber; the listener and the connection are
-// closed when the scope ends.
+// gets each connection on its own fiber, and the connection closes when the
+// handler is done.
 type Message =
   | { readonly type: "ping"; readonly n: number }
   | { readonly type: "pong"; readonly n: number };
@@ -32,16 +32,27 @@ const pongs = (connection: Connection<Message>) =>
   connection.messages.forEach((message) =>
     message.type === "ping" ? connection.send({ type: "pong", n: message.n }) : connection.close,
   );
+```
 
-const replies = await scoped(
-  eff(function* () {
-    const listener = yield* Tcp.listen({ host: "127.0.0.1", port: 0 }, { codec, handle: pongs });
-    const connection = yield* Tcp.connect(listener.address, { codec });
-    yield* connection.send({ type: "ping", n: 1 });
-    yield* connection.send({ type: "ping", n: 2 });
-    return yield* connection.messages.take(2).toArray();
-  }),
-)
+<!-- @end -->
+
+:::: syntax-tabs
+
+::: syntax generator
+<!-- @embed packages/net/examples/01-connections.ts#tcp-echo -->
+
+```ts
+import { eff } from "@spilne/perfect-core";
+import { Tcp } from "@spilne/perfect-net";
+
+// The listener and the connection close when the program ends.
+const replies = await eff(function* () {
+  const listener = yield* Tcp.listen({ host: "127.0.0.1", port: 0 }, { codec, handle: pongs });
+  const connection = yield* Tcp.connect(listener.address, { codec });
+  yield* connection.send({ type: "ping", n: 1 });
+  yield* connection.send({ type: "ping", n: 2 });
+  return yield* connection.messages.take(2).toArray();
+})
   .orDie()
   .run();
 assertEq(replies, [
@@ -51,31 +62,37 @@ assertEq(replies, [
 ```
 
 <!-- @end -->
+:::
 
-The examples here use generators. Everything works the same chained with
-`.flatMap`, which reads well for short pipelines like a client's
-connect-send-read (see [Syntax](./03-syntax.md) for when to pick which):
-
+::: syntax chainable
 <!-- @embed packages/net/examples/01-connections.ts#tcp-echo-chained -->
 
 ```ts
-import { scoped } from "@spilne/perfect-core";
 import { Tcp } from "@spilne/perfect-net";
 
-// The same client, chained instead of a generator.
-const chained = await scoped(
-  Tcp.listen({ host: "127.0.0.1", port: 0 }, { codec, handle: pongs })
-    .flatMap((listener) => Tcp.connect(listener.address, { codec }))
-    .flatMap((connection) =>
-      connection.send({ type: "ping", n: 1 }).flatMap(() => connection.messages.take(1).toArray()),
+// `.use` closes the connection as soon as the replies are in; the listener
+// closes when the program ends.
+const chained = await Tcp.listen({ host: "127.0.0.1", port: 0 }, { codec, handle: pongs })
+  .flatMap((listener) =>
+    Tcp.connect(listener.address, { codec }).use((connection) =>
+      connection
+        .send({ type: "ping", n: 1 })
+        .flatMap(() => connection.send({ type: "ping", n: 2 }))
+        .flatMap(() => connection.messages.take(2).toArray()),
     ),
-)
+  )
   .orDie()
   .run();
-console.log(chained); // → [{ type: "pong", n: 1 }]
+assertEq(chained, [
+  { type: "pong", n: 1 },
+  { type: "pong", n: 2 },
+]);
 ```
 
 <!-- @end -->
+:::
+
+::::
 
 - **Addresses** are `{ host, port }` or `{ path }` for a Unix socket. Listen
   on port 0 to let the system pick one; `listener.address` tells which.
@@ -121,7 +138,7 @@ that connected and `"server"` on the side that accepted.
 <!-- @embed packages/net/examples/02-channels.ts#multiplexer -->
 
 ```ts
-import { eff, fork, scoped } from "@spilne/perfect-core";
+import { eff, fork } from "@spilne/perfect-core";
 import { BinaryCodec, Multiplexer, Tcp, type Connection } from "@spilne/perfect-net";
 
 // Each channel is a Connection of its own. The shared connection carries
@@ -129,36 +146,32 @@ import { BinaryCodec, Multiplexer, Tcp, type Connection } from "@spilne/perfect-
 const codec = BinaryCodec.utf8;
 
 const shout = (connection: Connection<Uint8Array>) =>
-  scoped(
-    eff(function* () {
-      const mux = yield* Multiplexer.make(connection, { side: "server", codec });
-      yield* mux.incoming.forEach((channel) =>
-        fork(channel.messages.forEach((text) => channel.send(text.toUpperCase()))).map(
-          () => undefined,
-        ),
-      );
-    }),
-  );
-
-const shouted = await scoped(
   eff(function* () {
-    const listener = yield* Tcp.listen(
-      { host: "127.0.0.1", port: 0 },
-      { codec: BinaryCodec.bytes, handle: shout },
+    const mux = yield* Multiplexer.make(connection, { side: "server", codec });
+    yield* mux.incoming.forEach((channel) =>
+      fork(channel.messages.forEach((text) => channel.send(text.toUpperCase()))).map(
+        () => undefined,
+      ),
     );
-    const connection = yield* Tcp.connect(listener.address, { codec: BinaryCodec.bytes });
-    const mux = yield* Multiplexer.make(connection, { side: "client", codec });
+  });
 
-    const greetings = yield* mux.open;
-    const farewells = yield* mux.open;
-    yield* greetings.send("hello");
-    yield* farewells.send("bye");
-    return [
-      ...(yield* greetings.messages.take(1).toArray()),
-      ...(yield* farewells.messages.take(1).toArray()),
-    ];
-  }),
-)
+const shouted = await eff(function* () {
+  const listener = yield* Tcp.listen(
+    { host: "127.0.0.1", port: 0 },
+    { codec: BinaryCodec.bytes, handle: shout },
+  );
+  const connection = yield* Tcp.connect(listener.address, { codec: BinaryCodec.bytes });
+  const mux = yield* Multiplexer.make(connection, { side: "client", codec });
+
+  const greetings = yield* mux.open;
+  const farewells = yield* mux.open;
+  yield* greetings.send("hello");
+  yield* farewells.send("bye");
+  return [
+    ...(yield* greetings.messages.take(1).toArray()),
+    ...(yield* farewells.messages.take(1).toArray()),
+  ];
+})
   .orDie()
   .run();
 console.log(shouted); // → ["HELLO", "BYE"]
@@ -184,7 +197,7 @@ the new connection. Opening is retried with `retry` (by default from
 <!-- @embed packages/net/examples/02-channels.ts#resilient -->
 
 ```ts
-import { RetryPolicy, eff, scoped, sleep } from "@spilne/perfect-core";
+import { RetryPolicy, eff, sleep } from "@spilne/perfect-core";
 import { Resilient, Tcp, type Connection } from "@spilne/perfect-net";
 
 // The server answers one message per connection and hangs up; the
@@ -195,21 +208,19 @@ const once = (connection: Connection<string>) =>
     .forEach((text) => connection.send(`got ${text}`))
     .flatMap(() => connection.close);
 
-const answers = await scoped(
-  eff(function* () {
-    const listener = yield* Tcp.listen({ host: "127.0.0.1", port: 0 }, { codec, handle: once });
-    const connection = yield* Resilient.connect(Tcp.connect(listener.address, { codec }), {
-      retry: RetryPolicy.exponential({ initial: 10 }).withMaxRetries(5),
-    });
-    const answers: string[] = [];
-    for (const text of ["a", "b"]) {
-      yield* connection.send(text);
-      answers.push(...(yield* connection.messages.take(1).toArray()));
-      yield* sleep(20); // the server hangs up
-    }
-    return answers;
-  }),
-)
+const answers = await eff(function* () {
+  const listener = yield* Tcp.listen({ host: "127.0.0.1", port: 0 }, { codec, handle: once });
+  const connection = yield* Resilient.connect(Tcp.connect(listener.address, { codec }), {
+    retry: RetryPolicy.exponential({ initial: 10 }).withMaxRetries(5),
+  });
+  const answers: string[] = [];
+  for (const text of ["a", "b"]) {
+    yield* connection.send(text);
+    answers.push(...(yield* connection.messages.take(1).toArray()));
+    yield* sleep(20); // the server hangs up
+  }
+  return answers;
+})
   .orDie()
   .run();
 console.log(answers); // → ["got a", "got b"]
@@ -269,7 +280,7 @@ them.
 <!-- @embed packages/net/examples/03-cluster.ts#gossip -->
 
 ```ts
-import { eff, provide, scoped, sleep } from "@spilne/perfect-core";
+import { eff, provide, sleep } from "@spilne/perfect-core";
 import { Discovery, Gossip, HashRing, Tcp, Transport, type Address } from "@spilne/perfect-net";
 
 // Three members on this machine. Each knows only the first one, and learns
@@ -289,19 +300,17 @@ const join = (id: string, seeds: readonly Address[]) =>
     Tcp,
   );
 
-const members = await scoped(
-  eff(function* () {
-    const first = yield* join("worker-1", []);
-    const seed = (yield* first.self).address;
-    yield* join("worker-2", [seed]);
-    yield* join("worker-3", [seed]);
-    yield* sleep(500);
+const members = await eff(function* () {
+  const first = yield* join("worker-1", []);
+  const seed = (yield* first.self).address;
+  yield* join("worker-2", [seed]);
+  yield* join("worker-3", [seed]);
+  yield* sleep(500);
 
-    const members = yield* first.members;
-    const ring = HashRing.of(members.map((member) => member.id));
-    return { ids: ring.nodes, owner: ring.owner("customer-42") };
-  }),
-)
+  const members = yield* first.members;
+  const ring = HashRing.of(members.map((member) => member.id));
+  return { ids: ring.nodes, owner: ring.owner("customer-42") };
+})
   .orDie()
   .run();
 console.log(members.ids); // → ["worker-1", "worker-2", "worker-3"]
@@ -357,7 +366,7 @@ services, so with `TestClock` and `TestRandom` a test is deterministic.
 <!-- @embed packages/net/examples/01-connections.ts#simulated-network -->
 
 ```ts
-import { eff, provide, scoped } from "@spilne/perfect-core";
+import { eff, provide } from "@spilne/perfect-core";
 import { SimulatedNetwork, Transport } from "@spilne/perfect-net";
 
 // Code that uses the Transport service runs on real sockets in production
@@ -372,18 +381,16 @@ const ping = (n: number) =>
       ),
   );
 
-const simulated = await scoped(
-  eff(function* () {
-    const network = yield* SimulatedNetwork.make();
-    network.link("client", "server", { latencyMs: { min: 5, max: 20 } });
-    yield* network.node("server").listen({ host: "server", port: 7 }, { codec, handle: pongs });
+const simulated = await eff(function* () {
+  const network = yield* SimulatedNetwork.make();
+  network.link("client", "server", { latencyMs: { min: 5, max: 20 } });
+  yield* network.node("server").listen({ host: "server", port: 7 }, { codec, handle: pongs });
 
-    const reply = yield* provide(ping(1), Transport, network.node("client"));
-    network.partition("client", "server");
-    const cutOff = yield* provide(ping(2), Transport, network.node("client")).either();
-    return { reply, cutOff: cutOff._tag };
-  }),
-)
+  const reply = yield* provide(ping(1), Transport, network.node("client"));
+  network.partition("client", "server");
+  const cutOff = yield* provide(ping(2), Transport, network.node("client")).either();
+  return { reply, cutOff: cutOff._tag };
+})
   .orDie()
   .run();
 console.log(simulated); // → { reply: [{ type: "pong", n: 1 }], cutOff: "Left" }
@@ -413,7 +420,7 @@ with no server.
 <!-- @embed packages/net/examples/04-replay.ts#record-replay -->
 
 ```ts
-import { eff, scoped } from "@spilne/perfect-core";
+import { eff } from "@spilne/perfect-core";
 import { BinaryCodec, Recorder, Replay, Tcp, type Connection } from "@spilne/perfect-net";
 
 type Message = { readonly ask: string } | { readonly answer: number };
@@ -429,14 +436,12 @@ const server = (connection: Connection<Message>) =>
   );
 
 // Once, against the real server: record.
-const transcript = await scoped(
-  eff(function* () {
-    const listener = yield* Tcp.listen({ host: "127.0.0.1", port: 0 }, { codec, handle: server });
-    const recording = yield* Recorder.wrap(yield* Tcp.connect(listener.address, { codec }));
-    yield* askLength(recording.connection, "hello");
-    return yield* recording.transcript;
-  }),
-)
+const transcript = await eff(function* () {
+  const listener = yield* Tcp.listen({ host: "127.0.0.1", port: 0 }, { codec, handle: server });
+  const recording = yield* Recorder.wrap(yield* Tcp.connect(listener.address, { codec }));
+  yield* askLength(recording.connection, "hello");
+  return yield* recording.transcript;
+})
   .orDie()
   .run();
 const saved = JSON.stringify(transcript); // e.g. a file next to the test
