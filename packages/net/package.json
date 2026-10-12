@@ -1,6 +1,6 @@
 {
   "name": "@spilne/perfect-net",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Networking for @spilne/perfect-core: TCP, Unix socket and TLS connections as effects, typed messages, and a network simulator for tests.",
   "keywords": [
     "effect",
@@ -55,7 +55,7 @@
     "build": "bun ../../scripts/build-package.ts ."
   },
   "dependencies": {
-    "@spilne/perfect-core": "^0.5.0"
+    "@spilne/perfect-core": "^0.6.0"
   },
   "devDependencies": {
     "@bufbuild/protobuf": "^2.2.0",

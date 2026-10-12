@@ -1,3 +1,15 @@
+## 0.6.0 (2026-10-12)
+
+### 🚀 Features
+
+- **core:** resource.use(f) releases as soon as f is done ([fa67a7d](https://github.com/spilne/perfect/commit/fa67a7d))
+- **core:** actors and keyed entities ([cc67548](https://github.com/spilne/perfect/commit/cc67548))
+- **net:** WebSocket client connections ([0aefcb3](https://github.com/spilne/perfect/commit/0aefcb3))
+
+### 🔥 Performance
+
+- **net:** a networking perf suite, combined writes and chunked reads ([c18523e](https://github.com/spilne/perfect/commit/c18523e))
+
 ## 0.5.0 (2026-10-11)
 
 ### 🚀 Features
