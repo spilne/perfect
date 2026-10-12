@@ -86,7 +86,7 @@ the monorepo in CI.
 | [@spilne/perfect-kafka-platformatic](https://www.npmjs.com/package/@spilne/perfect-kafka-platformatic) | Platformatic Kafka adapter for `@spilne/perfect-kafka` (Node.js) |
 | [@spilne/perfect-postgres](https://www.npmjs.com/package/@spilne/perfect-postgres) | Postgres coordination, LISTEN/NOTIFY streams, durable state, and PGMQ queues with optional FIFO message groups |
 | [@spilne/perfect-redis](https://www.npmjs.com/package/@spilne/perfect-redis) | Redis-backed concurrency primitives, durable state, Redis Streams, and bounded Pub/Sub connectors |
-| [@spilne/perfect-net](https://www.npmjs.com/package/@spilne/perfect-net) | Typed TCP, Unix-socket and TLS connections, channels over one connection, reconnecting connections, cluster membership by gossip, consistent hashing, discovery, and a network simulator for tests |
+| [@spilne/perfect-net](https://www.npmjs.com/package/@spilne/perfect-net) | Typed TCP, Unix-socket, TLS and WebSocket connections, channels over one connection, reconnecting connections, cluster membership by gossip, consistent hashing, discovery, and a network simulator for tests |
 | [@spilne/perfect-topology](https://www.npmjs.com/package/@spilne/perfect-topology) | Flink-style stream topology engine: windows, joins, stage planning, distributed runs over a shuffle transport |
 | [@spilne/perfect-otel](https://www.npmjs.com/package/@spilne/perfect-otel) | OpenTelemetry bridge for the core `Tracer` and `Metrics` services |
 | [@spilne/perfect-http-otel](https://www.npmjs.com/package/@spilne/perfect-http-otel) | HTTP-specific tracing middleware + W3C trace propagation for `@spilne/perfect-http` |
