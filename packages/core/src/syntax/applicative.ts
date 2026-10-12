@@ -17,30 +17,34 @@ declare module "../eff.js" {
   }
 }
 
-Suspend.prototype.zip = function (that: any) {
+Suspend.prototype.zip = function (this: Suspend, that: Suspend) {
   return new Suspend(
     Op.FlatMap,
     this,
-    (a: any) => new Suspend(Op.FlatMap, that, (b: any) => succeed([a, b])),
-  ) as any;
-};
+    (a: unknown) => new Suspend(Op.FlatMap, that, (b: unknown) => succeed([a, b])),
+  ) as Eff<unknown, unknown>;
+} as Suspend["zip"];
 
-Suspend.prototype.zipWith = function (that: any, f: any) {
+Suspend.prototype.zipWith = function (
+  this: Suspend,
+  that: Suspend,
+  f: (a: unknown, b: unknown) => unknown,
+) {
   return new Suspend(
     Op.FlatMap,
     this,
-    (a: any) => new Suspend(Op.FlatMap, that, (b: any) => succeed(f(a, b))),
-  ) as any;
-};
+    (a: unknown) => new Suspend(Op.FlatMap, that, (b: unknown) => succeed(f(a, b))),
+  ) as Eff<unknown, unknown>;
+} as Suspend["zipWith"];
 
-Suspend.prototype.zipLeft = function (that: any) {
+Suspend.prototype.zipLeft = function (this: Suspend, that: Suspend) {
   return new Suspend(
     Op.FlatMap,
     this,
-    (a: any) => new Suspend(Op.FlatMap, that, () => succeed(a)),
-  ) as any;
-};
+    (a: unknown) => new Suspend(Op.FlatMap, that, () => succeed(a)),
+  ) as Eff<unknown, unknown>;
+} as Suspend["zipLeft"];
 
-Suspend.prototype.zipRight = function (that: any) {
-  return new Suspend(Op.FlatMap, this, () => that) as any;
-};
+Suspend.prototype.zipRight = function (this: Suspend, that: Suspend) {
+  return new Suspend(Op.FlatMap, this, () => that) as Eff<unknown, unknown>;
+} as Suspend["zipRight"];

@@ -9,7 +9,7 @@
 // a fiber; anything richer goes through run(). The microtask hop is
 // unavoidable either way — still ~10× slower than composed .flatMap.
 
-import { Suspend, Op } from "../eff.js";
+import { type Eff, Suspend, Op } from "../eff.js";
 import { Cause } from "../cause.js";
 import { run } from "../runtime.js";
 import { PROMISE_SOURCES } from "../constructors.js";
@@ -26,14 +26,16 @@ declare module "../eff.js" {
      */
     then<TResult1 = ValueOf<this>, TResult2 = never>(
       onFulfilled?: ((value: ValueOf<this>) => TResult1 | PromiseLike<TResult1>) | null,
-      // `reason: any` mirrors lib.es5's PromiseLike/Promise `then` exactly —
-      // required for structural thenable compatibility.
-      onRejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | null,
+      onRejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
     ): Promise<TResult1 | TResult2>;
   }
 }
 
-Suspend.prototype.then = function (this: Suspend, onFulfilled?: any, onRejected?: any): any {
+Suspend.prototype.then = function (
+  this: Suspend,
+  onFulfilled?: ((value: unknown) => unknown) | null,
+  onRejected?: ((reason: unknown) => unknown) | null,
+): Promise<unknown> {
   // Shortcut for bare `await tryPromise(p)` — skip fiber spawn entirely.
   // Saves ~500 ns vs run() for promise bridging in the no-composition case.
   // Only fires when this Suspend IS the tryPromise leaf (no surrounding
@@ -41,7 +43,7 @@ Suspend.prototype.then = function (this: Suspend, onFulfilled?: any, onRejected?
   const source = PROMISE_SOURCES.get(this);
   if (source !== undefined) {
     const onReject = source.onReject;
-    return (source.promise() as Promise<any>).then(
+    return source.promise().then(
       (v) => (onFulfilled ? onFulfilled(v) : v),
       (e) => {
         const mapped = onReject ? onReject(e) : e;
@@ -55,5 +57,5 @@ Suspend.prototype.then = function (this: Suspend, onFulfilled?: any, onRejected?
   if (this.op === Op.Fail)
     return Promise.reject(Cause.squash(this.a as Cause)).then(onFulfilled, onRejected);
   // Anything richer (Sync/FlatMap/Async/Fork/...) goes through the fiber runtime.
-  return run(this as any).then(onFulfilled, onRejected);
-};
+  return run(this as Eff<unknown, never>).then(onFulfilled, onRejected);
+} as Suspend["then"];

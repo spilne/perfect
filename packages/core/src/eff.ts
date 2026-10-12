@@ -138,5 +138,5 @@ export type EffectCheck<S> = [S] extends [never]
 
 // ── Runtime check ──────────────────────────────────────────────────
 export function isSuspend(v: unknown): v is Suspend {
-  return v !== null && typeof v === "object" && (v as any)[EFF_TAG] === true;
+  return v !== null && typeof v === "object" && (v as { [EFF_TAG]?: unknown })[EFF_TAG] === true;
 }

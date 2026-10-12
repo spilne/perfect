@@ -25,21 +25,35 @@ declare module "../eff.js" {
 }
 
 // parZip: run both in parallel, collect results
-Suspend.prototype.parZip = function (that: any) {
-  return (new Suspend(Op.All, [this, that], null) as any).map(([a, b]: any) => [a, b]);
-};
+Suspend.prototype.parZip = function (this: Suspend, that: Suspend) {
+  return (new Suspend(Op.All, [this, that], null) as Eff<[unknown, unknown], unknown>).map(
+    ([a, b]) => [a, b],
+  );
+} as Suspend["parZip"];
 
 // parZipWith: run both in parallel, combine results
-Suspend.prototype.parZipWith = function (that: any, f: any) {
-  return (new Suspend(Op.All, [this, that], null) as any).map(([a, b]: any) => f(a, b));
-};
+Suspend.prototype.parZipWith = function (
+  this: Suspend,
+  that: Suspend,
+  f: (a: unknown, b: unknown) => unknown,
+) {
+  return (new Suspend(Op.All, [this, that], null) as Eff<[unknown, unknown], unknown>).map(
+    ([a, b]) => f(a, b),
+  );
+} as Suspend["parZipWith"];
 
 // parMap: alias for parZipWith (Scala naming)
 Suspend.prototype.parMap = Suspend.prototype.parZipWith;
 
 // parFlatMap: run both in parallel, then flatMap the combined result
-Suspend.prototype.parFlatMap = function (that: any, f: any) {
-  return new Suspend(Op.FlatMap, new Suspend(Op.All, [this, that], null), ([a, b]: any) =>
-    f(a, b),
-  ) as any;
-};
+Suspend.prototype.parFlatMap = function (
+  this: Suspend,
+  that: Suspend,
+  f: (a: unknown, b: unknown) => Suspend,
+) {
+  return new Suspend(
+    Op.FlatMap,
+    new Suspend(Op.All, [this, that], null),
+    ([a, b]: [unknown, unknown]) => f(a, b),
+  ) as Eff<unknown, unknown>;
+} as Suspend["parFlatMap"];

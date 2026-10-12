@@ -110,109 +110,116 @@ declare module "../eff.js" {
 }
 
 Suspend.prototype.withSpan = function (name: string, attributes?: Record<string, unknown>) {
-  return withSpan(this as any, name, attributes) as any;
+  return withSpan(this, name, attributes);
 };
 
-Suspend.prototype.fork = function () {
-  return new Suspend(Op.Fork, this, null) as any;
+Suspend.prototype.fork = function (this: Suspend) {
+  return new Suspend(Op.Fork, this, null) as Eff<unknown, unknown>;
+} as Suspend["fork"];
+
+Suspend.prototype.forkDaemon = function (this: Suspend) {
+  return new Suspend(Op.ForkDaemon, this, null) as Eff<unknown, unknown>;
+} as Suspend["forkDaemon"];
+
+Suspend.prototype.ensuring = function (this: Suspend, finalizer: Suspend) {
+  return new Suspend(Op.Ensuring, this, finalizer) as Eff<unknown, unknown>;
+} as Suspend["ensuring"];
+
+Suspend.prototype.onExit = function (handler) {
+  return onExit(this, handler);
 };
 
-Suspend.prototype.forkDaemon = function () {
-  return new Suspend(Op.ForkDaemon, this, null) as any;
+Suspend.prototype.uninterruptible = function (this: Suspend) {
+  return new Suspend(Op.SetInterruptible, this, false) as Eff<unknown, unknown>;
+} as Suspend["uninterruptible"];
+
+Suspend.prototype.interruptible = function (this: Suspend) {
+  return new Suspend(Op.SetInterruptible, this, true) as Eff<unknown, unknown>;
+} as Suspend["interruptible"];
+
+Suspend.prototype.timeout = function (ms, onTimeout) {
+  return timeout(this, ms, onTimeout);
 };
 
-Suspend.prototype.ensuring = function (finalizer: any) {
-  return new Suspend(Op.Ensuring, this, finalizer) as any;
+Suspend.prototype.timeoutFail = function (ms, onTimeout) {
+  return timeoutFail(this, ms, onTimeout);
 };
 
-Suspend.prototype.onExit = function (handler: any) {
-  return onExit(this as any, handler) as any;
+Suspend.prototype.timeoutOption = function (ms) {
+  return timeoutOption(this, ms);
 };
 
-Suspend.prototype.uninterruptible = function () {
-  return new Suspend(Op.SetInterruptible, this, false) as any;
+Suspend.prototype.race = function (that) {
+  return race([this, that]);
 };
 
-Suspend.prototype.interruptible = function () {
-  return new Suspend(Op.SetInterruptible, this, true) as any;
+Suspend.prototype.raceFirst = function (that) {
+  return raceFirst([this, that]);
 };
 
-Suspend.prototype.timeout = function (ms: any, onTimeout: any) {
-  return timeout(this as any, ms, onTimeout) as any;
+Suspend.prototype.raceEither = function (that) {
+  return raceEither(this, that);
 };
 
-Suspend.prototype.timeoutFail = function (ms: any, onTimeout: any) {
-  return timeoutFail(this as any, ms, onTimeout) as any;
-};
-
-Suspend.prototype.timeoutOption = function (ms: any) {
-  return timeoutOption(this as any, ms) as any;
-};
-
-Suspend.prototype.race = function (that: any) {
-  return race([this as any, that]) as any;
-};
-
-Suspend.prototype.raceFirst = function (that: any) {
-  return raceFirst([this as any, that]) as any;
-};
-
-Suspend.prototype.raceEither = function (that: any) {
-  return raceEither(this as any, that) as any;
-};
-
-Suspend.prototype.delay = function (ms: any) {
-  return new Suspend(Op.FlatMap, sleep(ms), () => this) as any;
-};
+Suspend.prototype.delay = function (this: Suspend, ms: number) {
+  return new Suspend(Op.FlatMap, sleep(ms), () => this) as Eff<unknown, unknown>;
+} as Suspend["delay"];
 
 Suspend.prototype.scoped = function () {
-  return scoped(this as any) as any;
+  return scoped(this);
 };
 
 Suspend.prototype.use = function <A, S, B, S2>(this: Eff<A, S>, f: (a: A) => Eff<B, S2>) {
   return use(this, f);
 };
 
-Suspend.prototype.acquireRelease = function (release: any) {
-  return acquireRelease(this as any, release) as any;
+Suspend.prototype.acquireRelease = function (release) {
+  return acquireRelease(this, release);
 };
 
-Suspend.prototype.provide = function (tag: any, impl: any) {
-  return provide(this as any, tag, impl) as any;
+Suspend.prototype.provide = function (tag, impl) {
+  return provide(this, tag, impl);
 };
 
-Suspend.prototype.retry = function (policy: any) {
-  return retry(this as any, policy) as any;
+Suspend.prototype.retry = function <A, S>(
+  this: Eff<A, S>,
+  policy: RetryPolicy | RetryConfig<ErrorsOf<S>>,
+) {
+  // retry() takes either shape at runtime; only its overloads split them.
+  return retry(this, policy as RetryConfig<ErrorsOf<S>>);
 };
 
-Suspend.prototype.retryAllBy = function (options: any) {
-  return retryAllBy(this as any, options) as any;
+Suspend.prototype.retryAllBy = function <A, S, E>(
+  this: Eff<A, S>,
+  options: RetryAllByOptions<A, E>,
+) {
+  return retryAllBy(this, options as RetryAllByOptions<A, ErrorsOf<S>>);
 };
 
-Suspend.prototype.repeat = function (schedule: any) {
-  return repeat(this as any, schedule) as any;
+Suspend.prototype.repeat = function (schedule) {
+  return repeat(this, schedule);
 };
 
-Suspend.prototype.retryWith = function (schedule: any, opts?: any) {
-  return retryWith(this as any, schedule, opts) as any;
+Suspend.prototype.retryWith = function (schedule, opts) {
+  return retryWith(this, schedule, opts);
 };
 
-Suspend.prototype.repeatUntil = function (opts: any) {
-  return repeatUntil(this as any, opts) as any;
+Suspend.prototype.repeatUntil = function (opts) {
+  return repeatUntil(this, opts);
 };
 
-Suspend.prototype.repeatUntilWithBackoff = function (opts: any) {
-  return repeatUntilWithBackoff(this as any, opts) as any;
+Suspend.prototype.repeatUntilWithBackoff = function (opts) {
+  return repeatUntilWithBackoff(this, opts);
 };
 
-Suspend.prototype.when = function (cond: any) {
-  return (new Suspend(Op.Sync, () => cond(), null) as any).flatMap((c: boolean) =>
-    c ? (this as any) : new Suspend(Op.Succeed, undefined, null),
-  ) as any;
+Suspend.prototype.when = function (cond) {
+  return (new Suspend(Op.Sync, () => cond(), null) as Eff<boolean, never>).flatMap((c) =>
+    c ? this : (new Suspend(Op.Succeed, undefined, null) as Eff<undefined, never>),
+  );
 };
 
-Suspend.prototype.unless = function (cond: any) {
-  return (new Suspend(Op.Sync, () => cond(), null) as any).flatMap((c: boolean) =>
-    c ? new Suspend(Op.Succeed, undefined, null) : (this as any),
-  ) as any;
+Suspend.prototype.unless = function (cond) {
+  return (new Suspend(Op.Sync, () => cond(), null) as Eff<boolean, never>).flatMap((c) =>
+    c ? (new Suspend(Op.Succeed, undefined, null) as Eff<undefined, never>) : this,
+  );
 };
