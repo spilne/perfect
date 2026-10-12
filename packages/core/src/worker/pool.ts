@@ -11,8 +11,8 @@ interface PendingTask {
   readonly arg: unknown;
   /** The caller gave up (interrupted); its answer is ignored when it comes. */
   canceled: boolean;
-  resolve: (value: any) => void;
-  reject: (error: any) => void;
+  resolve: (value: unknown) => void;
+  reject: (error: string) => void;
 }
 
 // How many tasks a worker is given at once (see WorkerPoolOptions).
@@ -42,7 +42,8 @@ interface WorkerResponse {
   id: number;
   ok: boolean;
   value?: unknown;
-  error?: unknown;
+  /** The thrown error's message, when `ok` is false. */
+  error?: string;
 }
 
 /**
@@ -55,7 +56,8 @@ interface WorkerResponse {
 interface WorkerHandle {
   postMessage(message: unknown): void;
   terminate(): unknown;
-  on?(event: string, handler: (payload: any) => void): void;
+  // `never`: each event hands its handler a different payload.
+  on?(event: string, handler: (payload: never) => void): void;
   onmessage?: ((event: { data: WorkerResponse }) => void) | null;
   onerror?: ((event: { message?: string }) => void) | null;
 }
@@ -203,7 +205,7 @@ export class WorkerPool {
       this.sendQueued();
       if (task.canceled) return;
       if (response.ok) task.resolve(response.value);
-      else task.reject(response.error);
+      else task.reject(response.error as string);
     };
 
     // A thread that dies — most often because it could not load its executor at
@@ -234,10 +236,10 @@ export class WorkerPool {
     return async<B, WorkerError>((resume) => {
       // Checked when the task runs, not when execute() is called, so a
       // retried or reused task sees a pool that was shut down in between.
-      if (this._shutdown) return resume(fail(new WorkerError("Pool is shut down")) as any);
+      if (this._shutdown) return resume(fail(new WorkerError("Pool is shut down")));
       // Once a thread has failed the remaining ones are not trustworthy either,
       // and round-robin would keep handing tasks to a dead worker.
-      if (this.failure !== undefined) return resume(fail(new WorkerError(this.failure)) as any);
+      if (this.failure !== undefined) return resume(fail(new WorkerError(this.failure)));
 
       const task: PendingTask = {
         id: this.nextId++,
@@ -245,8 +247,8 @@ export class WorkerPool {
         fnSource: this.sourceOf(fn),
         arg,
         canceled: false,
-        resolve: (value) => resume(succeed(value) as any),
-        reject: (error) => resume(fail(new WorkerError(error)) as any),
+        resolve: (value) => resume(succeed(value as B)),
+        reject: (error) => resume(fail(new WorkerError(error))),
       };
       this.pending.set(task.id, task);
       this.queue.push(task);
@@ -258,7 +260,7 @@ export class WorkerPool {
       return () => {
         task.canceled = true;
       };
-    }) as any;
+    });
   }
 
   // Hand queued tasks to workers that have room, least busy first. (Tasks
@@ -297,7 +299,7 @@ export class WorkerPool {
   }
 
   parMap<A, B>(items: A[], fn: (arg: A) => B | Promise<B>): Eff<B[], Throws<WorkerError>> {
-    return all(items.map((item) => this.execute(fn, item))) as any;
+    return all(items.map((item) => this.execute(fn, item)));
   }
 
   get poolSize(): number {

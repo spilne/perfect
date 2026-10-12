@@ -72,10 +72,10 @@ class InProcessPubSub<T> implements PubSub<T> {
       return Array.from(this.subscribers);
     }).flatMap((subs) => {
       const closeAll = subs.reduce<Eff<void, never>>(
-        (acc, q) => (acc as any).flatMap(() => q.close()),
-        succeed(undefined) as any,
+        (acc, q) => acc.flatMap(() => q.close()),
+        succeed(undefined),
       );
-      return (closeAll as any).flatMap(() =>
+      return closeAll.flatMap(() =>
         sync(() => {
           this.subscribers.clear();
         }),

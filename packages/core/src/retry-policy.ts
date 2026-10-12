@@ -179,7 +179,7 @@ export class RetryPolicy {
 
   /** Only retry when the typed error predicate returns true. */
   whenError<E>(pred: (error: E) => boolean): RetryPolicy {
-    return this.copy({ whenError: pred as any });
+    return this.copy({ whenError: pred as (error: unknown) => boolean });
   }
 
   /** Defect-aware: retry decisions based on the full Cause. */
@@ -216,20 +216,20 @@ export class RetryPolicy {
 export function runRetry<A, S>(eff: Eff<A, S>, policy: RetryPolicy): Eff<A, S> {
   const { schedule, whenError, whenCause, onRetry, wallClockBudgetMs } = policy.impl;
 
-  function loop(state: any, attempts: number, deadline: number): Eff<A, S> {
-    return new Suspend(Op.CatchAll, eff, (cause: Cause) => {
+  function loop(state: unknown, attempts: number, deadline: number): Eff<A, S> {
+    return new Suspend(Op.CatchAll, eff, (cause: Cause): Eff<A, S> => {
       // Defect/interrupt gate (unless whenCause explicitly allows):
       const firstFail = Cause.firstFail(cause);
       if (whenCause) {
-        if (!whenCause(cause)) return new Suspend(Op.Fail, cause, null);
+        if (!whenCause(cause)) return new Suspend(Op.Fail, cause, null) as Eff<never, S>;
       } else {
-        if (firstFail === null) return new Suspend(Op.Fail, cause, null);
+        if (firstFail === null) return new Suspend(Op.Fail, cause, null) as Eff<never, S>;
         if (whenError && !whenError(firstFail.value)) {
-          return new Suspend(Op.Fail, cause, null);
+          return new Suspend(Op.Fail, cause, null) as Eff<never, S>;
         }
       }
 
-      const giveUp = (output: unknown, upcomingDelayMs: number) => {
+      const giveUp = (output: unknown, upcomingDelayMs: number): Eff<never, S> => {
         if (onRetry) {
           return (
             onRetry({
@@ -238,20 +238,20 @@ export function runRetry<A, S>(eff: Eff<A, S>, policy: RetryPolicy): Eff<A, S> {
               input: cause,
               output,
               givingUp: true,
-            }) as any
-          ).flatMap(() => new Suspend(Op.Fail, cause, null)) as any;
+            }) as Eff<void, never>
+          ).flatMap(() => new Suspend(Op.Fail, cause, null) as Eff<never, S>);
         }
-        return new Suspend(Op.Fail, cause, null);
+        return new Suspend(Op.Fail, cause, null) as Eff<never, S>;
       };
 
-      return (clockNow as any).flatMap((now: number) => {
-        const decision = schedule.step(cause as any, state, now);
+      return clockNow.flatMap((now: number) => {
+        const decision = schedule.step(cause, state, now);
         if (decision._tag === "Done") return giveUp(decision.output, 0);
 
         const next = () => {
-          const wait =
-            decision.delay > 0 ? (sleep(decision.delay) as any) : (succeed(undefined) as any);
-          return (wait as any).flatMap(() => loop(decision.state, attempts + 1, deadline));
+          const wait: Eff<void, never> =
+            decision.delay > 0 ? sleep(decision.delay) : succeed(undefined);
+          return wait.flatMap(() => loop(decision.state, attempts + 1, deadline));
         };
         const retryNow = () => {
           if (onRetry) {
@@ -262,8 +262,8 @@ export function runRetry<A, S>(eff: Eff<A, S>, policy: RetryPolicy): Eff<A, S> {
                 input: cause,
                 output: decision.output,
                 givingUp: false,
-              }) as any
-            ).flatMap(next) as any;
+              }) as Eff<void, never>
+            ).flatMap(next);
           }
           return next();
         };
@@ -272,12 +272,10 @@ export function runRetry<A, S>(eff: Eff<A, S>, policy: RetryPolicy): Eff<A, S> {
         // never interrupted by it.
         return now >= deadline ? giveUp(decision.output, decision.delay) : retryNow();
       });
-    }) as any;
+    }) as Eff<A, S>;
   }
 
   if (wallClockBudgetMs === undefined) return loop(schedule.initial, 0, Infinity);
   // Anchor at RUN time, not build time, so a module-level policy can be reused.
-  return (clockNow as any).flatMap((start: number) =>
-    loop(schedule.initial, 0, start + wallClockBudgetMs),
-  ) as any;
+  return clockNow.flatMap((start: number) => loop(schedule.initial, 0, start + wallClockBudgetMs));
 }

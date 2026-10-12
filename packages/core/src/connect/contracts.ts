@@ -81,7 +81,7 @@ export function isStreamable<T, S = never>(value: unknown): value is Streamable<
     value !== null &&
     typeof value === "object" &&
     "subscribe" in value &&
-    typeof (value as any).subscribe === "function" &&
+    typeof value.subscribe === "function" &&
     "codec" in value
   );
 }
@@ -103,7 +103,7 @@ export function isSinkable<T, S = never>(value: unknown): value is Sinkable<T, S
     value !== null &&
     typeof value === "object" &&
     "publish" in value &&
-    typeof (value as any).publish === "function" &&
+    typeof value.publish === "function" &&
     "codec" in value
   );
 }
@@ -114,10 +114,10 @@ export function isTransactionalSinkable<T, S = never, Transaction = unknown>(
   return (
     isSinkable(value) &&
     "transactionDomain" in value &&
-    typeof (value as any).transactionDomain === "object" &&
-    (value as any).transactionDomain !== null &&
+    typeof value.transactionDomain === "object" &&
+    value.transactionDomain !== null &&
     "publishInTransaction" in value &&
-    typeof (value as any).publishInTransaction === "function"
+    typeof value.publishInTransaction === "function"
   );
 }
 
@@ -140,9 +140,7 @@ export interface Partitionable<T, S = never> extends Streamable<T, S> {
 }
 
 export function isPartitionable<T, S = never>(value: unknown): value is Partitionable<T, S> {
-  return (
-    isStreamable(value) && "partitions" in value && typeof (value as any).partitions === "number"
-  );
+  return isStreamable(value) && "partitions" in value && typeof value.partitions === "number";
 }
 
 // ── Replayable<T> — "I can seek to a point in time" ────────────────
@@ -164,9 +162,7 @@ export interface Replayable<T, S = never> extends Streamable<T, S> {
 
 export function isReplayable<T, S = never>(value: unknown): value is Replayable<T, S> {
   return (
-    isStreamable(value) &&
-    "subscribeFrom" in value &&
-    typeof (value as any).subscribeFrom === "function"
+    isStreamable(value) && "subscribeFrom" in value && typeof value.subscribeFrom === "function"
   );
 }
 
@@ -189,10 +185,10 @@ export function isTransactionalEnvelope<T, S = never, Transaction = unknown>(
 ): value is TransactionalEnvelope<T, S, Transaction> {
   return (
     "transactionDomain" in value &&
-    typeof (value as any).transactionDomain === "object" &&
-    (value as any).transactionDomain !== null &&
+    typeof value.transactionDomain === "object" &&
+    value.transactionDomain !== null &&
     "ackInTransaction" in value &&
-    typeof (value as any).ackInTransaction === "function"
+    typeof value.ackInTransaction === "function"
   );
 }
 
@@ -226,11 +222,7 @@ export interface ManagedAcknowledgeable<T, S = never> extends Acknowledgeable<T,
 }
 
 export function isAcknowledgeable<T, S = never>(value: unknown): value is Acknowledgeable<T, S> {
-  return (
-    isStreamable(value) &&
-    "subscribeAck" in value &&
-    typeof (value as any).subscribeAck === "function"
-  );
+  return isStreamable(value) && "subscribeAck" in value && typeof value.subscribeAck === "function";
 }
 
 export function isManagedAcknowledgeable<T, S = never>(
@@ -239,7 +231,7 @@ export function isManagedAcknowledgeable<T, S = never>(
   return (
     isAcknowledgeable(value) &&
     "subscribeAckManaged" in value &&
-    typeof (value as any).subscribeAckManaged === "function"
+    typeof value.subscribeAckManaged === "function"
   );
 }
 
@@ -256,9 +248,9 @@ export function isCheckpointable<T, S = never>(value: unknown): value is Checkpo
   return (
     isStreamable(value) &&
     "commitOffset" in value &&
-    typeof (value as any).commitOffset === "function" &&
+    typeof value.commitOffset === "function" &&
     "getCommittedOffset" in value &&
-    typeof (value as any).getCommittedOffset === "function"
+    typeof value.getCommittedOffset === "function"
   );
 }
 

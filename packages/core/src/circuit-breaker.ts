@@ -98,31 +98,34 @@ class InProcessCircuitBreaker<E> implements CircuitBreaker<E> {
   }
 
   protect<A, S>(eff: Eff<A, S | Throws<E>>): Eff<A, S | Throws<E | CircuitOpen>> {
-    return (Clock.get as any).flatMap((clock: Clock) => {
-      this.nowFn = () => clock.now();
-      const openErr = this.checkOpen(clock.now());
-      if (openErr !== null) return fail(openErr) as any;
-      const isProbe = this.internal.state === "half-open";
-      if (isProbe) {
-        if (this.probeInFlight) return fail(this.openError()) as any;
-        this.probeInFlight = true;
-      }
-      const guarded = (eff as any)
-        .flatMap((value: A) => sync(() => this.recordSuccess()).map(() => value))
-        .catch((e: E) =>
-          sync(() => this.recordFailure(e, clock.now())).flatMap(() => fail(e) as any),
-        );
-      // However the probe ends (success, failure, defect, interrupt), the
-      // next call may probe again if we are still half-open.
-      return isProbe
-        ? ensuring(
-            guarded,
-            sync(() => {
-              this.probeInFlight = false;
-            }),
-          )
-        : guarded;
-    }) as any;
+    // Clock.get needs nothing in practice: the runtime always has a clock.
+    return (Clock.get as Eff<Clock, never>).flatMap(
+      (clock): Eff<A, S | Throws<E | CircuitOpen>> => {
+        this.nowFn = () => clock.now();
+        const openErr = this.checkOpen(clock.now());
+        if (openErr !== null) return fail(openErr);
+        const isProbe = this.internal.state === "half-open";
+        if (isProbe) {
+          if (this.probeInFlight) return fail(this.openError());
+          this.probeInFlight = true;
+        }
+        const guarded = eff
+          .flatMap((value: A) => sync(() => this.recordSuccess()).map(() => value))
+          .catch((e) =>
+            sync(() => this.recordFailure(e as E, clock.now())).flatMap(() => fail(e)),
+          ) as Eff<A, S | Throws<E>>;
+        // However the probe ends (success, failure, defect, interrupt), the
+        // next call may probe again if we are still half-open.
+        return isProbe
+          ? ensuring(
+              guarded,
+              sync(() => {
+                this.probeInFlight = false;
+              }),
+            )
+          : guarded;
+      },
+    );
   }
 
   reset(): Eff<void, never> {

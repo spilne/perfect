@@ -57,14 +57,14 @@ export class InProcessDeferred<A, E = never> implements Deferred<A, E> {
     return async<A, E>((resume) => {
       if (this.state._tag === "Done") {
         const r = this.state.result;
-        resume(r.ok ? (succeed(r.value) as any) : (fail(r.error) as any));
+        resume(r.ok ? succeed(r.value) : fail(r.error));
         return;
       }
       let canceled = false;
       const waiter = (result: DeferredResult<A, E>) => {
         if (canceled) return;
         canceled = true;
-        resume(result.ok ? (succeed(result.value) as any) : (fail(result.error) as any));
+        resume(result.ok ? succeed(result.value) : fail(result.error));
       };
       const waiters = this.state.waiters;
       waiters.add(waiter);
@@ -72,7 +72,7 @@ export class InProcessDeferred<A, E = never> implements Deferred<A, E> {
         canceled = true;
         waiters.delete(waiter);
       };
-    }) as any;
+    });
   }
 
   get isDone(): Eff<boolean, never> {

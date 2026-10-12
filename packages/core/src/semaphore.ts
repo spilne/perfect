@@ -47,11 +47,11 @@ export class InProcessSemaphore implements Semaphore {
       const giveBack = () => this.releaseMany(n);
       if (this.waiters.length === 0 && this.permits >= n) {
         this.permits -= n;
-        resume(succeed(undefined) as any, giveBack);
+        resume(succeed(undefined), giveBack);
         return;
       }
       const node = this.waiters.push(
-        new PermitWaiter(n, () => resume(succeed(undefined) as any, giveBack)),
+        new PermitWaiter(n, () => resume(succeed(undefined), giveBack)),
       );
       // If this waiter was first in line and wanted many permits, the ones
       // behind it might fit now, so check again.
@@ -59,7 +59,7 @@ export class InProcessSemaphore implements Semaphore {
         this.waiters.remove(node);
         this.releaseMany(0);
       };
-    }) as any;
+    });
   }
 
   releaseMany(n: number): void {
@@ -82,7 +82,7 @@ export class InProcessSemaphore implements Semaphore {
   }
 
   withPermit<A, S>(eff: Eff<A, S>): Eff<A, S> {
-    return this.acquireMany(1).flatMap(() => ensuring(eff, this.release())) as any;
+    return this.acquireMany(1).flatMap(() => ensuring(eff, this.release()));
   }
 
   withPermits<A, S>(n: number, eff: Eff<A, S>): Eff<A, S> {
@@ -92,7 +92,7 @@ export class InProcessSemaphore implements Semaphore {
         eff,
         sync(() => this.releaseMany(n)),
       ),
-    ) as any;
+    );
   }
 
   get available(): Eff<number, never> {
