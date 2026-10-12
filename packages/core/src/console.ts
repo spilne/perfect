@@ -17,15 +17,15 @@ export interface Console {
 export const Console: ServiceTag<Console, "Console"> = service<Console>()("Console");
 
 function effSync<A>(f: () => A): Eff<A, never> {
-  return new Suspend(Op.Sync, f, null) as any;
+  return new Suspend(Op.Sync, f, null) as Eff<A, never>;
 }
 
 function effAsync<A>(register: (resume: (value: Eff<A, never>) => void) => void): Eff<A, never> {
-  return new Suspend(Op.Async, register, null) as any;
+  return new Suspend(Op.Async, register, null) as Eff<A, never>;
 }
 
 function succeedNow<A>(value: A): Eff<A, never> {
-  return new Suspend(Op.Succeed, value, null) as any;
+  return new Suspend(Op.Succeed, value, null) as Eff<A, never>;
 }
 
 // ── Real console: writes to stdout/stderr via globalThis.console ───
@@ -62,7 +62,7 @@ export class RealConsole implements Console {
         return;
       }
 
-      const stdin = (globalThis as any).process?.stdin;
+      const stdin = (globalThis as { process?: { stdin?: StdinLike } }).process?.stdin;
       if (stdin === undefined) {
         resume(succeedNow(undefined));
         return;
@@ -98,6 +98,17 @@ export class RealConsole implements Console {
       stdin.resume?.();
     });
   }
+}
+
+// The slice of the Node stream API that readLine uses. Every method is
+// optional because a non-Node runtime may expose a partial stdin.
+interface StdinLike {
+  setEncoding?(encoding: string): void;
+  on?(event: string, listener: (chunk: unknown) => void): void;
+  once?(event: string, listener: (chunk: unknown) => void): void;
+  off?(event: string, listener: (chunk: unknown) => void): void;
+  pause?(): void;
+  resume?(): void;
 }
 
 // Module-level so the leftover of a partially-consumed chunk survives across

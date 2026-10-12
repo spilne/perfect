@@ -245,7 +245,7 @@ export const Config = {
       index: number,
       values: Record<string, unknown>,
       problems: ConfigProblem[],
-    ): ConfigReader<any> => {
+    ): ConfigReader<Record<string, unknown>> => {
       if (index === entries.length) {
         return problems.length > 0 ? fail(configError(problems)) : succeed(values);
       }
@@ -254,9 +254,11 @@ export const Config = {
         if (result._tag === "Right") values[key] = result.right;
         else problems.push(...result.left.problems);
         return collect(index + 1, values, problems);
-      }) as ConfigReader<any>;
+      }) as ConfigReader<Record<string, unknown>>;
     };
     // suspend: every run starts with fresh results.
-    return suspend(() => collect(0, {}, []));
+    return suspend(() => collect(0, {}, [])) as ConfigReader<{
+      [K in keyof R]: R[K] extends ConfigReader<infer A> ? A : never;
+    }>;
   },
 } as const;

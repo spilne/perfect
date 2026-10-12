@@ -54,7 +54,7 @@ export const currentSpan: Eff<Span | null, never> = new Suspend(
   Op.FlatMap,
   new Suspend(Op.GetCtx, CURRENT_SPAN_KEY, null),
   (s: Span) => new Suspend(Op.Succeed, s === NO_SPAN ? null : s, null),
-) as any;
+) as Eff<Span | null, never>;
 
 // ── withSpan ───────────────────────────────────────────────────────
 
@@ -103,7 +103,7 @@ export function withSpan<A, S>(
         );
       },
     );
-  }) as any;
+  }) as Eff<A, S>;
 }
 
 // ── Test tracer: records finished spans for assertions ─────────────

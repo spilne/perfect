@@ -24,14 +24,13 @@ export interface FiberSnapshot {
   readonly childCount: number;
 }
 
-// Fiber<any> throughout the supervision API: Fiber is invariant in A (its
-// completion listeners consume A), so `Fiber<unknown>` would reject fibers of
-// concrete result types. `any` is the only type that admits every fiber.
+// Fiber<unknown> admits every fiber because Fiber is covariant in A (see
+// CompletionListener).
 export interface FiberSupervisor {
-  onStart?(fiber: Fiber<any>): void;
-  onFork?(parent: Fiber<any>, child: Fiber<any>): void;
-  onInterrupt?(fiber: Fiber<any>): void;
-  onEnd?(fiber: Fiber<any>, result: FiberResult<any>): void;
+  onStart?(fiber: Fiber<unknown>): void;
+  onFork?(parent: Fiber<unknown>, child: Fiber<unknown>): void;
+  onInterrupt?(fiber: Fiber<unknown>): void;
+  onEnd?(fiber: Fiber<unknown>, result: FiberResult<unknown>): void;
 }
 
 const supervisors = new Set<FiberSupervisor>();
@@ -69,7 +68,7 @@ const NOOP = (): void => {};
 // fiber to its loop, so the callback's own error can still join the cause.
 export const IN_CALLBACK = (): void => {};
 
-export function notifyFiberStart(fiber: Fiber<any>): void {
+export function notifyFiberStart(fiber: Fiber<unknown>): void {
   if (supervisors.size !== 0) notify((supervisor) => supervisor.onStart?.(fiber));
 }
 
@@ -84,6 +83,13 @@ function interruptCause(pending: unknown): Cause {
   return Cause.interrupt();
 }
 
+// Declared through a method so its parameter is checked bivariantly. A plain
+// function type would make Fiber invariant in A, and then Fiber<unknown>
+// could not stand for "some fiber" in the supervision API and the fiber tree.
+type CompletionListener<A> = {
+  bivariant(result: FiberResult<A>): void;
+}["bivariant"];
+
 export class Fiber<A = unknown, E = unknown> {
   /**
    * Type-level only: the typed errors this fiber can fail with. There is no
@@ -95,14 +101,12 @@ export class Fiber<A = unknown, E = unknown> {
   /** @internal Runtime bookkeeping; not part of the public API. */
   state = FiberState.Ready;
   result: FiberResult<A> | null = null;
-  private listeners: Array<(result: FiberResult<A>) => void> | null = null;
+  private listeners: Array<CompletionListener<A>> | null = null;
   /** @internal Runtime bookkeeping; not part of the public API. */
   interruptHandle: (() => void) | null = null;
-  // Fiber<any>: see FiberSupervisor note — Fiber is invariant in A, so a
-  // heterogeneous parent/child tree needs `any`.
   // Created on the first fork: most fibers never fork.
-  private children: Set<Fiber<any>> | null = null;
-  parent: Fiber<any> | null = null;
+  private children: Set<Fiber<unknown>> | null = null;
+  parent: Fiber<unknown> | null = null;
   /** @internal Runtime bookkeeping; not part of the public API. */
   scope: Scope | null = null;
 
@@ -307,7 +311,7 @@ export class Fiber<A = unknown, E = unknown> {
   }
 
   /** @internal Runtime bookkeeping; not part of the public API. */
-  addChild(child: Fiber<any>): void {
+  addChild(child: Fiber<unknown>): void {
     (this.children ??= new Set()).add(child);
     child.parent = this;
     if (supervisors.size !== 0) notify((supervisor) => supervisor.onFork?.(this, child));
@@ -337,7 +341,7 @@ export class Fiber<A = unknown, E = unknown> {
     return this.children?.size ?? 0;
   }
 
-  childrenSnapshot(): readonly Fiber<any>[] {
+  childrenSnapshot(): readonly Fiber<unknown>[] {
     return this.children === null ? [] : Array.from(this.children);
   }
 

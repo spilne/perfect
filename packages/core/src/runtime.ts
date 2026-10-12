@@ -37,10 +37,10 @@ if (!emptyContext.has(Metrics.key)) emptyContext.set(Metrics.key, defaultMetrics
 
 type ExitFinalizer = (
   exit: Exit<unknown, unknown>,
-  fiber: Fiber<any> | undefined,
+  fiber: Fiber<unknown> | undefined,
 ) => Suspend | null;
 
-function succeedAfterFinalizer(finalizer: Suspend, value: any): Suspend {
+function succeedAfterFinalizer(finalizer: Suspend, value: unknown): Suspend {
   return new Suspend(
     Op.CatchAll,
     new Suspend(Op.FlatMap, finalizer, () => new Suspend(Op.Succeed, value, null)),
@@ -73,7 +73,7 @@ function failAfterFinalizer(finalizer: Suspend, cause: Cause): Suspend {
 // between popping the finalizer's frame and masking: an interrupt pending at
 // the top of the loop, or delivered while an op-budget pause has the node
 // queued, would otherwise replace the node and drop the finalizer.
-function enterUninterruptible(fiber: Fiber<any>, k: Cont | null): Cont {
+function enterUninterruptible(fiber: Fiber<unknown>, k: Cont | null): Cont {
   const frame = new Cont(Op.SetInterruptible, fiber.interruptible, k);
   fiber.interruptible = false;
   return frame;
@@ -119,7 +119,7 @@ function stripFailures(cause: Cause): Cause | null {
 function exitFinalizer(
   finalizer: unknown,
   exit: Exit<unknown, unknown>,
-  fiber: Fiber<any> | undefined,
+  fiber: Fiber<unknown> | undefined,
 ): Suspend | null {
   try {
     return (finalizer as ExitFinalizer)(exit, fiber);
@@ -136,14 +136,14 @@ function exitFinalizer(
 // Every run starts from a Ready fiber and consumes that state. A run that
 // finds the fiber in any other state is a duplicate (see Fiber.interrupt) and
 // does nothing.
-function runFiberLoop(fiber: Fiber<any>): void {
+function runFiberLoop(fiber: Fiber<unknown>): void {
   if (fiber.state !== FiberState.Ready) return;
   fiber.state = FiberState.Running;
   // A value handed over by an async resume is delivered once this run starts.
   fiber.handoffDiscard = null;
   fiber.opCount = 0;
 
-  let cur: any = fiber.current;
+  let cur: unknown = fiber.current;
   let k: Cont | null = fiber.stack;
   let context: Context = fiber.context!;
   const budget = DEFAULT_BUDGET;
@@ -196,7 +196,7 @@ function runFiberLoop(fiber: Fiber<any>): void {
             // a throwing continuation (user callback in .map/.flatMap) is a
             // defect, not an interpreter crash
             try {
-              cur = (frame.fn as any)(cur);
+              cur = (frame.fn as (a: unknown) => unknown)(cur);
             } catch (e) {
               cur = new Suspend(Op.Fail, Cause.die(e), null);
             }
@@ -268,7 +268,7 @@ function runFiberLoop(fiber: Fiber<any>): void {
     switch (cur.op) {
       case Op.Sync: {
         try {
-          cur = (cur.a as any)();
+          cur = (cur.a as () => unknown)();
         } catch (e) {
           cur = new Suspend(Op.Fail, Cause.die(e), null);
         }
@@ -291,7 +291,7 @@ function runFiberLoop(fiber: Fiber<any>): void {
                 continue;
               }
               try {
-                cur = (frame.fn as any)(f.value);
+                cur = (frame.fn as (e: unknown) => unknown)(f.value);
               } catch (e) {
                 cur = new Suspend(Op.Fail, Cause.die(e), null);
               }
@@ -304,7 +304,7 @@ function runFiberLoop(fiber: Fiber<any>): void {
               continue;
             }
             try {
-              cur = (frame.fn as any)(cause);
+              cur = (frame.fn as (cause: Cause) => unknown)(cause);
             } catch (e) {
               cur = new Suspend(Op.Fail, Cause.die(e), null);
             }
@@ -377,7 +377,7 @@ function runFiberLoop(fiber: Fiber<any>): void {
 
       case Op.Async: {
         const register = cur.a as (
-          resume: (value: any, onDiscard?: () => void) => void,
+          resume: (value: unknown, onDiscard?: () => void) => void,
         ) => (() => void) | void;
 
         fiber.stack = k;
@@ -390,7 +390,7 @@ function runFiberLoop(fiber: Fiber<any>): void {
         // fiber to this loop, so an error it throws afterwards is kept.
         fiber.interruptHandle = IN_CALLBACK;
         try {
-          const cancel = register((value: any, onDiscard?: () => void) => {
+          const cancel = register((value: unknown, onDiscard?: () => void) => {
             if (resumed || fiber.asyncToken !== token || fiber.state === FiberState.Done) {
               // Nothing waits for this value any more: hand it back.
               if (typeof onDiscard === "function") onDiscard();
@@ -557,7 +557,7 @@ function runFiberLoop(fiber: Fiber<any>): void {
 
       case Op.AcqRel: {
         const acquire = cur.a;
-        const release = cur.b as (a: any) => Eff<void, unknown>;
+        const release = cur.b as (a: unknown) => Eff<void, unknown>;
 
         // acquire, then register release on the innermost active scope.
         // Without an enclosing scoped(), fall back to a lazily-created
@@ -566,7 +566,7 @@ function runFiberLoop(fiber: Fiber<any>): void {
         // must never be silently dropped.
         k = new Cont(
           Op.FlatMap,
-          (resource: any) => {
+          (resource: unknown) => {
             if (!fiber.scope) fiber.scope = new Scope();
             fiber.scope.addFinalizer(() => release(resource));
             return new Suspend(Op.Succeed, resource, null);
@@ -647,7 +647,7 @@ const PARKED: unique symbol = Symbol("spilne/for-each-par-parked");
 // same turn and synchronous children cost no scheduling. Once a turn has spent
 // the op budget, the rest of the fill moves to the next scheduler turn.
 function startForEachPar(
-  fiber: Fiber<any>,
+  fiber: Fiber<unknown>,
   node: Suspend,
   k: Cont | null,
   context: Context,
@@ -819,16 +819,16 @@ class ChildGroup {
   // Running children. With `recycleSlots` (forEachPar) freed slots are reused,
   // so the table stays as small as the peak number of running children. all()
   // and race() start every child at once and skip the bookkeeping.
-  private readonly slots: Array<Fiber<any> | null> = [];
+  private readonly slots: Array<Fiber<unknown> | null> = [];
   private readonly freeSlots: number[] | null;
   private readonly token: number;
 
   constructor(
-    private readonly fiber: Fiber<any>,
+    private readonly fiber: Fiber<unknown>,
     k: Cont | null,
     private readonly context: Context,
     // Called when a child settles, after it stopped counting as running.
-    private readonly onChild: (result: FiberResult<any>, index: number) => void,
+    private readonly onChild: (result: FiberResult<unknown>, index: number) => void,
     recycleSlots = false,
   ) {
     this.freeSlots = recycleSlots ? [] : null;
@@ -845,7 +845,7 @@ class ChildGroup {
 
   // Starts a child for `effect`; `index` is passed back to onChild. An inline
   // child runs its first slice now instead of on the next scheduler turn.
-  start(effect: unknown, index: number, inline: boolean): Fiber<any> {
+  start(effect: unknown, index: number, inline: boolean): Fiber<unknown> {
     const child = makeChild(this.fiber, effect, this.context);
     const free = this.freeSlots;
     const slot = free !== null && free.length > 0 ? free.pop()! : this.slots.length;
@@ -1016,7 +1016,7 @@ class ChildGroup {
  * leaking side effects that the slow path then re-executes.
  */
 
-function bootstrapFiber<A>(eff: Eff<A, any>, scheduler?: Scheduler): Fiber<A> {
+function bootstrapFiber<A>(eff: Eff<A, unknown>, scheduler?: Scheduler): Fiber<A> {
   const fiber = new Fiber<A>();
   fiber.current = eff;
   fiber.context = emptyContext;
@@ -1029,7 +1029,12 @@ function bootstrapFiber<A>(eff: Eff<A, any>, scheduler?: Scheduler): Fiber<A> {
 // Create a child fiber — used by every op that spawns (All, Fork, Race,
 // ForkDaemon). Doesn't schedule; caller attaches
 // onComplete/scope/etc., then calls runChild(child).
-function makeChild(parent: Fiber<any>, eff: any, context: Context, structured = true): Fiber<any> {
+function makeChild(
+  parent: Fiber<unknown>,
+  eff: unknown,
+  context: Context,
+  structured = true,
+): Fiber<unknown> {
   const child = new Fiber();
   child.current = eff;
   child.context = context;
@@ -1063,12 +1068,12 @@ function runOptions(options: Scheduler | RunOptions | undefined): RunOptions {
 }
 
 function startFiberPromise<A, T>(
-  eff: Eff<A, any>,
+  eff: Eff<A, unknown>,
   options: RunOptions,
   settle: (
     r: { ok: true; value: A } | { ok: false; cause: Cause },
     resolve: (v: T) => void,
-    reject: (e: any) => void,
+    reject: (e: unknown) => void,
   ) => void,
 ): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -1098,9 +1103,9 @@ export function run<A, S>(
   options?: Scheduler | RunOptions,
 ): Promise<A> {
   // Literal-leaf fast path — see top-of-file comment for rationale.
-  const node = eff as any;
-  if (node.op === Op.Succeed) return Promise.resolve(node.a);
-  if (node.op === Op.Fail) return Promise.reject(Cause.squash(node.a));
+  const node: Suspend = eff;
+  if (node.op === Op.Succeed) return Promise.resolve(node.a as A);
+  if (node.op === Op.Fail) return Promise.reject(Cause.squash(node.a as Cause));
   return startFiberPromise<A, A>(eff, runOptions(options), (r, resolve, reject) => {
     if (r.ok) resolve(r.value);
     else reject(Cause.squash(r.cause));
@@ -1109,16 +1114,16 @@ export function run<A, S>(
 
 export function runSync<A>(eff: Eff<A, never>): A {
   // Literal-leaf fast path — see top-of-file comment for rationale.
-  const node = eff as any;
+  const node: Suspend = eff;
   if (node.op === Op.Succeed) return node.a as A;
-  if (node.op === Op.Fail) throw Cause.squash(node.a);
+  if (node.op === Op.Fail) throw Cause.squash(node.a as Cause);
 
   let result: A | undefined;
   let error: Cause | undefined;
   let done = false;
 
   const scheduler = new SyncScheduler();
-  const fiber = bootstrapFiber<A>(eff as Eff<A, any>, scheduler);
+  const fiber = bootstrapFiber<A>(eff, scheduler);
   fiber.onComplete((r) => {
     done = true;
     if (r.ok) result = r.value;
@@ -1136,7 +1141,7 @@ export function runFiber<A, S>(
   eff: Eff<A, S> & EffectCheck<S>,
   scheduler?: Scheduler,
 ): Fiber<A, ErrorsOf<S>> {
-  const fiber = bootstrapFiber<A>(eff as Eff<A, any>, scheduler);
+  const fiber = bootstrapFiber<A>(eff, scheduler);
   notifyFiberStart(fiber);
   fiber.scheduleRun();
   return fiber as Fiber<A, ErrorsOf<S>>;
@@ -1154,9 +1159,11 @@ export function runExit<A>(
   options?: Scheduler | RunOptions,
 ): Promise<Exit<unknown, A>> {
   // Literal-leaf fast path — see top-of-file comment for rationale.
-  const node = eff as any;
-  if (node.op === Op.Succeed) return Promise.resolve({ _tag: "Success" as const, value: node.a });
-  if (node.op === Op.Fail) return Promise.resolve({ _tag: "Failure" as const, cause: node.a });
+  const node: Suspend = eff;
+  if (node.op === Op.Succeed)
+    return Promise.resolve({ _tag: "Success" as const, value: node.a as A });
+  if (node.op === Op.Fail)
+    return Promise.resolve({ _tag: "Failure" as const, cause: node.a as Cause });
   return startFiberPromise<A, Exit<unknown, A>>(eff, runOptions(options), (r, resolve) => {
     resolve(r.ok ? { _tag: "Success", value: r.value } : { _tag: "Failure", cause: r.cause });
   });
@@ -1193,10 +1200,10 @@ export function runSafe<A>(
   scheduler?: Scheduler,
 ): Promise<{ data: A; error: null } | { data: null; error: unknown }> {
   // Literal-leaf fast path — see top-of-file comment for rationale.
-  const node = eff as any;
-  if (node.op === Op.Succeed) return Promise.resolve({ data: node.a, error: null });
+  const node: Suspend = eff;
+  if (node.op === Op.Succeed) return Promise.resolve({ data: node.a as A, error: null });
   if (node.op === Op.Fail) {
-    const cause = node.a;
+    const cause = node.a as Cause;
     const typedFail = Cause.firstFail(cause);
     if (typedFail !== null) return Promise.resolve({ data: null, error: typedFail.value });
     if (opts.catchDefects) return Promise.resolve({ data: null, error: Cause.squash(cause) });

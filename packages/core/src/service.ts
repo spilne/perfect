@@ -25,7 +25,7 @@ export function service<T>(): <const Name extends string>(name: Name) => Service
       [SERVICE_TAG]: true,
       key,
       name,
-      get: new Suspend(Op.GetCtx, key, null) as any,
+      get: new Suspend(Op.GetCtx, key, null) as Eff<T, Needs<T, typeof name>>,
     };
   };
 }
@@ -59,5 +59,8 @@ export function provide<A, S, T, Name extends string>(
   tag: ServiceTag<T, Name>,
   impl: NoInfer<T>,
 ): Eff<A, ProvidedService<S, T, Name>> {
-  return new Suspend(Op.Provide, eff, makeContext(tag, impl)) as any;
+  return new Suspend(Op.Provide, eff, makeContext(tag, impl)) as Eff<
+    A,
+    ProvidedService<S, T, Name>
+  >;
 }

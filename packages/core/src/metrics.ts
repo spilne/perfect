@@ -206,13 +206,16 @@ export const Metrics: ServiceTag<MetricsRegistry, "Metrics"> & {
   snapshot: Eff<MetricsSnapshot, never>;
 } = (() => {
   const tag = service<MetricsRegistry>()("Metrics");
-  const registryEff: Eff<MetricsRegistry, never> = new Suspend(Op.GetCtx, tag.key, null) as any;
+  const registryEff: Eff<MetricsRegistry, never> = new Suspend(Op.GetCtx, tag.key, null) as Eff<
+    MetricsRegistry,
+    never
+  >;
   const withRegistry = <A>(f: (r: MetricsRegistry) => A): Eff<A, never> =>
     new Suspend(
       Op.FlatMap,
-      registryEff as any,
+      registryEff,
       (r: MetricsRegistry) => new Suspend(Op.Sync, () => f(r), null),
-    ) as any;
+    ) as Eff<A, never>;
 
   return {
     ...tag,
