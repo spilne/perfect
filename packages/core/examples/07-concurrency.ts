@@ -2,7 +2,21 @@
 //
 // Run: bun packages/core/examples/07-concurrency.ts
 
-import { succeed, sleep, join, race, all, forEachPar } from "../src";
+import {
+  succeed,
+  sleep,
+  join,
+  race,
+  all,
+  forEachPar,
+  eff,
+  fail,
+  Actor,
+  Entities,
+  type Eff,
+  type Reply,
+  type Throws,
+} from "../src";
 import { assertEq } from "./_assert";
 
 // >>> example: fork-join
@@ -71,4 +85,61 @@ const users = await forEachPar([1, 2, 3, 4, 5], (id) => fetchUser(id), { concurr
 
 const names = users.map((u) => u.name);
 assertEq(names, ["user-1", "user-2", "user-3", "user-4", "user-5"]);
+// <<< example
+
+// >>> example: actor
+// An account as an actor: its balance belongs to one fiber and changes only
+// through messages, handled one at a time, so it needs no locks.
+type AccountMessage =
+  | { readonly type: "deposit"; readonly amount: number }
+  | { readonly type: "withdraw"; readonly amount: number; readonly reply: Reply<number> }
+  | { readonly type: "balance"; readonly reply: Reply<number> };
+
+const account = {
+  initial: 0,
+  receive: (balance: number, message: AccountMessage): Eff<number, Throws<string>> => {
+    switch (message.type) {
+      case "deposit":
+        return succeed(balance + message.amount);
+      case "withdraw":
+        // A failure leaves the balance as it was and fails this ask.
+        return message.amount > balance
+          ? fail("insufficient funds")
+          : message.reply(balance - message.amount).map(() => balance - message.amount);
+      case "balance":
+        return message.reply(balance).map(() => balance);
+    }
+  },
+};
+
+const outcome = await eff(function* () {
+  const acme = yield* Actor.make(account);
+  // A hundred deposits at the same time: none of them is lost.
+  yield* all(Array.from({ length: 100 }, () => acme.tell({ type: "deposit", amount: 1 })));
+  const left = yield* acme.ask<number>((reply) => ({ type: "withdraw", amount: 30, reply }));
+  const refused = yield* acme
+    .ask<number>((reply) => ({ type: "withdraw", amount: 500, reply }))
+    .either();
+  return { left, refused: refused._tag };
+})
+  .orDie()
+  .run();
+assertEq(outcome, { left: 70, refused: "Left" });
+// <<< example
+
+// >>> example: entities
+// One actor per key, made on its first message: each account's messages are
+// handled in order, different accounts at the same time.
+const balances = await eff(function* () {
+  const accounts = yield* Entities.make({ behavior: () => account, idleMs: 60_000 });
+  yield* accounts.tell("ann", { type: "deposit", amount: 50 });
+  yield* accounts.tell("bob", { type: "deposit", amount: 20 });
+  return {
+    ann: yield* accounts.ask("ann", (reply: Reply<number>) => ({ type: "balance", reply })),
+    bob: yield* accounts.ask("bob", (reply: Reply<number>) => ({ type: "balance", reply })),
+  };
+})
+  .orDie()
+  .run();
+assertEq(balances, { ann: 50, bob: 20 });
 // <<< example
