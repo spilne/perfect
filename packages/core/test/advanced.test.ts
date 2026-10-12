@@ -350,9 +350,7 @@ describe("complex compositions", () => {
 
     const provided = provide(program, ApiClient, {
       fetch: (_url) =>
-        sync(() => ++attempts).flatMap((n: number) =>
-          n < 2 ? fail("fail") : succeed("response"),
-        ) as any,
+        sync(() => ++attempts).flatMap((n: number) => (n < 2 ? fail("fail") : succeed("response"))),
     });
 
     expect(await run(provided.orDie())).toBe("response");

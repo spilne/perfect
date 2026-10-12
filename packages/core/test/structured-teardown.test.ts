@@ -112,7 +112,7 @@ describe("all() waits for its children", () => {
 
   test("interrupting the parent interrupts the children at once", () => {
     const scheduler = new StepScheduler();
-    const children: Fiber<any>[] = [];
+    const children: Fiber<unknown>[] = [];
     const fiber = runFiber(
       all([waitForever, waitForever]).map((values) => values.length),
       scheduler,

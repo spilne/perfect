@@ -17,13 +17,14 @@ import {
   Cause,
   StreamTimeoutError,
 } from "../src";
+import { runUnchecked } from "./run-unchecked";
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
 describe("mapAccumulate / statefulMap", () => {
   test("threads state and emits mapped values (running sum)", async () => {
     const result = await run(
-      (Stream.of(1, 2, 3) as any)
+      Stream.of(1, 2, 3)
         .mapAccumulate(0, (acc: number, a: number) => [acc + a, acc + a])
         .toArray(),
     );
@@ -32,7 +33,7 @@ describe("mapAccumulate / statefulMap", () => {
 
   test("state carries across chunk boundaries", async () => {
     const result = await run(
-      (Stream.of(1, 2) as any)
+      Stream.of(1, 2)
         .concat(Stream.of(3, 4))
         .mapAccumulate(0, (acc: number, a: number) => [acc + a, acc + a])
         .toArray(),
@@ -42,7 +43,7 @@ describe("mapAccumulate / statefulMap", () => {
 
   test("statefulMap is an alias with identical semantics", async () => {
     const result = await run(
-      (Stream.of("a", "b", "c") as any)
+      Stream.of("a", "b", "c")
         .statefulMap(0, (i: number, s: string) => [i + 1, `${i}:${s}`])
         .toArray(),
     );
@@ -51,14 +52,16 @@ describe("mapAccumulate / statefulMap", () => {
 
   test("empty stream emits nothing", async () => {
     const result = await run(
-      (Stream.empty<number>() as any).mapAccumulate(0, (s: number, a: number) => [s, a]).toArray(),
+      Stream.empty<number>()
+        .mapAccumulate(0, (s: number, a: number) => [s, a])
+        .toArray(),
     );
     expect(result).toEqual([]);
   });
 
   test("failure propagates", async () => {
     const exit = await runExit(
-      (Stream.of(1) as any)
+      Stream.of(1)
         .concat(Stream.fail("boom"))
         .mapAccumulate(0, (s: number, a: number) => [s, a])
         .toArray(),
@@ -70,13 +73,13 @@ describe("mapAccumulate / statefulMap", () => {
 
 describe("dedupe / distinctBy", () => {
   test("global dedup — non-consecutive duplicates are dropped", async () => {
-    const result = await run((Stream.of(1, 2, 1, 3, 2, 1) as any).dedupe().toArray());
+    const result = await run(Stream.of(1, 2, 1, 3, 2, 1).dedupe().toArray());
     expect(result).toEqual([1, 2, 3]);
   });
 
   test("dedupe with a key function keeps the first occurrence per key", async () => {
     const result = await run(
-      (Stream.of({ id: 1, v: "a" }, { id: 2, v: "b" }, { id: 1, v: "c" }) as any)
+      Stream.of({ id: 1, v: "a" }, { id: 2, v: "b" }, { id: 1, v: "c" })
         .dedupe((x: { id: number }) => x.id)
         .toArray(),
     );
@@ -88,7 +91,9 @@ describe("dedupe / distinctBy", () => {
 
   test("distinctBy is dedupe with a required key function", async () => {
     const result = await run(
-      (Stream.of("aa", "ab", "ba", "bb") as any).distinctBy((s: string) => s[0]).toArray(),
+      Stream.of("aa", "ab", "ba", "bb")
+        .distinctBy((s: string) => s[0])
+        .toArray(),
     );
     expect(result).toEqual(["aa", "ba"]);
   });
@@ -105,7 +110,7 @@ describe("dedupe / distinctBy", () => {
 
   test("works across chunk boundaries", async () => {
     const result = await run(
-      (Stream.of(1, 2) as any)
+      Stream.of(1, 2)
         .concat(Stream.of(2, 1, 3))
         .dedupe()
         .toArray(),
@@ -160,7 +165,7 @@ describe("sliding", () => {
   });
 
   test("failure propagates", async () => {
-    const exit = await runExit((Stream.fail("boom") as any).sliding(2).toArray());
+    const exit = await runExit(Stream.fail("boom").sliding(2).toArray());
     expect(exit._tag).toBe("Failure");
     if (exit._tag === "Failure") expect(Cause.pretty(exit.cause)).toBe("Fail(boom)");
   });
@@ -168,7 +173,7 @@ describe("sliding", () => {
 
 describe("zipWithPrevious", () => {
   test("pairs each element with its predecessor, undefined for the head", async () => {
-    const result = await run((Stream.of(1, 2, 3) as any).zipWithPrevious().toArray());
+    const result = await run(Stream.of(1, 2, 3).zipWithPrevious().toArray());
     expect(result).toEqual([
       [undefined, 1],
       [1, 2],
@@ -177,9 +182,7 @@ describe("zipWithPrevious", () => {
   });
 
   test("previous carries across chunk boundaries", async () => {
-    const result = await run(
-      (Stream.of("a") as any).concat(Stream.of("b")).zipWithPrevious().toArray(),
-    );
+    const result = await run(Stream.of("a").concat(Stream.of("b")).zipWithPrevious().toArray());
     expect(result).toEqual([
       [undefined, "a"],
       ["a", "b"],
@@ -198,7 +201,7 @@ describe("Stream.repeatWith", () => {
       Stream.repeatWith(() => {
         builds++;
         return Stream.of(1, 2);
-      }, 3).toArray() as any,
+      }, 3).toArray(),
     );
     expect(result).toEqual([1, 2, 1, 2, 1, 2]);
     expect(builds).toBe(3);
@@ -214,7 +217,7 @@ describe("Stream.repeatWith", () => {
       Stream.repeatWith(() => {
         builds++;
         return Stream.of(1);
-      }, 0).toArray() as any,
+      }, 0).toArray(),
     );
     expect(result).toEqual([]);
     expect(builds).toBe(0);
@@ -222,18 +225,13 @@ describe("Stream.repeatWith", () => {
 
   test("each repetition gets a fresh single-shot source", async () => {
     const result = await run(
-      Stream.repeatWith(
-        () => Stream.unfold(0, (n) => (n < 2 ? [n, n + 1] : null)),
-        2,
-      ).toArray() as any,
+      Stream.repeatWith(() => Stream.unfold(0, (n) => (n < 2 ? [n, n + 1] : null)), 2).toArray(),
     );
     expect(result).toEqual([0, 1, 0, 1]);
   });
 
   test("failure in a repetition propagates", async () => {
-    const exit = await runExit(
-      Stream.repeatWith(() => Stream.fail("boom") as any, 2).toArray() as any,
-    );
+    const exit = await runExit(Stream.repeatWith(() => Stream.fail("boom"), 2).toArray());
     expect(exit._tag).toBe("Failure");
     if (exit._tag === "Failure") expect(Cause.pretty(exit.cause)).toBe("Fail(boom)");
   });
@@ -242,7 +240,7 @@ describe("Stream.repeatWith", () => {
 describe("orElse", () => {
   test("switches to the fallback when the source fails, keeping prior elements", async () => {
     const result = await run(
-      (Stream.of(1, 2) as any)
+      Stream.of(1, 2)
         .concat(Stream.fail("boom"))
         .orElse(() => Stream.of(9))
         .toArray(),
@@ -253,7 +251,7 @@ describe("orElse", () => {
   test("successful source never builds the fallback", async () => {
     let built = false;
     const result = await run(
-      (Stream.of(1, 2) as any)
+      Stream.of(1, 2)
         .orElse(() => {
           built = true;
           return Stream.of(9);
@@ -275,7 +273,11 @@ describe("orElse", () => {
   });
 
   test("a failing fallback propagates its own failure", async () => {
-    const exit = await runExit((Stream.fail("a") as any).orElse(() => Stream.fail("b")).toArray());
+    const exit = await runExit(
+      Stream.fail("a")
+        .orElse(() => Stream.fail("b"))
+        .toArray(),
+    );
     expect(exit._tag).toBe("Failure");
     if (exit._tag === "Failure") expect(Cause.pretty(exit.cause)).toBe("Fail(b)");
   });
@@ -284,24 +286,22 @@ describe("orElse", () => {
 describe("timeout under TestClock", () => {
   test("elements arriving within the limit pass through", async () => {
     const c = new TestClock();
-    const result = await run(
-      provide((Stream.of(1, 2, 3) as any).timeout(100).toArray(), Clock, c) as any,
-    );
+    const result = await runUnchecked(provide(Stream.of(1, 2, 3).timeout(100).toArray(), Clock, c));
     expect(result).toEqual([1, 2, 3]);
   });
 
   test("a pull gap beyond the limit fails with StreamTimeoutError", async () => {
     const c = new TestClock();
     let finalized = false;
-    const q: any = await run(Queue.unbounded<number>() as any);
-    const source = (Stream.fromQueue(q) as any).onFinalize(
+    const q = await run(Queue.unbounded<number>());
+    const source = Stream.fromQueue(q).onFinalize(
       sync(() => {
         finalized = true;
       }),
     );
-    const done = runExit(provide(source.timeout(100).toArray(), Clock, c) as any);
+    const done = runExit(provide(source.timeout(100).toArray(), Clock, c));
 
-    await run(q.offer(1));
+    await runUnchecked(q.offer(1));
     // element 1 arrives immediately; the next take then waits past the limit
     for (let i = 0; i < 5; i++) {
       await tick();
@@ -310,7 +310,7 @@ describe("timeout under TestClock", () => {
     const exit = await done;
     expect(exit._tag).toBe("Failure");
     if (exit._tag === "Failure") {
-      const err = Cause.firstFail(exit.cause)?.value as any;
+      const err = Cause.firstFail(exit.cause)?.value as StreamTimeoutError;
       expect(err).toBeInstanceOf(StreamTimeoutError);
       expect(err._tag).toBe("StreamTimeoutError");
       expect(err.ms).toBe(100);
@@ -320,22 +320,22 @@ describe("timeout under TestClock", () => {
 
   test("elements arriving before each deadline keep the stream alive", async () => {
     const c = new TestClock();
-    const q: any = await run(Queue.unbounded<number>() as any);
-    const done = run(
-      provide((Stream.fromQueue(q) as any).timeout(100).take(2).toArray(), Clock, c) as any,
+    const q = await run(Queue.unbounded<number>());
+    const done = runUnchecked(
+      provide(Stream.fromQueue(q).timeout(100).take(2).toArray(), Clock, c),
     );
-    await run(q.offer(1));
+    await runUnchecked(q.offer(1));
     await tick();
     c.advance(50); // inside the window
-    await run(q.offer(2));
+    await runUnchecked(q.offer(2));
     await tick();
     expect(await done).toEqual([1, 2]);
   });
 
   test("empty stream completes without failing", async () => {
     const c = new TestClock();
-    const result = await run(
-      provide((Stream.empty<number>() as any).timeout(100).toArray(), Clock, c) as any,
+    const result = await runUnchecked(
+      provide(Stream.empty<number>().timeout(100).toArray(), Clock, c),
     );
     expect(result).toEqual([]);
   });
@@ -350,9 +350,9 @@ describe("interruptOn", () => {
       sync(() => {
         pulls++;
         return 1;
-      }) as any,
+      }),
     );
-    const result = await run((src as any).interruptOn(ctrl.signal).toArray());
+    const result = await run(src.interruptOn(ctrl.signal).toArray());
     expect(result).toEqual([]);
     expect(pulls).toBe(0);
   });
@@ -361,9 +361,9 @@ describe("interruptOn", () => {
     const ctrl = new AbortController();
     let seen = 0;
     let finalized = false;
-    const q: any = await run(Queue.unbounded<number>() as any);
+    const q = await run(Queue.unbounded<number>());
     const done = run(
-      (Stream.fromQueue(q) as any)
+      Stream.fromQueue(q)
         .tap(() => seen++)
         .onFinalize(
           sync(() => {
@@ -374,14 +374,14 @@ describe("interruptOn", () => {
         .toArray(),
     );
 
-    await run(q.offer(1));
+    await runUnchecked(q.offer(1));
     await tick();
     ctrl.abort(); // consumer is parked on the queue take
     expect(await done).toEqual([1]);
     expect(finalized).toBe(true);
 
     // no further consumption after abort — the blocked pull was interrupted
-    await run(q.offer(2));
+    await runUnchecked(q.offer(2));
     await tick();
     await tick();
     expect(seen).toBe(1);
@@ -402,10 +402,10 @@ describe("interruptOn", () => {
 
     // A parked pull is what registers the listener — sync pulls settle the
     // race before the abort side ever runs its register.
-    const q: any = await run(Queue.unbounded<number>() as any);
-    const done = run((Stream.fromQueue(q) as any).interruptOn(fake).toArray());
+    const q = await run(Queue.unbounded<number>());
+    const done = run(Stream.fromQueue(q).interruptOn(fake).toArray());
     await tick();
-    await run(q.offer(1));
+    await runUnchecked(q.offer(1));
     await tick();
     await run(q.close());
     expect(await done).toEqual([1]);
@@ -416,7 +416,7 @@ describe("interruptOn", () => {
 
   test("failure still propagates (not converted to Done)", async () => {
     const ctrl = new AbortController();
-    const exit = await runExit((Stream.fail("boom") as any).interruptOn(ctrl.signal).toArray());
+    const exit = await runExit(Stream.fail("boom").interruptOn(ctrl.signal).toArray());
     expect(exit._tag).toBe("Failure");
     if (exit._tag === "Failure") expect(Cause.pretty(exit.cause)).toBe("Fail(boom)");
   });
@@ -427,13 +427,13 @@ describe("interruptAfter under TestClock", () => {
     const c = new TestClock();
     const done = run(
       provide(
-        (Stream.tick(10) as any)
+        Stream.tick(10)
           .map(() => 1)
           .interruptAfter(35)
           .toArray(),
         Clock,
         c,
-      ) as any,
+      ),
     );
     for (let i = 0; i < 8; i++) {
       await tick();
@@ -446,19 +446,17 @@ describe("interruptAfter under TestClock", () => {
 
   test("a stream finishing before the deadline is unaffected", async () => {
     const c = new TestClock();
-    const result = await run(
-      provide((Stream.of(1, 2, 3) as any).interruptAfter(100).toArray(), Clock, c) as any,
-    );
+    const result = await run(provide(Stream.of(1, 2, 3).interruptAfter(100).toArray(), Clock, c));
     expect(result).toEqual([1, 2, 3]);
   });
 
   test("ends gracefully mid-pull-wait and runs finalizers", async () => {
     const c = new TestClock();
     let finalized = false;
-    const q: any = await run(Queue.unbounded<number>() as any);
+    const q = await run(Queue.unbounded<number>());
     const done = run(
       provide(
-        (Stream.fromQueue(q) as any)
+        Stream.fromQueue(q)
           .onFinalize(
             sync(() => {
               finalized = true;
@@ -468,7 +466,7 @@ describe("interruptAfter under TestClock", () => {
           .toArray(),
         Clock,
         c,
-      ) as any,
+      ),
     );
     await tick();
     c.advance(51);
@@ -483,9 +481,9 @@ describe("interruptAfter under TestClock", () => {
       sync(() => {
         pulls++;
         return 1;
-      }) as any,
+      }),
     );
-    const result = await run(provide((src as any).interruptAfter(0).toArray(), Clock, c) as any);
+    const result = await run(provide(src.interruptAfter(0).toArray(), Clock, c));
     expect(result).toEqual([]);
     expect(pulls).toBe(0);
   });
@@ -493,7 +491,7 @@ describe("interruptAfter under TestClock", () => {
   test("failure before the deadline propagates", async () => {
     const c = new TestClock();
     const exit = await runExit(
-      provide((Stream.fail("boom") as any).interruptAfter(100).toArray(), Clock, c) as any,
+      provide(Stream.fail("boom").interruptAfter(100).toArray(), Clock, c),
     );
     expect(exit._tag).toBe("Failure");
     if (exit._tag === "Failure") expect(Cause.pretty(exit.cause)).toBe("Fail(boom)");

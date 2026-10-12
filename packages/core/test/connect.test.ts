@@ -31,8 +31,8 @@ const p1 = Partition(1);
 // ── Type guards ────────────────────────────────────────────────────
 
 describe("streaming typeclass guards", () => {
-  const codec = { encode: (v: any) => v, decode: (v: any) => v };
-  const mockStreamable = { subscribe: () => null as any, codec };
+  const codec = { encode: (v: unknown) => v, decode: (v: unknown) => v };
+  const mockStreamable = { subscribe: () => null, codec };
   const mockSinkable = { publish: () => succeed(undefined), codec };
 
   test("isStreamable", () => {

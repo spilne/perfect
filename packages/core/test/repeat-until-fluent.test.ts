@@ -1,5 +1,6 @@
 import { describe, test, expect } from "bun:test";
 import { eff, succeed, sync, run, type RepeatTimeoutError, type Eff, type Throws } from "../src";
+import { runUnchecked } from "./run-unchecked";
 
 describe(".repeatUntil — fluent", () => {
   test("succeeds when condition met", async () => {
@@ -8,9 +9,9 @@ describe(".repeatUntil — fluent", () => {
       calls++;
       return yield* succeed({ status: calls === 3 ? "done" : "pending" });
     });
-    const result = await run(
-      (request as any).repeatUntil({
-        until: (r: any) => r.status === "done",
+    const result = await runUnchecked(
+      request.repeatUntil({
+        until: (r) => r.status === "done",
         intervalMs: 1,
       }),
     );
@@ -21,12 +22,12 @@ describe(".repeatUntil — fluent", () => {
   test("fails with RepeatTimeoutError carrying lastResult when maxAttempts hit", async () => {
     let calls = 0;
     const request = sync(() => ({ n: ++calls }));
-    const program = (request as any).repeatUntil({
+    const program = request.repeatUntil({
       until: () => false,
       intervalMs: 1,
       maxAttempts: 4,
     });
-    await expect(run(program)).rejects.toMatchObject({
+    await expect(runUnchecked(program)).rejects.toMatchObject({
       _tag: "RepeatTimeoutError",
       reason: "maxAttempts",
       attempts: 4,
@@ -36,12 +37,12 @@ describe(".repeatUntil — fluent", () => {
 
   test("fails with lastResult when maxDuration hit", async () => {
     const request = sync(() => ({ marker: "observed" }));
-    const program = (request as any).repeatUntil({
+    const program = request.repeatUntil({
       until: () => false,
       intervalMs: 30,
       maxDurationMs: 50,
     });
-    await expect(run(program)).rejects.toMatchObject({
+    await expect(runUnchecked(program)).rejects.toMatchObject({
       _tag: "RepeatTimeoutError",
       reason: "maxDuration",
       lastResult: { marker: "observed" },
@@ -58,10 +59,10 @@ describe(".catchTag narrows RepeatTimeoutError<A>", () => {
     const request: Eff<Job, Throws<never>> = succeed({
       id: "j1",
       status: "pending",
-    } as Job) as any;
+    } as Job);
 
     // Whole pipeline: fluent poll → catchTag with typed narrowing.
-    const program = (request as any)
+    const program = request
       .repeatUntil({
         until: (j: Job) => j.status === "done",
         intervalMs: 1,
@@ -78,7 +79,7 @@ describe(".catchTag narrows RepeatTimeoutError<A>", () => {
         });
       });
 
-    const result = await run(program as any);
+    const result = await run(program);
     expect(result).toEqual({
       fellBack: true,
       lastId: "j1",
@@ -92,9 +93,9 @@ describe(".repeatUntilWithBackoff — fluent", () => {
   test("succeeds, includes lastResult on timeout", async () => {
     let calls = 0;
     const request = sync(() => ({ n: ++calls }));
-    const success = await run(
-      (request as any).repeatUntilWithBackoff({
-        until: (r: any) => r.n === 3,
+    const success = await runUnchecked(
+      request.repeatUntilWithBackoff({
+        until: (r) => r.n === 3,
         initialIntervalMs: 1,
         maxIntervalMs: 5,
       }),
@@ -104,8 +105,8 @@ describe(".repeatUntilWithBackoff — fluent", () => {
     // Exhaustion case
     calls = 0;
     await expect(
-      run(
-        (sync(() => ({ n: ++calls })) as any).repeatUntilWithBackoff({
+      runUnchecked(
+        sync(() => ({ n: ++calls })).repeatUntilWithBackoff({
           until: () => false,
           initialIntervalMs: 1,
           maxIntervalMs: 5,

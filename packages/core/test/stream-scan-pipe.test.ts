@@ -1,5 +1,17 @@
 import { describe, expect, test } from "bun:test";
-import { Clock, Pipe, Ref, Stream, TestClock, fail, provide, run, runExit, succeed } from "../src";
+import {
+  Clock,
+  Pipe,
+  Ref,
+  Stream,
+  TestClock,
+  fail,
+  provide,
+  run,
+  runExit,
+  succeed,
+  type Throws,
+} from "../src";
 import { runUnchecked } from "./run-unchecked";
 
 describe("Stream.scanEffect", () => {
@@ -33,7 +45,7 @@ describe("Stream.scanEffect", () => {
     const exit = await runExit(
       Stream.of(1, 2, 3)
         .scanEffect(0, (acc, n) => (n === 2 ? fail("boom") : succeed(acc + n)))
-        .toArray() as any,
+        .toArray(),
     );
     expect(exit._tag).toBe("Failure");
   });
@@ -106,12 +118,12 @@ describe("Pipe constructors", () => {
   });
 
   test("evalMap pipe surfaces its own effects", async () => {
-    const parse = Pipe.evalMap<string, number, any>((s) =>
+    const parse = Pipe.evalMap<string, number, Throws<string>>((s) =>
       /^\d+$/.test(s) ? succeed(Number(s)) : fail(`bad: ${s}`),
     );
     expect(await runUnchecked(Stream.of("1", "2").through(parse).toArray())).toEqual([1, 2]);
 
-    const exit = await runExit(Stream.of("1", "x").through(parse).toArray() as any);
+    const exit = await runExit(Stream.of("1", "x").through(parse).toArray());
     expect(exit._tag).toBe("Failure");
   });
 });

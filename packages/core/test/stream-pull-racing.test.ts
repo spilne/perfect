@@ -208,7 +208,7 @@ const scenarios: Record<string, Scenario> = {
 
 const NEVER_MS = 1_000_000;
 
-const wrappers: Record<string, (stream: Stream<unknown, never>) => Stream<unknown, any>> = {
+const wrappers: Record<string, (stream: Stream<unknown, never>) => Stream<unknown, unknown>> = {
   none: (stream) => stream,
   timeout: (stream) => stream.timeout(1_000),
   deadline: (stream) => stream.deadline(10_000),
@@ -218,28 +218,28 @@ const wrappers: Record<string, (stream: Stream<unknown, never>) => Stream<unknow
   "timeout + interruptAfter": (stream) => stream.timeout(1_000).interruptAfter(10_000),
 };
 
-interface VirtualRun {
-  readonly result: FiberResult<any> | null;
+interface VirtualRun<A = unknown> {
+  readonly result: FiberResult<A> | null;
   readonly now: number;
   /** Fibers started during the run that had not ended once it settled. */
-  readonly leaked: readonly Fiber<any>[];
+  readonly leaked: readonly Fiber<unknown>[];
 }
 
-const runVirtual = (params: {
-  effect: Eff<unknown, any>;
+const runVirtual = <A>(params: {
+  effect: Eff<A, unknown>;
   maxMs?: number;
-  onTick?: (now: number, fiber: Fiber<unknown>) => void;
-}): VirtualRun => {
+  onTick?: (now: number, fiber: Fiber<A, never>) => void;
+}): VirtualRun<A> => {
   const { effect, maxMs = 2_000, onTick } = params;
   const scheduler = new SyncScheduler();
   const clock = new TestClock();
-  const live = new Set<Fiber<any>>();
+  const live = new Set<Fiber<unknown>>();
   const unsubscribe = addFiberSupervisor({
     onStart: (fiber) => live.add(fiber),
     onEnd: (fiber) => live.delete(fiber),
   });
   try {
-    const fiber = runFiber(provide(effect, Clock, clock) as Eff<unknown, never>, scheduler);
+    const fiber = runFiber(provide(effect, Clock, clock) as Eff<A, never>, scheduler);
     scheduler.flush();
     while (fiber.result === null && clock.now() < maxMs) {
       clock.advance(1);
@@ -252,11 +252,11 @@ const runVirtual = (params: {
   }
 };
 
-const collect = (stream: Stream<unknown, any>): Eff<string[], any> =>
-  stream.map(show).toArray() as Eff<string[], any>;
+const collect = (stream: Stream<unknown, unknown>): Eff<string[], unknown> =>
+  stream.map(show).toArray() as Eff<string[], unknown>;
 
 /** Values with the virtual time each was delivered downstream. */
-const timeline = (stream: Stream<unknown, any>): Eff<[string, number][], any> =>
+const timeline = (stream: Stream<unknown, unknown>): Eff<[string, number][], unknown> =>
   stream
     .evalMap((value) => clockNow.map((now) => [show(value), now] as [string, number]))
     .toArray();
@@ -956,14 +956,15 @@ describe("cleanup of a cut pull", () => {
         sleep(20),
       ),
     );
-  const sources: Record<string, (build: () => Stream<number, any>) => Stream<number, any>> = {
-    linear: (build) => build(),
-    merge: (build) => build().merge(Stream.empty<number>()),
-  };
+  const sources: Record<string, (build: () => Stream<number, unknown>) => Stream<number, unknown>> =
+    {
+      linear: (build) => build(),
+      merge: (build) => build().merge(Stream.empty<number>()),
+    };
 
   const wrappers: {
     name: string;
-    wrap: (stream: Stream<number, any>) => Stream<number, any>;
+    wrap: (stream: Stream<number, unknown>) => Stream<number, unknown>;
     error?: string;
   }[] = [
     { name: "timeout", wrap: (s) => s.timeout(5), error: "StreamTimeoutError" },
@@ -1128,7 +1129,11 @@ describe("retry and reuse", () => {
     {
       name: "parJoin",
       build: () =>
-        Stream.of<Stream<number, any>>(Stream.of(1), Stream.fail(new SourceError({})), Stream.of(3))
+        Stream.of<Stream<number, unknown>>(
+          Stream.of(1),
+          Stream.fail(new SourceError({})),
+          Stream.of(3),
+        )
           .rechunk(1)
           .parJoin(1),
     },

@@ -21,7 +21,7 @@ describe("runExit", () => {
     const exit = await runExit(
       sync(() => {
         throw new Error("oops");
-      }) as any,
+      }),
     );
     expect(Exit.isFailure(exit)).toBe(true);
     if (Exit.isFailure(exit)) {
@@ -31,7 +31,7 @@ describe("runExit", () => {
   });
 
   test("never throws — multiple failures composed", async () => {
-    const exit = await runExit(fail("a") as any);
+    const exit = await runExit(fail("a"));
     expect(
       Exit.match(
         exit,
@@ -58,14 +58,14 @@ describe("runSafe", () => {
   test("defect throws by default", async () => {
     const eff = sync(() => {
       throw new Error("oops");
-    }) as any;
+    });
     await expect(runSafe(eff)).rejects.toBeInstanceOf(Error);
   });
 
   test("catchDefects: true routes defects to error field", async () => {
     const eff = sync(() => {
       throw new Error("oops");
-    }) as any;
+    });
     const { data, error } = await runSafe(eff, { catchDefects: true });
     expect(data).toBeNull();
     expect(error).toBeInstanceOf(Error);

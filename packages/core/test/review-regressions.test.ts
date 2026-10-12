@@ -12,7 +12,9 @@ import {
   suspend,
   sync,
   SyncScheduler,
+  type Eff,
 } from "../src";
+import { runFiberUnchecked } from "./run-unchecked";
 
 describe("async registration failures", () => {
   test("registration defects settle the fiber and run finalizers", () => {
@@ -85,8 +87,8 @@ describe("pool acquisition cleanup", () => {
           release: () => succeed(undefined),
         }),
       );
-      const first = runFiber(pool.use(succeed) as any, scheduler);
-      const second = runFiber(pool.use(succeed) as any, scheduler);
+      const first = runFiberUnchecked(pool.use(succeed), scheduler);
+      const second = runFiberUnchecked(pool.use(succeed), scheduler);
       scheduler.flush();
       expect(first.status).toBe("suspended");
       expect(second.status).toBe("suspended");
@@ -120,10 +122,10 @@ describe("pool acquisition cleanup", () => {
           }),
       }),
     );
-    const first = runFiber(
-      pool.use(() => {
+    const first = runFiberUnchecked(
+      pool.use((): Eff<never, never> => {
         throw error;
-      }) as any,
+      }),
       scheduler,
     );
     scheduler.flush();

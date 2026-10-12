@@ -264,7 +264,7 @@ describe("Stream.async cleanup on normal completion", () => {
       emit(3);
       return sync(() => () => {
         cleanedUp = true;
-      }) as any;
+      });
     });
 
     const result = await run(s.take(3).toArray());
@@ -280,7 +280,7 @@ describe("Stream.async cleanup on normal completion", () => {
       close();
       return sync(() => () => {
         cleanups++;
-      }) as any;
+      });
     });
 
     const result = await run(s.toArray());

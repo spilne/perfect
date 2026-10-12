@@ -27,6 +27,7 @@ import {
   Barrier,
   PubSub,
   SubscriptionRef,
+  type Eff,
 } from "../src";
 import {
   Effect,
@@ -49,7 +50,7 @@ group(`Ref — get/set × ${N}`, () => {
           yield* r.set(i);
           yield* r.get;
         }
-      }) as any,
+      }),
     );
   });
 
@@ -85,7 +86,7 @@ group(`Deferred — make + succeed + await × ${N}`, () => {
           yield* d.succeed(i);
           yield* d.await;
         }
-      }) as any,
+      }),
     );
   });
 
@@ -123,7 +124,8 @@ group(`Queue — offer + take × ${Q_N}`, () => {
         const q = yield* Queue.unbounded<number>();
         for (let i = 0; i < Q_N; i++) yield* q.offer(i);
         for (let i = 0; i < Q_N; i++) yield* q.take();
-      }) as any,
+        // The queue is never closed here, so QueueClosed can't happen.
+      }) as Eff<void, never>,
     );
   });
 
@@ -153,7 +155,7 @@ group(`Semaphore — withPermit × ${S_N}`, () => {
       eff(function* () {
         const s = yield* Semaphore.make(10);
         for (let i = 0; i < S_N; i++) yield* s.withPermit(succeed(i));
-      }) as any,
+      }),
     );
   });
 
@@ -176,7 +178,8 @@ group(`CircuitBreaker — protect (closed, all success) × ${CB_N}`, () => {
     await run(
       eff(function* () {
         for (let i = 0; i < CB_N; i++) yield* cb.protect(succeed(i));
-      }) as any,
+        // Every call succeeds and the threshold is far away: the breaker never opens.
+      }) as Eff<void, never>,
     );
   });
 
@@ -203,7 +206,7 @@ group(`Singleflight — do (different keys, no contention) × ${SF_N}`, () => {
     await run(
       eff(function* () {
         for (let i = 0; i < SF_N; i++) yield* sf.do(`k${i}`, succeed(i));
-      }) as any,
+      }),
     );
   });
 
@@ -211,7 +214,7 @@ group(`Singleflight — do (different keys, no contention) × ${SF_N}`, () => {
     await run(
       eff(function* () {
         for (let i = 0; i < SF_N; i++) yield* succeed(i);
-      }) as any,
+      }),
     );
   });
 });
@@ -220,16 +223,13 @@ group(`Singleflight — do (different keys, no contention) × ${SF_N}`, () => {
 
 const RL_N = 500;
 group(`RateLimiter — sliding-window tryAcquire × ${RL_N}`, () => {
-  const benchStrategy = (
-    name: string,
-    factory: (opts: { limit: number; windowMs: number }) => any,
-  ) =>
+  const benchStrategy = (name: string, factory: typeof RateLimiter.slidingWindow) =>
     bench(name, async () => {
       await run(
         eff(function* () {
           const rl = yield* factory({ limit: 10000, windowMs: 1000 });
           for (let i = 0; i < RL_N; i++) yield* rl.tryAcquire;
-        }) as any,
+        }),
       );
     });
 
@@ -255,7 +255,7 @@ group(`Latch — countDown all + await × ${L_N}`, () => {
           for (let j = 0; j < L_N / 50; j++) yield* l.countDown;
           yield* l.await;
         }
-      }) as any,
+      }),
     );
   });
 });
@@ -270,7 +270,7 @@ group(`Barrier — single party rounds × 100`, () => {
           const b = yield* Barrier.make({ parties: 1 });
           yield* b.await;
         }
-      }) as any,
+      }),
     );
   });
 });
@@ -317,7 +317,7 @@ group(`SubscriptionRef — set × ${SR_N}`, () => {
       eff(function* () {
         const ref = yield* SubscriptionRef.make(0);
         for (let i = 0; i < SR_N; i++) yield* ref.set(i);
-      }) as any,
+      }),
     );
   });
 
@@ -326,7 +326,7 @@ group(`SubscriptionRef — set × ${SR_N}`, () => {
       eff(function* () {
         const ref = yield* Ref.make(0);
         for (let i = 0; i < SR_N; i++) yield* ref.set(i);
-      }) as any,
+      }),
     );
   });
 });

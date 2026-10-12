@@ -8,10 +8,13 @@ import {
   runSync,
   Random,
   TestRandom,
+  type Eff,
+  type Needs,
   type PropertyFailure,
 } from "../src";
+import { runUnchecked } from "./run-unchecked";
 
-const withSeed = <A>(seed: number, eff: any): A =>
+const withSeed = <A>(seed: number, eff: Eff<A, Needs<Random, "Random">>): A =>
   runSync(provide(eff, Random, new TestRandom(seed)));
 
 describe("Gen — primitive generators", () => {
@@ -115,7 +118,7 @@ describe("forAll", () => {
       Random,
       r,
     );
-    await run(program as any);
+    await runUnchecked(program);
   });
 
   test("fails with the counterexample when the property breaks", async () => {
@@ -123,15 +126,15 @@ describe("forAll", () => {
     let failure: PropertyFailure<number> | null = null;
 
     const program = provide(
-      (forAll(Gen.int(0, 1000), 200, (n) => n < 500) as any).catch((f: PropertyFailure<number>) => {
+      forAll(Gen.int(0, 1000), 200, (n) => n < 500).catch((f: PropertyFailure<number>) => {
         failure = f;
-        return succeed(undefined as any);
+        return succeed(undefined);
       }),
       Random,
       r,
     );
 
-    await run(program as any);
+    await run(program);
     expect(failure).not.toBeNull();
     expect(failure!.value).toBeGreaterThanOrEqual(500);
     expect(failure!.attempt).toBeGreaterThan(0);
@@ -142,27 +145,28 @@ describe("forAll", () => {
     const r = new TestRandom(3);
     const program = provide(
       forAll(Gen.int(-100, 100), 50, (n) => {
-        // Eff-returning predicate
-        return (Random.get as any).map((_rnd: Random) => Math.abs(n) <= 100);
+        // Eff-returning predicate. It runs where Random is provided, but
+        // forAll's type only takes predicates that need nothing.
+        return Random.get.map((_rnd: Random) => Math.abs(n) <= 100) as Eff<boolean, never>;
       }),
       Random,
       r,
     );
-    await run(program as any);
+    await runUnchecked(program);
   });
 
   test("forAll is deterministic under TestRandom", async () => {
     const program = (seed: number) =>
       provide(
-        (forAll(Gen.int(0, 1000), 5, (n) => n < 200) as any).catch((f: PropertyFailure<number>) =>
+        forAll(Gen.int(0, 1000), 5, (n) => n < 200).catch((f: PropertyFailure<number>) =>
           succeed(f.value),
         ),
         Random,
         new TestRandom(seed),
       );
 
-    const a = await run(program(11) as any);
-    const b = await run(program(11) as any);
+    const a = await run(program(11));
+    const b = await run(program(11));
     expect(a).toBe(b);
   });
 });

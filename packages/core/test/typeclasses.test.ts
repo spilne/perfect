@@ -98,7 +98,7 @@ describe("canonicalJSON + payloadHash", () => {
   });
 
   test("throws on cycles", () => {
-    const a: any = {};
+    const a: { self?: unknown } = {};
     a.self = a;
     expect(() => canonicalJSON(a)).toThrow(/cyclic/);
   });

@@ -40,7 +40,7 @@ describe("Stream.parEvalMap", () => {
   test("propagates mapper failures", async () => {
     const exit = await runExit(
       Stream.of(1, 2, 3)
-        .parEvalMap(2, (x) => (x === 2 ? fail("bad item") : sleep(1).map(() => x)) as any)
+        .parEvalMap(2, (x) => (x === 2 ? fail("bad item") : sleep(1).map(() => x)))
         .toArray(),
     );
 
@@ -67,7 +67,7 @@ describe("Stream.parEvalMapUnordered", () => {
   test("propagates mapper failures", async () => {
     const exit = await runExit(
       Stream.of(1, 2, 3)
-        .parEvalMapUnordered(2, (x) => (x === 2 ? fail("bad item") : sleep(1).map(() => x)) as any)
+        .parEvalMapUnordered(2, (x) => (x === 2 ? fail("bad item") : sleep(1).map(() => x)))
         .toArray(),
     );
 
@@ -98,7 +98,7 @@ describe("Stream.groupWithin", () => {
         .take(5)
         .evalMap((x) => sleep(5).map(() => x))
         .groupWithin(2, 500)
-        .map((c: any) => c.toArray())
+        .map((c) => c.toArray())
         .take(2)
         .toArray(),
     );

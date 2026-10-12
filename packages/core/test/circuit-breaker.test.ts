@@ -12,6 +12,7 @@ import {
   type Eff,
   type Throws,
 } from "../src";
+import { runUnchecked } from "./run-unchecked";
 
 describe("CircuitBreaker", () => {
   test("starts closed", () => {
@@ -28,20 +29,20 @@ describe("CircuitBreaker", () => {
 
   test("counts consecutive typed failures", async () => {
     const cb = CircuitBreaker.make<string>({ failureThreshold: 3, resetTimeoutMs: 100 });
-    const failing: Eff<never, Throws<string>> = fail("nope") as any;
-    await expect(run(cb.protect(failing) as any)).rejects.toBe("nope");
-    await expect(run(cb.protect(failing) as any)).rejects.toBe("nope");
+    const failing: Eff<never, Throws<string>> = fail("nope");
+    await expect(runUnchecked(cb.protect(failing))).rejects.toBe("nope");
+    await expect(runUnchecked(cb.protect(failing))).rejects.toBe("nope");
     expect(runSync(cb.state)).toBe("closed");
     expect(runSync(cb.failures)).toBe(2);
-    await expect(run(cb.protect(failing) as any)).rejects.toBe("nope");
+    await expect(runUnchecked(cb.protect(failing))).rejects.toBe("nope");
     expect(runSync(cb.state)).toBe("open");
     expect(runSync(cb.failures)).toBe(3);
   });
 
   test("rejects fast with CircuitOpen when open", async () => {
     const cb = CircuitBreaker.make<string>({ failureThreshold: 1, resetTimeoutMs: 100 });
-    const failing: Eff<never, Throws<string>> = fail("trip") as any;
-    await expect(run(cb.protect(failing) as any)).rejects.toBe("trip");
+    const failing: Eff<never, Throws<string>> = fail("trip");
+    await expect(runUnchecked(cb.protect(failing))).rejects.toBe("trip");
     expect(runSync(cb.state)).toBe("open");
 
     // Subsequent call rejects without invoking the inner effect
@@ -49,16 +50,15 @@ describe("CircuitBreaker", () => {
     const tracked: Eff<number, Throws<string>> = sync(() => {
       invoked = true;
       return 1;
-    }) as any;
-    const result = await (cb as any).protect(tracked).catch((e: any) => succeed({ caught: e }));
-    const exit = await run(result);
+    });
+    const exit = await run(cb.protect(tracked).catch((e) => succeed({ caught: e })));
     expect(invoked).toBe(false);
-    expect((exit as any).caught._tag).toBe("CircuitOpen");
+    expect(exit).toMatchObject({ caught: { _tag: "CircuitOpen" } });
   });
 
   test("transitions to half-open after reset timeout", async () => {
     const cb = CircuitBreaker.make<string>({ failureThreshold: 1, resetTimeoutMs: 30 });
-    await expect(run(cb.protect(fail("boom") as any) as any)).rejects.toBe("boom");
+    await expect(runUnchecked(cb.protect(fail("boom")))).rejects.toBe("boom");
     expect(runSync(cb.state)).toBe("open");
 
     await new Promise((r) => setTimeout(r, 35));
@@ -67,7 +67,7 @@ describe("CircuitBreaker", () => {
 
   test("half-open success closes the breaker", async () => {
     const cb = CircuitBreaker.make<string>({ failureThreshold: 1, resetTimeoutMs: 20 });
-    await expect(run(cb.protect(fail("a") as any) as any)).rejects.toBe("a");
+    await expect(runUnchecked(cb.protect(fail("a")))).rejects.toBe("a");
     await new Promise((r) => setTimeout(r, 25));
     expect(runSync(cb.state)).toBe("half-open");
 
@@ -78,11 +78,11 @@ describe("CircuitBreaker", () => {
 
   test("half-open failure re-opens the breaker", async () => {
     const cb = CircuitBreaker.make<string>({ failureThreshold: 1, resetTimeoutMs: 20 });
-    await expect(run(cb.protect(fail("a") as any) as any)).rejects.toBe("a");
+    await expect(runUnchecked(cb.protect(fail("a")))).rejects.toBe("a");
     await new Promise((r) => setTimeout(r, 25));
     expect(runSync(cb.state)).toBe("half-open");
 
-    await expect(run(cb.protect(fail("b") as any) as any)).rejects.toBe("b");
+    await expect(runUnchecked(cb.protect(fail("b")))).rejects.toBe("b");
     expect(runSync(cb.state)).toBe("open");
   });
 
@@ -93,21 +93,21 @@ describe("CircuitBreaker", () => {
       isFailure: (e) => e === "fatal",
     });
     // Non-fatal failures don't count
-    await expect(run(cb.protect(fail("transient") as any) as any)).rejects.toBe("transient");
-    await expect(run(cb.protect(fail("transient") as any) as any)).rejects.toBe("transient");
+    await expect(runUnchecked(cb.protect(fail("transient")))).rejects.toBe("transient");
+    await expect(runUnchecked(cb.protect(fail("transient")))).rejects.toBe("transient");
     expect(runSync(cb.state)).toBe("closed");
     expect(runSync(cb.failures)).toBe(0);
 
     // Fatal ones do
-    await expect(run(cb.protect(fail("fatal") as any) as any)).rejects.toBe("fatal");
-    await expect(run(cb.protect(fail("fatal") as any) as any)).rejects.toBe("fatal");
+    await expect(runUnchecked(cb.protect(fail("fatal")))).rejects.toBe("fatal");
+    await expect(runUnchecked(cb.protect(fail("fatal")))).rejects.toBe("fatal");
     expect(runSync(cb.state)).toBe("open");
   });
 
   test("success resets the failure counter", async () => {
     const cb = CircuitBreaker.make<string>({ failureThreshold: 3, resetTimeoutMs: 100 });
-    await expect(run(cb.protect(fail("a") as any) as any)).rejects.toBe("a");
-    await expect(run(cb.protect(fail("b") as any) as any)).rejects.toBe("b");
+    await expect(runUnchecked(cb.protect(fail("a")))).rejects.toBe("a");
+    await expect(runUnchecked(cb.protect(fail("b")))).rejects.toBe("b");
     expect(runSync(cb.failures)).toBe(2);
 
     expect(await run(cb.protect(succeed(42)).orDie())).toBe(42);
@@ -117,7 +117,7 @@ describe("CircuitBreaker", () => {
 
   test("reset() forces back to closed", async () => {
     const cb = CircuitBreaker.make<string>({ failureThreshold: 1, resetTimeoutMs: 9999 });
-    await expect(run(cb.protect(fail("trip") as any) as any)).rejects.toBe("trip");
+    await expect(runUnchecked(cb.protect(fail("trip")))).rejects.toBe("trip");
     expect(runSync(cb.state)).toBe("open");
     runSync(cb.reset());
     expect(runSync(cb.state)).toBe("closed");
@@ -144,7 +144,7 @@ describe("CircuitBreaker", () => {
     // What matters: after the burst, the breaker IS open.
     await Promise.all(
       Array.from({ length: 20 }, (_, i) =>
-        run((cb.protect(fail(`f${i}`) as any) as any).catch((e: any) => succeed({ caught: e }))),
+        run(cb.protect(fail(`f${i}`)).catch((e) => succeed({ caught: e }))),
       ),
     );
     expect(runSync(cb.state)).toBe("open");
@@ -155,17 +155,15 @@ describe("CircuitBreaker", () => {
     const tracked = sync(() => {
       invoked = true;
       return 1;
-    }) as any;
-    const rejected = await run(
-      (cb.protect(tracked) as any).catch((e: any) => succeed({ caught: e })),
-    );
+    });
+    const rejected = await run(cb.protect(tracked).catch((e) => succeed({ caught: e })));
     expect(invoked).toBe(false);
-    expect((rejected as any).caught._tag).toBe("CircuitOpen");
+    expect(rejected).toMatchObject({ caught: { _tag: "CircuitOpen" } });
   });
 
   test("half-open: only one probe at a time, the others see open", async () => {
     const cb = CircuitBreaker.make<string>({ failureThreshold: 1, resetTimeoutMs: 20 });
-    await expect(run(cb.protect(fail("trip") as any) as any)).rejects.toBe("trip");
+    await expect(runUnchecked(cb.protect(fail("trip")))).rejects.toBe("trip");
     expect(runSync(cb.state)).toBe("open");
 
     await new Promise((r) => setTimeout(r, 25));
@@ -188,8 +186,8 @@ describe("CircuitBreaker", () => {
 
   test("half-open: a probe that dies lets the next call probe", async () => {
     const cb = CircuitBreaker.make<string>({ failureThreshold: 1, resetTimeoutMs: 0 });
-    await expect(run(cb.protect(fail("trip") as any) as any)).rejects.toBe("trip");
-    await expect(run(cb.protect(die("boom")) as any)).rejects.toBe("boom");
+    await expect(runUnchecked(cb.protect(fail("trip")))).rejects.toBe("trip");
+    await expect(runUnchecked(cb.protect(die("boom")))).rejects.toBe("boom");
     expect(await run(cb.protect(succeed("ok")).orDie())).toBe("ok");
     expect(runSync(cb.state)).toBe("closed");
   });

@@ -1,7 +1,17 @@
 import { describe, test, expect } from "bun:test";
-import { provide, run, Clock, TestClock, Log, Logger, TestLogger, levelEnabled } from "../src";
+import {
+  provide,
+  run,
+  Clock,
+  TestClock,
+  Log,
+  Logger,
+  TestLogger,
+  levelEnabled,
+  type Eff,
+} from "../src";
 
-function withLogger(eff: any, logger: TestLogger, clock?: TestClock) {
+function withLogger<A, S>(eff: Eff<A, S>, logger: TestLogger, clock?: TestClock) {
   const withLog = provide(eff, Logger, logger);
   return clock ? provide(withLog, Clock, clock) : withLog;
 }
@@ -22,7 +32,7 @@ describe("Log levels", () => {
           .flatMap(() => Log.warn("kept"))
           .flatMap(() => Log.error("also kept")),
         logger,
-      ) as any,
+      ),
     );
     expect(logger.messages).toEqual(["kept", "also kept"]);
     expect(logger.atLevel("error").length).toBe(1);
@@ -33,7 +43,7 @@ describe("Log annotations + timestamps", () => {
   test("timestamp reads the Clock service", async () => {
     const logger = new TestLogger();
     const clock = new TestClock(123_456);
-    await run(withLogger(Log.info("hello"), logger, clock) as any);
+    await run(withLogger(Log.info("hello"), logger, clock));
     expect(logger.entries[0]!.timestamp).toBe(123_456);
   });
 
@@ -46,7 +56,7 @@ describe("Log annotations + timestamps", () => {
       { requestId: "r-1" },
     );
 
-    await run(withLogger(program, logger) as any);
+    await run(withLogger(program, logger));
 
     expect(logger.entries[0]!.annotations).toEqual({ requestId: "r-1" });
     expect(logger.entries[1]!.annotations).toEqual({ requestId: "r-1", span: "child", extra: 1 });
@@ -60,14 +70,14 @@ describe("Log annotations + timestamps", () => {
       withLogger(
         Log.annotated(Log.info("m", { requestId: "call" }), { requestId: "region" }),
         logger,
-      ) as any,
+      ),
     );
     expect(logger.entries[0]!.annotations).toEqual({ requestId: "call" });
   });
 
   test("default logger context works without provide", async () => {
     // just proves the seeded default doesn't blow up (writes to console)
-    await run(Log.debug("dropped by default info level") as any);
+    await run(Log.debug("dropped by default info level"));
     expect(true).toBe(true);
   });
 });

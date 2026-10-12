@@ -67,7 +67,7 @@ describe("join under a timeout", () => {
     // A daemon, so it keeps running after the run() that started it ends.
     const fiber = await run(forkDaemon(sleep(1_000)));
     for (let i = 0; i < 100; i++) await run(timeoutOption(join(fiber), 0));
-    expect(((fiber as any).listeners ?? []).length).toBe(0);
+    expect((fiber["listeners"] ?? []).length).toBe(0);
     fiber.interrupt();
   });
 });

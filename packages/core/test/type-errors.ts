@@ -511,7 +511,7 @@ type Many =
   | Throws<{ readonly _tag: "E8" }>
   | Throws<{ readonly _tag: "E9" }>
   | Throws<{ readonly _tag: "E10" }>;
-const _largeUnion: Eff<number, Many> = fail(new NotFound()) as any;
+const _largeUnion: Eff<number, Many> = fail(new NotFound());
 const _largeUnionHandled = _largeUnion
   .catchTag("NotFound", () => succeed(1))
   .catchTag("Forbidden", () => succeed(2))

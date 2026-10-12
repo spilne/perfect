@@ -132,8 +132,12 @@ interface Ctx {
   readonly holdsShared: boolean;
 }
 
+// A generated program: its value and typed errors don't matter, only how it
+// starts, waits and ends.
+type Program = Eff<unknown, Throws<unknown>>;
+
 interface Gate {
-  readonly resume: (effect: Eff<any, any>) => void;
+  readonly resume: (effect: Eff<unknown, Throws<string>>) => void;
   readonly inFinalizer: boolean;
   cancelled: boolean;
   fired: boolean;
@@ -266,18 +270,18 @@ async function runIteration(params: {
   const nodes: Node[] = [];
   const started = new Set<number>();
   const inProgress = new Set<Node>();
-  const fibers = new Set<Fiber<any>>();
+  const fibers = new Set<Fiber<unknown>>();
   // Effects the program itself runs on a child fiber (all, race, timeout,
   // fork). Only those fibers are interrupted directly; a stream's internal
   // driver and worker fibers are only ever interrupted through the stream.
   const childEffects = new WeakSet<object>();
-  const interruptibleChildren = new Set<Fiber<any>>();
+  const interruptibleChildren = new Set<Fiber<unknown>>();
   const generatorRuns: Array<{ started: number; finished: number }> = [];
-  const child = (effect: Eff<any, any>): Eff<any, any> => {
+  const child = (effect: Program): Program => {
     childEffects.add(effect);
     return effect;
   };
-  const ends = new Map<Fiber<any>, number>();
+  const ends = new Map<Fiber<unknown>, number>();
   let nodeBudget = 28;
 
   const makeNode = (kind: NodeKind, ancestors: readonly Ancestor[], group = -1): Node => {
@@ -342,8 +346,8 @@ async function runIteration(params: {
     cancellable: boolean;
     inFinalizer: boolean;
     holder?: { gate: Gate | null };
-  }): Eff<any, any> =>
-    async<any, any>((resume) => {
+  }): Eff<unknown, Throws<string>> =>
+    async<unknown, string>((resume) => {
       const gate: Gate = {
         resume,
         inFinalizer: params.inFinalizer,
@@ -361,7 +365,7 @@ async function runIteration(params: {
   const promiseLeaf = (params: {
     inFinalizer: boolean;
     holder?: { promise: ManualPromise | null };
-  }): Eff<any, any> =>
+  }): Program =>
     tryPromise(
       () =>
         new Promise<number>((resolve, reject) => {
@@ -371,13 +375,13 @@ async function runIteration(params: {
         }),
       (e) => e,
     );
-  const timedSleep = (ms: number, holder: { deadline: number }): Eff<any, any> =>
+  const timedSleep = (ms: number, holder: { deadline: number }): Program =>
     sync(() => {
       holder.deadline = clock.now() + ms;
     }).flatMap(() => clock.sleep(ms));
 
   // What a finalizer waits on, and how to tell that the wait really finished.
-  const finalizerWait = (): { effect: Eff<any, any>; finished: () => boolean } => {
+  const finalizerWait = (): { effect: Program; finished: () => boolean } => {
     switch (ri(12)) {
       case 10: {
         // Interrupted at once when the finalizer runs for an interrupted fiber.
@@ -451,7 +455,7 @@ async function runIteration(params: {
       }
     }
   };
-  const finalizer = (node: Node): Eff<any, any> => {
+  const finalizer = (node: Node): Program => {
     const { effect, finished } = finalizerWait();
     return sync(() => finalizerStarted(node))
       .flatMap(() => effect)
@@ -464,8 +468,8 @@ async function runIteration(params: {
       .catchAllCause((cause) => sync(() => finalizerDone(node)).flatMap(() => failCause(cause)));
   };
 
-  const leaf = (ctx: Ctx): Eff<any, any> => {
-    let effect: Eff<any, any>;
+  const leaf = (ctx: Ctx): Program => {
+    let effect: Program;
     switch (ri(13)) {
       case 0:
       case 9:
@@ -525,7 +529,7 @@ async function runIteration(params: {
     };
   };
 
-  const acquireReleaseNode = (ctx: Ctx): Eff<any, any> => {
+  const acquireReleaseNode = (ctx: Ctx): Program => {
     const owner = nodes[ctx.scopeGroup]!;
     const release = makeNode("rel", owner.ancestors, owner.id);
     const acquireWait =
@@ -546,8 +550,8 @@ async function runIteration(params: {
   const finalizerNode = (params: {
     ctx: Ctx;
     depth: number;
-    attach: (body: Eff<any, any>, fin: Eff<any, any>) => Eff<any, any>;
-  }): Eff<any, any> => {
+    attach: (body: Program, fin: Program) => Program;
+  }): Program => {
     const { ctx, depth, attach } = params;
     const node = makeNode("fin", ctx.ancestors);
     const inner: Ctx = {
@@ -564,7 +568,7 @@ async function runIteration(params: {
     );
   };
 
-  const withPermit = (depth: number, ctx: Ctx): Eff<any, any> => {
+  const withPermit = (depth: number, ctx: Ctx): Program => {
     if (ctx.holdsShared) return uninterruptible(generate(depth - 1, ctx));
     let holding = false;
     return semaphore.withPermit(
@@ -580,7 +584,7 @@ async function runIteration(params: {
     );
   };
 
-  const withResource = (depth: number, ctx: Ctx): Eff<any, any> => {
+  const withResource = (depth: number, ctx: Ctx): Program => {
     if (ctx.holdsShared) return generate(depth - 1, ctx);
     return pool.use((resource) => {
       let holding = false;
@@ -598,7 +602,7 @@ async function runIteration(params: {
     });
   };
 
-  const generatorNode = (ctx: Ctx, depth: number): Eff<any, any> => {
+  const generatorNode = (ctx: Ctx, depth: number): Program => {
     const node = makeNode("genFinally", ctx.ancestors);
     const inner: Ctx = {
       ...ctx,
@@ -625,7 +629,7 @@ async function runIteration(params: {
     });
   };
 
-  const streamNode = (ctx: Ctx, depth: number): Eff<any, any> => {
+  const streamNode = (ctx: Ctx, depth: number): Program => {
     const items = 1 + ri(3);
     const failAt = ri(items + 2);
     const sourceCtx = childCtx(ctx, { awaited: false });
@@ -657,7 +661,7 @@ async function runIteration(params: {
   // throw, or with an f that may throw or fail. Children are awaited like
   // all()'s. Every generator it starts must finish: run out, throw, or be
   // closed when the traversal stops early.
-  const forEachParNode = (ctx: Ctx, depth: number): Eff<any, any> => {
+  const forEachParNode = (ctx: Ctx, depth: number): Program => {
     const count = 1 + ri(4);
     const bodies = Array.from({ length: count }, () =>
       child(generate(depth - 1, childCtx(ctx, { awaited: true }))),
@@ -699,7 +703,7 @@ async function runIteration(params: {
     }
   };
 
-  const generate = (depth: number, ctx: Ctx): Eff<any, any> => {
+  const generate = (depth: number, ctx: Ctx): Program => {
     if (depth <= 0 || nodeBudget <= 0 || ri(5) === 0) return leaf(ctx);
     nodeBudget--;
     switch (ri(26)) {
@@ -714,7 +718,7 @@ async function runIteration(params: {
         if (ctx.holdsShared) return generate(depth - 1, ctx);
         // One use leaves a resource idle, then two parallel uses contend for
         // it: one validates the reused resource while the other waits.
-        const use = (body: Eff<any, any>) =>
+        const use = (body: Program) =>
           validatingPool.use(() => body).catchAllCause(() => succeed(0));
         const holding = (child: Ctx): Ctx => ({ ...child, holdsShared: true });
         return use(leaf(holding(ctx))).flatMap(() =>
@@ -798,7 +802,7 @@ async function runIteration(params: {
   const stopSupervisor = addFiberSupervisor({
     onStart: (fiber) => {
       fibers.add(fiber);
-      const effect = (fiber as any).current;
+      const effect = fiber.current;
       if (typeof effect === "object" && effect !== null && childEffects.has(effect)) {
         interruptibleChildren.add(fiber);
       }
@@ -808,7 +812,7 @@ async function runIteration(params: {
 
   let bodyDone = false;
   let interruptedBeforeBodyDone = false;
-  let root: Fiber<any> | undefined;
+  let root: Fiber<unknown> | undefined;
   try {
     root = runFiber(
       provide(

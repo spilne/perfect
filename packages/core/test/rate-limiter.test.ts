@@ -22,7 +22,7 @@ describe("RateLimiter — sliding-window", () => {
         const c = yield* rl.tryAcquire;
         const d = yield* rl.tryAcquire;
         return [a, b, c, d];
-      }) as any,
+      }),
     );
     expect(result).toEqual([true, true, true, false]);
   });
@@ -34,13 +34,13 @@ describe("RateLimiter — sliding-window", () => {
       yield* rl.acquire; // should fail
       return "unreachable";
     });
-    await expect(run(program as any)).rejects.toMatchObject({
+    await expect(runUnchecked(program)).rejects.toMatchObject({
       _tag: "RateLimitExceeded",
     });
   });
 
   test("remaining decrements as we acquire", async () => {
-    const result = await run(
+    const result = await runUnchecked(
       eff(function* () {
         const rl = yield* RateLimiter.slidingWindow({ limit: 5, windowMs: 1000 });
         const r0 = yield* rl.remaining;
@@ -50,7 +50,7 @@ describe("RateLimiter — sliding-window", () => {
         yield* rl.acquire;
         const r3 = yield* rl.remaining;
         return [r0, r1, r3];
-      }) as any,
+      }),
     );
     expect(result).toEqual([5, 4, 2]);
   });
@@ -65,7 +65,7 @@ describe("RateLimiter — fixed-window", () => {
         const b = yield* rl.tryAcquire;
         const c = yield* rl.tryAcquire;
         return [a, b, c];
-      }) as any,
+      }),
     );
     expect(result).toEqual([true, true, false]);
   });
@@ -81,13 +81,13 @@ describe("RateLimiter — token-bucket", () => {
         const c = yield* rl.tryAcquire;
         const d = yield* rl.tryAcquire;
         return [a, b, c, d];
-      }) as any,
+      }),
     );
     expect(result).toEqual([true, true, true, false]);
   });
 
   test("refills over time", async () => {
-    const result = await run(
+    const result = await runUnchecked(
       eff(function* () {
         const rl = yield* RateLimiter.tokenBucket({ limit: 2, windowMs: 100 });
         // Drain the bucket
@@ -99,7 +99,7 @@ describe("RateLimiter — token-bucket", () => {
           yield* succeed(undefined);
         }); // no-op to anchor types
         return empty;
-      }) as any,
+      }),
     );
     expect(result).toBe(false);
   });
@@ -107,7 +107,7 @@ describe("RateLimiter — token-bucket", () => {
 
 describe("RateLimiter — wait mode (subsumes throttle)", () => {
   test("acquireWaiting blocks then succeeds", async () => {
-    const result = await run(
+    const result = await runUnchecked(
       eff(function* () {
         const rl = yield* RateLimiter.tokenBucket({ limit: 1, windowMs: 50 });
         yield* rl.acquire; // takes the token
@@ -115,7 +115,7 @@ describe("RateLimiter — wait mode (subsumes throttle)", () => {
         yield* rl.acquireWaiting; // should block ~50ms for refill
         const elapsed = Date.now() - start;
         return elapsed >= 30; // some slack
-      }) as any,
+      }),
     );
     expect(result).toBe(true);
   });
@@ -154,7 +154,7 @@ describe("RateLimiter — concurrent / slow-path coverage", () => {
         const attempts = yield* all(Array.from({ length: 50 }, () => rl.tryAcquire));
         const granted = attempts.filter((b: boolean) => b).length;
         return granted;
-      }) as any,
+      }),
     );
     // Bucket starts at burst=10. With 50 concurrent attempts, ~10 should succeed.
     // Allow ±2 for tiny refill during the loop.
@@ -164,7 +164,7 @@ describe("RateLimiter — concurrent / slow-path coverage", () => {
 
   test("multiple fibers acquireWaiting → all eventually proceed in order", async () => {
     const order: number[] = [];
-    await run(
+    await runUnchecked(
       eff(function* () {
         const rl = yield* RateLimiter.tokenBucket({ limit: 1, windowMs: 20 });
         // Drain the initial token
@@ -177,7 +177,7 @@ describe("RateLimiter — concurrent / slow-path coverage", () => {
         yield* join(f1);
         yield* join(f2);
         yield* join(f3);
-      }) as any,
+      }),
     );
     expect(order.length).toBe(3);
     expect(order.sort()).toEqual([1, 2, 3]);
@@ -190,7 +190,7 @@ describe("RateLimiter — concurrent / slow-path coverage", () => {
       try {
         yield* rl.acquire;
         return null;
-      } catch (e: any) {
+      } catch (e) {
         return e;
       }
     });
@@ -204,13 +204,9 @@ describe("RateLimiter — concurrent / slow-path coverage", () => {
 
 describe("RateLimiter — validation", () => {
   test("limit must be >= 1", async () => {
-    expect(() => run(RateLimiter.make({ limit: 0, windowMs: 100 }) as any)).toThrow(
-      /limit must be >= 1/,
-    );
+    expect(() => run(RateLimiter.make({ limit: 0, windowMs: 100 }))).toThrow(/limit must be >= 1/);
   });
   test("windowMs must be >= 1", async () => {
-    expect(() => run(RateLimiter.make({ limit: 1, windowMs: 0 }) as any)).toThrow(
-      /windowMs must be >= 1/,
-    );
+    expect(() => run(RateLimiter.make({ limit: 1, windowMs: 0 }))).toThrow(/windowMs must be >= 1/);
   });
 });

@@ -29,7 +29,7 @@ function rawLoop(n: number): number {
   return x;
 }
 
-async function bench(name: string, fn: () => any | Promise<any>, rounds: number) {
+async function bench(name: string, fn: () => unknown, rounds: number) {
   // warmup
   for (let i = 0; i < 5; i++) await fn();
 

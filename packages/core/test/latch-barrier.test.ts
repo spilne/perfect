@@ -53,7 +53,7 @@ describe("Latch", () => {
   });
 
   test("validates count >= 0", () => {
-    expect(() => runSync(Latch.make({ count: -1 }) as any)).toThrow(/count must be >= 0/);
+    expect(() => runSync(Latch.make({ count: -1 }))).toThrow(/count must be >= 0/);
   });
 });
 
@@ -98,6 +98,6 @@ describe("Barrier", () => {
   });
 
   test("validates parties >= 1", () => {
-    expect(() => runSync(Barrier.make({ parties: 0 }) as any)).toThrow(/parties must be >= 1/);
+    expect(() => runSync(Barrier.make({ parties: 0 }))).toThrow(/parties must be >= 1/);
   });
 });

@@ -271,13 +271,13 @@ describe("Stream fusion — correctness vs unfused", () => {
   });
 
   test("unNone drops null and undefined", async () => {
-    const s: any = Stream.of(1, null, 2, undefined, 3);
+    const s = Stream.of(1, null, 2, undefined, 3);
     const result = await run(s.unNone().toArray());
     expect(result).toEqual([1, 2, 3]);
   });
 
   test("unNone fuses with adjacent ops", async () => {
-    const s: any = Stream.of(1, null, 2, undefined, 3);
+    const s = Stream.of(1, null, 2, undefined, 3);
     const result = await run(
       s
         .unNone()

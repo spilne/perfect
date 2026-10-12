@@ -71,24 +71,24 @@ describe("Exit.mapError", () => {
 
 describe("Fiber.childrenSnapshot", () => {
   test("lists live forked children; empties once the parent completes", async () => {
-    let captured: Fiber<any>[] = [];
-    let gate: any = null;
+    let captured: Fiber<void, never>[] = [];
+    let gate = null as Deferred<void> | null;
 
-    const program = (Deferred.make<void>() as any).flatMap((d: any) =>
-      (fork(d.await) as any).flatMap((c1: any) =>
-        (fork(d.await) as any).flatMap((c2: any) =>
+    const program = Deferred.make<void>().flatMap((d) =>
+      fork(d.await).flatMap((c1) =>
+        fork(d.await).flatMap((c2) =>
           sync(() => {
             captured = [c1, c2];
             gate = d;
           })
-            .flatMap(() => join(c1) as any)
-            .flatMap(() => join(c2) as any)
+            .flatMap(() => join(c1))
+            .flatMap(() => join(c2))
             .map(() => "done"),
         ),
       ),
     );
 
-    const root = runFiber(program as any);
+    const root = runFiber(program);
     for (let i = 0; i < 10 && gate === null; i++) await tick();
     expect(gate).not.toBeNull();
 
@@ -98,10 +98,10 @@ describe("Fiber.childrenSnapshot", () => {
     expect(snap).toContain(captured[1]!);
 
     // snapshot is a copy — mutating it does not affect the fiber
-    (snap as Fiber<any>[]).pop();
+    (snap as unknown[]).pop();
     expect(root.childCount).toBe(2);
 
-    await run(gate.succeed(undefined) as any);
+    await run(gate!.succeed(undefined));
     const exit = await root.await();
     expect(exit._tag).toBe("Success");
     expect(root.childrenSnapshot()).toHaveLength(0);
@@ -120,7 +120,7 @@ describe("Layer.memoize (standalone function)", () => {
       sync(() => {
         builds++;
         return { Db: { query: (s: string) => sync(() => `db:${builds}:${s}`) } as Db };
-      }) as any,
+      }),
     );
 
     const program = eff(function* () {
@@ -131,7 +131,7 @@ describe("Layer.memoize (standalone function)", () => {
       return [a, b];
     });
 
-    const result = await run(program.with(Layer.merge(DbLive, DbLive) as any) as any);
+    const result = await run(program.with(Layer.merge(DbLive, DbLive)));
 
     expect(result).toEqual(["db:1:a", "db:1:b"]);
     expect(builds).toBe(1);
