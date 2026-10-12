@@ -32,7 +32,6 @@ import {
   Multiplexer,
   SimulatedNetwork,
   Tcp,
-  WebSocketClient,
   type Connection,
   type NetError,
 } from "../../../packages/net/src";
@@ -181,12 +180,19 @@ export const netSuite: Suite = {
         .orDie(),
     );
     raw = await openRaw();
+    // Only where the tree being measured has the WebSocket client: the
+    // baseline comparison runs these suite files against an older tree too.
+    const netModule: Record<string, unknown> = await import("../../../packages/net/src");
+    const webSocketClient = netModule.WebSocketClient as
+      | typeof import("../../../packages/net/src").WebSocketClient
+      | undefined;
+    if (webSocketClient === undefined) return;
     wsServer = new WebSocketServer({ port: 0 });
     wsServer.on("connection", (socket) => socket.on("message", (data) => socket.send(data)));
     await new Promise<void>((resolve) => wsServer!.once("listening", () => resolve()));
     const { port } = wsServer.address() as net.AddressInfo;
     ws = await runDisposable(
-      WebSocketClient.connect(`ws://127.0.0.1:${port}`, { codec: BinaryCodec.bytes }).orDie(),
+      webSocketClient.connect(`ws://127.0.0.1:${port}`, { codec: BinaryCodec.bytes }).orDie(),
     );
   },
 
@@ -263,13 +269,18 @@ export const netSuite: Suite = {
         gating: false,
         run: () => rawRoundTrips(raw!.socket, ROUND_TRIPS),
       },
-      {
-        name: "WebSocket loopback: echo x1k",
-        unit: "ns/item",
-        divisor: ROUND_TRIPS,
-        gating: false,
-        run: () => roundTrips(ws!.value, ROUND_TRIPS),
-      },
+      // Measured only where setup found the WebSocket client.
+      ...(ws === undefined
+        ? []
+        : [
+            {
+              name: "WebSocket loopback: echo x1k",
+              unit: "ns/item" as const,
+              divisor: ROUND_TRIPS,
+              gating: false,
+              run: () => roundTrips(ws!.value, ROUND_TRIPS),
+            },
+          ]),
       {
         name: "TCP loopback Connection: echo x1k",
         unit: "ns/item",
