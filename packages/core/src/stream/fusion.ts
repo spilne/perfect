@@ -11,17 +11,21 @@
 export const SKIP: unique symbol = Symbol("stream/fusion/SKIP");
 export type SKIP = typeof SKIP;
 
+// Element types are erased once an op joins the buffer. A method's parameter
+// is checked both ways, so a typed `(a: A) => B` can be stored as an op.
+type ErasedFn<R> = { fn(v: unknown): R }["fn"];
+
 export type FusibleOp =
-  | { readonly _tag: "map"; readonly fn: (v: any) => any }
-  | { readonly _tag: "filter"; readonly fn: (v: any) => boolean }
-  | { readonly _tag: "filterMap"; readonly fn: (v: any) => any | undefined }
-  | { readonly _tag: "tap"; readonly fn: (v: any) => void };
+  | { readonly _tag: "map"; readonly fn: ErasedFn<unknown> }
+  | { readonly _tag: "filter"; readonly fn: ErasedFn<boolean> }
+  | { readonly _tag: "filterMap"; readonly fn: ErasedFn<unknown> }
+  | { readonly _tag: "tap"; readonly fn: ErasedFn<void> };
 
 /** Compile a list of pure ops into a single per-element function. Returns
  * SKIP to signal a filtered-out element. Small-case specializations avoid the
  * loop+switch overhead for common pairings. */
-export function compileFused(ops: FusibleOp[]): (value: any) => any {
-  if (ops.length === 0) return (v: any) => v;
+export function compileFused(ops: FusibleOp[]): (value: unknown) => unknown {
+  if (ops.length === 0) return (v: unknown) => v;
 
   if (ops.length === 1) return compileOne(ops[0]!);
 
@@ -31,7 +35,7 @@ export function compileFused(ops: FusibleOp[]): (value: any) => any {
     if (o1._tag === "map" && o2._tag === "filter") {
       const f = o1.fn,
         p = o2.fn;
-      return (v: any) => {
+      return (v: unknown) => {
         const m = f(v);
         return p(m) ? m : SKIP;
       };
@@ -40,24 +44,24 @@ export function compileFused(ops: FusibleOp[]): (value: any) => any {
     if (o1._tag === "filter" && o2._tag === "map") {
       const p = o1.fn,
         f = o2.fn;
-      return (v: any) => (p(v) ? f(v) : SKIP);
+      return (v: unknown) => (p(v) ? f(v) : SKIP);
     }
     // map → map
     if (o1._tag === "map" && o2._tag === "map") {
       const f = o1.fn,
         g = o2.fn;
-      return (v: any) => g(f(v));
+      return (v: unknown) => g(f(v));
     }
     // filter → filter
     if (o1._tag === "filter" && o2._tag === "filter") {
       const p = o1.fn,
         q = o2.fn;
-      return (v: any) => (p(v) && q(v) ? v : SKIP);
+      return (v: unknown) => (p(v) && q(v) ? v : SKIP);
     }
     // general 2-op fallback (includes tap / filterMap)
     const op1 = compileOne(o1),
       op2 = compileOne(o2);
-    return (v: any) => {
+    return (v: unknown) => {
       const r1 = op1(v);
       if (r1 === SKIP) return SKIP;
       return op2(r1);
@@ -66,8 +70,8 @@ export function compileFused(ops: FusibleOp[]): (value: any) => any {
 
   // 3+ ops: loop + switch. Still one chunk walk — the goal is right even if the
   // per-element cost is higher than the 2-op specialization.
-  return (value: any) => {
-    let v: any = value;
+  return (value: unknown) => {
+    let v = value;
     for (let i = 0; i < ops.length; i++) {
       const op = ops[i]!;
       switch (op._tag) {
@@ -92,19 +96,19 @@ export function compileFused(ops: FusibleOp[]): (value: any) => any {
   };
 }
 
-function compileOne(op: FusibleOp): (v: any) => any {
+function compileOne(op: FusibleOp): (v: unknown) => unknown {
   switch (op._tag) {
     case "map":
       return op.fn;
     case "filter":
-      return (v: any) => (op.fn(v) ? v : SKIP);
+      return (v: unknown) => (op.fn(v) ? v : SKIP);
     case "filterMap":
-      return (v: any) => {
+      return (v: unknown) => {
         const r = op.fn(v);
         return r === undefined ? SKIP : r;
       };
     case "tap":
-      return (v: any) => {
+      return (v: unknown) => {
         op.fn(v);
         return v;
       };

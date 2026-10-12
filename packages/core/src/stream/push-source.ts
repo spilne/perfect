@@ -168,7 +168,7 @@ export function pushStream<A, T, S>(params: {
       return new Stream(
         new Suspend(
           Op.Async,
-          (resume: (eff: any, onDiscard?: () => void) => void) => {
+          (resume: (eff: Eff<Step<A>, unknown>, onDiscard?: () => void) => void) => {
             if (buffer.length > 0) {
               const chunk = takeChunk();
               if (buffer.length < bufferSize) wakeProducers();
@@ -197,18 +197,16 @@ export function pushStream<A, T, S>(params: {
             };
           },
           null,
-        ) as any,
+        ) as Eff<Step<A>, S>,
       );
     }
 
-    const start = (register(pushEmit, pushClose, pushFail) as any).flatMap(
-      (c: (() => void) | void) => {
-        cleanup = c ?? undefined;
-        // The stream may already have been cleaned up while register ran.
-        if (cleaned && cleanup) cleanup();
-        return next().step;
-      },
-    );
+    const start = register(pushEmit, pushClose, pushFail).flatMap((c: (() => void) | void) => {
+      cleanup = c ?? undefined;
+      // The stream may already have been cleaned up while register ran.
+      if (cleaned && cleanup) cleanup();
+      return next().step;
+    });
     return new Stream<A, S>(start, sync(cleanupOnce));
   });
 }

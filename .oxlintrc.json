@@ -19,21 +19,5 @@
       }
     ],
     "typescript/no-explicit-any": "error"
-  },
-  "overrides": [
-    {
-      "files": [
-        "packages/core/src/stream/driver-lifecycle.ts",
-        "packages/core/src/stream/fusion.ts",
-        "packages/core/src/stream/par-join.ts",
-        "packages/core/src/stream/pipes.ts",
-        "packages/core/src/stream/push-source.ts",
-        "packages/core/src/stream/raw-stream.ts",
-        "packages/core/src/stream/stream.ts"
-      ],
-      "rules": {
-        "typescript/no-explicit-any": "off"
-      }
-    }
-  ]
+  }
 }
