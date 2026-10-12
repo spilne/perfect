@@ -16,7 +16,7 @@ describe("withSpan", () => {
   test("failure ends the span with error status and re-raises", async () => {
     const tracer = new TestTracer();
     const program = withSpan(fail("boom"), "failing-op");
-    const exit = await runExit(provide(program, Tracer, tracer) as any);
+    const exit = await runExit(provide(program, Tracer, tracer));
 
     expect(exit._tag).toBe("Failure");
     const span = tracer.find("failing-op")!;
@@ -29,7 +29,7 @@ describe("withSpan", () => {
       withSpan(succeed("inner-done"), "child").flatMap(() => succeed("outer-done")),
       "parent",
     );
-    await run(provide(program, Tracer, tracer) as any);
+    await run(provide(program, Tracer, tracer));
 
     expect(tracer.finished.map((s) => s.name)).toEqual(["child", "parent"]);
     expect(tracer.find("child")!.parentName).toBe("parent");
@@ -44,7 +44,7 @@ describe("withSpan", () => {
         "region",
       ),
     );
-    const result = await run(provide(program, Tracer, tracer) as any);
+    const result = await run(provide(program, Tracer, tracer));
     expect(result).toEqual({ outside: null, inside: "region" });
   });
 
@@ -68,7 +68,7 @@ describe("withSpan", () => {
       }),
       "defective",
     );
-    const exit = await runExit(provide(program, Tracer, tracer) as any);
+    const exit = await runExit(provide(program, Tracer, tracer));
     expect(exit._tag).toBe("Failure");
     const span = tracer.find("defective")!;
     expect(span.status!.ok).toBe(false);

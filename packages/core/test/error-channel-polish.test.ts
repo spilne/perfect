@@ -10,6 +10,7 @@ import {
   type Eff,
   type Throws,
 } from "../src";
+import { runUnchecked } from "./run-unchecked";
 
 type AppErr =
   | { _tag: "NotFound"; id: number }
@@ -36,7 +37,7 @@ describe(".catchTags — bulk handler", () => {
     ).catchTags({
       NotFound: (e) => succeed(`m${e.id}`),
     });
-    await expect(run(partial as any)).rejects.toMatchObject({ _tag: "Forbidden" });
+    await expect(runUnchecked(partial)).rejects.toMatchObject({ _tag: "Forbidden" });
   });
 });
 
@@ -47,7 +48,7 @@ describe(".matchTag — switch-style", () => {
         "NotFound",
         (e) => succeed(`hit:${e.id}`),
         (e) => succeed(`other:${e._tag}`),
-      ) as any;
+      );
 
     expect(runSync(handle({ _tag: "NotFound", id: 1 }))).toBe("hit:1");
     expect(runSync(handle({ _tag: "Forbidden", reason: "no" }))).toBe("other:Forbidden");
@@ -61,19 +62,16 @@ describe(".exit", () => {
   });
 
   test("Failure with Cause on typed failure", async () => {
-    const exit = await run((fail("boom") as any).exit());
-    expect((exit as any)._tag).toBe("Failure");
-    expect((exit as any).cause._tag).toBe("Fail");
-    expect((exit as any).cause.error).toBe("boom");
+    const exit = await run(fail("boom").exit());
+    expect(exit).toMatchObject({ _tag: "Failure", cause: { _tag: "Fail", error: "boom" } });
   });
 
   test("Failure on defect", async () => {
     const blowUp = sync(() => {
       throw new Error("oops");
-    }) as any;
+    });
     const exit = await run(blowUp.exit());
-    expect((exit as any)._tag).toBe("Failure");
-    expect((exit as any).cause._tag).toBe("Die");
+    expect(exit).toMatchObject({ _tag: "Failure", cause: { _tag: "Die" } });
   });
 });
 
@@ -110,15 +108,14 @@ describe(".tapDefect", () => {
 describe(".mapErrorCause", () => {
   test("transforms the entire Cause tree", async () => {
     let mapped = false;
-    const program = (fail("orig") as any).mapErrorCause((c: any) => {
+    const program = fail("orig").mapErrorCause((c) => {
       mapped = true;
       // wrap in a Then with a die
       return Cause.then(c, Cause.die("wrapped"));
     });
     const exit = await run(program.exit());
     expect(mapped).toBe(true);
-    expect((exit as any)._tag).toBe("Failure");
-    expect((exit as any).cause._tag).toBe("Then");
+    expect(exit).toMatchObject({ _tag: "Failure", cause: { _tag: "Then" } });
   });
 });
 
@@ -174,7 +171,7 @@ describe("TaggedError class helper", () => {
 
   test("works with .catchTag narrowing", () => {
     const result = runSync(
-      (fail(new NotFound({ id: 7 })) as any).catchTag("NotFound", (e: NotFound) =>
+      fail(new NotFound({ id: 7 })).catchTag("NotFound", (e: NotFound) =>
         succeed(`missing ${e.id}`),
       ),
     );
@@ -187,7 +184,7 @@ describe("TaggedError class helper", () => {
       (fail(e) as Eff<never, Throws<Err>>).catchTags({
         NotFound: (e) => succeed(`m${e.id}`),
         Forbidden: (e) => succeed(`f:${e.reason}`),
-      }) as any;
+      });
 
     expect(runSync(program(new NotFound({ id: 1 })))).toBe("m1");
     expect(runSync(program(new Forbidden({ reason: "no" })))).toBe("f:no");

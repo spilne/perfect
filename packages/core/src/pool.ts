@@ -94,7 +94,7 @@ class InProcessPool<R, S> implements Pool<R, S> {
         this.acquireInto(lease).flatMap((r) => suspend(() => fn(r))),
         suspend(() => this.endLease(lease)),
       );
-    }) as any;
+    });
   }
 
   get inUse(): Eff<number, S> {
@@ -116,13 +116,13 @@ class InProcessPool<R, S> implements Pool<R, S> {
       const closedToken = new PoolClosed();
       for (const w of this.waiters.drain()) w.close(closedToken);
       return this.idleList.drain();
-    }).flatMap((toRelease: R[]) => {
-      if (toRelease.length === 0) return sync(() => undefined) as any;
-      return toRelease.reduce<Eff<void, never>>(
-        (acc, r) => (acc as any).flatMap(() => this.opts.release(r)),
-        sync(() => undefined) as any,
+    }).flatMap((toRelease: R[]): Eff<void, S> => {
+      if (toRelease.length === 0) return sync(() => undefined);
+      return toRelease.reduce<Eff<void, S>>(
+        (acc, r) => acc.flatMap(() => this.opts.release(r)),
+        sync(() => undefined),
       );
-    }) as Eff<void, never>;
+    });
   }
 
   // ── internals ──────────────────────────────────────────────────────
@@ -130,36 +130,39 @@ class InProcessPool<R, S> implements Pool<R, S> {
   // Resources reach the caller through async resumes, so a fiber interrupted
   // before it runs gives them back instead of losing them.
   private acquireInto(lease: Lease<R>): Eff<R, S | Throws<PoolClosed>> {
+    // async's resume is typed for PoolClosed only; the acquire and validate
+    // effects resumed with here may also carry S.
+    type Resumed = Eff<R, Throws<PoolClosed>>;
     return async<R, PoolClosed>((resume) => {
       if (this.closed) {
-        resume(fail(new PoolClosed()) as any);
+        resume(fail(new PoolClosed()));
         return;
       }
       if (this.idleList.length > 0) {
         const r = this.idleList.shift() as R;
         this.inUseCount++;
         this.grant(lease, r);
-        resume(this.validated(lease, r) as any, () => this.ungrant(lease, r));
+        resume(this.validated(lease, r) as Resumed, () => this.ungrant(lease, r));
         return;
       }
       if (this.inUseCount < this.opts.size) {
         this.inUseCount++;
         lease.slot = true;
-        resume(this.create(lease) as any, () => this.endSlot(lease));
+        resume(this.create(lease) as Resumed, () => this.endSlot(lease));
         return;
       }
       const node = this.waiters.push(
         new PoolWaiter<R>(
           (r) => {
             this.grant(lease, r);
-            resume(succeed(r) as any, () => this.ungrant(lease, r));
+            resume(succeed(r), () => this.ungrant(lease, r));
           },
-          () => resume(this.acquireInto(lease) as any, () => this.wakeRetry()),
-          (error) => resume(fail(error) as any),
+          () => resume(this.acquireInto(lease) as Resumed, () => this.wakeRetry()),
+          (error) => resume(fail(error)),
         ),
       );
       return () => this.waiters.remove(node);
-    }) as any;
+    });
   }
 
   // Creates a resource in the lease's slot. A create that fails or is
@@ -175,7 +178,7 @@ class InProcessPool<R, S> implements Pool<R, S> {
 
   private validated(lease: Lease<R>, r: R): Eff<R, S | Throws<PoolClosed>> {
     if (!this.opts.validate) return succeed(r);
-    return (this.opts.validate(r) as any).flatMap((ok: boolean) => {
+    return this.opts.validate(r).flatMap((ok: boolean) => {
       if (ok) return succeed(r);
       // Bad resource: release it and create a fresh one in the same slot.
       // Dropping it from the lease and releasing it is one uninterruptible

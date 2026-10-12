@@ -62,11 +62,9 @@ declare module "../eff.js" {
      * is equivalent to chaining `.catchTag()` calls. TS narrows each handler's
      * `e` parameter to its tag's payload type.
      *
-     * The `any`s below are inference machinery, not a leak: `(e: any) =>`
-     * patterns must stay `any` so conditional types match handlers whose
-     * parameter is a narrowed error type (`unknown` would fail contravariance
-     * inside `extends`), and each `any` sits inside an `extends`/`infer`
-     * clause that never surfaces in the result type.
+     * The `(e: never) =>` patterns below match handlers whose parameter is a
+     * narrowed error type: `unknown` would fail contravariance inside
+     * `extends`, while every parameter type accepts `never`.
      */
     catchTags<
       A,
@@ -74,16 +72,20 @@ declare module "../eff.js" {
       Handlers extends {
         readonly [K in Extract<ErrorsOf<S>, { readonly _tag: string }>["_tag"]]?: (
           error: Extract<ErrorsOf<S>, { readonly _tag: K }>,
-        ) => Eff<any, any>;
+        ) => Eff<unknown, unknown>;
       },
     >(
       this: Eff<A, S>,
       handlers: Handlers,
     ): Eff<
       | A
-      | (Handlers[keyof Handlers] extends ((e: any) => Eff<infer B, any>) | undefined ? B : never),
+      | (Handlers[keyof Handlers] extends ((e: never) => Eff<infer B, unknown>) | undefined
+          ? B
+          : never),
       | ExcludeTags<S, keyof Handlers & string>
-      | (Handlers[keyof Handlers] extends ((e: any) => Eff<any, infer S2>) | undefined ? S2 : never)
+      | (Handlers[keyof Handlers] extends ((e: never) => Eff<unknown, infer S2>) | undefined
+          ? S2
+          : never)
     >;
 
     /**
@@ -147,55 +149,67 @@ declare module "../eff.js" {
   }
 }
 
-Suspend.prototype.catch = function (handler: any) {
-  return new Suspend(Op.Catch, this, handler) as any;
-};
+// Implementations work on erased types; the public signatures above are
+// the contract, so each one is cast once to its declared method type.
+type AnyEff = Eff<unknown, unknown>;
+type Tagged = { readonly _tag: string };
 
-Suspend.prototype.catchTag = function (tag: any, handler: any) {
-  return new Suspend(Op.Catch, this, (error: any) => {
-    if (error !== null && typeof error === "object" && error._tag === tag) {
-      return handler(error);
+Suspend.prototype.catch = function (this: Suspend, handler: (error: unknown) => Suspend) {
+  return new Suspend(Op.Catch, this, handler) as AnyEff;
+} as Suspend["catch"];
+
+Suspend.prototype.catchTag = function (
+  this: Suspend,
+  tag: string,
+  handler: (error: never) => Suspend,
+) {
+  return new Suspend(Op.Catch, this, (error: unknown) => {
+    if (error !== null && typeof error === "object" && (error as Tagged)._tag === tag) {
+      return handler(error as never);
     }
     return fail(error);
-  }) as any;
-};
+  }) as AnyEff;
+} as Suspend["catchTag"];
 
-Suspend.prototype.catchSome = function (handler: any) {
-  return new Suspend(Op.Catch, this, (error: any) => {
+Suspend.prototype.catchSome = function (
+  this: Suspend,
+  handler: (error: unknown) => Suspend | undefined,
+) {
+  return new Suspend(Op.Catch, this, (error: unknown) => {
     const alt = handler(error);
     return alt ?? fail(error);
-  }) as any;
-};
+  }) as AnyEff;
+} as Suspend["catchSome"];
 
-Suspend.prototype.catchAllCause = function (handler: any) {
-  return new Suspend(Op.CatchAll, this, handler) as any;
-};
+Suspend.prototype.catchAllCause = function (this: Suspend, handler: (cause: Cause) => Suspend) {
+  return new Suspend(Op.CatchAll, this, handler) as AnyEff;
+} as Suspend["catchAllCause"];
 
-Suspend.prototype.orElse = function (that: any) {
-  return new Suspend(Op.Catch, this, () => that()) as any;
-};
+Suspend.prototype.orElse = function (this: Suspend, that: () => Suspend) {
+  return new Suspend(Op.Catch, this, () => that()) as AnyEff;
+} as Suspend["orElse"];
 
-Suspend.prototype.orDie = function () {
+Suspend.prototype.orDie = function (this: Suspend) {
   return new Suspend(Op.CatchAll, this, (cause: Cause) => {
     const f = Cause.firstFail(cause);
     if (f) return die(f.value);
     return new Suspend(Op.Fail, cause, null);
-  }) as any;
-};
+  }) as AnyEff;
+} as Suspend["orDie"];
 
-Suspend.prototype.option = function () {
-  return new Suspend(Op.Catch, this, () => succeed(undefined)) as any;
-};
+Suspend.prototype.option = function (this: Suspend) {
+  return new Suspend(Op.Catch, this, () => succeed(undefined)) as AnyEff;
+} as Suspend["option"];
 
-Suspend.prototype.either = function () {
-  return (this as any)
-    .map((a: any) => ({ _tag: "Right" as const, right: a }))
-    .catch((e: any) => succeed({ _tag: "Left" as const, left: e }));
-};
+Suspend.prototype.either = function (this: AnyEff) {
+  return this.map((a) => ({ _tag: "Right" as const, right: a })).catch((e) =>
+    succeed({ _tag: "Left" as const, left: e }),
+  );
+} as Suspend["either"];
 
-Suspend.prototype.rethrow = function () {
-  return new Suspend(Op.FlatMap, this, rethrowOutcome) as any;
-};
+Suspend.prototype.rethrow = function (this: Suspend) {
+  return new Suspend(Op.FlatMap, this, rethrowOutcome) as AnyEff;
+} as Suspend["rethrow"];
 
 function rethrowOutcome(
   outcome: Either<unknown, unknown> | Exit<unknown, unknown>,
@@ -212,88 +226,116 @@ function rethrowOutcome(
   }
 }
 
-Suspend.prototype.mapError = function (f: any) {
-  return new Suspend(Op.Catch, this, (e: any) => fail(f(e))) as any;
-};
+Suspend.prototype.mapError = function (this: Suspend, f: (e: unknown) => unknown) {
+  return new Suspend(Op.Catch, this, (e: unknown) => fail(f(e))) as AnyEff;
+} as Suspend["mapError"];
 
-Suspend.prototype.tapError = function (f: any) {
+Suspend.prototype.tapError = function (this: Suspend, f: (e: unknown) => Suspend) {
   return new Suspend(
     Op.Catch,
     this,
-    (e: any) => new Suspend(Op.FlatMap, f(e), () => fail(e)),
-  ) as any;
-};
+    (e: unknown) => new Suspend(Op.FlatMap, f(e), () => fail(e)),
+  ) as AnyEff;
+} as Suspend["tapError"];
 
-Suspend.prototype.tapErrorCause = function (f: any) {
+Suspend.prototype.tapErrorCause = function (this: Suspend, f: (cause: Cause) => Suspend) {
   return new Suspend(
     Op.CatchAll,
     this,
     (cause: Cause) => new Suspend(Op.FlatMap, f(cause), () => new Suspend(Op.Fail, cause, null)),
-  ) as any;
-};
+  ) as AnyEff;
+} as Suspend["tapErrorCause"];
 
-Suspend.prototype.tapBoth = function (onError: any, onSuccess: any) {
-  return (this as any).tapError(onError).tap(onSuccess);
-};
+Suspend.prototype.tapBoth = function (
+  this: AnyEff,
+  onError: (e: unknown) => AnyEff,
+  onSuccess: (a: unknown) => AnyEff,
+) {
+  return this.tapError(onError).tap(onSuccess);
+} as Suspend["tapBoth"];
 
-Suspend.prototype.catchTags = function (handlers: any) {
-  return new Suspend(Op.Catch, this, (error: any) => {
-    if (error !== null && typeof error === "object" && error._tag in handlers) {
-      const handler = handlers[error._tag];
+Suspend.prototype.catchTags = function (
+  this: Suspend,
+  handlers: Record<string, ((error: unknown) => Suspend) | undefined>,
+) {
+  return new Suspend(Op.Catch, this, (error: unknown) => {
+    if (error !== null && typeof error === "object" && (error as Tagged)._tag in handlers) {
+      const handler = handlers[(error as Tagged)._tag];
       if (typeof handler === "function") return handler(error);
     }
     return fail(error);
-  }) as any;
-};
+  }) as AnyEff;
+} as Suspend["catchTags"];
 
-Suspend.prototype.matchTag = function (tag: any, onMatch: any, onElse: any) {
-  return new Suspend(Op.Catch, this, (error: any) => {
-    if (error !== null && typeof error === "object" && error._tag === tag) {
-      return onMatch(error);
+Suspend.prototype.matchTag = function (
+  this: Suspend,
+  tag: string,
+  onMatch: (error: never) => Suspend,
+  onElse: (error: never) => Suspend,
+) {
+  return new Suspend(Op.Catch, this, (error: unknown) => {
+    if (error !== null && typeof error === "object" && (error as Tagged)._tag === tag) {
+      return onMatch(error as never);
     }
-    return onElse(error);
-  }) as any;
-};
+    return onElse(error as never);
+  }) as AnyEff;
+} as Suspend["matchTag"];
 
-Suspend.prototype.exit = function () {
+Suspend.prototype.exit = function (this: Suspend) {
   return new Suspend(
     Op.CatchAll,
-    new Suspend(Op.FlatMap, this, (a: any) => succeed(ExitNS.succeed(a))),
+    new Suspend(Op.FlatMap, this, (a: unknown) => succeed(ExitNS.succeed(a))),
     (cause: Cause) => succeed(ExitNS.failure(cause)),
-  ) as any;
-};
+  ) as AnyEff;
+} as Suspend["exit"];
 
-Suspend.prototype.tapDefect = function (f: any) {
+Suspend.prototype.tapDefect = function (this: Suspend, f: (defect: unknown) => Suspend) {
   return new Suspend(Op.CatchAll, this, (cause: Cause) => {
     const d = Cause.firstDie(cause);
     if (d === null) return new Suspend(Op.Fail, cause, null);
     return new Suspend(Op.FlatMap, f(d.value), () => new Suspend(Op.Fail, cause, null));
-  }) as any;
-};
+  }) as AnyEff;
+} as Suspend["tapDefect"];
 
-Suspend.prototype.mapErrorCause = function (f: any) {
+Suspend.prototype.mapErrorCause = function (this: Suspend, f: (cause: Cause) => Cause) {
   return new Suspend(Op.CatchAll, this, (cause: Cause) => {
     const next = f(cause);
     return new Suspend(Op.Fail, next, null);
-  }) as any;
-};
+  }) as AnyEff;
+} as Suspend["mapErrorCause"];
 
 // ── Cats-flavored aliases ────────────────────────────────────────
 
 Suspend.prototype.handleErrorWith = Suspend.prototype.catch;
 
-Suspend.prototype.recover = function (predicate: any, handler: any) {
-  return (this as any).catchSome((e: any) => (predicate(e) ? succeed(handler(e)) : undefined));
-};
+Suspend.prototype.recover = function (
+  this: AnyEff,
+  predicate: (e: unknown) => boolean,
+  handler: (e: unknown) => unknown,
+) {
+  return this.catchSome((e) => (predicate(e) ? succeed(handler(e)) : undefined));
+} as Suspend["recover"];
 
-Suspend.prototype.recoverWith = function (predicate: any, handler: any) {
-  return (this as any).catchSome((e: any) => (predicate(e) ? handler(e) : undefined));
-};
+Suspend.prototype.recoverWith = function (
+  this: AnyEff,
+  predicate: (e: unknown) => boolean,
+  handler: (e: unknown) => AnyEff,
+) {
+  return this.catchSome((e) => (predicate(e) ? handler(e) : undefined));
+} as Suspend["recoverWith"];
 
-Suspend.prototype.redeem = function (onError: any, onSuccess: any) {
-  return (this as any).map((a: any) => onSuccess(a)).catch((e: any) => succeed(onError(e)));
-};
+Suspend.prototype.redeem = function (
+  this: AnyEff,
+  onError: (e: unknown) => unknown,
+  onSuccess: (a: unknown) => unknown,
+) {
+  return this.map((a) => onSuccess(a)).catch((e) => succeed(onError(e)));
+} as Suspend["redeem"];
 
-Suspend.prototype.redeemWith = function (onError: any, onSuccess: any) {
-  return (this as any).flatMap((a: any) => onSuccess(a)).catch((e: any) => onError(e));
-};
+Suspend.prototype.redeemWith = function (
+  this: AnyEff,
+  onError: (e: unknown) => AnyEff,
+  onSuccess: (a: unknown) => AnyEff,
+) {
+  return this.flatMap((a) => onSuccess(a)).catch((e) => onError(e));
+} as Suspend["redeemWith"];

@@ -50,7 +50,7 @@ class InMemoryCacheStore<K, V> implements CacheStore<K, V> {
   }
 
   get(key: K): Eff<V | undefined, never> {
-    return (clockNow as any).map((now: number) => {
+    return clockNow.map((now: number) => {
       const entry = this.entries.get(key);
       if (!entry) return undefined;
       if (now > entry.expiresAt) {
@@ -65,7 +65,7 @@ class InMemoryCacheStore<K, V> implements CacheStore<K, V> {
   }
 
   set(key: K, value: V, ttlMs?: number): Eff<void, never> {
-    return (clockNow as any).map((now: number) => {
+    return clockNow.map((now: number) => {
       const ttl = ttlMs ?? this.defaultTtl;
       const expiresAt = ttl === Infinity ? Infinity : now + ttl;
       this.entries.delete(key); // ensure insertion order = recency
@@ -84,7 +84,7 @@ class InMemoryCacheStore<K, V> implements CacheStore<K, V> {
   }
 
   has(key: K): Eff<boolean, never> {
-    return (clockNow as any).map((now: number) => {
+    return clockNow.map((now: number) => {
       const entry = this.entries.get(key);
       if (!entry) return false;
       if (now > entry.expiresAt) {

@@ -93,11 +93,11 @@ export class RealFileSystem implements FileSystem {
   }
 
   writeFile(path: string, contents: string | Uint8Array): Eff<void, Throws<FileSystemError>> {
-    return attempt("writeFile", path, (fs) => fs.writeFile(path, contents)) as any;
+    return attempt("writeFile", path, (fs) => fs.writeFile(path, contents));
   }
 
   appendFile(path: string, contents: string): Eff<void, Throws<FileSystemError>> {
-    return attempt("appendFile", path, (fs) => fs.appendFile(path, contents)) as any;
+    return attempt("appendFile", path, (fs) => fs.appendFile(path, contents));
   }
 
   /** Never fails: a permission error or a missing parent both mean "no". */
@@ -113,19 +113,19 @@ export class RealFileSystem implements FileSystem {
           )
           .catch(() => false),
       () => false,
-    ) as any;
+    ) as Eff<boolean, never>;
   }
 
   remove(path: string, options: { recursive?: boolean } = {}): Eff<void, Throws<FileSystemError>> {
     return attempt("remove", path, (fs) =>
       fs.rm(path, { recursive: options.recursive ?? false, force: true }),
-    ) as any;
+    );
   }
 
   mkdir(path: string, options: { recursive?: boolean } = {}): Eff<void, Throws<FileSystemError>> {
     return attempt("mkdir", path, (fs) =>
       fs.mkdir(path, { recursive: options.recursive ?? false }),
-    ) as any;
+    ) as Eff<void, Throws<FileSystemError>>;
   }
 
   readDir(path: string): Eff<string[], Throws<FileSystemError>> {
@@ -215,7 +215,7 @@ export class TestFileSystem implements FileSystem {
       Op.Fail,
       { _tag: "Fail", error: new FileSystemError({ op, path, cause: `ENOENT: ${path}` }) },
       null,
-    ) as any;
+    ) as Eff<A, Throws<FileSystemError>>;
   }
 
   private emit(event: FileEvent): void {
@@ -228,8 +228,8 @@ export class TestFileSystem implements FileSystem {
     return suspend(() => {
       const bytes = this.files.get(path);
       if (bytes === undefined) return this.fail("readFile", path);
-      return sync(() => this.decoder.decode(bytes)) as any;
-    }) as any;
+      return sync(() => this.decoder.decode(bytes));
+    });
   }
 
   readFileBytes(path: string): Eff<Uint8Array, Throws<FileSystemError>> {
@@ -238,8 +238,8 @@ export class TestFileSystem implements FileSystem {
     return suspend(() => {
       const bytes = this.files.get(path);
       if (bytes === undefined) return this.fail("readFile", path);
-      return sync(() => bytes) as any;
-    }) as any;
+      return sync(() => bytes);
+    });
   }
 
   writeFile(path: string, contents: string | Uint8Array): Eff<void, Throws<FileSystemError>> {
@@ -247,7 +247,7 @@ export class TestFileSystem implements FileSystem {
       const existed = this.files.has(path);
       this.setFile(path, contents);
       this.emit({ type: existed ? "change" : "rename", path });
-    }) as any;
+    });
   }
 
   appendFile(path: string, contents: string): Eff<void, Throws<FileSystemError>> {
@@ -264,7 +264,7 @@ export class TestFileSystem implements FileSystem {
         this.times.set(path, ++this.clock);
       }
       this.emit({ type: "change", path });
-    }) as any;
+    });
   }
 
   exists(path: string): Eff<boolean, never> {
@@ -286,13 +286,13 @@ export class TestFileSystem implements FileSystem {
         }
       }
       this.emit({ type: "rename", path });
-    }) as any;
+    });
   }
 
   mkdir(path: string, _options: { recursive?: boolean } = {}): Eff<void, Throws<FileSystemError>> {
     return sync(() => {
       this.dirs.add(path);
-    }) as any;
+    });
   }
 
   readDir(path: string): Eff<string[], Throws<FileSystemError>> {
@@ -308,8 +308,8 @@ export class TestFileSystem implements FileSystem {
         entries.add(rest.split("/")[0]!);
       }
       if (entries.size === 0 && !this.dirs.has(path)) return this.fail("readDir", path);
-      return sync(() => [...entries].sort()) as any;
-    }) as any;
+      return sync(() => [...entries].sort());
+    });
   }
 
   stat(path: string): Eff<FileStat, Throws<FileSystemError>> {
@@ -323,13 +323,13 @@ export class TestFileSystem implements FileSystem {
           isFile: true,
           isDirectory: false,
           modifiedAt: this.times.get(path) ?? 0,
-        })) as any;
+        }));
       }
       if (this.dirs.has(path)) {
-        return sync(() => ({ size: 0, isFile: false, isDirectory: true, modifiedAt: 0 })) as any;
+        return sync(() => ({ size: 0, isFile: false, isDirectory: true, modifiedAt: 0 }));
       }
       return this.fail("stat", path);
-    }) as any;
+    });
   }
 
   watch(path: string, options: { recursive?: boolean } = {}): Stream<FileEvent, never> {

@@ -1,5 +1,6 @@
 import { describe, test, expect } from "bun:test";
 import { eff, succeed, sleep, fork, join, run, runSync, PubSub, SubscriptionRef } from "../src";
+import { runUnchecked } from "./run-unchecked";
 
 describe("PubSub", () => {
   test("reusable publish effects use subscribers present at execution", () => {
@@ -17,7 +18,7 @@ describe("PubSub", () => {
   });
 
   test("subscriber receives published messages", async () => {
-    const result = await run(
+    const result = await runUnchecked(
       eff(function* () {
         const pubsub = yield* PubSub.unbounded<number>();
         const stream = yield* pubsub.subscribe;
@@ -27,13 +28,13 @@ describe("PubSub", () => {
         yield* pubsub.publish(2);
         yield* pubsub.publish(3);
         return yield* join(collector);
-      }) as any,
+      }),
     );
     expect(result).toEqual([1, 2, 3]);
   });
 
   test("multiple subscribers each see every message", async () => {
-    const result = await run(
+    const result = await runUnchecked(
       eff(function* () {
         const pubsub = yield* PubSub.unbounded<string>();
         const a = yield* pubsub.subscribe;
@@ -46,7 +47,7 @@ describe("PubSub", () => {
         yield* pubsub.publish("x");
         yield* pubsub.publish("y");
         return [yield* join(fA), yield* join(fB), yield* join(fC)];
-      }) as any,
+      }),
     );
     expect(result).toEqual([
       ["x", "y"],
@@ -79,20 +80,20 @@ describe("PubSub", () => {
       eff(function* () {
         const pubsub = yield* PubSub.unbounded<number>();
         const stream = yield* pubsub.subscribe;
-        const collector = yield* fork((stream.toArray() as any).catch(() => succeed([])));
+        const collector = yield* fork(stream.toArray().catch(() => succeed([])));
         yield* sleep(5);
         yield* pubsub.publish(1);
         yield* pubsub.publish(2);
         yield* sleep(5);
         yield* pubsub.shutdown();
         return yield* join(collector);
-      }) as any,
+      }),
     );
     expect(result).toEqual([1, 2]);
   });
 
   test("validates capacity >= 1 for bounded", async () => {
-    expect(() => run(PubSub.bounded<number>(0) as any)).toThrow(/capacity must be >= 1/);
+    expect(() => run(PubSub.bounded<number>(0))).toThrow(/capacity must be >= 1/);
   });
 });
 
@@ -125,7 +126,7 @@ describe("SubscriptionRef", () => {
   });
 
   test("changes emits current value first, then updates", async () => {
-    const result = await run(
+    const result = await runUnchecked(
       eff(function* () {
         const ref = yield* SubscriptionRef.make(0);
         const stream = yield* ref.changes;
@@ -135,13 +136,13 @@ describe("SubscriptionRef", () => {
         yield* ref.set(2);
         yield* ref.update((n) => n + 10); // 12
         return yield* join(collector);
-      }) as any,
+      }),
     );
     expect(result).toEqual([0, 1, 2, 12]);
   });
 
   test("multiple subscribers each see initial value + all updates", async () => {
-    const result = await run(
+    const result = await runUnchecked(
       eff(function* () {
         const ref = yield* SubscriptionRef.make("initial");
         const a = yield* ref.changes;
@@ -152,7 +153,7 @@ describe("SubscriptionRef", () => {
         yield* ref.set("first");
         yield* ref.set("second");
         return [yield* join(fA), yield* join(fB)];
-      }) as any,
+      }),
     );
     expect(result).toEqual([
       ["initial", "first", "second"],
@@ -163,7 +164,7 @@ describe("SubscriptionRef", () => {
 
 describe("PubSub subscriber cleanup", () => {
   test("finished subscriber leaves the broadcast set", async () => {
-    const result = await run(
+    const result = await runUnchecked(
       eff(function* () {
         const pubsub = yield* PubSub.bounded<number>(4);
         const stream = yield* pubsub.subscribe;
@@ -175,13 +176,13 @@ describe("PubSub subscriber cleanup", () => {
         yield* sleep(5);
         const count = yield* pubsub.subscriberCount;
         return { vals, count };
-      }) as any,
+      }),
     );
     expect(result).toEqual({ vals: [1, 2], count: 0 });
   });
 
   test("publish does not block on an abandoned bounded subscriber", async () => {
-    const result = await run(
+    const result = await runUnchecked(
       eff(function* () {
         const pubsub = yield* PubSub.bounded<number>(1);
         const stream = yield* pubsub.subscribe;
@@ -195,7 +196,7 @@ describe("PubSub subscriber cleanup", () => {
         yield* pubsub.publish(2);
         yield* pubsub.publish(3);
         return "done";
-      }) as any,
+      }),
     );
     expect(result).toBe("done");
   }, 2000);

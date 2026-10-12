@@ -11,18 +11,18 @@ declare module "../eff.js" {
   }
 }
 
-Suspend.prototype.flatMap = function (f: any) {
-  return new Suspend(Op.FlatMap, this, f) as any;
-};
+Suspend.prototype.flatMap = function (this: Suspend, f: (a: unknown) => Suspend) {
+  return new Suspend(Op.FlatMap, this, f) as Eff<unknown, unknown>;
+} as Suspend["flatMap"];
 
-Suspend.prototype.tap = function (f: any) {
+Suspend.prototype.tap = function (this: Suspend, f: (a: unknown) => Suspend) {
   return new Suspend(
     Op.FlatMap,
     this,
-    (a: any) => new Suspend(Op.FlatMap, f(a), () => succeed(a)),
-  ) as any;
-};
+    (a: unknown) => new Suspend(Op.FlatMap, f(a), () => succeed(a)),
+  ) as Eff<unknown, unknown>;
+} as Suspend["tap"];
 
-Suspend.prototype.flatten = function () {
-  return new Suspend(Op.FlatMap, this, (inner: any) => inner) as any;
-};
+Suspend.prototype.flatten = function (this: Suspend) {
+  return new Suspend(Op.FlatMap, this, (inner: unknown) => inner) as Eff<unknown, unknown>;
+} as Suspend["flatten"];

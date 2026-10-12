@@ -65,7 +65,7 @@ describe("thenable — await eff", () => {
   });
 
   test("catchAll still fires when eff is awaited", async () => {
-    const recovered = (fail("e") as any).catch(() => succeed("ok"));
+    const recovered = fail("e").catch(() => succeed("ok"));
     expect(await recovered).toBe("ok");
   });
 

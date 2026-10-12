@@ -28,20 +28,20 @@ function mk<A>(generate: Eff<A, never>): Gen<A> {
 function intGen(min: number, max: number): Gen<number> {
   if (max <= min) throw new Error(`Gen.int: max must be > min (got min=${min}, max=${max})`);
   return mk(
-    new Suspend(Op.FlatMap, Random.get as any, (r: Random) => r.nextRange(min, max)) as any,
+    new Suspend(Op.FlatMap, Random.get, (r: Random) => r.nextRange(min, max)) as Eff<number, never>,
   );
 }
 
 const boolGen: Gen<boolean> = mk(
-  new Suspend(Op.FlatMap, Random.get as any, (r: Random) => r.nextBool()) as any,
+  new Suspend(Op.FlatMap, Random.get, (r: Random) => r.nextBool()) as Eff<boolean, never>,
 );
 
 function charGen(alphabet: string = ALPHANUM): Gen<string> {
   if (alphabet.length === 0) throw new Error("Gen.char: alphabet must be non-empty");
   return mk(
-    new Suspend(Op.FlatMap, Random.get as any, (r: Random) =>
-      (r.nextInt(alphabet.length) as any).map((i: number) => alphabet[i]!),
-    ) as any,
+    new Suspend(Op.FlatMap, Random.get, (r: Random) =>
+      r.nextInt(alphabet.length).map((i: number) => alphabet[i]!),
+    ) as Eff<string, never>,
   );
 }
 
@@ -50,28 +50,26 @@ function stringGen(
 ): Gen<string> {
   const { length, minLength = 0, maxLength = 32, alphabet = ALPHANUM } = opts;
   return mk(
-    new Suspend(Op.FlatMap, Random.get as any, (r: Random) => {
+    new Suspend(Op.FlatMap, Random.get, (r: Random) => {
       const lenEff: Eff<number, never> =
-        length !== undefined
-          ? (sync(() => length) as any)
-          : (r.nextRange(minLength, maxLength + 1) as any);
+        length !== undefined ? sync(() => length) : r.nextRange(minLength, maxLength + 1);
       return new Suspend(Op.FlatMap, lenEff, (n: number) => {
         // n picks of a random alphabet char
         const collect = (i: number, acc: string): Eff<string, never> => {
-          if (i >= n) return sync(() => acc) as any;
-          return new Suspend(Op.FlatMap, r.nextInt(alphabet.length) as any, (idx: number) =>
+          if (i >= n) return sync(() => acc);
+          return new Suspend(Op.FlatMap, r.nextInt(alphabet.length), (idx: number) =>
             collect(i + 1, acc + alphabet[idx]),
-          ) as any;
+          ) as Eff<string, never>;
         };
         return collect(0, "");
       });
-    }) as any,
+    }) as Eff<string, never>,
   );
 }
 
 function choiceGen<A>(...items: A[]): Gen<A> {
   if (items.length === 0) throw new Error("Gen.choice: at least one item required");
-  return mk(new Suspend(Op.FlatMap, Random.get as any, (r: Random) => r.choice(items)) as any);
+  return mk(new Suspend(Op.FlatMap, Random.get, (r: Random) => r.choice(items)) as Eff<A, never>);
 }
 
 function arrayGen<A>(
@@ -80,22 +78,20 @@ function arrayGen<A>(
 ): Gen<A[]> {
   const { length, minLength = 0, maxLength = 16 } = opts;
   return mk(
-    new Suspend(Op.FlatMap, Random.get as any, (r: Random) => {
+    new Suspend(Op.FlatMap, Random.get, (r: Random) => {
       const lenEff: Eff<number, never> =
-        length !== undefined
-          ? (sync(() => length) as any)
-          : (r.nextRange(minLength, maxLength + 1) as any);
+        length !== undefined ? sync(() => length) : r.nextRange(minLength, maxLength + 1);
       return new Suspend(Op.FlatMap, lenEff, (n: number) => {
         const collect = (i: number, acc: A[]): Eff<A[], never> => {
-          if (i >= n) return sync(() => acc) as any;
+          if (i >= n) return sync(() => acc);
           return new Suspend(Op.FlatMap, item.generate, (a: A) => {
             acc.push(a);
             return collect(i + 1, acc);
-          }) as any;
+          }) as Eff<A[], never>;
         };
         return collect(0, []);
       });
-    }) as any,
+    }) as Eff<A[], never>,
   );
 }
 
@@ -105,15 +101,24 @@ function objectGen<T extends Record<string, Gen<unknown>>>(
   const keys = Object.keys(shape);
   return mk(
     (() => {
-      const collect = (i: number, acc: any): Eff<any, never> => {
-        if (i >= keys.length) return sync(() => acc) as any;
+      const collect = (
+        i: number,
+        acc: Record<string, unknown>,
+      ): Eff<Record<string, unknown>, never> => {
+        if (i >= keys.length) return sync(() => acc);
         const k = keys[i]!;
-        return new Suspend(Op.FlatMap, shape[k]!.generate, (v: any) => {
+        return new Suspend(Op.FlatMap, shape[k]!.generate, (v: unknown) => {
           acc[k] = v;
           return collect(i + 1, acc);
-        }) as any;
+        }) as Eff<Record<string, unknown>, never>;
       };
-      return suspend(() => collect(0, {}));
+      // The accumulator gets one field per key of the shape.
+      return suspend(() => collect(0, {})) as Eff<
+        {
+          [K in keyof T]: T[K] extends Gen<infer A> ? A : never;
+        },
+        never
+      >;
     })(),
   );
 }
@@ -123,23 +128,23 @@ function oneOfGen<A>(...gens: Gen<A>[]): Gen<A> {
   return mk(
     new Suspend(
       Op.FlatMap,
-      Random.get as any,
+      Random.get,
       (r: Random) =>
-        new Suspend(Op.FlatMap, r.nextInt(gens.length) as any, (i: number) => gens[i]!.generate),
-    ) as any,
+        new Suspend(Op.FlatMap, r.nextInt(gens.length), (i: number) => gens[i]!.generate),
+    ) as Eff<A, never>,
   );
 }
 
 function constantGen<A>(value: A): Gen<A> {
-  return mk(sync(() => value) as any);
+  return mk(sync(() => value));
 }
 
 function mapGen<A, B>(g: Gen<A>, f: (a: A) => B): Gen<B> {
-  return mk(new Suspend(Op.FlatMap, g.generate, (a: A) => sync(() => f(a))) as any);
+  return mk(new Suspend(Op.FlatMap, g.generate, (a: A) => sync(() => f(a))) as Eff<B, never>);
 }
 
 function flatMapGen<A, B>(g: Gen<A>, f: (a: A) => Gen<B>): Gen<B> {
-  return mk(new Suspend(Op.FlatMap, g.generate, (a: A) => f(a).generate) as any);
+  return mk(new Suspend(Op.FlatMap, g.generate, (a: A) => f(a).generate) as Eff<B, never>);
 }
 
 function tupleGen<A extends readonly Gen<unknown>[]>(
@@ -148,14 +153,19 @@ function tupleGen<A extends readonly Gen<unknown>[]>(
   return mk(
     (() => {
       // accumulator is heterogenous by construction; cast at the boundary
-      const collect = (i: number, acc: any[]): Eff<any, never> => {
-        if (i >= gens.length) return sync(() => acc) as any;
-        return new Suspend(Op.FlatMap, gens[i]!.generate, (v: any) => {
+      const collect = (i: number, acc: unknown[]): Eff<unknown[], never> => {
+        if (i >= gens.length) return sync(() => acc);
+        return new Suspend(Op.FlatMap, gens[i]!.generate, (v: unknown) => {
           acc.push(v);
           return collect(i + 1, acc);
-        }) as any;
+        }) as Eff<unknown[], never>;
       };
-      return suspend(() => collect(0, []));
+      return suspend(() => collect(0, [])) as Eff<
+        {
+          [K in keyof A]: A[K] extends Gen<infer V> ? V : never;
+        },
+        never
+      >;
     })(),
   );
 }
@@ -200,11 +210,11 @@ export function forAll<A>(
   predicate: (value: A) => boolean | Eff<boolean, never>,
 ): Eff<void, Throws<PropertyFailure<A>>> {
   const step = (attempt: number): Eff<void, Throws<PropertyFailure<A>>> => {
-    if (attempt > count) return sync(() => undefined) as any;
+    if (attempt > count) return sync(() => undefined);
     return new Suspend(Op.FlatMap, gen.generate, (value: A) => {
       const result = predicate(value);
       const boolEff: Eff<boolean, never> =
-        typeof result === "boolean" ? (sync(() => result) as any) : (result as Eff<boolean, never>);
+        typeof result === "boolean" ? sync(() => result) : result;
       return new Suspend(Op.FlatMap, boolEff, (ok: boolean) => {
         if (!ok) {
           return fail({
@@ -215,7 +225,7 @@ export function forAll<A>(
         }
         return step(attempt + 1);
       });
-    }) as any;
+    }) as Eff<void, Throws<PropertyFailure<A>>>;
   };
   return step(1);
 }

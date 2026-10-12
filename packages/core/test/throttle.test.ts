@@ -15,7 +15,7 @@ describe("Throttle", () => {
   test("tryAcquire grants up to `permits` per window, then refuses", async () => {
     const c = new TestClock();
     const t = await makeThrottle(c, 2, 1000);
-    const tryAcquire = () => run(provide(t.tryAcquire, Clock, c) as any);
+    const tryAcquire = () => run(provide(t.tryAcquire, Clock, c));
 
     expect(await tryAcquire()).toBe(true);
     expect(await tryAcquire()).toBe(true);
@@ -28,8 +28,8 @@ describe("Throttle", () => {
   test("remaining reports permits left in the current window", async () => {
     const c = new TestClock();
     const t = await makeThrottle(c, 3, 1000);
-    const remaining = () => run(provide(t.remaining, Clock, c) as any);
-    const tryAcquire = () => run(provide(t.tryAcquire, Clock, c) as any);
+    const remaining = () => run(provide(t.remaining, Clock, c));
+    const tryAcquire = () => run(provide(t.tryAcquire, Clock, c));
 
     expect(await remaining()).toBe(3);
     await tryAcquire();
@@ -45,8 +45,8 @@ describe("Throttle", () => {
   test("nextSlotIn is 0 when free, else ms until the oldest permit expires", async () => {
     const c = new TestClock();
     const t = await makeThrottle(c, 1, 1000);
-    const nextSlotIn = () => run(provide(t.nextSlotIn, Clock, c) as any);
-    const tryAcquire = () => run(provide(t.tryAcquire, Clock, c) as any);
+    const nextSlotIn = () => run(provide(t.nextSlotIn, Clock, c));
+    const tryAcquire = () => run(provide(t.tryAcquire, Clock, c));
 
     expect(await nextSlotIn()).toBe(0);
     await tryAcquire(); // taken at t=0
@@ -62,21 +62,21 @@ describe("Throttle", () => {
   test("acquire blocks on virtual time until a permit opens", async () => {
     const c = new TestClock();
     const t = await makeThrottle(c, 1, 1000);
-    const tryAcquire = () => run(provide(t.tryAcquire, Clock, c) as any);
+    const tryAcquire = () => run(provide(t.tryAcquire, Clock, c));
 
     expect(await tryAcquire()).toBe(true); // exhaust the window at t=0
 
     let acquired = false;
     const done = run(
       provide(
-        (t.acquire as any).flatMap(() =>
+        t.acquire.flatMap(() =>
           sync(() => {
             acquired = true;
           }),
         ),
         Clock,
         c,
-      ) as any,
+      ),
     );
 
     await tick();
@@ -90,9 +90,9 @@ describe("Throttle", () => {
   test("withPermit runs the effect and consumes a permit", async () => {
     const c = new TestClock();
     const t = await makeThrottle(c, 2, 1000);
-    const remaining = () => run(provide(t.remaining, Clock, c) as any);
+    const remaining = () => run(provide(t.remaining, Clock, c));
 
-    const result = await run(provide(t.withPermit(sync(() => "done")), Clock, c) as any);
+    const result = await run(provide(t.withPermit(sync(() => "done")), Clock, c));
     expect(result).toBe("done");
     expect(await remaining()).toBe(1);
   });
@@ -114,7 +114,7 @@ describe("Throttle", () => {
         ),
         Clock,
         c,
-      ) as any,
+      ),
     );
 
     await tick();

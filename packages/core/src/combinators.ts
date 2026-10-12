@@ -28,15 +28,18 @@ export function all<const T extends readonly Eff<unknown, unknown>[]>(
 export function all<T extends Record<string, Eff<unknown, unknown>>>(
   effects: T,
 ): Eff<ObjValues<T>, ObjEffects<T>>;
-export function all(effects: any): any {
+export function all(
+  effects: readonly Eff<unknown, unknown>[] | Record<string, Eff<unknown, unknown>>,
+): Suspend {
   if (Array.isArray(effects)) {
     return new Suspend(Op.All, effects, null);
   }
   // Object form: collect by keys, run in parallel, rebuild record.
-  const keys = Object.keys(effects);
-  const arr = keys.map((k) => effects[k]);
-  return new Suspend(Op.FlatMap, new Suspend(Op.All, arr, null), (results: any[]) => {
-    const out: any = {};
+  const record = effects as Record<string, Eff<unknown, unknown>>;
+  const keys = Object.keys(record);
+  const arr = keys.map((k) => record[k]);
+  return new Suspend(Op.FlatMap, new Suspend(Op.All, arr, null), (results: unknown[]) => {
+    const out: Record<string, unknown> = {};
     for (let i = 0; i < keys.length; i++) out[keys[i]!] = results[i];
     return new Suspend(Op.Succeed, out, null);
   });
@@ -88,5 +91,5 @@ export function forEachPar<A, R extends Eff<unknown, unknown>>(
     );
   }
   const limit = concurrency === "unbounded" ? Infinity : concurrency;
-  return new Suspend(Op.ForEachPar, items, { f, limit }) as any;
+  return new Suspend(Op.ForEachPar, items, { f, limit }) as Eff<InferValue<R>[], InferEffects<R>>;
 }

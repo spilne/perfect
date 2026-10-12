@@ -219,7 +219,7 @@ const provided = provide(
       updateStatus: (orderId, status) =>
         sync(() => {
           const order = fakeOrders.find((o) => o.id === orderId);
-          if (order) (order as any).status = status;
+          if (order) order.status = status;
         }),
     },
   ),

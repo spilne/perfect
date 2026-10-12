@@ -26,7 +26,7 @@ const parallel = (first: Cause | null, second: Cause | null): Cause | null =>
   first === null ? second : second === null ? first : Cause.both(first, second);
 
 /** Interrupt the fibers, await them all, and return their teardown failures. */
-function stopFibers(fibers: readonly Fiber<any>[]): Eff<Cause | null, never> {
+function stopFibers(fibers: readonly Fiber<unknown>[]): Eff<Cause | null, never> {
   if (fibers.length === 0) return NO_CAUSE;
   for (const fiber of fibers) fiber.interrupt();
   return fibers.reduce<Eff<Cause | null, never>>(
@@ -46,7 +46,7 @@ export function combineFinalizers(
 ): Eff<void, unknown> | null {
   if (first === null) return second;
   if (second === null) return first;
-  return new Suspend(Op.Ensuring, first, second) as any;
+  return new Suspend(Op.Ensuring, first, second) as Eff<void, unknown>;
 }
 
 export type Pull<A> = () => Eff<Step<A>, unknown>;
@@ -69,7 +69,7 @@ const currentAttempts: Eff<PullAttempts, never> = new Suspend(
   Op.GetCtx,
   PULL_ATTEMPTS_KEY,
   null,
-) as any;
+) as Eff<PullAttempts, never>;
 
 /**
  * Run `retryLoop(attempt)` with a fresh attempt token visible to every attempt
@@ -80,8 +80,10 @@ export function withPullAttempts<A, S>(
 ): Eff<A, S> {
   return new Suspend(Op.FlatMap, currentAttempts, (outer: PullAttempts) => {
     const context = new Map<symbol, unknown>([[PULL_ATTEMPTS_KEY, [{}, ...outer]]]);
-    return retryLoop((eff) => new Suspend(Op.Provide, eff, context) as any);
-  }) as any;
+    return retryLoop(
+      <B, S2>(eff: Eff<B, S2>) => new Suspend(Op.Provide, eff, context) as Eff<B, S2>,
+    );
+  }) as Eff<A, S>;
 }
 
 const sharesAttempt = (a: PullAttempts, b: PullAttempts): boolean =>
@@ -124,7 +126,7 @@ export interface DriverRun<A> {
 }
 
 class Run<A> implements DriverRun<A> {
-  private readonly fibers = new Set<Fiber<any>>();
+  private readonly fibers = new Set<Fiber<unknown>>();
   first: Pull<A> | null = null;
   // Id of the pull in flight, 0 when none. Pulls of one run are sequential; an
   // interrupted pull that settles late, or replays its continuation, carries a
@@ -205,7 +207,7 @@ class Run<A> implements DriverRun<A> {
     );
   }
 
-  private readonly register = (fiber: Fiber<any>): Eff<Fiber<any>, never> => {
+  private readonly register = (fiber: Fiber<unknown>): Eff<Fiber<unknown>, never> => {
     this.fibers.add(fiber);
     fiber.onComplete(() => this.fibers.delete(fiber));
     if (this.stopRequested) fiber.interrupt();
@@ -215,8 +217,11 @@ class Run<A> implements DriverRun<A> {
   fork<B>(eff: Eff<B, unknown>): Eff<Fiber<B>, never> {
     // Registration is atomic with the fork so a stop never misses a fiber.
     return uninterruptible(
-      new Suspend(Op.FlatMap, new Suspend(Op.ForkDaemon, eff, null), this.register) as any,
-    ) as Eff<Fiber<B>, never>;
+      new Suspend(Op.FlatMap, new Suspend(Op.ForkDaemon, eff, null), this.register) as Eff<
+        Fiber<B>,
+        never
+      >,
+    );
   }
 
   pull(pull: Pull<A>): Eff<Step<A>, unknown> {
@@ -228,7 +233,7 @@ class Run<A> implements DriverRun<A> {
       this.interrupted = false;
       // An Exit finalizer, not an error handler: an interrupted pull skips
       // error handlers, but its bookkeeping must still run.
-      const settle = (exit: Exit<unknown, Step<A>>, fiber: Fiber<any> | undefined): null => {
+      const settle = (exit: Exit<unknown, Step<A>>, fiber: Fiber<unknown> | undefined): null => {
         if (this.pending !== id) return null;
         this.pending = 0;
         if (exit._tag === "Success") {
@@ -327,7 +332,7 @@ export function driverStream<A>(params: {
       const stale = Array.from(runs).filter((run) => run.stale);
       return stale.length === 0 ? begin() : stopRuns(stale).flatMap(begin);
     },
-  ) as any;
+  ) as Eff<Step<A>, unknown>;
 
   const stop: Eff<void, unknown> = suspend(() => stopRuns(Array.from(runs)));
 

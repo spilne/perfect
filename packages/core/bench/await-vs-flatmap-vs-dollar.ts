@@ -213,13 +213,13 @@ group(`service lookup × ${N}`, () => {
     counterImpl,
   );
 
-  bench("composed: lookup once + chain + run", async () => run(composedSvc as any));
+  bench("composed: lookup once + chain + run", async () => run(composedSvc));
 
   // (B) await: lookup PER step (worst-case naive translation)
   bench("await: lookup + add per step (× N awaits)", async () => {
     let x = 0;
     for (let i = 0; i < N; i++) {
-      const c: any = await provide(Counter.get, Counter, counterImpl);
+      const c = await provide(Counter.get, Counter, counterImpl);
       x = await c.add(x);
     }
     return x;
@@ -244,7 +244,7 @@ group(`service lookup × ${N}`, () => {
     Counter,
     counterImpl,
   );
-  bench("eff(function*): lookup once + loop of yield* c.add()", async () => run(genSvc as any));
+  bench("eff(function*): lookup once + loop of yield* c.add()", async () => run(genSvc));
 });
 
 // ── 5. Error recovery: fail mid-chain, catch + continue ───────────────
@@ -254,7 +254,7 @@ group("fail mid-chain + recover", () => {
   const composedRecover = (() => {
     let e: Eff<number, never> = succeed(0);
     for (let i = 0; i < N / 2; i++) e = e.flatMap((x) => succeed(x + 1));
-    e = (e as any).flatMap(() => fail("midway")).catch(() => succeed(999));
+    e = e.flatMap(() => fail("midway")).catch(() => succeed(999));
     for (let i = 0; i < N / 2; i++) e = e.flatMap((x) => succeed(x + 1));
     return e;
   })();
@@ -293,7 +293,9 @@ group("fail mid-chain + recover", () => {
     for (let i = 0; i < N / 2; i++) x = yield* succeed(x + 1);
     return x;
   });
-  bench("eff(function*): try/catch around yield* fail", async () => run(genRecover as any));
+  // The try/catch above handles the failure, which the types can't see.
+  bench("eff(function*): try/catch around yield* fail", async () =>
+    run(genRecover as Eff<number, never>));
 });
 
 // ── 6. Eff wrapping promises vs plain promises ────────────────────────

@@ -87,18 +87,18 @@ class InProcessQueue<A> implements Queue<A> {
     // Fast path: closed → fail; taker waiting → hand off; buffer has room → push.
     // All sync. Only fall to async when blocking on capacity.
     return suspend(() => {
-      if (this._closed) return fail(new QueueClosed()) as any;
-      if (this.handOff(value)) return succeed(true) as any;
+      if (this._closed) return fail(new QueueClosed());
+      if (this.handOff(value)) return succeed(true);
       if (this.buffer.length < this.capacity) {
         this.buffer.push(value);
-        return succeed(true) as any;
+        return succeed(true);
       }
       // Slow path: bounded queue is full — block until a taker arrives.
       return async<boolean, QueueClosed>((resume) => {
-        const node = this.offerers.push(new OfferWaiter(value, resume as any));
+        const node = this.offerers.push(new OfferWaiter(value, resume));
         return () => this.offerers.remove(node);
-      }) as any;
-    }) as any;
+      });
+    });
   }
 
   take(): Eff<A, Throws<QueueClosed>> {
@@ -113,22 +113,22 @@ class InProcessQueue<A> implements Queue<A> {
           const offerer = this.nextOfferer();
           if (offerer) {
             this.buffer.push(offerer.value);
-            offerer.resume(succeed(true) as any);
+            offerer.resume(succeed(true));
           }
         }
-        return succeed(item) as any;
+        return succeed(item);
       }
       const offerer = this.nextOfferer();
       if (offerer) {
-        offerer.resume(succeed(true) as any);
-        return succeed(offerer.value) as any;
+        offerer.resume(succeed(true));
+        return succeed(offerer.value);
       }
-      if (this._closed) return fail(new QueueClosed()) as any;
+      if (this._closed) return fail(new QueueClosed());
       return async<A, QueueClosed>((resume) => {
-        const node = this.takers.push(new ResumeWaiter(resume as any));
+        const node = this.takers.push(new ResumeWaiter(resume));
         return () => this.takers.remove(node);
-      }) as any;
-    }) as any;
+      });
+    });
   }
 
   takeAll(): Eff<A[], never> {
@@ -138,7 +138,7 @@ class InProcessQueue<A> implements Queue<A> {
       let offerer: OfferWaiter<A> | undefined;
       while ((offerer = this.nextOfferer())) {
         items.push(offerer.value);
-        offerer.resume(succeed(true) as any);
+        offerer.resume(succeed(true));
       }
       return items;
     });
@@ -147,9 +147,9 @@ class InProcessQueue<A> implements Queue<A> {
   offerAll(values: A[]): Eff<void, Throws<QueueClosed>> {
     const loop = (index: number): Eff<void, Throws<QueueClosed>> =>
       index >= values.length
-        ? (succeed(undefined) as any)
-        : (this.offer(values[index]!) as any).flatMap(() => loop(index + 1));
-    return suspend(() => (this._closed ? (fail(new QueueClosed()) as any) : loop(0))) as any;
+        ? succeed(undefined)
+        : this.offer(values[index]!).flatMap(() => loop(index + 1));
+    return suspend(() => (this._closed ? fail(new QueueClosed()) : loop(0)));
   }
 
   get size(): Eff<number, never> {
@@ -168,8 +168,8 @@ class InProcessQueue<A> implements Queue<A> {
     return sync(() => {
       if (this._closed) return;
       this._closed = true;
-      for (const t of this.takers.drain()) t.resume(fail(new QueueClosed()) as any);
-      for (const o of this.offerers.drain()) o.resume(fail(new QueueClosed()) as any);
+      for (const t of this.takers.drain()) t.resume(fail(new QueueClosed()));
+      for (const o of this.offerers.drain()) o.resume(fail(new QueueClosed()));
       for (const w of this.closeWaiters.drain()) w.resume();
     });
   }
@@ -182,14 +182,12 @@ class InProcessQueue<A> implements Queue<A> {
     if (this._closed) return succeed(undefined);
     return async<void>((resume) => {
       if (this._closed) {
-        resume(succeed(undefined) as any);
+        resume(succeed(undefined));
         return;
       }
-      const node = this.closeWaiters.push(
-        new ResumeWaiter(() => resume(succeed(undefined) as any)),
-      );
+      const node = this.closeWaiters.push(new ResumeWaiter(() => resume(succeed(undefined))));
       return () => this.closeWaiters.remove(node);
-    }) as any;
+    });
   }
 
   get awaitShutdown(): Eff<void, never> {
@@ -201,7 +199,7 @@ class InProcessQueue<A> implements Queue<A> {
   private handOff(value: A, handoff: number = this.nextHandoff++): boolean {
     const taker = this.takers.shift();
     if (taker === undefined) return false;
-    taker.resume(succeed(value) as any, () => this.giveBack(value, handoff));
+    taker.resume(succeed(value), () => this.giveBack(value, handoff));
     return true;
   }
 

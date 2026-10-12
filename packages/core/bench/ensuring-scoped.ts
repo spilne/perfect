@@ -30,7 +30,7 @@ group("scoped single call", () => {
 for (const N of [1, 5, 50]) {
   group(`ensuring × ${N} nested`, () => {
     const build = () => {
-      let inner = succeed(0) as any;
+      let inner = succeed(0);
       for (let i = 0; i < N; i++) {
         inner = ensuring(
           inner,

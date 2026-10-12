@@ -13,18 +13,18 @@ declare module "../eff.js" {
   }
 }
 
-Suspend.prototype.run = function (this: any, options?: Scheduler | RunOptions) {
+Suspend.prototype.run = function (options?: Scheduler | RunOptions) {
   return run(this, options);
 };
 
-Suspend.prototype.runSync = function (this: any) {
+Suspend.prototype.runSync = function () {
   return runSync(this);
 };
 
-Suspend.prototype.runExit = function (this: any, options?: Scheduler | RunOptions) {
+Suspend.prototype.runExit = function (options?: Scheduler | RunOptions) {
   return runExit(this, options);
 };
 
-Suspend.prototype.runFiber = function (this: any, scheduler?: Scheduler) {
+Suspend.prototype.runFiber = function (scheduler?: Scheduler) {
   return runFiber(this, scheduler);
 };

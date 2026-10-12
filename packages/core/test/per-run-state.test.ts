@@ -63,8 +63,7 @@ describe("state is created per run", () => {
   });
 
   test("Gen.tuple and Gen.object", () => {
-    const sample = <A>(gen: { generate: any }): A =>
-      runSync(provide(gen.generate, Random, new TestRandom(1)) as any) as A;
+    const sample = <A>(gen: Gen<A>): A => runSync(provide(gen.generate, Random, new TestRandom(1)));
     const pair = Gen.tuple(Gen.int(0, 9), Gen.bool);
     const record = Gen.object({ n: Gen.int(0, 9) });
     const first = sample<unknown[]>(pair);

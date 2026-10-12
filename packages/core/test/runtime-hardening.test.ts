@@ -129,7 +129,7 @@ describe("interruption hardening", () => {
           async<number>((resume) => {
             const id = setTimeout(() => {
               resumes++;
-              resume(succeed(1) as any);
+              resume(succeed(1));
             }, 0);
             return () => clearTimeout(id);
           }),
@@ -149,7 +149,7 @@ describe("interruption hardening", () => {
     let finalized = 0;
     const never = async<void>(() => () => {});
     const asyncCleanup = async<void>((resume) => {
-      queueMicrotask(() => resume(succeed(undefined) as any));
+      queueMicrotask(() => resume(succeed(undefined)));
     }).flatMap(() =>
       sync(() => {
         finalized++;
@@ -223,7 +223,7 @@ describe("an interrupted fiber does not recover", () => {
 
   test("an interrupt pending while a finalizer's all() fails with an interrupt is not caught", () => {
     const scheduler = new StepScheduler();
-    const children: Fiber<any>[] = [];
+    const children: Fiber<unknown>[] = [];
     const stop = addFiberSupervisor({ onFork: (_parent, child) => void children.push(child) });
     const fiber = runFiber(
       ensuring(fail("E"), all([waitForever, waitForever]).asVoid()).catch(() =>
@@ -451,7 +451,11 @@ describe("cleanup registered in the same step as the work it guards", () => {
         scheduler,
       );
       scheduler.step();
-      if (leader.status !== "ready" || !(flights as any).flights.has("key")) continue;
+      if (
+        leader.status !== "ready" ||
+        !(flights as unknown as { flights: Map<string, unknown> }).flights.has("key")
+      )
+        continue;
       windows++;
       leader.interrupt();
       scheduler.flush();
@@ -474,9 +478,9 @@ describe("cleanup registered in the same step as the work it guards", () => {
         const scheduler = new StepScheduler();
         let entered = false;
         let finallyRan = false;
-        let body: any = succeed(undefined);
+        let body: Eff<void, never> = succeed(undefined);
         for (let i = 0; i < length; i++) body = body.flatMap(() => succeed(undefined));
-        let padded: any = succeed(undefined);
+        let padded: Eff<unknown, never> = succeed(undefined);
         for (let i = 0; i < pad; i++) padded = succeed(padded);
         const fiber = runFiber(
           body
@@ -925,7 +929,7 @@ describe("interrupting a fiber whose loop is queued or running", () => {
     const scheduler = new StepScheduler();
     const clock = new TestClock();
     const log: string[] = [];
-    let body: any = succeed(0);
+    let body: Eff<number, never> = succeed(0);
     for (let i = 0; i < 10_000; i++) body = body.flatMap((x: number) => succeed(x));
     const fiber = runFiber(
       provide(
@@ -1161,7 +1165,7 @@ describe("callbacks from a wait the fiber has left", () => {
     let ranAfter = false;
     const fiber: Fiber<undefined> = runFiber(
       async<void>((resume) => {
-        resumeLate = () => resume(succeed(undefined) as any);
+        resumeLate = () => resume(succeed(undefined));
         fiber.interrupt();
         return () => {
           cancelled++;
@@ -1272,8 +1276,9 @@ describe("pending interrupts at finalizer boundaries", () => {
       for (let pad = 0; pad < 3; pad++) {
         const scheduler = new StepScheduler();
         let finalized = 0;
-        let body: any = 0;
-        for (let i = 0; i <= pad; i++) body = succeed(body);
+        let padded: unknown = 0;
+        for (let i = 0; i <= pad; i++) padded = succeed(padded);
+        let body = padded as Eff<number, never>;
         for (let i = 0; i < length; i++) body = body.flatMap((x: number) => succeed(x));
         const fiber = runFiber(
           ensuring(
@@ -1302,7 +1307,7 @@ describe("scheduler fairness", () => {
     const asyncFiber = await run(
       forkDaemon(
         async<string>((resume) => {
-          setTimeout(() => resume(succeed("ready") as any), 0);
+          setTimeout(() => resume(succeed("ready")), 0);
         }),
       ),
     );

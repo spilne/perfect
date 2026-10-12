@@ -11,12 +11,10 @@ describe("cached", () => {
       }),
     );
 
-    const program = (getConfig as any).flatMap((a: number) =>
-      (getConfig as any).flatMap((b: number) =>
-        (getConfig as any).map((c: number) => ({ a, b, c })),
-      ),
+    const program = getConfig.flatMap((a: number) =>
+      getConfig.flatMap((b: number) => getConfig.map((c: number) => ({ a, b, c }))),
     );
-    const { a, b, c } = (await run(program)) as any;
+    const { a, b, c } = await run(program);
     expect(a).toBe(b);
     expect(b).toBe(c);
     expect(runs).toBe(1);
@@ -39,10 +37,8 @@ describe("cached", () => {
     const a = cached(source);
     const b = cached(source);
 
-    const program = (a as any).flatMap((va: number) =>
-      (b as any).map((vb: number) => ({ va, vb })),
-    );
-    const { va, vb } = (await run(program)) as any;
+    const program = a.flatMap((va: number) => b.map((vb: number) => ({ va, vb })));
+    const { va, vb } = await run(program);
     expect(va).not.toBe(vb);
     expect(runs).toBe(2);
   });
@@ -55,14 +51,12 @@ describe("cached", () => {
       { ttlMs: 1000 },
     );
 
-    const program = (getOnce as any).flatMap((a: number) =>
-      (getOnce as any).flatMap((b: number) =>
-        sync(() => c.advance(1001)).flatMap(() =>
-          (getOnce as any).map((cc: number) => ({ a, b, c: cc })),
-        ),
+    const program = getOnce.flatMap((a: number) =>
+      getOnce.flatMap((b: number) =>
+        sync(() => c.advance(1001)).flatMap(() => getOnce.map((cc: number) => ({ a, b, c: cc }))),
       ),
     );
-    const { a, b, c: third } = (await run(provide(program, Clock, c) as any)) as any;
+    const { a, b, c: third } = await run(provide(program, Clock, c));
     expect(a).toBe(1);
     expect(b).toBe(1);
     expect(third).toBe(2);
@@ -72,12 +66,10 @@ describe("cached", () => {
   test(".invalidate drops the cache", async () => {
     let runs = 0;
     const getOnce = cached(sync(() => ++runs));
-    const program = (getOnce as any).flatMap((first: number) =>
-      getOnce.invalidate.flatMap(() =>
-        (getOnce as any).map((second: number) => ({ first, second })),
-      ),
+    const program = getOnce.flatMap((first: number) =>
+      getOnce.invalidate.flatMap(() => getOnce.map((second: number) => ({ first, second }))),
     );
-    const { first, second } = (await run(program as any)) as any;
+    const { first, second } = await run(program);
     expect(first).toBe(1);
     expect(second).toBe(2);
   });
@@ -89,7 +81,7 @@ describe("cached", () => {
     expect(await run(getOnce.isFresh)).toBe(false);
     expect(await run(getOnce.current)).toBe(undefined);
     // run once, then peek
-    await run(getOnce as any);
+    await run(getOnce);
     expect(await run(getOnce.isFresh)).toBe(true);
     expect(await run(getOnce.current)).toBe(1);
     expect(runs).toBe(1);
@@ -106,18 +98,18 @@ describe("cachedBy", () => {
       }),
     );
 
-    const program = (cache.get("a") as any).flatMap((a1: string) =>
-      cache
-        .get("a")
-        .flatMap((a2: string) =>
-          cache
-            .get("b")
-            .flatMap((b: string) =>
-              (cache.get("a") as any).map((a3: string) => ({ a1, a2, a3, b })),
-            ),
-        ),
-    );
-    const { a1, a2, a3, b } = (await run(program as any)) as any;
+    const program = cache
+      .get("a")
+      .flatMap((a1: string) =>
+        cache
+          .get("a")
+          .flatMap((a2: string) =>
+            cache
+              .get("b")
+              .flatMap((b: string) => cache.get("a").map((a3: string) => ({ a1, a2, a3, b }))),
+          ),
+      );
+    const { a1, a2, a3, b } = await run(program);
     expect(a1).toBe("value-for-a");
     expect(a2).toBe(a1);
     expect(a3).toBe(a1);
@@ -130,16 +122,18 @@ describe("cachedBy", () => {
     const c = new TestClock();
     const cache = cachedBy((_id: string) => sync(() => ++runs), { ttlMs: 1000 });
 
-    const program = (cache.get("k") as any).flatMap((first: number) =>
-      cache
-        .get("k")
-        .flatMap((second: number) =>
-          sync(() => c.advance(1001)).flatMap(() =>
-            (cache.get("k") as any).map((third: number) => ({ first, second, third })),
+    const program = cache
+      .get("k")
+      .flatMap((first: number) =>
+        cache
+          .get("k")
+          .flatMap((second: number) =>
+            sync(() => c.advance(1001)).flatMap(() =>
+              cache.get("k").map((third: number) => ({ first, second, third })),
+            ),
           ),
-        ),
-    );
-    const { first, second, third } = (await run(provide(program as any, Clock, c) as any)) as any;
+      );
+    const { first, second, third } = await run(provide(program, Clock, c));
     expect(first).toBe(1);
     expect(second).toBe(1);
     expect(third).toBe(2);
@@ -150,12 +144,12 @@ describe("cachedBy", () => {
     let runs = 0;
     const cache = cachedBy((_: string) => sync(() => ++runs));
 
-    const program = (cache.get("a") as any).flatMap((a1: number) =>
-      cache
-        .invalidate("a")
-        .flatMap(() => (cache.get("a") as any).map((a2: number) => ({ a1, a2 }))),
-    );
-    const { a1, a2 } = (await run(program as any)) as any;
+    const program = cache
+      .get("a")
+      .flatMap((a1: number) =>
+        cache.invalidate("a").flatMap(() => cache.get("a").map((a2: number) => ({ a1, a2 }))),
+      );
+    const { a1, a2 } = await run(program);
     expect(a1).toBe(1);
     expect(a2).toBe(2);
   });
@@ -185,17 +179,19 @@ describe("cachedBy", () => {
     const program = cache
       .has("x")
       .flatMap((empty: boolean) =>
-        (cache.get("x") as any).flatMap(() =>
-          cache
-            .has("x")
-            .flatMap((filled: boolean) =>
-              cache
-                .invalidate("x")
-                .flatMap(() => cache.has("x").map((gone: boolean) => ({ empty, filled, gone }))),
-            ),
-        ),
+        cache
+          .get("x")
+          .flatMap(() =>
+            cache
+              .has("x")
+              .flatMap((filled: boolean) =>
+                cache
+                  .invalidate("x")
+                  .flatMap(() => cache.has("x").map((gone: boolean) => ({ empty, filled, gone }))),
+              ),
+          ),
       );
-    const { empty, filled, gone } = (await run(program as any)) as any;
+    const { empty, filled, gone } = await run(program);
     expect(empty).toBe(false);
     expect(filled).toBe(true);
     expect(gone).toBe(false);
@@ -205,21 +201,23 @@ describe("cachedBy", () => {
     let runs = 0;
     const cache = cachedBy((id: string) => sync(() => ({ id, n: ++runs })), { maxSize: 2 });
 
-    const program = (cache.get("a") as any).flatMap(() =>
+    const program = cache.get("a").flatMap(() =>
       cache.get("b").flatMap(() =>
         // touching "a" makes it most-recent, so "b" becomes the eviction target
-        (cache.get("a") as any).flatMap(() =>
-          cache
-            .get("c")
-            .flatMap(() =>
-              cache.size.flatMap((s: number) =>
-                cache.has("b").map((hasB: boolean) => ({ s, hasB })),
+        cache
+          .get("a")
+          .flatMap(() =>
+            cache
+              .get("c")
+              .flatMap(() =>
+                cache.size.flatMap((s: number) =>
+                  cache.has("b").map((hasB: boolean) => ({ s, hasB })),
+                ),
               ),
-            ),
-        ),
+          ),
       ),
     );
-    const { s, hasB } = (await run(program as any)) as any;
+    const { s, hasB } = await run(program);
     expect(s).toBe(2);
     expect(hasB).toBe(false);
   });
@@ -233,22 +231,24 @@ describe("cachedBy", () => {
         sync(() => {
           runs++;
           return { value: `tok-${id}`, expiresIn: id === "short" ? 100 : 10_000 };
-        }) as any,
+        }),
       { ttlMs: (t: Token) => t.expiresIn },
     );
 
-    const program = (cache.get("short") as any).flatMap(() =>
+    const program = cache.get("short").flatMap(() =>
       sync(() => c.advance(200)).flatMap(() =>
         // "short" should be expired
         cache.has("short").flatMap((stillShort: boolean) =>
           // "long" lives well past that
-          (cache.get("long") as any).flatMap(() =>
-            cache.has("long").map((stillLong: boolean) => ({ stillShort, stillLong })),
-          ),
+          cache
+            .get("long")
+            .flatMap(() =>
+              cache.has("long").map((stillLong: boolean) => ({ stillShort, stillLong })),
+            ),
         ),
       ),
     );
-    const { stillShort, stillLong } = (await run(provide(program as any, Clock, c) as any)) as any;
+    const { stillShort, stillLong } = await run(provide(program, Clock, c));
     expect(stillShort).toBe(false);
     expect(stillLong).toBe(true);
     expect(runs).toBe(2);
@@ -269,14 +269,16 @@ describe("cachedBy", () => {
       { keyFn: (r: Req) => `${r.org}:${r.id}` },
     );
 
-    const program = (cache.get({ org: "acme", id: 1 }) as any).flatMap((a: string) =>
-      cache
-        .get({ org: "acme", id: 1 })
-        .flatMap((b: string) =>
-          (cache.get({ org: "acme", id: 2 }) as any).map((c: string) => ({ a, b, c })),
-        ),
-    );
-    const { a, b, c } = (await run(program as any)) as any;
+    const program = cache
+      .get({ org: "acme", id: 1 })
+      .flatMap((a: string) =>
+        cache
+          .get({ org: "acme", id: 1 })
+          .flatMap((b: string) =>
+            cache.get({ org: "acme", id: 2 }).map((c: string) => ({ a, b, c })),
+          ),
+      );
+    const { a, b, c } = await run(program);
     expect(a).toBe("acme/1");
     expect(b).toBe(a);
     expect(c).toBe("acme/2");

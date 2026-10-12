@@ -1052,7 +1052,11 @@ describe("Pool handoff", () => {
 
 describe("push-source bridges", () => {
   const pullAfterFirst = <A>(stream: Stream<A>) =>
-    runSync(stream.step as Eff<any, never>) as { _tag: "Emit"; chunk: Chunk<A>; next: Stream<A> };
+    runSync(stream.step as Eff<unknown, never>) as {
+      _tag: "Emit";
+      chunk: Chunk<A>;
+      next: Stream<A>;
+    };
 
   test("Stream.fromCallback keeps a value handed to a pull interrupted before it runs", () => {
     const scheduler = new StepScheduler();
@@ -1064,14 +1068,14 @@ describe("push-source bridges", () => {
     const first = pullAfterFirst(stream);
     expect(first.chunk.toArray()).toEqual([0]);
 
-    const pull = runFiber(first.next.step as Eff<any, never>, scheduler);
+    const pull = runFiber(first.next.step as Eff<unknown, never>, scheduler);
     scheduler.flush();
     emit(1);
     pull.interrupt();
     scheduler.flush();
     expect<unknown>(pull.result).toEqual(interrupted);
 
-    const retried = runSync(first.next.step as Eff<any, never>) as { chunk: Chunk<number> };
+    const retried = runSync(first.next.step as Eff<unknown, never>) as { chunk: Chunk<number> };
     expect(retried.chunk.toArray()).toEqual([1]);
   });
 
@@ -1086,14 +1090,14 @@ describe("push-source bridges", () => {
     );
     const first = pullAfterFirst(stream);
 
-    const pull = runFiber(first.next.step as Eff<any, never>, scheduler);
+    const pull = runFiber(first.next.step as Eff<unknown, never>, scheduler);
     scheduler.flush();
     emit(1);
     emit(2);
     pull.interrupt();
     scheduler.flush();
 
-    const retried = runSync(first.next.step as Eff<any, never>) as { chunk: Chunk<number> };
+    const retried = runSync(first.next.step as Eff<unknown, never>) as { chunk: Chunk<number> };
     expect(retried.chunk.toArray()).toEqual([1, 2]);
   });
 
@@ -1108,13 +1112,13 @@ describe("push-source bridges", () => {
     );
     const first = pullAfterFirst(stream);
 
-    const pull = runFiber(first.next.step as Eff<any, never>, scheduler);
+    const pull = runFiber(first.next.step as Eff<unknown, never>, scheduler);
     scheduler.flush();
     emit(Chunk.fromArray([1, 2]));
     pull.interrupt();
     scheduler.flush();
 
-    const retried = runSync(first.next.step as Eff<any, never>) as { chunk: Chunk<number> };
+    const retried = runSync(first.next.step as Eff<unknown, never>) as { chunk: Chunk<number> };
     expect(retried.chunk.toArray()).toEqual([1, 2]);
   });
 });

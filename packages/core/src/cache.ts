@@ -84,15 +84,16 @@ export function cached<A, S>(eff: Eff<A, S>, opts: { ttlMs?: number } = {}): Cac
   const { ttlMs = Infinity } = opts;
   let entry: SingleEntry<A> | null = null;
 
-  const nowEff: Eff<number, never> = (Clock.get as any).flatMap((c: Clock) =>
+  // The runtime always has a clock, so this needs nothing.
+  const nowEff: Eff<number, never> = (Clock.get as Eff<Clock, never>).flatMap((c: Clock) =>
     sync(() => c.now()),
-  ) as Eff<number, never>;
+  );
 
   const inFlight = new InFlight<"value">();
-  const getOrCompute: Eff<A, S> = (nowEff as any).flatMap((t: number) => {
+  const getOrCompute: Eff<A, S> = nowEff.flatMap((t: number) => {
     if (entry !== null && entry.expiresAt > t) return succeed(entry.value);
     if (entry !== null) entry = null; // expired
-    const compute = (eff as any).flatMap((value: A) => {
+    const compute = eff.flatMap((value: A) => {
       const expiresAt = ttlMs === Infinity ? Infinity : t + ttlMs;
       entry = { value, expiresAt };
       return succeed(value);
@@ -104,19 +105,24 @@ export function cached<A, S>(eff: Eff<A, S>, opts: { ttlMs?: number } = {}): Cac
     entry = null;
   });
 
-  const current: Eff<A | undefined, never> = (nowEff as any).map((t: number) =>
+  const current: Eff<A | undefined, never> = nowEff.map((t: number) =>
     entry !== null && entry.expiresAt > t ? entry.value : undefined,
   ) as Eff<A | undefined, never>;
 
-  const isFresh: Eff<boolean, never> = (nowEff as any).map(
+  const isFresh: Eff<boolean, never> = nowEff.map(
     (t: number) => entry !== null && entry.expiresAt > t,
   ) as Eff<boolean, never>;
 
   // Attach helpers to the Suspend AST node so users see `.invalidate` etc.
-  (getOrCompute as any).invalidate = invalidate;
-  (getOrCompute as any).current = current;
-  (getOrCompute as any).isFresh = isFresh;
-  return getOrCompute as CachedEff<A, S>;
+  const result = getOrCompute as Eff<A, S> & {
+    invalidate: Eff<void, never>;
+    current: Eff<A | undefined, never>;
+    isFresh: Eff<boolean, never>;
+  };
+  result.invalidate = invalidate;
+  result.current = current;
+  result.isFresh = isFresh;
+  return result;
 }
 
 // ── cachedBy: keyed cache with optional TTL + LRU ──────────────────
@@ -165,9 +171,10 @@ export function cachedBy<K, A, S>(
   // On hit, we re-insert to move-to-end (true LRU).
   const store = new Map<string, Entry<A>>();
 
-  const nowEff: Eff<number, never> = (Clock.get as any).flatMap((c: Clock) =>
+  // The runtime always has a clock, so this needs nothing.
+  const nowEff: Eff<number, never> = (Clock.get as Eff<Clock, never>).flatMap((c: Clock) =>
     sync(() => c.now()),
-  ) as Eff<number, never>;
+  );
 
   const inFlight = new InFlight<string>();
 
@@ -183,7 +190,7 @@ export function cachedBy<K, A, S>(
   };
 
   const get = (key: K): Eff<A, S> =>
-    (nowEff as any).flatMap((t: number) => {
+    nowEff.flatMap((t: number) => {
       const hash = keyFn(key);
       const entry = store.get(hash);
       if (entry !== undefined && entry.expiresAt > t) {
@@ -193,7 +200,7 @@ export function cachedBy<K, A, S>(
         return succeed(entry.value);
       }
       if (entry !== undefined) store.delete(hash); // expired
-      const compute = (build(key) as any).flatMap((value: A) => {
+      const compute = build(key).flatMap((value: A) => {
         const entryTtl = resolveTtl(value);
         const expiresAt = entryTtl === Infinity ? Infinity : t + entryTtl;
         sweep(t);
@@ -218,7 +225,7 @@ export function cachedBy<K, A, S>(
   });
 
   const has = (key: K): Eff<boolean, never> =>
-    (nowEff as any).map((t: number) => {
+    nowEff.map((t: number) => {
       const entry = store.get(keyFn(key));
       return entry !== undefined && entry.expiresAt > t;
     }) as Eff<boolean, never>;

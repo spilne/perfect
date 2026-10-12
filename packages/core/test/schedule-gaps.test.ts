@@ -32,7 +32,7 @@ describe("Schedule.union", () => {
     });
 
     const exit = await runExit(
-      retryWith(alwaysFail as any, Schedule.union(Schedule.recurs(1), Schedule.recurs(2))) as any,
+      retryWith(alwaysFail, Schedule.union(Schedule.recurs(1), Schedule.recurs(2))),
     );
     expect(exit._tag).toBe("Failure");
     expect(attempts).toBe(3); // initial + 2 retries (recurs(2) is the longer branch)
@@ -48,7 +48,7 @@ describe("Schedule.whileInput", () => {
     });
 
     const sched = Schedule.whileInput(Schedule.forever, (e: unknown) => e === "retryable");
-    const exit = await runExit(retryWith(effect as any, sched as any) as any);
+    const exit = await runExit(retryWith(effect, sched));
 
     expect(exit._tag).toBe("Failure");
     if (exit._tag === "Failure") {

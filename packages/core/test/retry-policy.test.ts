@@ -67,7 +67,7 @@ describe("RetryPolicy — fluent builder", () => {
   test("fibonacci schedule produces 1, 1, 2, 3, 5, ...", () => {
     const s = Schedule.fibonacci(10);
     const delays: number[] = [];
-    let state: any = s.initial;
+    let state = s.initial;
     for (let i = 0; i < 5; i++) {
       const d = s.step(undefined, state);
       if (d._tag === "Done") break;
@@ -91,7 +91,7 @@ describe("RetryPolicy — fluent builder", () => {
   test("cumulativeDelay output is running total", () => {
     const s = Schedule.cumulativeDelay(Schedule.spaced(100));
     const outputs: number[] = [];
-    let state: any = s.initial;
+    let state = s.initial;
     for (let i = 0; i < 4; i++) {
       const d = s.step(undefined, state);
       if (d._tag === "Done") break;

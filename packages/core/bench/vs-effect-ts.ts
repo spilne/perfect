@@ -144,7 +144,7 @@ for (const count of [10, 100, 1_000]) {
 
     bench("Promise.all", async () => Promise.all(items.map((i) => Promise.resolve(i * 2))));
 
-    bench("perfect all + run", async () => pRun(pAll(items.map((i) => pSucceed(i * 2))) as any));
+    bench("perfect all + run", async () => pRun(pAll(items.map((i) => pSucceed(i * 2)))));
 
     bench("effect all + runPromise", async () =>
       Effect.runPromise(Effect.all(items.map((i) => Effect.succeed(i * 2)))));
@@ -168,8 +168,7 @@ group("race × 3 (all succeed fast)", () => {
 // ── error handling ─────────────────────────────────────────────────
 
 group("error: fail → handle → succeed", () => {
-  bench("perfect fail + .catch + run", async () =>
-    pRun((pFail("boom") as any).catch(() => pSucceed(0))));
+  bench("perfect fail + .catch + run", async () => pRun(pFail("boom").catch(() => pSucceed(0))));
 
   bench("effect fail + catchAll + runPromise", async () =>
     Effect.runPromise(Effect.fail("boom").pipe(Effect.catch(() => Effect.succeed(0)))));

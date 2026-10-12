@@ -10,19 +10,20 @@ import {
   Op,
 } from "./eff.js";
 import { Fiber } from "./fiber.js";
+import type { Clock } from "./clock.js";
 import { type Exit, Exit as ExitNS } from "./exit.js";
 import { RetryPolicy, runRetry as runRetryUnified } from "./retry-policy.js";
 
 export function succeed<A>(value: A): Eff<A, never> {
-  return new Suspend(Op.Succeed, value, null) as any;
+  return new Suspend(Op.Succeed, value, null) as Eff<A, never>;
 }
 
 export function fail<E>(error: E): Eff<never, Throws<E>> {
-  return new Suspend(Op.Fail, Cause.fail(error), null) as any;
+  return new Suspend(Op.Fail, Cause.fail(error), null) as Eff<never, Throws<E>>;
 }
 
 export function die(defect: unknown): Eff<never, never> {
-  return new Suspend(Op.Fail, Cause.die(defect), null) as any;
+  return new Suspend(Op.Fail, Cause.die(defect), null) as Eff<never, never>;
 }
 
 /** Fail with a pre-existing Cause — useful for re-failing unchanged after
@@ -30,15 +31,15 @@ export function die(defect: unknown): Eff<never, never> {
 export function failCause<E = unknown>(
   cause: import("./cause.js").Cause<E>,
 ): Eff<never, Throws<E>> {
-  return new Suspend(Op.Fail, cause, null) as any;
+  return new Suspend(Op.Fail, cause, null) as Eff<never, Throws<E>>;
 }
 
 export function sync<A>(f: () => A): Eff<A, never> {
-  return new Suspend(Op.Sync, f, null) as any;
+  return new Suspend(Op.Sync, f, null) as Eff<A, never>;
 }
 
 export function suspend<A, S>(f: () => Eff<A, S>): Eff<A, S> {
-  return new Suspend(Op.FlatMap, new Suspend(Op.Succeed, undefined, null), f) as any;
+  return new Suspend(Op.FlatMap, new Suspend(Op.Succeed, undefined, null), f) as Eff<A, S>;
 }
 
 /**
@@ -65,11 +66,11 @@ export function async<A, E = never>(
     resume: (value: Eff<A, Throws<E>>, onDiscard?: () => void) => void,
   ) => (() => void) | void,
 ): Eff<A, WithError<never, E>> {
-  return new Suspend(Op.Async, register, null) as any;
+  return new Suspend(Op.Async, register, null) as Eff<A, WithError<never, E>>;
 }
 
 // alias: fromPromise — same as tryPromise (matches the "from*" naming family).
-export const fromPromise: typeof tryPromise = (...args: any[]) => (tryPromise as any)(...args);
+export const fromPromise: typeof tryPromise = (...args) => tryPromise(...args);
 
 /**
  * The promise behind each effect made by tryPromise/fromPromise, so the
@@ -98,18 +99,18 @@ export function tryPromise<A, E>(
     return async<A, E>((resume) => {
       const controller = new AbortController();
       promise(controller.signal).then(
-        (a) => resume(succeed(a) as any),
-        (e) => resume(fail(onReject(e)) as any),
+        (a) => resume(succeed(a)),
+        (e) => resume(fail(onReject(e))),
       );
       return () => controller.abort();
-    }) as any;
+    }) as Eff<A, Throws<E>>;
   }
   const eff = async<A, E>((resume) => {
     (promise as () => Promise<A>)().then(
-      (a) => resume(succeed(a) as any),
-      (e) => resume(fail(onReject(e)) as any),
+      (a) => resume(succeed(a)),
+      (e) => resume(fail(onReject(e))),
     );
-  }) as any;
+  }) as Eff<A, Throws<E>>;
   // Remember the promise for the thenable fast path. Going through run()
   // costs ~500 ns (fiber spawn + register/resume cycle) on top of the
   // promise. For a bare `await tryPromise(p)` (no further composition) the
@@ -127,7 +128,7 @@ export function tryPromise<A, E>(
 export function fork<A, S>(
   eff: Eff<A, S>,
 ): Eff<Fiber<A, ErrorsOf<S>>, Exclude<S, Throws<unknown>>> {
-  return new Suspend(Op.Fork, eff, null) as any;
+  return new Suspend(Op.Fork, eff, null) as Eff<Fiber<A, ErrorsOf<S>>, Exclude<S, Throws<unknown>>>;
 }
 
 // Spawn a fiber that is NOT tied to the parent's lifecycle.
@@ -135,7 +136,10 @@ export function fork<A, S>(
 export function forkDaemon<A, S>(
   eff: Eff<A, S>,
 ): Eff<Fiber<A, ErrorsOf<S>>, Exclude<S, Throws<unknown>>> {
-  return new Suspend(Op.ForkDaemon, eff, null) as any;
+  return new Suspend(Op.ForkDaemon, eff, null) as Eff<
+    Fiber<A, ErrorsOf<S>>,
+    Exclude<S, Throws<unknown>>
+  >;
 }
 
 /**
@@ -146,13 +150,14 @@ export function forkDaemon<A, S>(
  * raw Cause, so even defects could be caught with .catch.)
  */
 export function join<A, E>(fiber: Fiber<A, E>): Eff<A, WithError<never, E>> {
-  return async<A, Cause>((resume) =>
+  return async<A, E>((resume) =>
     // Returning the remover means a join that gives up stops listening.
     fiber.onComplete((result) => {
-      if (result.ok) resume(succeed(result.value) as any);
-      else resume(failCause(result.cause) as any);
+      if (result.ok) resume(succeed(result.value));
+      // A Fiber<A, E> fails with E; FiberResult just doesn't carry it.
+      else resume(failCause(result.cause as Cause<E>));
     }),
-  ) as any;
+  );
 }
 
 export function interrupt<A, E>(fiber: Fiber<A, E>): Eff<void, never> {
@@ -164,20 +169,22 @@ export function awaitFiber<A, E>(fiber: Fiber<A, E>): Eff<Exit<E, A>, never> {
   return async<Exit<E, A>>((resume) =>
     fiber.onComplete((result) => {
       resume(
-        succeed(result.ok ? ExitNS.succeed(result.value) : ExitNS.failure(result.cause)) as any,
+        succeed(
+          result.ok ? ExitNS.succeed(result.value) : ExitNS.failure(result.cause as Cause<E>),
+        ),
       );
     }),
-  ) as any;
+  );
 }
 
 // ── Interruption masking ───────────────────────────────────────────
 
 export function uninterruptible<A, S>(eff: Eff<A, S>): Eff<A, S> {
-  return new Suspend(Op.SetInterruptible, eff, false) as any;
+  return new Suspend(Op.SetInterruptible, eff, false) as Eff<A, S>;
 }
 
 export function interruptible<A, S>(eff: Eff<A, S>): Eff<A, S> {
-  return new Suspend(Op.SetInterruptible, eff, true) as any;
+  return new Suspend(Op.SetInterruptible, eff, true) as Eff<A, S>;
 }
 
 /**
@@ -200,13 +207,16 @@ export function uninterruptibleMask<A, S>(
   return new Suspend(
     Op.SetInterruptible,
     (wasInterruptible: boolean) =>
-      f(<B, S2>(eff: Eff<B, S2>) => new Suspend(Op.SetInterruptible, eff, wasInterruptible) as any),
+      f(
+        <B, S2>(eff: Eff<B, S2>) =>
+          new Suspend(Op.SetInterruptible, eff, wasInterruptible) as Eff<B, S2>,
+      ),
     false,
-  ) as any;
+  ) as Eff<A, S>;
 }
 
 // Explicit cooperative yield point — forces a scheduler reschedule.
-export const yieldNow: Eff<void, never> = new Suspend(Op.YieldNow, null, null) as any;
+export const yieldNow: Eff<void, never> = new Suspend(Op.YieldNow, null, null) as Eff<void, never>;
 
 // ── Timing ─────────────────────────────────────────────────────────
 
@@ -216,13 +226,13 @@ export const yieldNow: Eff<void, never> = new Suspend(Op.YieldNow, null, null) a
 const CLOCK_KEY = Symbol.for("spilne/svc/Clock");
 export function sleep(ms: number): Eff<void, never> {
   // Op.FlatMap directly so we don't depend on the fluent prototype being installed.
-  return new Suspend(Op.FlatMap, new Suspend(Op.GetCtx, CLOCK_KEY, null), (clock: any) =>
+  return new Suspend(Op.FlatMap, new Suspend(Op.GetCtx, CLOCK_KEY, null), (clock: Clock) =>
     clock.sleep(ms),
-  ) as any;
+  ) as Eff<void, never>;
 }
 
 export function delay<A, S>(eff: Eff<A, S>, ms: number): Eff<A, S> {
-  return new Suspend(Op.FlatMap, sleep(ms), () => eff) as any;
+  return new Suspend(Op.FlatMap, sleep(ms), () => eff) as Eff<A, S>;
 }
 
 // ── Race ───────────────────────────────────────────────────────────
@@ -234,7 +244,7 @@ export function delay<A, S>(eff: Eff<A, S>, ms: number): Eff<A, S> {
 export function race<E extends Eff<unknown, unknown>[]>(
   effects: [...E],
 ): Eff<InferValue<E[number]>, InferEffects<E[number]>> {
-  return new Suspend(Op.Race, effects, null) as any;
+  return new Suspend(Op.Race, effects, null) as Eff<InferValue<E[number]>, InferEffects<E[number]>>;
 }
 
 /**
@@ -248,7 +258,7 @@ export function race<E extends Eff<unknown, unknown>[]>(
 export function raceSuccess<E extends Eff<unknown, unknown>[]>(
   effects: [...E],
 ): Eff<InferValue<E[number]>, InferEffects<E[number]>> {
-  if (effects.length === 0) return die(new Error("raceSuccess: empty input")) as any;
+  if (effects.length === 0) return die(new Error("raceSuccess: empty input"));
   return suspend(() => {
     let remaining = effects.length;
     let failures: Cause | null = null;
@@ -262,11 +272,14 @@ export function raceSuccess<E extends Eff<unknown, unknown>[]>(
           return new Suspend(Op.Fail, failures, null);
         }),
     );
-    return new Suspend(Op.Race, contenders, null) as Eff<unknown, unknown>;
-  }) as any;
+    return new Suspend(Op.Race, contenders, null) as Eff<
+      InferValue<E[number]>,
+      InferEffects<E[number]>
+    >;
+  });
 }
 
-const NEVER: Eff<never, never> = new Suspend(Op.Async, () => {}, null) as any;
+const NEVER: Eff<never, never> = new Suspend(Op.Async, () => {}, null) as Eff<never, never>;
 
 /** @deprecated Same as {@link race}. Use `race`. */
 export function raceFirst<E extends Eff<unknown, unknown>[]>(
@@ -285,12 +298,15 @@ export function raceEither<A, S1, B, S2>(
   left: Eff<A, S1>,
   right: Eff<B, S2>,
 ): Eff<{ _tag: "Left"; left: A } | { _tag: "Right"; right: B }, S1 | S2>;
-export function raceEither(...args: any[]): any {
-  const [left, right] = Array.isArray(args[0]) ? args[0] : args;
+export function raceEither(...args: unknown[]): Eff<unknown, unknown> {
+  const [left, right] = (Array.isArray(args[0]) ? args[0] : args) as [
+    Eff<unknown, unknown>,
+    Eff<unknown, unknown>,
+  ];
   return race([
-    (left as any).map((a: any) => ({ _tag: "Left" as const, left: a })),
-    (right as any).map((b: any) => ({ _tag: "Right" as const, right: b })),
-  ]) as any;
+    left.map((a) => ({ _tag: "Left" as const, left: a })),
+    right.map((b) => ({ _tag: "Right" as const, right: b })),
+  ]);
 }
 
 /**
@@ -305,11 +321,11 @@ export function allSettled<A, S>(
     (e) =>
       new Suspend(
         Op.CatchAll,
-        new Suspend(Op.FlatMap, e as any, (a: any) => succeed(ExitNS.succeed(a))),
-        (cause: any) => succeed(ExitNS.failure(cause)),
+        new Suspend(Op.FlatMap, e, (a: A) => succeed(ExitNS.succeed(a))),
+        (cause: Cause) => succeed(ExitNS.failure(cause)),
       ),
   );
-  return new Suspend(Op.All, wrapped, null) as any;
+  return new Suspend(Op.All, wrapped, null) as Eff<Exit<unknown, A>[], Exclude<S, Throws<unknown>>>;
 }
 
 /**
@@ -320,9 +336,9 @@ export const raceAll: typeof allSettled = allSettled;
 
 export function timeoutOption<A, S>(eff: Eff<A, S>, ms: number): Eff<A | undefined, S> {
   return race([
-    eff as any,
-    new Suspend(Op.FlatMap, sleep(ms), () => succeed(undefined)) as any,
-  ]) as any;
+    eff,
+    new Suspend(Op.FlatMap, sleep(ms), () => succeed(undefined)) as Eff<undefined, never>,
+  ]);
 }
 
 // Like timeout but with a custom typed error instead of Option<A>.
@@ -331,7 +347,10 @@ export function timeoutFail<A, S, E>(
   ms: number,
   onTimeout: () => E,
 ): Eff<A, S | Throws<E>> {
-  return race([eff, new Suspend(Op.FlatMap, sleep(ms), () => fail(onTimeout())) as any]) as any;
+  return race([
+    eff,
+    new Suspend(Op.FlatMap, sleep(ms), () => fail(onTimeout())) as Eff<never, Throws<E>>,
+  ]);
 }
 
 // Race against a timer; timeout produces a typed failure.
@@ -348,7 +367,7 @@ export function timeout<A, S, E>(
 // Finalizers may produce any value; it is thrown away. So a finalizer like
 // `sync(() => log.push("closed"))` (an Eff<number>) is fine.
 export function ensuring<A, S, S2>(eff: Eff<A, S>, finalizer: Eff<unknown, S2>): Eff<A, S | S2> {
-  return new Suspend(Op.Ensuring, eff, finalizer) as any;
+  return new Suspend(Op.Ensuring, eff, finalizer) as Eff<A, S | S2>;
 }
 
 // Run handler with the Exit of eff, then propagate eff's original outcome.
@@ -358,18 +377,18 @@ export function onExit<A, S, S2>(
   eff: Eff<A, S>,
   handler: (exit: Exit<unknown, A>) => Eff<unknown, S2>,
 ): Eff<A, S | S2> {
-  return new Suspend(Op.Ensuring, eff, handler) as any;
+  return new Suspend(Op.Ensuring, eff, handler) as Eff<A, S | S2>;
 }
 
 export function acquireRelease<A, S, S2>(
   acquire: Eff<A, S>,
   release: (a: A) => Eff<unknown, S2>,
 ): Eff<A, S | S2> {
-  return new Suspend(Op.AcqRel, acquire, release) as any;
+  return new Suspend(Op.AcqRel, acquire, release) as Eff<A, S | S2>;
 }
 
 export function scoped<A, S>(eff: Eff<A, S>): Eff<A, S> {
-  return new Suspend(Op.Scoped, eff, null) as any;
+  return new Suspend(Op.Scoped, eff, null) as Eff<A, S>;
 }
 
 /**

@@ -53,7 +53,7 @@ const getAnnotations: Eff<Record<string, unknown>, never> = new Suspend(
   Op.GetCtx,
   LOG_ANNOTATIONS_KEY,
   null,
-) as any;
+) as Eff<Record<string, unknown>, never>;
 
 function logAt(
   level: LogLevel,
@@ -64,11 +64,11 @@ function logAt(
     if (!levelEnabled(logger.minLevel, level)) return succeedUndefined;
     return new Suspend(
       Op.FlatMap,
-      clockNow as any,
+      clockNow,
       (timestamp: number) =>
         new Suspend(
           Op.FlatMap,
-          getAnnotations as any,
+          getAnnotations,
           (ann: Record<string, unknown>) =>
             new Suspend(
               Op.Sync,
@@ -84,7 +84,7 @@ function logAt(
             ),
         ),
     );
-  }) as any;
+  }) as Eff<void, never>;
 }
 
 export const Log = {
@@ -103,12 +103,12 @@ export const Log = {
    * region's annotations; unwinds when the region completes.
    */
   annotated<A, S>(eff: Eff<A, S>, annotations: Record<string, unknown>): Eff<A, S> {
-    return new Suspend(Op.FlatMap, getAnnotations as any, (current: Record<string, unknown>) => {
+    return new Suspend(Op.FlatMap, getAnnotations, (current: Record<string, unknown>) => {
       const merged = new Map<symbol, unknown>([
         [LOG_ANNOTATIONS_KEY, { ...current, ...annotations }],
       ]);
       return new Suspend(Op.Provide, eff, merged);
-    }) as any;
+    }) as Eff<A, S>;
   },
 } as const;
 

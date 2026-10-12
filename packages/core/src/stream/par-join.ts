@@ -27,7 +27,7 @@ const DONE: Step<never> = { _tag: "Done" };
 type AnyStream<A> = Stream<A, unknown>;
 
 interface InnerHandle {
-  fiber: Fiber<any> | null;
+  fiber: Fiber<unknown> | null;
   finalizer: Eff<void, unknown> | null;
 }
 
@@ -53,7 +53,7 @@ export function parJoinStreams<A>(params: {
         const idle = new InProcessDeferred<void>();
         const acquire: Eff<void, never> = permits === null ? UNIT : permits.acquire();
         const releasePermit: Eff<void, never> = permits === null ? UNIT : permits.release();
-        let driver: Fiber<any> | null = null;
+        let driver: Fiber<void> | null = null;
         // Outer elements already pulled but not yet launched; teardown
         // finalizes them like opened inner streams.
         let backlog: Chunk<AnyStream<A>> | null = null;

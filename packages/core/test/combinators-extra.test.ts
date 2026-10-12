@@ -34,9 +34,9 @@ describe("trapError", () => {
   test("converts matching defect into a typed failure", async () => {
     const defectProne = sync(() => {
       throw new ParseError("bad input");
-    }) as any;
+    });
     const trapped = trapError(defectProne, ParseError);
-    await expect(run(trapped as any)).rejects.toBeInstanceOf(ParseError);
+    await expect(runUnchecked(trapped)).rejects.toBeInstanceOf(ParseError);
   });
 
   test("non-matching defects stay defects", async () => {
@@ -44,7 +44,7 @@ describe("trapError", () => {
       throw new TypeError("not this one");
     });
     const trapped = trapError(defectProne, ParseError);
-    await expect(run(trapped as any)).rejects.toBeInstanceOf(TypeError);
+    await expect(runUnchecked(trapped)).rejects.toBeInstanceOf(TypeError);
   });
 
   test("multiple classes — any one matches", async () => {
@@ -52,7 +52,7 @@ describe("trapError", () => {
       throw new NetError("500");
     });
     const trapped = trapError(defectProne, ParseError, NetError);
-    await expect(run(trapped as any)).rejects.toBeInstanceOf(NetError);
+    await expect(runUnchecked(trapped)).rejects.toBeInstanceOf(NetError);
   });
 
   test("successful effects pass through unchanged", async () => {
@@ -64,7 +64,7 @@ describe("trapError", () => {
 
 describe("validate", () => {
   test("returns tuple of values when all succeed", async () => {
-    const result = await run(validate([succeed(1), succeed("two"), succeed(true)]) as any);
+    const result = await run(validate([succeed(1), succeed("two"), succeed(true)]));
     expect(result).toEqual([1, "two", true]);
   });
 
@@ -79,7 +79,7 @@ describe("validate", () => {
   });
 
   test("single failure passes through cleanly", async () => {
-    await expect(run(validate([succeed(1), fail("only")]) as any)).rejects.toBe("only");
+    await expect(runUnchecked(validate([succeed(1), fail("only")]))).rejects.toBe("only");
   });
 
   test("empty array returns empty tuple", async () => {
@@ -120,15 +120,11 @@ describe("repeatUntil", () => {
     const poller = sync(() => {
       calls++;
       return calls;
-    }) as any;
+    });
 
     const c = new TestClock();
-    const promise = run(
-      provide(
-        repeatUntil(poller, { until: (n: number) => n >= 3, intervalMs: 100 }),
-        Clock,
-        c,
-      ) as any,
+    const promise = runUnchecked(
+      provide(repeatUntil(poller, { until: (n: number) => n >= 3, intervalMs: 100 }), Clock, c),
     );
     await new Promise((r) => setTimeout(r, 0));
     c.advance(100);
@@ -142,10 +138,10 @@ describe("repeatUntil", () => {
 
   test("fails with RepeatTimeoutError when maxAttempts is hit", async () => {
     // Use real time with tiny delays — simpler and less flaky than TestClock drain.
-    const poller = sync(() => 0) as any;
+    const poller = sync(() => 0);
     await expect(
-      run(
-        repeatUntil(poller, { until: (n: number) => n > 0, intervalMs: 1, maxAttempts: 3 }) as any,
+      runUnchecked(
+        repeatUntil(poller, { until: (n: number) => n > 0, intervalMs: 1, maxAttempts: 3 }),
       ),
     ).rejects.toEqual(
       expect.objectContaining({ _tag: "RepeatTimeoutError", reason: "maxAttempts" }),
@@ -159,10 +155,10 @@ describe("repeatUntilWithBackoff", () => {
     const poller = sync(() => {
       attempts++;
       return attempts;
-    }) as any;
+    });
     const c = new TestClock();
 
-    const promise = run(
+    const promise = runUnchecked(
       provide(
         repeatUntilWithBackoff(poller, {
           until: (n: number) => n >= 3,
@@ -171,7 +167,7 @@ describe("repeatUntilWithBackoff", () => {
         }),
         Clock,
         c,
-      ) as any,
+      ),
     );
     await new Promise((r) => setTimeout(r, 0));
     // attempt 1 → 10ms
@@ -251,9 +247,9 @@ describe("retry enhancements", () => {
     const eff = sync(() => {
       attempts++;
       throw new Error("unexpected");
-    }) as any;
+    });
 
-    await expect(run(retry(eff, { times: 5, delay: 0 }) as any)).rejects.toBeInstanceOf(Error);
+    await expect(run(retry(eff, { times: 5, delay: 0 }))).rejects.toBeInstanceOf(Error);
     expect(attempts).toBe(1); // no retry on defect
   });
 
@@ -263,14 +259,14 @@ describe("retry enhancements", () => {
       attempts++;
       if (attempts < 3) throw new Error("transient");
       return "ok";
-    }) as any;
+    });
 
     const result = await run(
       retryAllCause(eff, {
         shouldRetry: (c) => Cause.hasDie(c),
         times: 5,
         delayMs: 0,
-      }) as any,
+      }),
     );
     expect(result).toBe("ok");
     expect(attempts).toBe(3);
@@ -281,14 +277,14 @@ describe("retry enhancements", () => {
     const eff = sync(() => {
       attempts++;
       throw new TypeError("never-retry");
-    }) as any;
+    });
     await expect(
       run(
         retryAllCause(eff, {
           shouldRetry: (c) => Cause.defects(c).some((d) => !(d instanceof TypeError)),
           times: 5,
           delayMs: 0,
-        }) as any,
+        }),
       ),
     ).rejects.toBeInstanceOf(TypeError);
     expect(attempts).toBe(1);
@@ -299,11 +295,11 @@ describe("retry enhancements", () => {
     // We don't assert exact values — just that the effect completes and the
     // delay stays positive / below maxDelay.
     let attempts = 0;
-    const eff: any = sync(() => ++attempts).flatMap((n: number) =>
+    const eff = sync(() => ++attempts).flatMap((n: number) =>
       n < 3 ? fail("retry") : succeed("ok"),
     );
-    const result = await run(
-      retry(eff, { times: 5, delay: 2, backoff: "fixed", jitter: true }) as any,
+    const result = await runUnchecked(
+      retry(eff, { times: 5, delay: 2, backoff: "fixed", jitter: true }),
     );
     expect(result).toBe("ok");
     expect(attempts).toBe(3);
@@ -325,7 +321,7 @@ describe("retryAllBy", () => {
           RetryAttempt.isSuccess(r) && r.value.state === "pending"
             ? RetryDecision.retry()
             : RetryDecision.stop(),
-      }) as any,
+      }),
     );
     expect(result).toEqual({ state: "done" });
     expect(calls).toBe(3);
@@ -336,17 +332,17 @@ describe("retryAllBy", () => {
     const unstable = sync(() => {
       calls++;
       return calls < 2 ? fail("retry") : succeed("done");
-    }).flatMap((v: any) => (v === "retry" ? fail("retry") : succeed(v))) as any;
+    }).flatMap((v: unknown) => (v === "retry" ? fail("retry") : succeed(v)));
 
     await expect(
-      run(
+      runUnchecked(
         retryAllBy(unstable, {
           baseDelayMs: 1,
           handle: (r) =>
             RetryAttempt.isError(r) && r.error === "go-on"
               ? RetryDecision.retry()
               : RetryDecision.stop(),
-        }) as any,
+        }),
       ),
     ).rejects.toBe("retry");
     expect(calls).toBe(1);

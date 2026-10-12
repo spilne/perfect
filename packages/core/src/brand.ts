@@ -41,8 +41,8 @@ export type Unbrand<A> = A extends string
  * Zero-cost nominal constructor — brands the value with no validation.
  * Use at the boundary where a raw value first enters typed code.
  */
-export function nominal<A extends Brand<any, string>>(): (value: Unbrand<A>) => A {
-  return (value) => value as A;
+export function nominal<A extends Brand<unknown, string>>(): (value: Unbrand<A>) => A {
+  return (value) => value as unknown as A;
 }
 
 /**
@@ -50,13 +50,13 @@ export function nominal<A extends Brand<any, string>>(): (value: Unbrand<A>) => 
  * throws `BrandError` otherwise. Use for identifiers with invariants
  * (non-empty names, non-negative offsets).
  */
-export function refined<A extends Brand<any, string>>(
+export function refined<A extends Brand<unknown, string>>(
   validate: (value: Unbrand<A>) => boolean,
   describe: (value: Unbrand<A>) => string,
 ): (value: Unbrand<A>) => A {
   return (value) => {
     if (!validate(value)) throw new BrandError(describe(value));
-    return value as A;
+    return value as unknown as A;
   };
 }
 

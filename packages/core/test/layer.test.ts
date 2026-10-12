@@ -10,6 +10,7 @@ import {
   runSync,
   Layer,
   type Eff,
+  type Throws,
 } from "../src";
 import { runUnchecked } from "./run-unchecked";
 
@@ -240,7 +241,7 @@ describe("Layer", () => {
       );
       return { Logger: logger };
     });
-    const BrokenDb = fail("db unavailable") as Layer<{ Db: Db }, any>;
+    const BrokenDb = fail("db unavailable") as Layer<{ Db: Db }, Throws<string>>;
 
     const program = succeed("unused").with(Layer.merge(LoggerLive, BrokenDb));
 

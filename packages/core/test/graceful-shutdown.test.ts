@@ -75,9 +75,7 @@ describe("GracefulShutdown + Stream.interruptOn pairing", () => {
       }),
     );
 
-    const consumed = run(
-      (infinite as any).rechunk(1).buffer(2).interruptOn(shutdown.signal).toArray(),
-    );
+    const consumed = run(infinite.rechunk(1).buffer(2).interruptOn(shutdown.signal).toArray());
 
     await new Promise((r) => setTimeout(r, 10));
     await shutdown.run();

@@ -40,20 +40,20 @@ class InProcessSubscriptionRef<A> implements SubscriptionRef<A> {
   }
 
   set(value: A): Eff<void, never> {
-    return (this.ref.set(value) as any).flatMap(() =>
-      (this.pubsub.publish(value) as any).map(() => undefined),
-    ) as Eff<void, never>;
+    return this.ref
+      .set(value)
+      .flatMap(() => this.pubsub.publish(value).map(() => undefined)) as Eff<void, never>;
   }
 
   update(f: (a: A) => A): Eff<void, never> {
-    return (this.ref.updateAndGet(f) as any).flatMap((next: A) =>
-      (this.pubsub.publish(next) as any).map(() => undefined),
-    ) as Eff<void, never>;
+    return this.ref
+      .updateAndGet(f)
+      .flatMap((next: A) => this.pubsub.publish(next).map(() => undefined)) as Eff<void, never>;
   }
 
   get changes(): Eff<Stream<A, Throws<QueueClosed>>, never> {
-    return (this.ref.get as any).flatMap((current: A) =>
-      (this.pubsub.subscribe as any).map(
+    return this.ref.get.flatMap((current: A) =>
+      this.pubsub.subscribe.map(
         (subscribed: Stream<A, Throws<QueueClosed>>) =>
           Stream.of(current).concat(subscribed) as Stream<A, Throws<QueueClosed>>,
       ),

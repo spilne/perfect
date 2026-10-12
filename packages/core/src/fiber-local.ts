@@ -22,7 +22,10 @@ export const FIBER_LOCALS_KEY = Symbol.for("spilne/svc/FiberLocals");
 
 type Locals = ReadonlyMap<symbol, unknown>;
 
-const getLocals: Eff<Locals, never> = new Suspend(Op.GetCtx, FIBER_LOCALS_KEY, null) as any;
+const getLocals: Eff<Locals, never> = new Suspend(Op.GetCtx, FIBER_LOCALS_KEY, null) as Eff<
+  Locals,
+  never
+>;
 
 export interface FiberLocal<A> {
   /** The value for the current region, or the initial value outside any. */
@@ -52,7 +55,7 @@ export const FiberLocal = {
       Op.FlatMap,
       getLocals,
       (locals: Locals) => new Suspend(Op.Succeed, valueIn(locals), null),
-    ) as any;
+    ) as Eff<A, never>;
 
     const locallyWith = <B, S>(f: (current: A) => A, eff: Eff<B, S>): Eff<B, S> =>
       new Suspend(Op.FlatMap, getLocals, (locals: Locals) => {
@@ -69,7 +72,7 @@ export const FiberLocal = {
             return new Suspend(Op.Provide, eff, provided);
           },
         );
-      }) as any;
+      }) as Eff<B, S>;
 
     return {
       get,

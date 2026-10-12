@@ -9,14 +9,14 @@ declare module "../eff.js" {
   }
 }
 
-Suspend.prototype.map = function (f: any) {
-  return new Suspend(Op.FlatMap, this, (a: any) => succeed(f(a))) as any;
-};
+Suspend.prototype.map = function (this: Suspend, f: (a: unknown) => unknown) {
+  return new Suspend(Op.FlatMap, this, (a: unknown) => succeed(f(a))) as Eff<unknown, unknown>;
+} as Suspend["map"];
 
-Suspend.prototype.as = function (value: any) {
-  return new Suspend(Op.FlatMap, this, () => succeed(value)) as any;
-};
+Suspend.prototype.as = function (this: Suspend, value: unknown) {
+  return new Suspend(Op.FlatMap, this, () => succeed(value)) as Eff<unknown, unknown>;
+} as Suspend["as"];
 
-Suspend.prototype.asVoid = function () {
-  return new Suspend(Op.FlatMap, this, () => succeed(undefined)) as any;
-};
+Suspend.prototype.asVoid = function (this: Suspend) {
+  return new Suspend(Op.FlatMap, this, () => succeed(undefined)) as Eff<unknown, unknown>;
+} as Suspend["asVoid"];

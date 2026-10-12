@@ -22,6 +22,9 @@ import {
   Latch,
   Barrier,
   PubSub,
+  type Eff,
+  type Fiber,
+  type QueueClosed,
 } from "../src";
 
 // ── Queue: producers + consumers ──────────────────────────────────
@@ -56,7 +59,8 @@ group("Queue: 4 producers × 250 + 4 consumers × 250 (bounded 8)", () => {
         yield* join(c2);
         yield* join(c3);
         yield* join(c4);
-      }) as any,
+        // The queue is never closed here, so QueueClosed can't happen.
+      }) as Eff<void, never>,
     );
   });
 });
@@ -71,10 +75,10 @@ group("Semaphore: 16 fibers × 100 acquire/release (4 permits)", () => {
         const worker = eff(function* () {
           for (let i = 0; i < 100; i++) yield* sem.withPermit(succeed(i));
         });
-        const fibers: any[] = [];
+        const fibers: Fiber<void, never>[] = [];
         for (let i = 0; i < 16; i++) fibers.push(yield* fork(worker));
         for (const f of fibers) yield* join(f);
-      }) as any,
+      }),
     );
   });
 });
@@ -89,12 +93,12 @@ group("Deferred: 1 producer + 50 awaiters", () => {
         const awaiter = eff(function* () {
           yield* d.await;
         });
-        const fibers: any[] = [];
+        const fibers: Fiber<void, never>[] = [];
         for (let i = 0; i < 50; i++) fibers.push(yield* fork(awaiter));
         yield* sleep(0); // let awaiters register
         yield* d.succeed(42);
         for (const f of fibers) yield* join(f);
-      }) as any,
+      }),
     );
   });
 });
@@ -107,7 +111,8 @@ group("CircuitBreaker: 100 concurrent .protect (closed, all success)", () => {
       eff(function* () {
         const cb = CircuitBreaker.make({ failureThreshold: 1000, resetTimeoutMs: 10_000 });
         yield* all(Array.from({ length: 100 }, (_, i) => cb.protect(succeed(i))));
-      }) as any,
+        // Every call succeeds and the threshold is far away: the breaker never opens.
+      }) as Eff<void, never>,
     );
   });
 });
@@ -126,7 +131,7 @@ group("Singleflight: 100 callers / 5 distinct keys (20× dedup factor)", () => {
             sleep(1).flatMap(() => succeed(i)),
           );
         yield* all(Array.from({ length: 100 }, (_, i) => work(i)));
-      }) as any,
+      }),
     );
   });
 
@@ -134,7 +139,7 @@ group("Singleflight: 100 callers / 5 distinct keys (20× dedup factor)", () => {
     await run(
       eff(function* () {
         yield* all(Array.from({ length: 100 }, (_, i) => sleep(1).flatMap(() => succeed(i))));
-      }) as any,
+      }),
     );
   });
 });
@@ -142,13 +147,13 @@ group("Singleflight: 100 callers / 5 distinct keys (20× dedup factor)", () => {
 // ── RateLimiter: 100 concurrent tryAcquire ─────────────────────────
 
 group("RateLimiter: 100 concurrent tryAcquire (limit 30)", () => {
-  const benchStrat = (name: string, factory: (opts: { limit: number; windowMs: number }) => any) =>
+  const benchStrat = (name: string, factory: typeof RateLimiter.slidingWindow) =>
     bench(name, async () => {
       await run(
         eff(function* () {
           const rl = yield* factory({ limit: 30, windowMs: 10_000 });
           yield* all(Array.from({ length: 100 }, () => rl.tryAcquire));
-        }) as any,
+        }),
       );
     });
 
@@ -164,12 +169,12 @@ group("Latch: 100 awaiters + countDown(100)", () => {
     await run(
       eff(function* () {
         const latch = yield* Latch.make({ count: 1 });
-        const fibers: any[] = [];
+        const fibers: Fiber<void, never>[] = [];
         for (let i = 0; i < 100; i++) fibers.push(yield* fork(latch.await));
         yield* sleep(0);
         yield* latch.countDown;
         for (const f of fibers) yield* join(f);
-      }) as any,
+      }),
     );
   });
 });
@@ -181,10 +186,10 @@ group("Barrier: 32-party coordination", () => {
     await run(
       eff(function* () {
         const barrier = yield* Barrier.make({ parties: 32 });
-        const fibers: any[] = [];
+        const fibers: Fiber<void, never>[] = [];
         for (let i = 0; i < 32; i++) fibers.push(yield* fork(barrier.await));
         for (const f of fibers) yield* join(f);
-      }) as any,
+      }),
     );
   });
 });
@@ -196,7 +201,7 @@ group("PubSub: 1 publisher + 10 subscribers + 200 messages", () => {
     await run(
       eff(function* () {
         const ps = yield* PubSub.bounded<number>(1024);
-        const subs: any[] = [];
+        const subs: Fiber<void, QueueClosed>[] = [];
         for (let i = 0; i < 10; i++) {
           const stream = yield* ps.subscribe;
           subs.push(yield* fork(stream.take(200).drain()));
@@ -204,7 +209,8 @@ group("PubSub: 1 publisher + 10 subscribers + 200 messages", () => {
         yield* sleep(1); // let subscribers register
         for (let i = 0; i < 200; i++) yield* ps.publish(i);
         for (const f of subs) yield* join(f);
-      }) as any,
+        // The pubsub is never shut down here, so QueueClosed can't happen.
+      }) as Eff<void, never>,
     );
   });
 });

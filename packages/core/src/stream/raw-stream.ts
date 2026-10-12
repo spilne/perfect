@@ -20,7 +20,7 @@ import { type FusibleOp, SKIP, compileFused } from "./fusion.js";
 
 export class RawStream<A> implements Iterable<A> {
   private constructor(
-    private readonly source: Iterable<any>,
+    private readonly source: Iterable<unknown>,
     private readonly ops: readonly FusibleOp[],
   ) {}
 

@@ -3,7 +3,7 @@
 import { Stream } from "./stream.js";
 import { Chunk } from "./chunk.js";
 import type { Pipe, Step } from "./stream.js";
-import type { Throws } from "../eff.js";
+import type { Eff, Throws } from "../eff.js";
 import type { WithError } from "../either.js";
 import { succeed, fail } from "../constructors.js";
 import { TaggedError } from "../tagged-error.js";
@@ -38,9 +38,9 @@ function parseChunks<A, B, S, E = never>(
 ): Stream<B, WithError<S, E>> {
   return Stream.suspend(() => {
     const parser = make();
-    const go = (stream: Stream<A, any>): Stream<B, any> =>
+    const go = (stream: Stream<A, unknown>): Stream<B, unknown> =>
       new Stream(
-        (stream.step as any).flatMap((s: Step<A>) => {
+        stream.step.flatMap((s: Step<A>): Eff<Step<B>, Throws<E>> => {
           if (s._tag === "Done") {
             const rest = parser.end();
             if (rest instanceof PipeFailure) return fail(rest.error);
@@ -391,8 +391,8 @@ export function parseAs<T>(schema: SchemaParser<T>): Pipe<unknown, T, Throws<Sch
       const result = schema.safeParse(data);
       return result.success
         ? succeed(result.data)
-        : (fail(new SchemaParseError({ error: result.error })) as any);
-    }) as any;
+        : fail(new SchemaParseError({ error: result.error }));
+    });
 }
 
 /** Validate each element with a schema; elements that fail validation are

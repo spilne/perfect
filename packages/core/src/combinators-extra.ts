@@ -16,11 +16,11 @@ import { RetryPolicy } from "./retry-policy.js";
 // throw domain exceptions you want to handle structurally rather than letting
 // them propagate as `Cause.die`.
 
-// `any[]` is required for constructor-pattern matching — `unknown[]` would
-// reject constructors with typed parameters. The args never escape.
-type Ctor<E> = new (...args: any[]) => E;
+// `never` args, not `unknown[]`: every constructor accepts never, while
+// `unknown[]` would reject constructors with typed parameters.
+type Ctor<E> = new (...args: never) => E;
 
-export function trapError<A, S, Classes extends Ctor<any>[]>(
+export function trapError<A, S, Classes extends Ctor<unknown>[]>(
   eff: Eff<A, S>,
   ...classes: Classes
 ): Eff<A, S | Throws<InstanceType<Classes[number]>>> {
@@ -28,12 +28,12 @@ export function trapError<A, S, Classes extends Ctor<any>[]>(
     const defects = Cause.defects(cause);
     for (const d of defects) {
       for (const cls of classes) {
-        if (d instanceof cls) return fail(d as any);
+        if (d instanceof cls) return fail(d);
       }
     }
     // nothing matched — reraise the original cause
     return new Suspend(Op.Fail, cause, null);
-  }) as any;
+  }) as Eff<A, S | Throws<InstanceType<Classes[number]>>>;
 }
 
 // ── validate ───────────────────────────────────────────────────────
@@ -51,23 +51,28 @@ export function validate<const T extends readonly Eff<unknown, unknown>[]>(
   // InferEffects distributes, so an empty list gives never, not unknown.
   InferEffects<T[number]>
 > {
-  if (effects.length === 0) return succeed([] as any) as any;
+  type Result = Eff<
+    { [K in keyof T]: T[K] extends Eff<infer A, unknown> ? A : never },
+    InferEffects<T[number]>
+  >;
+  type Outcome = { ok: true; value: unknown } | { ok: false; cause: Cause };
+  if (effects.length === 0) return succeed([]) as Result;
 
   // Wrap each effect so it never fails — captures Exit-like { ok, value/cause }.
   const wrapped = effects.map(
     (e) =>
       new Suspend(
         Op.CatchAll,
-        new Suspend(Op.FlatMap, e as any, (v: any) => succeed({ ok: true as const, value: v })),
+        new Suspend(Op.FlatMap, e, (v: unknown) => succeed({ ok: true as const, value: v })),
         (cause: Cause) => succeed({ ok: false as const, cause }),
       ),
   );
 
   return new Suspend(
     Op.FlatMap,
-    allParallel(wrapped as any) as any,
-    (results: Array<{ ok: true; value: any } | { ok: false; cause: Cause }>) => {
-      const values: any[] = new Array(results.length);
+    allParallel(wrapped as Eff<Outcome, never>[]),
+    (results: Outcome[]) => {
+      const values: unknown[] = new Array(results.length);
       let combined: Cause | null = null;
       for (let i = 0; i < results.length; i++) {
         const r = results[i]!;
@@ -77,7 +82,7 @@ export function validate<const T extends readonly Eff<unknown, unknown>[]>(
       if (combined !== null) return new Suspend(Op.Fail, combined, null);
       return succeed(values);
     },
-  ) as any;
+  ) as Result;
 }
 
 // ── hedged ─────────────────────────────────────────────────────────
@@ -103,10 +108,10 @@ export function hedged<A, S>(
       variants.push(eff);
     } else {
       const d = i * staggerMs;
-      variants.push(new Suspend(Op.FlatMap, sleep(d), () => eff) as any);
+      variants.push(new Suspend(Op.FlatMap, sleep(d), () => eff) as Eff<A, S>);
     }
   }
-  return raceSuccess(variants) as any;
+  return raceSuccess(variants) as Eff<A, S>;
 }
 
 // ── retryAllCause ──────────────────────────────────────────────────
@@ -138,7 +143,7 @@ export function retryAllCause<A, S>(
       const waitEff = current > 0 ? sleep(current) : succeed(undefined);
       const next = backoff === "exponential" ? Math.min(current * 2, maxDelayMs) : current;
       return new Suspend(Op.FlatMap, waitEff, () => attempt(remaining - 1, next));
-    }) as any;
+    }) as Eff<A, S>;
   }
   return attempt(times, delayMs);
 }
@@ -181,7 +186,7 @@ export function retryAllBy<A, S>(
   const { maxRetries = 3, baseDelayMs = 250, maxDelayMs = 30_000, handle, policy } = options;
 
   // Normalize each attempt into a tagged outcome object on the success channel.
-  const normalized = (eff as any)
+  const normalized = eff
     .map((value: A) => RetryAttempt.success(value))
     .catchAllCause((cause: Cause): Eff<RetryAttempt<A, ErrorsOf<S>>, never> => {
       const f = Cause.firstFail(cause);
@@ -193,7 +198,7 @@ export function retryAllBy<A, S>(
       return new Suspend(Op.Fail, cause, null) as Eff<never, never>;
     }) as Eff<RetryAttempt<A, ErrorsOf<S>>, never>;
 
-  const normalizedForRetry = (normalized as any).flatMap((r: RetryAttempt<A, ErrorsOf<S>>) =>
+  const normalizedForRetry = normalized.flatMap((r: RetryAttempt<A, ErrorsOf<S>>) =>
     handle(r)._tag === "retry" ? fail(r) : succeed(r),
   ) as Eff<RetryAttempt<A, ErrorsOf<S>>, Throws<RetryAttempt<A, ErrorsOf<S>>>>;
 
@@ -262,23 +267,24 @@ export function repeatUntil<A, S>(
   function step(attempt: number, started: number): Eff<A, S | Throws<RepeatTimeoutError<A>>> {
     return new Suspend(
       Op.FlatMap,
-      eff as any,
+      eff,
       (value: A) =>
-        new Suspend(Op.FlatMap, clockNow as any, (now: number) => {
+        new Suspend(Op.FlatMap, clockNow, (now: number) => {
           if (until(value)) return succeed(value);
           const elapsed = now - started;
           if (attempt + 1 >= maxAttempts)
             return fail(makeRepeatTimeout("maxAttempts", attempt + 1, elapsed, value));
           if (elapsed >= maxDurationMs)
             return fail(makeRepeatTimeout("maxDuration", attempt + 1, elapsed, value));
-          return new Suspend(Op.FlatMap, sleep(intervalMs), () =>
-            step(attempt + 1, started),
-          ) as any;
+          return new Suspend(Op.FlatMap, sleep(intervalMs), () => step(attempt + 1, started));
         }),
-    ) as any;
+    ) as Eff<A, S | Throws<RepeatTimeoutError<A>>>;
   }
 
-  return new Suspend(Op.FlatMap, startNow as any, (now: number) => step(0, now)) as any;
+  return new Suspend(Op.FlatMap, startNow, (now: number) => step(0, now)) as Eff<
+    A,
+    S | Throws<RepeatTimeoutError<A>>
+  >;
 }
 
 export function repeatUntilWithBackoff<A, S>(
@@ -308,9 +314,9 @@ export function repeatUntilWithBackoff<A, S>(
   ): Eff<A, S | Throws<RepeatTimeoutError<A>>> {
     return new Suspend(
       Op.FlatMap,
-      eff as any,
+      eff,
       (value: A) =>
-        new Suspend(Op.FlatMap, clockNow as any, (now: number) => {
+        new Suspend(Op.FlatMap, clockNow, (now: number) => {
           if (until(value)) return succeed(value);
           const elapsed = now - started;
           if (attempt + 1 >= maxAttempts)
@@ -320,12 +326,13 @@ export function repeatUntilWithBackoff<A, S>(
           const nextInterval = Math.min(currentInterval * 2, maxIntervalMs);
           return new Suspend(Op.FlatMap, sleep(currentInterval), () =>
             step(attempt + 1, nextInterval, started),
-          ) as any;
+          );
         }),
-    ) as any;
+    ) as Eff<A, S | Throws<RepeatTimeoutError<A>>>;
   }
 
-  return new Suspend(Op.FlatMap, startNow as any, (now: number) =>
-    step(0, initialIntervalMs, now),
-  ) as any;
+  return new Suspend(Op.FlatMap, startNow, (now: number) => step(0, initialIntervalMs, now)) as Eff<
+    A,
+    S | Throws<RepeatTimeoutError<A>>
+  >;
 }

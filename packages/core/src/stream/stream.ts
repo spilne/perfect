@@ -59,12 +59,12 @@ export interface StatefulMapOptions<A, K, V, B, S> {
   readonly process: (value: A, state: StateBackend<K, V>, key: K) => Eff<B, S>;
 }
 
-type BroadcastBranch<A, S> = (stream: Stream<A, S>) => Stream<any, any>;
-type StreamValue<T> = T extends Stream<infer A, any> ? A : never;
-type StreamEffects<T> = T extends Stream<any, infer S> ? S : never;
-type DefectClass = abstract new (...args: any[]) => unknown;
+type BroadcastBranch<A, S> = (stream: Stream<A, S>) => Stream<unknown, unknown>;
+type StreamValue<T> = T extends Stream<infer A, unknown> ? A : never;
+type StreamEffects<T> = T extends Stream<unknown, infer S> ? S : never;
+type DefectClass = abstract new (...args: never[]) => unknown;
 type DefectInstances<Classes extends readonly DefectClass[]> =
-  Classes[number] extends abstract new (...args: any[]) => infer E ? E : never;
+  Classes[number] extends abstract new (...args: never[]) => infer E ? E : never;
 
 import {
   combineFinalizers,
@@ -102,7 +102,7 @@ export type Step<A> =
   | { readonly _tag: "Emit"; readonly chunk: Chunk<A>; readonly next: Stream<A, unknown> }
   | { readonly _tag: "Done" };
 
-const DONE: Step<any> = { _tag: "Done" };
+const DONE: Step<never> = { _tag: "Done" };
 
 // How many chunks a background producer (groupWithin, debounce) may get
 // ahead of its consumer.
@@ -110,6 +110,13 @@ const SLOTS_AHEAD = 16;
 
 // Biggest chunk a lazy source (fromIterable, unfold) builds in one step.
 const MAX_SOURCE_BATCH = 4096;
+
+// `retry` takes a policy or a config through separate overloads; the stream
+// operators accept either and pass it on as is.
+type RetryWith = <A, S>(
+  eff: Eff<A, S>,
+  policy: RetryPolicy | RetryConfig<ErrorsOf<S>>,
+) => Eff<A, S>;
 
 // Waits until interrupted.
 const NEVER: Eff<never, never> = async<never>(() => {}) as Eff<never, never>;
@@ -125,10 +132,10 @@ function emit<A>(chunk: Chunk<A>, next: Stream<A, unknown>): Step<A> {
 // through s.next so continuations inherit the same compilation.
 function fuseStep<A, S>(
   rawStep: Eff<Step<A>, S>,
-  compiled: (v: any) => any,
+  compiled: (v: unknown) => unknown,
   hasFilter: boolean,
 ): Eff<Step<A>, S> {
-  return (rawStep as any).map((s: Step<A>) => {
+  return rawStep.map((s: Step<A>): Step<A> => {
     if (s._tag === "Done") return DONE;
     let out: Chunk<A>;
     if (hasFilter) {
@@ -136,18 +143,18 @@ function fuseStep<A, S>(
       // whole extra pass over every chunk.
       const chunk = s.chunk;
       const len = chunk.length;
-      const arr: any[] = [];
+      const arr: A[] = [];
       for (let i = 0; i < len; i++) {
         const v = compiled(chunk.get(i));
-        if (v !== SKIP) arr.push(v);
+        if (v !== SKIP) arr.push(v as A);
       }
       out = Chunk.fromArray(arr);
     } else {
-      out = s.chunk.map(compiled);
+      out = s.chunk.map(compiled as (v: A) => A);
     }
     // s.next.step triggers s.next's own flush (if it has _pending).
     // We then wrap its raw step with THIS compilation.
-    const nextStream = new Stream<A, any>(
+    const nextStream = new Stream<A, unknown>(
       fuseStep(s.next.step, compiled, hasFilter),
       s.next._finalizer,
     );
@@ -185,22 +192,22 @@ export class Stream<A, S = never> {
 
   /** Append a pure op to the fusion buffer; returns a new Stream sharing the
    *  raw step but with its own pending list. */
-  private _withOp(op: FusibleOp): Stream<any, S> {
-    const s = new Stream<any, S>(this._rawStep, this._finalizer);
+  private _withOp(op: FusibleOp): Stream<unknown, S> {
+    const s = new Stream<unknown, S>(this._rawStep, this._finalizer);
     s._pending = this._pending.length === 0 ? [op] : [...this._pending, op];
     return s;
   }
 
   private _withFinalizer<S2>(finalizer: Eff<void, S2>): Stream<A, S | S2> {
     const combined = combineFinalizers(this._finalizer, finalizer);
-    const s = new Stream<A, any>(this._rawStep, combined as any);
+    const s = new Stream<A, S | S2>(this._rawStep, combined);
     s._pending = this._pending.slice();
     return s as Stream<A, S | S2>;
   }
 
   private _finalize<B, S2>(eff: Eff<B, S2>): Eff<B, S2> {
     if (this._finalizer === null) return eff;
-    return new Suspend(Op.Ensuring, eff, this._finalizer) as any;
+    return new Suspend(Op.Ensuring, eff, this._finalizer) as Eff<B, S2>;
   }
 
   // ── Constructors ─────────────────────────────────────────────────
@@ -296,24 +303,24 @@ export class Stream<A, S = never> {
         iterator ??= iterable[Symbol.asyncIterator]();
         pending = Promise.resolve(iterator.next());
       } catch (error) {
-        resume(fail(onError(error)) as any);
+        resume(fail(onError(error)));
         return;
       }
       pending.then(
-        (result) => resume(succeed(result) as any),
-        (error) => resume(fail(onError(error)) as any),
+        (result) => resume(succeed(result)),
+        (error) => resume(fail(onError(error))),
       );
     });
 
     const next = (): Stream<A, Throws<E>> =>
       new Stream(
-        pullOne.map((result) => {
+        pullOne.map((result): Step<A> => {
           if (result.done) {
             completed = true;
             return DONE;
           }
           return emit(Chunk.single(result.value), next());
-        }) as any,
+        }),
       );
 
     return next().onFinalize(
@@ -328,11 +335,11 @@ export class Stream<A, S = never> {
   }
 
   static fromEffect<A, S>(eff: Eff<A, S>): Stream<A, S> {
-    return new Stream((eff as any).map((a: A) => emit(Chunk.single(a), Stream.empty())));
+    return new Stream(eff.map((a: A) => emit(Chunk.single(a), Stream.empty())));
   }
 
   static fail<E>(error: E): Stream<never, Throws<E>> {
-    return new Stream(fail(error) as any);
+    return new Stream(fail(error) as Eff<Step<never>, Throws<E>>);
   }
 
   static suspend<A, S>(f: () => Stream<A, S>): Stream<A, S> {
@@ -383,7 +390,7 @@ export class Stream<A, S = never> {
   static unfoldEffect<A, B, S>(seed: B, f: (b: B) => Eff<[A, B] | null, S>): Stream<A, S> {
     function go(s: B): Stream<A, S> {
       return new Stream(
-        (f(s) as any).map((result: [A, B] | null) => {
+        f(s).map((result: [A, B] | null) => {
           if (result === null) return DONE;
           const [value, next] = result;
           return emit(Chunk.single(value), go(next));
@@ -405,7 +412,7 @@ export class Stream<A, S = never> {
   ): Stream<A, S> {
     function go(s: B): Stream<A, S> {
       return new Stream(
-        (f(s) as any).flatMap((result: readonly [ReadonlyArray<A>, B] | null) => {
+        f(s).flatMap((result: readonly [ReadonlyArray<A>, B] | null) => {
           if (result === null) return succeed(DONE);
           const [values, next] = result;
           // Nothing this time: ask again rather than emit an empty chunk.
@@ -441,7 +448,7 @@ export class Stream<A, S = never> {
   }
 
   static repeat<A, S>(eff: Eff<A, S>): Stream<A, S> {
-    const self: Stream<A, S> = new Stream((eff as any).map((a: A) => emit(Chunk.single(a), self)));
+    const self: Stream<A, S> = new Stream(eff.map((a: A) => emit(Chunk.single(a), self)));
     return self;
   }
 
@@ -464,11 +471,11 @@ export class Stream<A, S = never> {
    */
   static repeatWith<A, S>(factory: () => Stream<A, S>, n: number): Stream<A, S> {
     const count = Math.floor(n);
-    if (count <= 0) return Stream.empty() as any;
+    if (count <= 0) return Stream.empty<A>();
     const go = (remaining: number): Stream<A, S> =>
       remaining <= 1
         ? Stream.suspend(factory)
-        : (Stream.suspend(factory).concat(Stream.suspend(() => go(remaining - 1))) as any);
+        : Stream.suspend(factory).concat(Stream.suspend(() => go(remaining - 1)));
     return go(count);
   }
 
@@ -486,11 +493,14 @@ export class Stream<A, S = never> {
   }
 
   /** Concurrently merge any number of streams. */
-  static mergeAll<const Streams extends readonly Stream<any, any>[]>(
+  static mergeAll<const Streams extends readonly Stream<unknown, unknown>[]>(
     ...streams: Streams
   ): Stream<StreamValue<Streams[number]>, StreamEffects<Streams[number]>> {
-    if (streams.length === 0) return Stream.empty() as any;
-    return streams.slice(1).reduce((acc, stream) => acc.merge(stream), streams[0]!) as any;
+    type Merged = Stream<StreamValue<Streams[number]>, StreamEffects<Streams[number]>>;
+    if (streams.length === 0) return Stream.empty() as Merged;
+    return streams
+      .slice(1)
+      .reduce((acc: Stream<unknown, unknown>, stream) => acc.merge(stream), streams[0]!) as Merged;
   }
 
   /**
@@ -519,49 +529,48 @@ export class Stream<A, S = never> {
       suspend(() => {
         const source = factory();
         activeFinalizer = source._finalizer;
-        return (source.step as any)
+        return source.step
           .flatMap((step: Step<A>) =>
-            step._tag === "Done" ? (releaseActive() as any).map(() => DONE) : succeed(step),
+            step._tag === "Done" ? releaseActive().map((): Step<A> => DONE) : succeed(step),
           )
-          .catchAllCause((cause: Cause) =>
-            (releaseActive() as any).flatMap(() => failCause(cause)),
-          );
-      }) as any;
+          .catchAllCause((cause: Cause) => releaseActive().flatMap(() => failCause(cause)));
+      }) as Eff<Step<A>, S>;
 
     const wrapStep = (stepEffect: Eff<Step<A>, S>): Eff<Step<A>, S> =>
-      (stepEffect as any).map((step: Step<A>) =>
+      stepEffect.map((step: Step<A>) =>
         step._tag === "Done" ? DONE : emit(step.chunk, follow(step.next as Stream<A, S>)),
       );
 
     const retryAfter = (cause: Cause): Eff<Step<A>, S> => {
       let first = true;
-      const attempt: Eff<Step<A>, S> = suspend(() => {
+      const attempt: Eff<Step<A>, S> = suspend((): Eff<Step<A>, unknown> => {
         if (first) {
           first = false;
-          return failCause(cause) as any;
+          return failCause(cause);
         }
         return acquire();
-      }) as any;
-      return wrapStep(effRetry(attempt, policy as any) as Eff<Step<A>, S>);
+      }) as Eff<Step<A>, S>;
+      return wrapStep((effRetry as RetryWith)(attempt, policy));
     };
 
     function follow(current: Stream<A, S>): Stream<A, S> {
       return new Stream(
-        (current.step as any)
+        current.step
           .flatMap((step: Step<A>) => {
             if (step._tag === "Done") {
-              return (releaseActive() as any).map(() => DONE);
+              return releaseActive().map((): Step<A> => DONE);
             }
             return succeed(emit(step.chunk, follow(step.next as Stream<A, S>)));
           })
-          .catchAllCause((cause: Cause) =>
-            (releaseActive() as any).flatMap(() => retryAfter(cause)),
-          ),
+          .catchAllCause((cause: Cause) => releaseActive().flatMap(() => retryAfter(cause))) as Eff<
+          Step<A>,
+          S
+        >,
       );
     }
 
-    const initial = suspend(() => wrapStep(effRetry(acquire(), policy as any) as Eff<Step<A>, S>));
-    return new Stream(initial as Eff<Step<A>, S>, suspend(releaseActive) as any);
+    const initial = suspend(() => wrapStep((effRetry as RetryWith)(acquire(), policy)));
+    return new Stream(initial, suspend(releaseActive));
   }
 
   /** Emit `undefined` every `intervalMs`. The interval must be a finite,
@@ -569,9 +578,7 @@ export class Stream<A, S = never> {
   static tick(intervalMs: number): Stream<void, never> {
     requireFiniteMs({ operator: "Stream.tick", name: "intervalMs", value: intervalMs });
     function go(): Stream<void, never> {
-      return new Stream(
-        (sleep(intervalMs) as any).map(() => emit(Chunk.single(undefined as void), go())),
-      );
+      return new Stream(sleep(intervalMs).map(() => emit(Chunk.single(undefined as void), go())));
     }
     return go();
   }
@@ -579,7 +586,8 @@ export class Stream<A, S = never> {
   static fromQueue<A, S>(queue: { take(): Eff<A, S> }): Stream<A, ExcludeTags<S, "QueueClosed">> {
     function go(): Stream<A, ExcludeTags<S, "QueueClosed">> {
       return new Stream(
-        (queue.take() as any)
+        queue
+          .take()
           .map((a: A) => emit(Chunk.single(a), go()))
           .catchTag("QueueClosed", () => succeed(DONE)),
       );
@@ -626,22 +634,23 @@ export class Stream<A, S = never> {
    * event is observed. On cleanup the listener is removed.
    */
   static fromEventEmitter<A = unknown>(
-    // Listener args stay `any[]` for structural compat with Node's
-    // EventEmitter and typed-listener emitters; returns are ignored.
+    // Declared as methods, so their parameters are checked both ways and
+    // Node's EventEmitter and typed-listener emitters both fit; returns are
+    // ignored.
     emitter: {
-      on(event: string, listener: (...args: any[]) => void): unknown;
-      off?(event: string, listener: (...args: any[]) => void): unknown;
-      removeListener?(event: string, listener: (...args: any[]) => void): unknown;
+      on(event: string, listener: (...args: unknown[]) => void): unknown;
+      off?(event: string, listener: (...args: unknown[]) => void): unknown;
+      removeListener?(event: string, listener: (...args: unknown[]) => void): unknown;
     },
     event: string,
     options?: number | PushOptions,
   ): Stream<A, never> {
-    const removeListener = (ev: string, l: (...args: any[]) => void) => {
+    const removeListener = (ev: string, l: (...args: unknown[]) => void) => {
       if (typeof emitter.off === "function") emitter.off(ev, l);
       else if (typeof emitter.removeListener === "function") emitter.removeListener(ev, l);
     };
     return Stream.fromCallback<A>((emit, close) => {
-      const onValue = (...args: any[]) => emit(args.length <= 1 ? args[0] : (args as any));
+      const onValue = (...args: unknown[]) => emit((args.length <= 1 ? args[0] : args) as A);
       const onEnd = () => close();
       emitter.on(event, onValue);
       emitter.on("error", onEnd);
@@ -694,7 +703,7 @@ export class Stream<A, S = never> {
   static bracket<A, S>(acquire: Eff<A, S>, release: (a: A) => Eff<unknown, never>): Stream<A, S> {
     let activeFinalizer: Eff<unknown, never> | null = null;
     return new Stream(
-      (acquire as any).map((resource: A) => {
+      acquire.map((resource: A) => {
         activeFinalizer = release(resource);
         return emit(Chunk.single(resource), Stream.empty());
       }),
@@ -710,18 +719,18 @@ export class Stream<A, S = never> {
   // ── Transform operators ──────────────────────────────────────────
 
   map<B>(f: (a: A) => B): Stream<B, S> {
-    return this._withOp({ _tag: "map", fn: f as any }) as Stream<B, S>;
+    return this._withOp({ _tag: "map", fn: f }) as Stream<B, S>;
   }
 
   /** Like `map` but returning `undefined` means "skip this element". Fused
    *  together with adjacent map/filter/tap ops for a single chunk walk. */
   filterMap<B>(f: (a: A) => B | undefined): Stream<B, S> {
-    return this._withOp({ _tag: "filterMap", fn: f as any }) as Stream<B, S>;
+    return this._withOp({ _tag: "filterMap", fn: f }) as Stream<B, S>;
   }
 
   mapChunks<B>(f: (chunk: Chunk<A>) => Chunk<B>): Stream<B, S> {
     return new Stream(
-      (this.step as any).map((s: Step<A>) => {
+      this.step.map((s: Step<A>) => {
         if (s._tag === "Done") return DONE;
         return emit(f(s.chunk), s.next.mapChunks(f));
       }),
@@ -738,19 +747,19 @@ export class Stream<A, S = never> {
   filter(p: (a: A) => boolean, action?: "keep" | "drop"): Stream<A, S>;
   filter(p: (a: A) => boolean, action: "keep" | "drop" = "keep"): Stream<A, S> {
     const fn: (a: A) => boolean = action === "drop" ? (a) => !p(a) : p;
-    return this._withOp({ _tag: "filter", fn: fn as any }) as Stream<A, S>;
+    return this._withOp({ _tag: "filter", fn }) as Stream<A, S>;
   }
 
   /** Drop null/undefined values. Fused with adjacent pure ops. */
   unNone(): Stream<NonNullable<A>, S> {
-    return this._withOp({ _tag: "filter", fn: (a: any) => a != null } as any) as Stream<
+    return this._withOp({ _tag: "filter", fn: (a: unknown) => a != null }) as Stream<
       NonNullable<A>,
       S
     >;
   }
 
   collect<B>(f: (a: A) => B | undefined): Stream<B, S> {
-    return this.map(f).filter((b): b is B => b !== undefined) as any;
+    return this.map(f).filter((b): b is B => b !== undefined);
   }
 
   flatMap<B, S2>(f: (a: A) => Stream<B, S2>): Stream<B, S | S2> {
@@ -773,12 +782,14 @@ export class Stream<A, S = never> {
       idx: number,
     ): Stream<B, OuterS | S2> =>
       new Stream(
-        (inner.step as any).flatMap((s: Step<B>) => {
+        inner.step.flatMap((s: Step<B>) => {
           if (s._tag === "Emit") {
-            return succeed(emit(s.chunk, drainInner(s.next as any, outer, pending, idx + 0)));
+            return succeed(
+              emit(s.chunk, drainInner(s.next as Stream<B, S2>, outer, pending, idx + 0)),
+            );
           }
           return releaseInner().flatMap(() => nextElement(outer, pending, idx + 1).step);
-        }),
+        }) as Eff<Step<B>, OuterS | S2>,
       );
 
     const nextElement = (
@@ -792,9 +803,9 @@ export class Stream<A, S = never> {
         return drainInner(inner, outer, pending, idx);
       }
       return new Stream(
-        (outer.step as any).flatMap((s: Step<A>) => {
+        outer.step.flatMap((s: Step<A>) => {
           if (s._tag === "Done") return succeed(DONE);
-          return nextElement(s.next as any, s.chunk, 0).step;
+          return nextElement(s.next as Stream<A, OuterS>, s.chunk, 0).step;
         }),
       );
     };
@@ -827,10 +838,10 @@ export class Stream<A, S = never> {
       | { readonly _tag: "innerEnd"; readonly generation: number }
       | { readonly _tag: "innerFail"; readonly generation: number; readonly cause: Cause };
 
-    const start = (run: DriverRun<B>): Eff<Pull<B>, any> =>
-      (QueueNS.bounded<Event>(16) as any).flatMap((events: Queue<Event>) => {
+    const start = (run: DriverRun<B>): Eff<Pull<B>, unknown> =>
+      QueueNS.bounded<Event>(16).flatMap((events: Queue<Event>) => {
         interface Inner {
-          fiber: Fiber<any> | null;
+          fiber: Fiber<unknown> | null;
           readonly generation: number;
           // Set before a switch interrupts the fiber.
           switchedOut: boolean;
@@ -847,37 +858,39 @@ export class Stream<A, S = never> {
         const offerOuterChunk = (
           items: A[],
           index: number,
-          nextOuter: Stream<A, any>,
-        ): Eff<void, any> =>
+          nextOuter: Stream<A, unknown>,
+        ): Eff<unknown, unknown> =>
           index >= items.length
             ? drainOuter(nextOuter)
-            : (DeferredNS.make<void>() as any).flatMap((ready: Deferred<void>) =>
-                (events.offer({ _tag: "outerItem", value: items[index]!, ready }) as any).flatMap(
-                  () =>
-                    (ready.await as any).flatMap(() =>
-                      offerOuterChunk(items, index + 1, nextOuter),
-                    ),
-                ),
+            : DeferredNS.make<void>().flatMap((ready: Deferred<void>) =>
+                events
+                  .offer({ _tag: "outerItem", value: items[index]!, ready })
+                  .flatMap(() =>
+                    ready.await.flatMap(() => offerOuterChunk(items, index + 1, nextOuter)),
+                  ),
               );
 
-        const drainOuter = (outer: Stream<A, any>): Eff<void, any> =>
-          (outer.step as any).flatMap((step: Step<A>) =>
+        const drainOuter = (outer: Stream<A, unknown>): Eff<unknown, unknown> =>
+          outer.step.flatMap((step: Step<A>) =>
             step._tag === "Done"
               ? events.offer({ _tag: "outerEnd" })
               : offerOuterChunk(step.chunk.toArray(), 0, step.next),
           );
 
-        const drainInner = (inner: Stream<B, any>, innerGeneration: number): Eff<void, any> =>
-          (inner.step as any).flatMap((step: Step<B>) =>
+        const drainInner = (
+          inner: Stream<B, unknown>,
+          innerGeneration: number,
+        ): Eff<void, unknown> =>
+          inner.step.flatMap((step: Step<B>) =>
             step._tag === "Done"
               ? succeed(undefined)
-              : (
-                  events.offer({
+              : events
+                  .offer({
                     _tag: "innerChunk",
                     generation: innerGeneration,
                     chunk: step.chunk,
-                  }) as any
-                ).flatMap(() => drainInner(step.next, innerGeneration)),
+                  })
+                  .flatMap(() => drainInner(step.next, innerGeneration)),
           );
 
         // As in `run.reportFailure`, the handler sits in an uninterruptible
@@ -885,18 +898,14 @@ export class Stream<A, S = never> {
         // interrupts the inner outside the run's stop. The interrupted fiber
         // cannot run an interruptible report, so its teardown failure is noted
         // synchronously for the launch that waits for it.
-        const runInner = (inner: Stream<B, any>, handle: Inner): Eff<unknown, any> =>
+        const runInner = (inner: Stream<B, unknown>, handle: Inner): Eff<unknown, unknown> =>
           uninterruptibleMask((restore) =>
-            (
-              restore(
-                (
-                  ensuring(
-                    drainInner(inner, handle.generation),
-                    inner._finalizer ?? succeed(undefined),
-                  ) as any
-                ).flatMap(() => events.offer({ _tag: "innerEnd", generation: handle.generation })),
-              ) as any
-            ).catchAllCause((cause: Cause) => {
+            restore(
+              ensuring(
+                drainInner(inner, handle.generation),
+                inner._finalizer ?? succeed(undefined),
+              ).flatMap(() => events.offer({ _tag: "innerEnd", generation: handle.generation })),
+            ).catchAllCause((cause: Cause): Eff<unknown, unknown> => {
               if (run.stopping) return failCause(cause);
               if (handle.switchedOut) {
                 handle.teardown = Cause.stripInterrupts(cause);
@@ -918,7 +927,7 @@ export class Stream<A, S = never> {
           readonly generation: number;
         } | null = null;
 
-        const launch = (): Eff<void, any> =>
+        const launch = (): Eff<void, unknown> =>
           suspend(() => {
             const pending = launching!;
             const previous = pending.previous;
@@ -927,12 +936,12 @@ export class Stream<A, S = never> {
             const settled =
               previous === null
                 ? succeed(undefined)
-                : (awaitFiber(previous.fiber!) as any).flatMap(() => {
+                : awaitFiber(previous.fiber!).flatMap(() => {
                     if (previous.teardown === null) return succeed(undefined);
                     previous.delivered = true;
                     return failCause(previous.teardown);
                   });
-            return (settled as any)
+            return settled
               .flatMap(() =>
                 // Forking the inner stream and releasing the outer driver
                 // happen together or not at all.
@@ -958,11 +967,11 @@ export class Stream<A, S = never> {
               .flatMap(() => yieldNow);
           });
 
-        const pull = (): Eff<Step<B>, any> =>
+        const pull = (): Eff<Step<B>, unknown> =>
           launching !== null ? launch().flatMap(() => pull()) : takeEvent();
 
-        const takeEvent = (): Eff<Step<B>, any> =>
-          (events.take() as any).flatMap((event: Event): any => {
+        const takeEvent = (): Eff<Step<B>, unknown> =>
+          events.take().flatMap((event: Event): Eff<Step<B>, unknown> => {
             switch (event._tag) {
               case "outerItem": {
                 if (mode === "exhaust" && active) {
@@ -1005,7 +1014,7 @@ export class Stream<A, S = never> {
         // A teardown failure no launch delivered, because the pull waiting for
         // it was cut before it ran, fails the stop instead of being dropped.
         // The outer driver waits for every launch, so it is still running.
-        const undelivered: Eff<void, any> = suspend(() => {
+        const undelivered: Eff<void, unknown> = suspend(() => {
           const previous = launching?.previous ?? null;
           return run.stopping && previous?.teardown && !previous.delivered
             ? failCause(previous.teardown)
@@ -1013,7 +1022,7 @@ export class Stream<A, S = never> {
         });
 
         const outerDriver = run.reportFailure(
-          ensuring(drainOuter(self), undelivered) as any,
+          ensuring(drainOuter(self), undelivered),
           (cause: Cause) => events.offer({ _tag: "outerFail", cause }),
         );
 
@@ -1025,7 +1034,7 @@ export class Stream<A, S = never> {
 
   evalMap<B, S2>(f: (a: A) => Eff<B, S2>): Stream<B, S | S2> {
     return new Stream(
-      (this.step as any).flatMap((s: Step<A>) => {
+      this.step.flatMap((s: Step<A>) => {
         if (s._tag === "Done") return succeed(DONE);
         return evalMapChunk(s.chunk, f).map((mapped: Chunk<B>) => emit(mapped, s.next.evalMap(f)));
       }),
@@ -1035,14 +1044,14 @@ export class Stream<A, S = never> {
 
   evalFilter<S2>(p: (a: A) => Eff<boolean, S2>): Stream<A, S | S2> {
     return this.evalMap<A | typeof FILTER_SENTINEL, S2>((a) =>
-      (p(a) as any).map((b: boolean) => (b ? a : FILTER_SENTINEL)),
-    ).filter((a): a is A => a !== FILTER_SENTINEL) as any;
+      p(a).map((b: boolean) => (b ? a : FILTER_SENTINEL)),
+    ).filter((a): a is A => a !== FILTER_SENTINEL);
   }
 
   take(n: number): Stream<A, S> {
     if (n <= 0) return new Stream(succeed(DONE), this._finalizer);
     return new Stream(
-      (this.step as any).map((s: Step<A>) => {
+      this.step.map((s: Step<A>) => {
         if (s._tag === "Done") return DONE;
         if (s.chunk.length <= n) {
           return emit(s.chunk, s.next.take(n - s.chunk.length));
@@ -1056,9 +1065,9 @@ export class Stream<A, S = never> {
   drop(n: number): Stream<A, S> {
     if (n <= 0) return this;
     return new Stream(
-      (this.step as any).flatMap((s: Step<A>) => {
+      this.step.flatMap((s: Step<A>) => {
         if (s._tag === "Done") return succeed(DONE);
-        if (n >= s.chunk.length) return s.next.drop(n - s.chunk.length).step;
+        if (n >= s.chunk.length) return (s.next as Stream<A, S>).drop(n - s.chunk.length).step;
         return succeed(emit(s.chunk.drop(n), s.next));
       }),
       this._finalizer,
@@ -1067,7 +1076,7 @@ export class Stream<A, S = never> {
 
   takeWhile(p: (a: A) => boolean): Stream<A, S> {
     return new Stream(
-      (this.step as any).map((s: Step<A>) => {
+      this.step.map((s: Step<A>) => {
         if (s._tag === "Done") return DONE;
         // Find the first value that fails, and slice the chunk there (no copy).
         const chunk = s.chunk;
@@ -1096,8 +1105,8 @@ export class Stream<A, S = never> {
 
     const self = this;
 
-    const start = (run: DriverRun<A>): Eff<Pull<A>, any> =>
-      (DeferredNS.make<SignalEvent>() as any).flatMap((control: Deferred<SignalEvent>) => {
+    const start = (run: DriverRun<A>): Eff<Pull<A>, unknown> =>
+      DeferredNS.make<SignalEvent>().flatMap((control: Deferred<SignalEvent>) => {
         let signalFinished = false;
         let signalFinalizer = signal._finalizer;
 
@@ -1108,32 +1117,32 @@ export class Stream<A, S = never> {
             return finalizer ?? succeed(undefined);
           });
 
-        const watchSignal = (
-          run.reportFailure<SignalEvent>(
+        const watchSignal = run
+          .reportFailure<SignalEvent>(
             ensuring(
-              (signal.step as any).flatMap((step: Step<unknown>) =>
-                (releaseSignal() as any).map((): SignalEvent =>
+              signal.step.flatMap((step: Step<unknown>) =>
+                releaseSignal().map((): SignalEvent =>
                   step._tag === "Done" ? { _tag: "empty" } : { _tag: "stop" },
                 ),
               ),
               suspend(releaseSignal),
-            ) as any,
+            ),
             (cause: Cause) => succeed<SignalEvent>({ _tag: "failure", cause }),
-          ) as any
-        ).flatMap((event: SignalEvent) =>
-          sync(() => {
-            if (event._tag === "empty") signalFinished = true;
-          }).flatMap(() => control.succeed(event).map(() => undefined)),
-        );
+          )
+          .flatMap((event: SignalEvent) =>
+            sync(() => {
+              if (event._tag === "empty") signalFinished = true;
+            }).flatMap(() => control.succeed(event).map(() => undefined)),
+          );
 
         const pullSource = (
-          source: Stream<A, any>,
-        ): Eff<Extract<RaceEvent, { readonly _tag: "source" }>, any> =>
-          (source.step as any).map((step: Step<A>) => ({ _tag: "source" as const, step }));
+          source: Stream<A, unknown>,
+        ): Eff<Extract<RaceEvent, { readonly _tag: "source" }>, unknown> =>
+          source.step.map((step: Step<A>) => ({ _tag: "source" as const, step }));
 
         // Source pulls stay individually retryable, so continuations are
         // plain streams rather than `run.continueWith`.
-        const pull = (source: Stream<A, any>): Eff<Step<A>, any> => {
+        const pull = (source: Stream<A, unknown>): Eff<Step<A>, unknown> => {
           if (signalFinished) {
             return pullSource(source).map((event) => {
               const step = event.step;
@@ -1143,22 +1152,20 @@ export class Stream<A, S = never> {
             });
           }
 
-          return (
-            race([
-              pullSource(source),
-              // A failed signal fails its side of the race rather than winning
-              // with a marker, so a failure while the cut pull cleans up joins
-              // the signal's failure instead of replacing it. A signal that
-              // ends empty never wins, so the pull in flight keeps running.
-              (control.await as any).flatMap((event: SignalEvent): Eff<RaceEvent, any> =>
-                event._tag === "failure"
-                  ? failCause(event.cause)
-                  : event._tag === "empty"
-                    ? NEVER
-                    : succeed<RaceEvent>({ _tag: "stop" }),
-              ),
-            ]) as any
-          ).flatMap((winner: RaceEvent): Eff<Step<A>, any> => {
+          return race([
+            pullSource(source),
+            // A failed signal fails its side of the race rather than winning
+            // with a marker, so a failure while the cut pull cleans up joins
+            // the signal's failure instead of replacing it. A signal that
+            // ends empty never wins, so the pull in flight keeps running.
+            control.await.flatMap((event: SignalEvent): Eff<RaceEvent, unknown> =>
+              event._tag === "failure"
+                ? failCause(event.cause)
+                : event._tag === "empty"
+                  ? NEVER
+                  : succeed<RaceEvent>({ _tag: "stop" }),
+            ),
+          ]).flatMap((winner: RaceEvent): Eff<Step<A>, unknown> => {
             if (winner._tag === "stop") return succeed(DONE);
             const step = winner.step;
             return succeed(
@@ -1177,12 +1184,12 @@ export class Stream<A, S = never> {
 
   dropWhile(p: (a: A) => boolean): Stream<A, S> {
     return new Stream(
-      (this.step as any).flatMap((s: Step<A>) => {
+      this.step.flatMap((s: Step<A>) => {
         if (s._tag === "Done") return succeed(DONE);
         const chunk = s.chunk;
         let dropCount = 0;
         while (dropCount < chunk.length && p(chunk.get(dropCount))) dropCount++;
-        if (dropCount === chunk.length) return s.next.dropWhile(p).step;
+        if (dropCount === chunk.length) return (s.next as Stream<A, S>).dropWhile(p).step;
         return succeed(emit(chunk.drop(dropCount), s.next));
       }),
       this._finalizer,
@@ -1190,9 +1197,9 @@ export class Stream<A, S = never> {
   }
 
   scan<B>(zero: B, f: (acc: B, a: A) => B): Stream<B, S> {
-    function go(acc: B, stream: Stream<A, any>): Stream<B, any> {
+    function go(acc: B, stream: Stream<A, unknown>): Stream<B, unknown> {
       return new Stream(
-        (stream.step as any).map((s: Step<A>) => {
+        stream.step.map((s: Step<A>) => {
           if (s._tag === "Done") return DONE;
           const chunk = s.chunk;
           const results = new Array<B>(chunk.length);
@@ -1206,7 +1213,10 @@ export class Stream<A, S = never> {
         stream._finalizer,
       );
     }
-    return new Stream(succeed(emit(Chunk.single(zero), go(zero, this))), this._finalizer);
+    return new Stream(succeed(emit(Chunk.single(zero), go(zero, this))), this._finalizer) as Stream<
+      B,
+      S
+    >;
   }
 
   /**
@@ -1221,33 +1231,34 @@ export class Stream<A, S = never> {
    * chain, which the trampoline keeps stack-safe at any chunk size.
    */
   scanEffect<B, S2>(zero: B, f: (acc: B, a: A) => Eff<B, S2>): Stream<B, S | S2> {
-    function go(acc: B, stream: Stream<A, any>): Stream<B, any> {
+    function go(acc: B, stream: Stream<A, unknown>): Stream<B, unknown> {
       return new Stream(
-        (stream.step as any).flatMap((s: Step<A>) => {
+        stream.step.flatMap((s: Step<A>) => {
           if (s._tag === "Done") return succeed(DONE);
           const items = s.chunk.toArray();
           const out: B[] = [];
-          const foldFrom = (index: number, current: B): Eff<B, any> =>
+          const foldFrom = (index: number, current: B): Eff<B, unknown> =>
             index >= items.length
-              ? (succeed(current) as any)
-              : (f(current, items[index] as A) as any).flatMap((next: B) => {
+              ? succeed(current)
+              : f(current, items[index] as A).flatMap((next: B) => {
                   out.push(next);
                   return foldFrom(index + 1, next);
                 });
-          return (foldFrom(0, acc) as any).map((last: B) =>
-            emit(Chunk.fromArray(out), go(last, s.next)),
-          );
+          return foldFrom(0, acc).map((last: B) => emit(Chunk.fromArray(out), go(last, s.next)));
         }),
         stream._finalizer,
       );
     }
-    return new Stream(succeed(emit(Chunk.single(zero), go(zero, this))), this._finalizer) as any;
+    return new Stream(succeed(emit(Chunk.single(zero), go(zero, this))), this._finalizer) as Stream<
+      B,
+      S | S2
+    >;
   }
 
   mapAccumulate<St, B>(initial: St, f: (state: St, a: A) => readonly [St, B]): Stream<B, S> {
-    function go(state: St, stream: Stream<A, any>): Stream<B, any> {
+    function go(state: St, stream: Stream<A, unknown>): Stream<B, unknown> {
       return new Stream(
-        (stream.step as any).map((s: Step<A>) => {
+        stream.step.map((s: Step<A>) => {
           if (s._tag === "Done") return DONE;
           const chunk = s.chunk;
           const out = new Array<B>(chunk.length);
@@ -1262,7 +1273,7 @@ export class Stream<A, S = never> {
         stream._finalizer,
       );
     }
-    return go(initial, this);
+    return go(initial, this) as Stream<B, S>;
   }
 
   statefulMap<K, V, B, S2>(options: StatefulMapOptions<A, K, V, B, S2>): Stream<B, S | S2>;
@@ -1279,11 +1290,11 @@ export class Stream<A, S = never> {
   }
 
   tap(f: (a: A) => void): Stream<A, S> {
-    return this._withOp({ _tag: "tap", fn: f as any });
+    return this._withOp({ _tag: "tap", fn: f }) as Stream<A, S>;
   }
 
   tapEffect<S2>(f: (a: A) => Eff<unknown, S2>): Stream<A, S | S2> {
-    return this.evalMap((a) => (f(a) as any).map(() => a));
+    return this.evalMap((a) => f(a).map(() => a));
   }
 
   /** Start a fire-and-forget effect for every value without delaying delivery.
@@ -1357,9 +1368,9 @@ export class Stream<A, S = never> {
   grouped(size: number): Stream<Chunk<A>, S> {
     if (!Number.isInteger(size) || size < 1)
       throw new RangeError("grouped: size must be a positive integer");
-    function go(buffer: A[], stream: Stream<A, any>): Stream<Chunk<A>, any> {
+    function go(buffer: A[], stream: Stream<A, unknown>): Stream<Chunk<A>, unknown> {
       return new Stream(
-        (stream.step as any).flatMap((s: Step<A>) => {
+        stream.step.flatMap((s: Step<A>) => {
           if (s._tag === "Done") {
             if (buffer.length === 0) return succeed(DONE);
             return succeed(emit(Chunk.single(Chunk.fromArray(buffer)), Stream.empty()));
@@ -1394,7 +1405,7 @@ export class Stream<A, S = never> {
     return new Stream(
       suspend(() => go([], this).step),
       this._finalizer,
-    );
+    ) as Stream<Chunk<A>, S>;
   }
 
   rechunk(size: number): Stream<A, S> {
@@ -1410,9 +1421,9 @@ export class Stream<A, S = never> {
   sliding(size: number, step = 1): Stream<Chunk<A>, S> {
     const sz = requireCount({ operator: "sliding", name: "size", value: size });
     const st = requireCount({ operator: "sliding", name: "step", value: step });
-    function go(buffer: A[], skip: number, stream: Stream<A, any>): Stream<Chunk<A>, any> {
+    function go(buffer: A[], skip: number, stream: Stream<A, unknown>): Stream<Chunk<A>, unknown> {
       return new Stream(
-        (stream.step as any).flatMap((s: Step<A>) => {
+        stream.step.flatMap((s: Step<A>) => {
           if (s._tag === "Done") return succeed(DONE);
           const windows: Chunk<A>[] = [];
           let buf = buffer.slice();
@@ -1441,7 +1452,7 @@ export class Stream<A, S = never> {
         stream._finalizer,
       );
     }
-    return go([], 0, this);
+    return go([], 0, this) as Stream<Chunk<A>, S>;
   }
 
   // ── Combination ──────────────────────────────────────────────────
@@ -1457,9 +1468,11 @@ export class Stream<A, S = never> {
    * concat(concat(a, b), c). That keeps long chains fast.
    */
   concat<S2>(that: Stream<A, S2>): Stream<A, S | S2> {
+    // The parts of a stream of A are themselves streams of A.
+    type Parts = readonly Stream<A, unknown>[] | undefined;
     return concatSegments<A>([
-      ...(CONCAT_SEGMENTS.get(this) ?? [this]),
-      ...(CONCAT_SEGMENTS.get(that) ?? [that]),
+      ...((CONCAT_SEGMENTS.get(this) as Parts) ?? [this]),
+      ...((CONCAT_SEGMENTS.get(that) as Parts) ?? [that]),
     ]) as Stream<A, S | S2>;
   }
 
@@ -1469,11 +1482,11 @@ export class Stream<A, S = never> {
 
   zipWith<B, C, S2>(that: Stream<B, S2>, f: (a: A, b: B) => C): Stream<C, S | S2> {
     function go(
-      left: Stream<A, any>,
-      right: Stream<B, any>,
+      left: Stream<A, unknown>,
+      right: Stream<B, unknown>,
       leftBuf: Chunk<A>,
       rightBuf: Chunk<B>,
-    ): Stream<C, any> {
+    ): Stream<C, unknown> {
       // if both buffers have elements, pair them
       if (!leftBuf.isEmpty && !rightBuf.isEmpty) {
         const len = Math.min(leftBuf.length, rightBuf.length);
@@ -1491,7 +1504,7 @@ export class Stream<A, S = never> {
       // need to pull from whichever buffer is empty
       if (leftBuf.isEmpty) {
         return new Stream(
-          (left.step as any).flatMap((s: Step<A>) => {
+          left.step.flatMap((s: Step<A>) => {
             if (s._tag === "Done") return succeed(DONE);
             return go(s.next, right, s.chunk, rightBuf).step;
           }),
@@ -1499,7 +1512,7 @@ export class Stream<A, S = never> {
       }
 
       return new Stream(
-        (right.step as any).flatMap((s: Step<B>) => {
+        right.step.flatMap((s: Step<B>) => {
           if (s._tag === "Done") return succeed(DONE);
           return go(left, s.next, leftBuf, s.chunk).step;
         }),
@@ -1522,8 +1535,8 @@ export class Stream<A, S = never> {
       | { readonly _tag: "rightEnd" }
       | { readonly _tag: "fail"; readonly cause: Cause };
 
-    const start = (run: DriverRun<[A, B]>): Eff<Pull<[A, B]>, any> =>
-      (QueueNS.bounded<Event>(2) as any).flatMap((events: Queue<Event>) => {
+    const start = (run: DriverRun<[A, B]>): Eff<Pull<[A, B]>, unknown> =>
+      QueueNS.bounded<Event>(2).flatMap((events: Queue<Event>) => {
         let hasLeft = false;
         let hasRight = false;
         let latestLeft!: A;
@@ -1532,29 +1545,29 @@ export class Stream<A, S = never> {
         let rightDone = false;
 
         const drain = <T>(
-          stream: Stream<T, any>,
+          stream: Stream<T, unknown>,
           chunkEvent: (chunk: Chunk<T>) => Event,
           endEvent: Event,
-        ): Eff<void, any> =>
-          (stream.step as any).flatMap((step: Step<T>) =>
+        ): Eff<unknown, unknown> =>
+          stream.step.flatMap((step: Step<T>) =>
             step._tag === "Done"
               ? events.offer(endEvent)
-              : (events.offer(chunkEvent(step.chunk)) as any).flatMap(() =>
-                  drain(step.next, chunkEvent, endEvent),
-                ),
+              : events
+                  .offer(chunkEvent(step.chunk))
+                  .flatMap(() => drain(step.next, chunkEvent, endEvent)),
           );
 
         const guardedDrain = <T>(
-          stream: Stream<T, any>,
+          stream: Stream<T, unknown>,
           chunkEvent: (chunk: Chunk<T>) => Event,
           endEvent: Event,
         ) =>
-          run.reportFailure(drain(stream, chunkEvent, endEvent) as any, (cause: Cause) =>
+          run.reportFailure(drain(stream, chunkEvent, endEvent), (cause: Cause) =>
             events.offer({ _tag: "fail", cause }),
           );
 
-        const pull = (): Eff<Step<[A, B]>, any> =>
-          (events.take() as any).flatMap((event: Event): any => {
+        const pull = (): Eff<Step<[A, B]>, unknown> =>
+          events.take().flatMap((event: Event) => {
             switch (event._tag) {
               case "left": {
                 const output: [A, B][] = [];
@@ -1611,35 +1624,35 @@ export class Stream<A, S = never> {
       | { readonly _tag: "sideEnd" }
       | { readonly _tag: "fail"; readonly cause: Cause };
 
-    const start = (run: DriverRun<[A, B]>): Eff<Pull<[A, B]>, any> =>
-      (QueueNS.bounded<Event>(2) as any).flatMap((events: Queue<Event>) => {
+    const start = (run: DriverRun<[A, B]>): Eff<Pull<[A, B]>, unknown> =>
+      QueueNS.bounded<Event>(2).flatMap((events: Queue<Event>) => {
         let hasLatest = false;
         let latest!: B;
 
         const drain = <T>(
-          stream: Stream<T, any>,
+          stream: Stream<T, unknown>,
           chunkEvent: (chunk: Chunk<T>) => Event,
           endEvent: Event,
-        ): Eff<void, any> =>
-          (stream.step as any).flatMap((step: Step<T>) =>
+        ): Eff<unknown, unknown> =>
+          stream.step.flatMap((step: Step<T>) =>
             step._tag === "Done"
               ? events.offer(endEvent)
-              : (events.offer(chunkEvent(step.chunk)) as any).flatMap(() =>
-                  drain(step.next, chunkEvent, endEvent),
-                ),
+              : events
+                  .offer(chunkEvent(step.chunk))
+                  .flatMap(() => drain(step.next, chunkEvent, endEvent)),
           );
 
         const guardedDrain = <T>(
-          stream: Stream<T, any>,
+          stream: Stream<T, unknown>,
           chunkEvent: (chunk: Chunk<T>) => Event,
           endEvent: Event,
         ) =>
-          run.reportFailure(drain(stream, chunkEvent, endEvent) as any, (cause: Cause) =>
+          run.reportFailure(drain(stream, chunkEvent, endEvent), (cause: Cause) =>
             events.offer({ _tag: "fail", cause }),
           );
 
-        const pull = (): Eff<Step<[A, B]>, any> =>
-          (events.take() as any).flatMap((event: Event): any => {
+        const pull = (): Eff<Step<[A, B]>, unknown> =>
+          events.take().flatMap((event: Event) => {
             switch (event._tag) {
               case "side":
                 for (const value of event.chunk) {
@@ -1702,7 +1715,7 @@ export class Stream<A, S = never> {
    * anything else throws `RangeError`.
    */
   parJoin(
-    this: Stream<Stream<any, any>, S>,
+    this: Stream<Stream<unknown, unknown>, S>,
     maxOpen: number,
   ): Stream<StreamValue<A>, S | StreamEffects<A>> {
     const limit = requireCount({
@@ -1711,16 +1724,22 @@ export class Stream<A, S = never> {
       value: maxOpen,
       unbounded: true,
     });
-    return parJoinStreams({ outer: this, maxOpen: limit }) as any;
+    return parJoinStreams({ outer: this, maxOpen: limit }) as Stream<
+      StreamValue<A>,
+      S | StreamEffects<A>
+    >;
   }
 
   /** {@link Stream.parJoin} without a limit: every inner stream is opened as
    *  soon as the outer stream emits it, so memory grows with the number of
    *  inner streams open at once. */
   parJoinUnbounded(
-    this: Stream<Stream<any, any>, S>,
+    this: Stream<Stream<unknown, unknown>, S>,
   ): Stream<StreamValue<A>, S | StreamEffects<A>> {
-    return parJoinStreams({ outer: this, maxOpen: Infinity }) as any;
+    return parJoinStreams({ outer: this, maxOpen: Infinity }) as Stream<
+      StreamValue<A>,
+      S | StreamEffects<A>
+    >;
   }
 
   /**
@@ -1737,7 +1756,7 @@ export class Stream<A, S = never> {
     StreamValue<ReturnType<Branches[number]>>,
     S | StreamEffects<ReturnType<Branches[number]>>
   >;
-  broadcastThrough(...branches: readonly BroadcastBranch<A, S>[]): Stream<any, any> {
+  broadcastThrough(...branches: readonly BroadcastBranch<A, S>[]): Stream<unknown, unknown> {
     if (branches.length === 0) return this;
 
     const self = this;
@@ -1750,38 +1769,36 @@ export class Stream<A, S = never> {
       | { readonly _tag: "end" }
       | { readonly _tag: "fail"; readonly cause: Cause };
 
-    const start = (run: DriverRun<unknown>): Eff<Pull<unknown>, any> =>
-      (
-        branches.reduce<Eff<Queue<InputSlot>[], never>>(
+    const start = (run: DriverRun<unknown>): Eff<Pull<unknown>, unknown> =>
+      branches
+        .reduce<Eff<Queue<InputSlot>[], never>>(
           (acc) =>
-            (acc as any).flatMap((queues: Queue<InputSlot>[]) =>
+            acc.flatMap((queues: Queue<InputSlot>[]) =>
               QueueNS.bounded<InputSlot>(1).map((queue) => {
                 queues.push(queue);
                 return queues;
               }),
             ),
           succeed([]) as Eff<Queue<InputSlot>[], never>,
-        ) as any
-      ).flatMap((inputs: Queue<InputSlot>[]) =>
-        (QueueNS.bounded<OutputSlot>(branches.length) as any).flatMap(
-          (outputs: Queue<OutputSlot>) => {
+        )
+        .flatMap((inputs: Queue<InputSlot>[]) =>
+          QueueNS.bounded<OutputSlot>(branches.length).flatMap((outputs: Queue<OutputSlot>) => {
             const active = branches.map(() => true);
             let open = branches.length;
 
             const inputStream = (queue: Queue<InputSlot>): Stream<A, S> => {
-              const pull = (): Eff<Step<A>, any> =>
-                (queue.take() as any)
-                  .flatMap((slot: InputSlot): any => {
+              const pull = (): Eff<Step<A>, unknown> =>
+                queue
+                  .take()
+                  .flatMap((slot: InputSlot): Eff<Step<A>, unknown> => {
                     if (slot._tag === "fail") return failCause(slot.cause);
                     if (slot._tag === "end") return succeed(DONE);
-                    return succeed(
-                      emit(slot.chunk, new Stream<A, any>(suspend(() => pull()) as any)),
-                    );
+                    return succeed(emit(slot.chunk, new Stream<A, unknown>(suspend(() => pull()))));
                   })
                   .catch((error: unknown) =>
                     error instanceof QueueClosed ? succeed(DONE) : fail(error),
                   );
-              return new Stream(suspend(() => pull()) as any) as Stream<A, S>;
+              return new Stream(suspend(() => pull())) as Stream<A, S>;
             };
 
             const closeInput = (index: number): Eff<void, never> =>
@@ -1789,23 +1806,21 @@ export class Stream<A, S = never> {
                 active[index] = false;
               }).flatMap(() => inputs[index]!.close());
 
-            const branchDriver = (index: number): Eff<unknown, any> => {
+            const branchDriver = (index: number): Eff<unknown, unknown> => {
               const branch = branches[index]!(inputStream(inputs[index]!));
               // Pass the branch's output on a whole chunk at a time. (It used
               // to go one value at a time, each with its own queue slot.)
-              const forward = (stream: Stream<unknown, any>): Eff<void, any> =>
-                (stream.step as any).flatMap((step: Step<unknown>) => {
+              const forward = (stream: Stream<unknown, unknown>): Eff<unknown, unknown> =>
+                stream.step.flatMap((step: Step<unknown>) => {
                   if (step._tag === "Done") return succeed(undefined);
                   if (step.chunk.isEmpty) return forward(step.next);
-                  return (outputs.offer({ _tag: "chunk", chunk: step.chunk }) as any).flatMap(() =>
-                    forward(step.next),
-                  );
+                  return outputs
+                    .offer({ _tag: "chunk", chunk: step.chunk })
+                    .flatMap(() => forward(step.next));
                 });
               const drain = branch._finalize(forward(branch));
               return run.reportFailure(
-                (ensuring(drain, closeInput(index)) as any).flatMap(() =>
-                  outputs.offer({ _tag: "end" }),
-                ),
+                ensuring(drain, closeInput(index)).flatMap(() => outputs.offer({ _tag: "end" })),
                 (cause: Cause) => outputs.offer({ _tag: "fail", cause }),
               );
             };
@@ -1815,30 +1830,30 @@ export class Stream<A, S = never> {
                 ? succeed(undefined)
                 : run.fork(branchDriver(index)).flatMap(() => startBranches(index + 1));
 
-            const offerInput = (slot: InputSlot, index = 0): Eff<void, any> => {
+            const offerInput = (slot: InputSlot, index = 0): Eff<unknown, unknown> => {
               if (index >= inputs.length) return succeed(undefined);
               if (!active[index]) return offerInput(slot, index + 1);
-              return (inputs[index]!.offer(slot) as any)
+              return inputs[index]!.offer(slot)
                 .catch((error: unknown) =>
                   error instanceof QueueClosed ? succeed(false) : fail(error),
                 )
                 .flatMap(() => offerInput(slot, index + 1));
             };
 
-            const drainUpstream = (stream: Stream<A, any>): Eff<void, any> =>
-              (stream.step as any).flatMap((step: Step<A>) => {
+            const drainUpstream = (stream: Stream<A, unknown>): Eff<unknown, unknown> =>
+              stream.step.flatMap((step: Step<A>) => {
                 if (step._tag === "Done") return offerInput({ _tag: "end" });
-                return (offerInput({ _tag: "chunk", chunk: step.chunk }) as any).flatMap(() =>
+                return offerInput({ _tag: "chunk", chunk: step.chunk }).flatMap(() =>
                   active.some(Boolean) ? drainUpstream(step.next) : succeed(undefined),
                 );
               });
 
-            const upstreamDriver = run.reportFailure(drainUpstream(self) as any, (cause: Cause) =>
+            const upstreamDriver = run.reportFailure(drainUpstream(self), (cause: Cause) =>
               offerInput({ _tag: "fail", cause }),
             );
 
-            const pullOutput = (): Eff<Step<unknown>, any> =>
-              (outputs.take() as any).flatMap((slot: OutputSlot): any => {
+            const pullOutput = (): Eff<Step<unknown>, unknown> =>
+              outputs.take().flatMap((slot: OutputSlot) => {
                 if (slot._tag === "fail") return failCause(slot.cause);
                 if (slot._tag === "end") {
                   open--;
@@ -1851,9 +1866,8 @@ export class Stream<A, S = never> {
             return startBranches(0)
               .flatMap(() => run.fork(upstreamDriver))
               .map(() => pullOutput);
-          },
-        ),
-      );
+          }),
+        );
 
     return driverStream<unknown>({ start, finalizer: self._finalizer });
   }
@@ -1871,7 +1885,7 @@ export class Stream<A, S = never> {
     return this.broadcastThrough(
       (stream) => stream,
       (stream) => observer(stream).mapChunks(() => Chunk.empty<never>()),
-    ) as any;
+    ) as Stream<A, S | S2>;
   }
 
   // ── Concurrency ──────────────────────────────────────────────────
@@ -1906,46 +1920,47 @@ export class Stream<A, S = never> {
       | { _tag: "end" }
       | { _tag: "fail"; cause: Cause };
 
-    const start = (run: DriverRun<B>): Eff<Pull<B>, any> =>
-      (QueueNS.bounded<Slot>(n) as any).flatMap((slots: Queue<Slot>) =>
-        (Semaphore.make(permits) as any).flatMap((sem: Semaphore) => {
+    const start = (run: DriverRun<B>): Eff<Pull<B>, unknown> =>
+      QueueNS.bounded<Slot>(n).flatMap((slots: Queue<Slot>) =>
+        Semaphore.make(permits).flatMap((sem: Semaphore) => {
           // Deferreds the consumer may still await. A worker settles its own
           // from a finalizer, so an interrupted worker cannot strand the
           // consumer; a failing driver settles the rest with its cause, which
           // also covers workers interrupted before they ever ran.
           const pending = new Set<Deferred<Exit<unknown, B>>>();
-          const enqueue = (item: A): Eff<void, any> =>
-            (sem.acquire() as any).flatMap(() =>
-              (DeferredNS.make<Exit<unknown, B>>() as any).flatMap(
-                (d: Deferred<Exit<unknown, B>>) =>
-                  (slots.offer({ _tag: "item", deferred: d }) as any).flatMap(() => {
-                    pending.add(d);
-                    // A worker that fails while its run stops fails with that
-                    // cause, which the stop collects into the stream's exit.
-                    return run.fork(
-                      (
-                        onExit(suspend(() => f(item)) as Eff<B, unknown>, (exit) =>
-                          sync(() => pending.delete(d)).flatMap(() =>
-                            d.succeed(exit).map(() => undefined),
-                          ),
-                        ) as any
-                      ).ensuring(sem.release()),
-                    );
-                  }),
+          const enqueue = (item: A): Eff<unknown, unknown> =>
+            sem.acquire().flatMap(() =>
+              DeferredNS.make<Exit<unknown, B>>().flatMap((d: Deferred<Exit<unknown, B>>) =>
+                slots.offer({ _tag: "item", deferred: d }).flatMap(() => {
+                  pending.add(d);
+                  // A worker that fails while its run stops fails with that
+                  // cause, which the stop collects into the stream's exit.
+                  return run.fork(
+                    onExit(suspend(() => f(item)) as Eff<B, unknown>, (exit) =>
+                      sync(() => pending.delete(d)).flatMap(() =>
+                        d.succeed(exit).map(() => undefined),
+                      ),
+                    ).ensuring(sem.release()),
+                  );
+                }),
               ),
             );
 
-          const drainChunk = (items: A[], i: number, next: Stream<A, any>): Eff<void, any> =>
+          const drainChunk = (
+            items: A[],
+            i: number,
+            next: Stream<A, unknown>,
+          ): Eff<unknown, unknown> =>
             i >= items.length
               ? drain(next)
-              : (enqueue(items[i]!) as any).flatMap(() => drainChunk(items, i + 1, next));
+              : enqueue(items[i]!).flatMap(() => drainChunk(items, i + 1, next));
 
-          const drain = (s: Stream<A, any>): Eff<void, any> =>
-            (s.step as any).flatMap((step: Step<A>) =>
+          const drain = (s: Stream<A, unknown>): Eff<unknown, unknown> =>
+            s.step.flatMap((step: Step<A>) =>
               step._tag === "Done"
-                ? (sem.withPermits(permits, succeed(undefined)) as any).flatMap(() =>
-                    slots.offer({ _tag: "end" }),
-                  )
+                ? sem
+                    .withPermits(permits, succeed(undefined))
+                    .flatMap(() => slots.offer({ _tag: "end" }))
                 : drainChunk(step.chunk.toArray(), 0, step.next),
             );
 
@@ -1959,7 +1974,7 @@ export class Stream<A, S = never> {
               return settled.map(() => undefined);
             });
 
-          const driver = run.reportFailure(drain(self) as any, (cause: Cause) =>
+          const driver = run.reportFailure(drain(self), (cause: Cause) =>
             settlePending(cause).flatMap(() => slots.offer({ _tag: "fail", cause })),
           );
 
@@ -1967,18 +1982,18 @@ export class Stream<A, S = never> {
           // interrupted while awaiting it resumes with the same slot.
           let claimed: Deferred<Exit<unknown, B>> | null = null;
 
-          const deliver = (deferred: Deferred<Exit<unknown, B>>): Eff<Step<B>, any> =>
-            (deferred.await as any).flatMap((exit: Exit<unknown, B>) => {
+          const deliver = (deferred: Deferred<Exit<unknown, B>>): Eff<Step<B>, unknown> =>
+            deferred.await.flatMap((exit: Exit<unknown, B>) => {
               claimed = null;
               return exit._tag === "Success"
                 ? succeed(emit(Chunk.single(exit.value), next))
                 : failCause(exit.cause);
             });
 
-          const pull = (): Eff<Step<B>, any> =>
+          const pull = (): Eff<Step<B>, unknown> =>
             claimed !== null
               ? deliver(claimed)
-              : (slots.take() as any).flatMap((slot: Slot): any => {
+              : slots.take().flatMap((slot: Slot) => {
                   if (slot._tag === "fail") return failCause(slot.cause);
                   if (slot._tag === "end") return succeed(DONE);
                   claimed = slot.deferred;
@@ -2014,50 +2029,52 @@ export class Stream<A, S = never> {
       | { _tag: "end" }
       | { _tag: "fail"; cause: Cause };
 
-    const start = (run: DriverRun<B>): Eff<Pull<B>, any> =>
-      (QueueNS.bounded<Slot>(n) as any).flatMap((slots: Queue<Slot>) =>
-        (Semaphore.make(permits) as any).flatMap((sem: Semaphore) => {
-          const enqueue = (item: A): Eff<void, any> =>
-            (sem.acquire() as any).flatMap(() =>
+    const start = (run: DriverRun<B>): Eff<Pull<B>, unknown> =>
+      QueueNS.bounded<Slot>(n).flatMap((slots: Queue<Slot>) =>
+        Semaphore.make(permits).flatMap((sem: Semaphore) => {
+          const enqueue = (item: A): Eff<unknown, unknown> =>
+            sem.acquire().flatMap(() =>
               run.fork(
                 // The handler sits in an uninterruptible region so a worker
                 // stopped with its run still sees, and re-raises, a failure
                 // from its own cleanup. Workers are interrupted only when the
                 // run stops, so the permit needs no release on that path.
-                (
-                  uninterruptible(
-                    (interruptible(suspend(() => f(item))) as any)
-                      .map((value: B) => Exit.succeed(value))
-                      .catchAllCause((cause: Cause) =>
-                        run.stopping ? failCause(cause) : succeed(Exit.failure(cause)),
-                      ),
-                  ) as any
+                uninterruptible(
+                  interruptible(suspend(() => f(item)))
+                    .map((value: B): Exit<unknown, B> => Exit.succeed(value))
+                    .catchAllCause((cause: Cause) =>
+                      run.stopping ? failCause(cause) : succeed(Exit.failure(cause)),
+                    ),
                 ).flatMap((exit: Exit<unknown, B>) =>
                   slots.offer({ _tag: "item", exit }).flatMap(() => sem.release()),
                 ),
               ),
             );
 
-          const drainChunk = (items: A[], i: number, next: Stream<A, any>): Eff<void, any> =>
+          const drainChunk = (
+            items: A[],
+            i: number,
+            next: Stream<A, unknown>,
+          ): Eff<unknown, unknown> =>
             i >= items.length
               ? drain(next)
-              : (enqueue(items[i]!) as any).flatMap(() => drainChunk(items, i + 1, next));
+              : enqueue(items[i]!).flatMap(() => drainChunk(items, i + 1, next));
 
-          const drain = (s: Stream<A, any>): Eff<void, any> =>
-            (s.step as any).flatMap((step: Step<A>) =>
+          const drain = (s: Stream<A, unknown>): Eff<unknown, unknown> =>
+            s.step.flatMap((step: Step<A>) =>
               step._tag === "Done"
-                ? (sem.withPermits(permits, succeed(undefined)) as any).flatMap(() =>
-                    slots.offer({ _tag: "end" }),
-                  )
+                ? sem
+                    .withPermits(permits, succeed(undefined))
+                    .flatMap(() => slots.offer({ _tag: "end" }))
                 : drainChunk(step.chunk.toArray(), 0, step.next),
             );
 
-          const driver = run.reportFailure(drain(self) as any, (cause: Cause) =>
+          const driver = run.reportFailure(drain(self), (cause: Cause) =>
             slots.offer({ _tag: "fail", cause }),
           );
 
-          const pull = (): Eff<Step<B>, any> =>
-            (slots.take() as any).flatMap((slot: Slot): any => {
+          const pull = (): Eff<Step<B>, unknown> =>
+            slots.take().flatMap((slot: Slot) => {
               if (slot._tag === "fail") return failCause(slot.cause);
               if (slot._tag === "end") return succeed(DONE);
               return slot.exit._tag === "Success"
@@ -2097,20 +2114,20 @@ export class Stream<A, S = never> {
       | { _tag: "end" }
       | { _tag: "fail"; cause: Cause };
 
-    const start = (run: DriverRun<Chunk<A>>): Eff<Pull<Chunk<A>>, any> =>
+    const start = (run: DriverRun<Chunk<A>>): Eff<Pull<Chunk<A>>, unknown> =>
       // The queue holds whole chunks. A few are enough to keep the producer
       // busy while the consumer is filling a group.
-      (QueueNS.bounded<Slot>(SLOTS_AHEAD) as any).flatMap((slots: Queue<Slot>) => {
-        const drain = (s: Stream<A, any>): Eff<void, any> =>
-          (s.step as any).flatMap((step: Step<A>) => {
+      QueueNS.bounded<Slot>(SLOTS_AHEAD).flatMap((slots: Queue<Slot>) => {
+        const drain = (s: Stream<A, unknown>): Eff<unknown, unknown> =>
+          s.step.flatMap((step: Step<A>) => {
             if (step._tag === "Done") return slots.offer({ _tag: "end" });
             if (step.chunk.isEmpty) return drain(step.next);
-            return (slots.offer({ _tag: "chunk", chunk: step.chunk }) as any).flatMap(() =>
-              drain(step.next),
-            );
+            return slots
+              .offer({ _tag: "chunk", chunk: step.chunk })
+              .flatMap(() => drain(step.next));
           });
 
-        const driver = run.reportFailure(drain(self) as any, (cause: Cause) =>
+        const driver = run.reportFailure(drain(self), (cause: Cause) =>
           slots.offer({ _tag: "fail", cause }),
         );
 
@@ -2129,43 +2146,41 @@ export class Stream<A, S = never> {
           leftover = room < chunk.length ? chunk.drop(room) : null;
         };
 
-        const flush = (continuation: Stream<Chunk<A>, unknown>): Eff<Step<Chunk<A>>, any> =>
+        const flush = (continuation: Stream<Chunk<A>, unknown>): Eff<Step<Chunk<A>>, unknown> =>
           sync(() => {
             const items = batch!.items;
             batch = null;
             return emit(Chunk.single(Chunk.fromArray(items)), continuation);
           });
 
-        const collect = (): Eff<Step<Chunk<A>>, any> => {
+        const collect = (): Eff<Step<Chunk<A>>, unknown> => {
           const open = batch!;
           if (open.items.length >= cap || leftover !== null) return flush(next);
-          return (clockNow as any).flatMap((now: number) => {
+          return clockNow.flatMap((now: number) => {
             const remaining = open.deadline - now;
             if (remaining <= 0) return flush(next);
-            return (timeoutOption(slots.take() as any, remaining) as any).flatMap(
-              (slot: Slot | undefined): any => {
-                if (slot === undefined) return flush(next);
-                if (slot._tag === "fail") return failCause(slot.cause);
-                if (slot._tag === "end") return flush(run.end);
-                fill(open, slot.chunk);
-                return collect();
-              },
-            );
+            return timeoutOption(slots.take(), remaining).flatMap((slot: Slot | undefined) => {
+              if (slot === undefined) return flush(next);
+              if (slot._tag === "fail") return failCause(slot.cause);
+              if (slot._tag === "end") return flush(run.end);
+              fill(open, slot.chunk);
+              return collect();
+            });
           });
         };
 
-        const openBatch = (chunk: Chunk<A>): Eff<Step<Chunk<A>>, any> =>
+        const openBatch = (chunk: Chunk<A>): Eff<Step<Chunk<A>>, unknown> =>
           uninterruptible(
-            (clockNow as any).map((now: number) => {
+            clockNow.map((now: number) => {
               batch = { items: [], deadline: now + timeoutMs };
               fill(batch, chunk);
             }),
           ).flatMap(collect);
 
-        const pull = (): Eff<Step<Chunk<A>>, any> => {
+        const pull = (): Eff<Step<Chunk<A>>, unknown> => {
           if (batch !== null) return collect();
           if (leftover !== null) return openBatch(leftover);
-          return (slots.take() as any).flatMap((slot: Slot): any => {
+          return slots.take().flatMap((slot: Slot) => {
             if (slot._tag === "fail") return failCause(slot.cause);
             if (slot._tag === "end") return succeed(DONE);
             return openBatch(slot.chunk);
@@ -2187,23 +2202,21 @@ export class Stream<A, S = never> {
     const self = this;
     type Slot = { _tag: "item"; value: A } | { _tag: "end" } | { _tag: "fail"; cause: Cause };
 
-    const start = (run: DriverRun<A>): Eff<Pull<A>, any> =>
+    const start = (run: DriverRun<A>): Eff<Pull<A>, unknown> =>
       // A small bounded queue: memory stays bounded even if the consumer
       // stops pulling for a while (the producer then waits).
-      (QueueNS.bounded<Slot>(SLOTS_AHEAD) as any).flatMap((slots: Queue<Slot>) => {
+      QueueNS.bounded<Slot>(SLOTS_AHEAD).flatMap((slots: Queue<Slot>) => {
         // Values in one chunk arrive together, so only the last one could
         // ever survive the quiet period. We only send that one.
-        const drain = (s: Stream<A, any>): Eff<void, any> =>
-          (s.step as any).flatMap((step: Step<A>) => {
+        const drain = (s: Stream<A, unknown>): Eff<unknown, unknown> =>
+          s.step.flatMap((step: Step<A>) => {
             if (step._tag === "Done") return slots.offer({ _tag: "end" });
             if (step.chunk.isEmpty) return drain(step.next);
             const latest = step.chunk.get(step.chunk.length - 1);
-            return (slots.offer({ _tag: "item", value: latest }) as any).flatMap(() =>
-              drain(step.next),
-            );
+            return slots.offer({ _tag: "item", value: latest }).flatMap(() => drain(step.next));
           });
 
-        const driver = run.reportFailure(drain(self) as any, (cause: Cause) =>
+        const driver = run.reportFailure(drain(self), (cause: Cause) =>
           slots.offer({ _tag: "fail", cause }),
         );
 
@@ -2211,15 +2224,15 @@ export class Stream<A, S = never> {
         // pull resumes waiting for it.
         let pending: { readonly value: A } | null = null;
 
-        const emitPending = (continuation: Stream<A, unknown>): Eff<Step<A>, any> =>
+        const emitPending = (continuation: Stream<A, unknown>): Eff<Step<A>, unknown> =>
           sync(() => {
             const value = pending!.value;
             pending = null;
             return emit(Chunk.single(value), continuation);
           });
 
-        const settle = (): Eff<Step<A>, any> =>
-          (timeoutOption(slots.take() as any, ms) as any).flatMap((slot: Slot | undefined): any => {
+        const settle = (): Eff<Step<A>, unknown> =>
+          timeoutOption(slots.take(), ms).flatMap((slot: Slot | undefined) => {
             if (slot === undefined) return emitPending(next);
             if (slot._tag === "fail") return failCause(slot.cause);
             if (slot._tag === "end") return emitPending(run.end);
@@ -2227,10 +2240,10 @@ export class Stream<A, S = never> {
             return settle();
           });
 
-        const pull = (): Eff<Step<A>, any> =>
+        const pull = (): Eff<Step<A>, unknown> =>
           pending !== null
             ? settle()
-            : (slots.take() as any).flatMap((slot: Slot): any => {
+            : slots.take().flatMap((slot: Slot) => {
                 if (slot._tag === "fail") return failCause(slot.cause);
                 if (slot._tag === "end") return succeed(DONE);
                 pending = { value: slot.value };
@@ -2252,13 +2265,13 @@ export class Stream<A, S = never> {
     const interval = requireWindowMs({ operator: "sample", name: "intervalMs", value: intervalMs });
     type Event = { readonly _tag: "end" } | { readonly _tag: "fail"; readonly cause: Cause };
 
-    const start = (run: DriverRun<A>): Eff<Pull<A>, any> =>
-      (QueueNS.bounded<Event>(1) as any).flatMap((events: Queue<Event>) => {
+    const start = (run: DriverRun<A>): Eff<Pull<A>, unknown> =>
+      QueueNS.bounded<Event>(1).flatMap((events: Queue<Event>) => {
         let dirty = false;
         let latest!: A;
 
-        const drain = (stream: Stream<A, any>): Eff<void, any> =>
-          (stream.step as any).flatMap((step: Step<A>) => {
+        const drain = (stream: Stream<A, unknown>): Eff<unknown, unknown> =>
+          stream.step.flatMap((step: Step<A>) => {
             if (step._tag === "Done") return events.offer({ _tag: "end" });
             return sync(() => {
               for (const value of step.chunk) {
@@ -2268,23 +2281,21 @@ export class Stream<A, S = never> {
             }).flatMap(() => drain(step.next));
           });
 
-        const driver = run.reportFailure(drain(self) as any, (cause: Cause) =>
+        const driver = run.reportFailure(drain(self), (cause: Cause) =>
           events.offer({ _tag: "fail", cause }),
         );
 
-        const pull = (): Eff<Step<A>, any> =>
-          (timeoutOption(events.take() as any, interval) as any).flatMap(
-            (event: Event | undefined): any => {
-              if (event?._tag === "fail") return failCause(event.cause);
-              if (event?._tag === "end") return succeed(DONE);
-              if (!dirty) return pull();
-              return sync(() => {
-                const value = latest;
-                dirty = false;
-                return emit(Chunk.single(value), next);
-              });
-            },
-          );
+        const pull = (): Eff<Step<A>, unknown> =>
+          timeoutOption(events.take(), interval).flatMap((event: Event | undefined) => {
+            if (event?._tag === "fail") return failCause(event.cause);
+            if (event?._tag === "end") return succeed(DONE);
+            if (!dirty) return pull();
+            return sync(() => {
+              const value = latest;
+              dirty = false;
+              return emit(Chunk.single(value), next);
+            });
+          });
         const next = run.continueWith(pull);
 
         return run.fork(driver).map(() => pull);
@@ -2304,14 +2315,14 @@ export class Stream<A, S = never> {
       | { readonly _tag: "end" }
       | { readonly _tag: "fail"; readonly cause: Cause };
 
-    const start = (run: DriverRun<A>): Eff<Pull<A>, any> =>
-      (QueueNS.unbounded<Event>() as any).flatMap((events: Queue<Event>) => {
+    const start = (run: DriverRun<A>): Eff<Pull<A>, unknown> =>
+      QueueNS.unbounded<Event>().flatMap((events: Queue<Event>) => {
         let windowOpen = false;
         let dirty = false;
         let latest!: A;
 
-        const drain = (stream: Stream<A, any>): Eff<void, any> =>
-          (stream.step as any).flatMap((step: Step<A>) => {
+        const drain = (stream: Stream<A, unknown>): Eff<unknown, unknown> =>
+          stream.step.flatMap((step: Step<A>) => {
             if (step._tag === "Done") return events.offer({ _tag: "end" });
             return sync(() => {
               let open = false;
@@ -2331,11 +2342,11 @@ export class Stream<A, S = never> {
             );
           });
 
-        const driver = run.reportFailure(drain(self) as any, (cause: Cause) =>
+        const driver = run.reportFailure(drain(self), (cause: Cause) =>
           events.offer({ _tag: "fail", cause }),
         );
 
-        const emitLatest = (continuation: Stream<A, unknown>): Eff<Step<A>, any> =>
+        const emitLatest = (continuation: Stream<A, unknown>): Eff<Step<A>, unknown> =>
           sync(() => {
             const value = latest;
             dirty = false;
@@ -2343,20 +2354,18 @@ export class Stream<A, S = never> {
             return emit(Chunk.single(value), continuation);
           });
 
-        const waitForWindow = (): Eff<Step<A>, any> =>
-          (timeoutOption(events.take() as any, duration) as any).flatMap(
-            (event: Event | undefined): any => {
-              if (event === undefined) return emitLatest(next);
-              if (event._tag === "fail") return failCause(event.cause);
-              if (event._tag === "end") {
-                return dirty ? emitLatest(run.end) : succeed(DONE);
-              }
-              return waitForWindow();
-            },
-          );
+        const waitForWindow = (): Eff<Step<A>, unknown> =>
+          timeoutOption(events.take(), duration).flatMap((event: Event | undefined) => {
+            if (event === undefined) return emitLatest(next);
+            if (event._tag === "fail") return failCause(event.cause);
+            if (event._tag === "end") {
+              return dirty ? emitLatest(run.end) : succeed(DONE);
+            }
+            return waitForWindow();
+          });
 
-        const idle = (): Eff<Step<A>, any> =>
-          (events.take() as any).flatMap((event: Event): any => {
+        const idle = (): Eff<Step<A>, unknown> =>
+          events.take().flatMap((event: Event) => {
             if (event._tag === "fail") return failCause(event.cause);
             if (event._tag === "end") return succeed(DONE);
             return waitForWindow();
@@ -2364,7 +2373,7 @@ export class Stream<A, S = never> {
 
         // An open window outlives a pull: a pull interrupted after taking
         // its `start` event resumes by waiting for the window to close.
-        const pull = (): Eff<Step<A>, any> => (windowOpen ? waitForWindow() : idle());
+        const pull = (): Eff<Step<A>, unknown> => (windowOpen ? waitForWindow() : idle());
         const next = run.continueWith(pull);
 
         return run.fork(driver).map(() => pull);
@@ -2399,8 +2408,8 @@ export class Stream<A, S = never> {
       | { _tag: "end" }
       | { _tag: "fail"; cause: Cause };
 
-    const start = (run: DriverRun<A>): Eff<Pull<A>, any> =>
-      (QueueNS.unbounded<Slot>() as any).flatMap((slots: Queue<Slot>) => {
+    const start = (run: DriverRun<A>): Eff<Pull<A>, unknown> =>
+      QueueNS.unbounded<Slot>().flatMap((slots: Queue<Slot>) => {
         // One permit per buffered value. The producer takes permits before
         // it puts a chunk in the queue, and the consumer gives them back when
         // it takes the chunk out. So at most `cap` values wait at any time.
@@ -2409,24 +2418,24 @@ export class Stream<A, S = never> {
         const waitForRoom = (values: number): Eff<void, never> =>
           room === null ? succeed(undefined) : room.acquireMany(values);
 
-        const offerChunk = (chunk: Chunk<A>, next: Stream<A, any>): Eff<void, any> => {
+        const offerChunk = (chunk: Chunk<A>, next: Stream<A, unknown>): Eff<unknown, unknown> => {
           if (chunk.isEmpty) return drain(next);
           // A chunk bigger than the whole buffer could never fit, so it goes
           // in pieces of at most `cap` values. For a normal chunk, `piece` is
           // the whole chunk and `rest` is empty.
           const piece = chunk.take(cap);
           const rest = chunk.drop(cap);
-          return (waitForRoom(piece.length) as any)
+          return waitForRoom(piece.length)
             .flatMap(() => slots.offer({ _tag: "chunk", chunk: piece }))
             .flatMap(() => offerChunk(rest, next));
         };
 
-        const drain = (s: Stream<A, any>): Eff<void, any> =>
-          (s.step as any).flatMap((step: Step<A>) =>
+        const drain = (s: Stream<A, unknown>): Eff<unknown, unknown> =>
+          s.step.flatMap((step: Step<A>) =>
             step._tag === "Done" ? slots.offer({ _tag: "end" }) : offerChunk(step.chunk, step.next),
           );
 
-        const driver = run.reportFailure(drain(self) as any, (cause: Cause) =>
+        const driver = run.reportFailure(drain(self), (cause: Cause) =>
           slots.offer({ _tag: "fail", cause }),
         );
 
@@ -2434,18 +2443,20 @@ export class Stream<A, S = never> {
         // after a sentinel, so a sentinel is always last in a drained batch)
         let terminal: Slot | null = null;
 
-        const finish = (): Eff<Step<A>, any> =>
-          terminal!._tag === "fail" ? failCause((terminal as any).cause) : succeed(DONE);
+        const finish = (): Eff<Step<A>, unknown> =>
+          terminal!._tag === "fail"
+            ? failCause((terminal as Extract<Slot, { _tag: "fail" }>).cause)
+            : succeed(DONE);
 
         // Take everything that is ready and hand it on as one chunk.
-        const pull = (): Eff<Step<A>, any> => {
-          if (terminal !== null) return suspend(() => finish()) as any;
-          return (slots.take() as any).flatMap((first: Slot): any => {
+        const pull = (): Eff<Step<A>, unknown> => {
+          if (terminal !== null) return suspend(() => finish());
+          return slots.take().flatMap((first: Slot) => {
             if (first._tag !== "chunk") {
               terminal = first;
               return finish();
             }
-            return (slots.takeAll() as any).flatMap((rest: Slot[]) => {
+            return slots.takeAll().flatMap((rest: Slot[]) => {
               const chunks = [first.chunk];
               for (const slot of rest) {
                 if (slot._tag === "chunk") chunks.push(slot.chunk);
@@ -2473,17 +2484,16 @@ export class Stream<A, S = never> {
     // first run's schedule (it delayed the first value of the next run).
     return Stream.suspend(() => {
       let nextAt: number | undefined;
-      return this.rechunk(1).evalMap(
-        (a) =>
-          (clockNow as any).flatMap((now: number) => {
-            if (nextAt === undefined) {
-              nextAt = now + ms;
-              return succeed(a);
-            }
-            const wait = Math.max(0, nextAt - now);
-            nextAt = Math.max(now, nextAt) + ms;
-            return wait > 0 ? sleep(wait).map(() => a) : succeed(a);
-          }) as any,
+      return this.rechunk(1).evalMap((a) =>
+        clockNow.flatMap((now: number) => {
+          if (nextAt === undefined) {
+            nextAt = now + ms;
+            return succeed(a);
+          }
+          const wait = Math.max(0, nextAt - now);
+          nextAt = Math.max(now, nextAt) + ms;
+          return wait > 0 ? sleep(wait).map(() => a) : succeed(a);
+        }),
       );
     });
   }
@@ -2512,16 +2522,16 @@ export class Stream<A, S = never> {
    */
   timeout(ms: number): Stream<A, S | Throws<StreamTimeoutError>> {
     requireFiniteMs({ operator: "timeout", name: "ms", value: ms });
-    const wrap = (s: Stream<A, any>): Stream<A, any> =>
+    const wrap = (s: Stream<A, unknown>): Stream<A, unknown> =>
       new Stream(
         // The timer fails rather than returning a marker, so a failure while
         // the cut pull cleans up joins the timeout instead of replacing it.
-        (timeoutFail(s.step as any, ms, () => new StreamTimeoutError({ ms })) as any).map(
-          (step: Step<A>) => (step._tag === "Done" ? DONE : emit(step.chunk, wrap(step.next))),
+        timeoutFail(s.step, ms, () => new StreamTimeoutError({ ms })).map((step: Step<A>) =>
+          step._tag === "Done" ? DONE : emit(step.chunk, wrap(step.next)),
         ),
         s._finalizer,
       );
-    return wrap(this) as any;
+    return wrap(this) as Stream<A, S | Throws<StreamTimeoutError>>;
   }
 
   /** Fail if the whole stream is still active `ms` after its first pull.
@@ -2531,24 +2541,23 @@ export class Stream<A, S = never> {
   deadline(ms: number): Stream<A, S | Throws<StreamDeadlineError>> {
     requireFiniteMs({ operator: "deadline", name: "ms", value: ms });
     const self = this;
-    const wrap = (expiresAt: number, source: Stream<A, any>): Stream<A, any> =>
+    const wrap = (expiresAt: number, source: Stream<A, unknown>): Stream<A, unknown> =>
       new Stream(
-        (clockNow as any).flatMap((now: number) => {
+        clockNow.flatMap((now: number) => {
           const remaining = expiresAt - now;
           if (remaining <= 0) return fail(new StreamDeadlineError({ ms }));
-          return (
-            timeoutFail(source.step as any, remaining, () => new StreamDeadlineError({ ms })) as any
-          ).map((step: Step<A>) =>
-            step._tag === "Done" ? DONE : emit(step.chunk, wrap(expiresAt, step.next)),
+          return timeoutFail(source.step, remaining, () => new StreamDeadlineError({ ms })).map(
+            (step: Step<A>) =>
+              step._tag === "Done" ? DONE : emit(step.chunk, wrap(expiresAt, step.next)),
           );
         }),
         source._finalizer,
       );
 
     return new Stream(
-      (clockNow as any).flatMap((now: number) => wrap(now + ms, self).step),
+      clockNow.flatMap((now: number) => wrap(now + ms, self).step),
       self._finalizer,
-    ) as any;
+    ) as Stream<A, S | Throws<StreamDeadlineError>>;
   }
 
   /** Alias emphasizing that this is a total-stream timeout. */
@@ -2567,28 +2576,28 @@ export class Stream<A, S = never> {
   interruptOn(signal: AbortSignal): Stream<A, S> {
     const abortStep: Eff<Step<A>, never> = async<Step<A>>((resume) => {
       if (signal.aborted) {
-        resume(succeed(DONE) as any);
+        resume(succeed(DONE));
         return;
       }
-      const onAbort = () => resume(succeed(DONE) as any);
+      const onAbort = () => resume(succeed(DONE));
       signal.addEventListener("abort", onAbort, { once: true });
       return () => signal.removeEventListener("abort", onAbort);
-    }) as any;
-    const wrap = (s: Stream<A, any>): Stream<A, any> =>
+    });
+    const wrap = (s: Stream<A, unknown>): Stream<A, unknown> =>
       new Stream(
-        suspend(() =>
+        suspend((): Eff<Step<A>, unknown> =>
           signal.aborted
-            ? (succeed(DONE) as any)
+            ? succeed(DONE)
             : race([
-                (s.step as any).map((step: Step<A>) =>
+                s.step.map((step: Step<A>): Step<A> =>
                   step._tag === "Done" ? DONE : emit(step.chunk, wrap(step.next)),
                 ),
-                abortStep as any,
+                abortStep,
               ]),
-        ) as any,
+        ),
         s._finalizer,
       );
-    return wrap(this);
+    return wrap(this) as Stream<A, S>;
   }
 
   /**
@@ -2602,24 +2611,22 @@ export class Stream<A, S = never> {
   interruptAfter(ms: number): Stream<A, S> {
     requireFiniteMs({ operator: "interruptAfter", name: "ms", value: ms });
     const self = this;
-    const wrap = (deadline: number, s: Stream<A, any>): Stream<A, any> =>
+    const wrap = (deadline: number, s: Stream<A, unknown>): Stream<A, unknown> =>
       new Stream(
-        (clockNow as any).flatMap((now: number) => {
+        clockNow.flatMap((now: number) => {
           const remaining = deadline - now;
           if (remaining <= 0) return succeed(DONE);
-          return (timeoutOption(s.step as any, remaining) as any).map(
-            (step: Step<A> | undefined) => {
-              if (step === undefined || step._tag === "Done") return DONE;
-              return emit(step.chunk, wrap(deadline, step.next));
-            },
-          );
+          return timeoutOption(s.step, remaining).map((step: Step<A> | undefined) => {
+            if (step === undefined || step._tag === "Done") return DONE;
+            return emit(step.chunk, wrap(deadline, step.next));
+          });
         }),
         s._finalizer,
       );
     return new Stream(
-      (clockNow as any).flatMap((now: number) => wrap(now + ms, self).step),
+      clockNow.flatMap((now: number) => wrap(now + ms, self).step),
       self._finalizer,
-    );
+    ) as Stream<A, S>;
   }
 
   /** Pause delivery while `state.get` is true, polling through the Clock
@@ -2633,7 +2640,7 @@ export class Stream<A, S = never> {
     );
     const awaitResumed = (): Eff<void, S2> =>
       suspend(() =>
-        (state.get as any).flatMap((paused: boolean) =>
+        state.get.flatMap((paused: boolean) =>
           paused ? sleep(interval).flatMap(awaitResumed) : succeed(undefined),
         ),
       ) as Eff<void, S2>;
@@ -2643,7 +2650,7 @@ export class Stream<A, S = never> {
   // ── Pipe ─────────────────────────────────────────────────────────
 
   through<B, S2 = never>(pipe: Pipe<A, B, S2>): Stream<B, S | S2> {
-    return pipe(this) as any;
+    return pipe(this);
   }
 
   runSink<B, S2>(sink: Sink<A, B, S2>): Eff<B, S | S2> {
@@ -2665,14 +2672,14 @@ export class Stream<A, S = never> {
         return finalizer ?? succeed(undefined);
       });
 
-    const wrap = (source: Stream<A, any>): Stream<A | B, any> =>
+    const wrap = (source: Stream<A, unknown>): Stream<A | B, unknown> =>
       new Stream(
-        (source.step as any)
-          .map((step: Step<A>) =>
-            step._tag === "Done" ? DONE : emit(step.chunk, wrap(step.next as Stream<A, any>)),
+        source.step
+          .map((step: Step<A>): Step<A | B> =>
+            step._tag === "Done" ? DONE : emit(step.chunk, wrap(step.next as Stream<A, unknown>)),
           )
-          .catch((error: ErrorsOf<S>) => {
-            const recovery = handler(error);
+          .catch((error) => {
+            const recovery = handler(error as ErrorsOf<S>);
             recoveryFinalizer = recovery._finalizer;
             return recovery.step;
           }),
@@ -2681,25 +2688,32 @@ export class Stream<A, S = never> {
     return new Stream(
       wrap(self).step,
       combineFinalizers(self._finalizer, suspend(releaseRecovery)),
-    ) as any;
+    ) as Stream<A | B, Exclude<S, Throws<unknown>> | S2>;
   }
 
   catchTag<Tag extends string, B, S2>(
     tag: Tag,
     handler: (error: Extract<ErrorsOf<S>, { readonly _tag: Tag }>) => Stream<B, S2>,
   ): Stream<A | B, ExcludeTags<S, Tag> | S2> {
-    return this.catch(((error: ErrorsOf<S>) => {
-      if (error !== null && typeof error === "object" && (error as any)._tag === tag) {
+    return this.catch((error: ErrorsOf<S>): Stream<B, S2 | Throws<ErrorsOf<S>>> => {
+      if (
+        error !== null &&
+        typeof error === "object" &&
+        (error as { readonly _tag?: unknown })._tag === tag
+      ) {
         return handler(error as Extract<ErrorsOf<S>, { readonly _tag: Tag }>);
       }
       return Stream.fail(error);
-    }) as any) as any;
+    }) as Stream<A | B, ExcludeTags<S, Tag> | S2>;
   }
 
   catchSome<B, S2>(
     handler: (error: ErrorsOf<S>) => Stream<B, S2> | undefined,
   ): Stream<A | B, S | S2> {
-    return this.catch(((error: ErrorsOf<S>) => handler(error) ?? Stream.fail(error)) as any) as any;
+    return this.catch(
+      (error: ErrorsOf<S>): Stream<B, S2 | Throws<ErrorsOf<S>>> =>
+        handler(error) ?? Stream.fail(error),
+    ) as Stream<A | B, S | S2>;
   }
 
   catchAllCause<B, S2>(
@@ -2715,14 +2729,14 @@ export class Stream<A, S = never> {
         return finalizer ?? succeed(undefined);
       });
 
-    const wrap = (source: Stream<A, any>): Stream<A | B, any> =>
+    const wrap = (source: Stream<A, unknown>): Stream<A | B, unknown> =>
       new Stream(
-        (source.step as any)
-          .map((step: Step<A>) =>
-            step._tag === "Done" ? DONE : emit(step.chunk, wrap(step.next as Stream<A, any>)),
+        source.step
+          .map((step: Step<A>): Step<A | B> =>
+            step._tag === "Done" ? DONE : emit(step.chunk, wrap(step.next as Stream<A, unknown>)),
           )
-          .catchAllCause((cause: Cause<ErrorsOf<S>>) => {
-            const recovery = handler(cause);
+          .catchAllCause((cause: Cause) => {
+            const recovery = handler(cause as Cause<ErrorsOf<S>>);
             recoveryFinalizer = recovery._finalizer;
             return recovery.step;
           }),
@@ -2731,11 +2745,14 @@ export class Stream<A, S = never> {
     return new Stream(
       wrap(self).step,
       combineFinalizers(self._finalizer, suspend(releaseRecovery)),
-    ) as any;
+    ) as Stream<A | B, Exclude<S, Throws<unknown>> | S2>;
   }
 
   mapError<E2>(f: (error: ErrorsOf<S>) => E2): Stream<A, Exclude<S, Throws<unknown>> | Throws<E2>> {
-    return this.catch((error) => Stream.fail(f(error))) as any;
+    return this.catch((error) => Stream.fail(f(error))) as Stream<
+      A,
+      Exclude<S, Throws<unknown>> | Throws<E2>
+    >;
   }
 
   /** Turn typed failures into defects, like `Eff.orDie`, before a runner boundary. */
@@ -2745,19 +2762,22 @@ export class Stream<A, S = never> {
       return Stream.fromEffect(failure === null ? failCause(cause) : die(failure.value));
     });
     const finalizer = recovered._finalizer;
-    return new Stream(recovered.step, finalizer === null ? null : finalizer.orDie()) as any;
+    return new Stream(recovered.step, finalizer === null ? null : finalizer.orDie()) as Stream<
+      A,
+      Exclude<S, Throws<unknown>>
+    >;
   }
 
   tapError<S2>(f: (error: ErrorsOf<S>) => Eff<unknown, S2>): Stream<A, S | S2> {
     return this.catch((error) =>
       Stream.fromEffect(f(error)).flatMap(() => Stream.fail(error)),
-    ) as any;
+    ) as Stream<A, S | S2>;
   }
 
   tapErrorCause<S2>(f: (cause: Cause<ErrorsOf<S>>) => Eff<unknown, S2>): Stream<A, S | S2> {
     return this.catchAllCause((cause) =>
       Stream.fromEffect(f(cause)).flatMap(() => Stream.fromEffect(failCause(cause))),
-    ) as any;
+    ) as Stream<A, S | S2>;
   }
 
   /** Observe every typed failure and defect while preserving the full Cause. */
@@ -2765,7 +2785,7 @@ export class Stream<A, S = never> {
     return this.tapErrorCause((cause) => {
       const errors = [...Cause.failures(cause), ...Cause.defects(cause)];
       return errors.reduce<Eff<void, S2>>(
-        (effect, error) => (effect as any).flatMap(() => (f(error) as any).map(() => undefined)),
+        (effect, error) => effect.flatMap(() => f(error).map(() => undefined)),
         succeed(undefined) as Eff<void, S2>,
       );
     });
@@ -2777,13 +2797,13 @@ export class Stream<A, S = never> {
   ): Stream<A, S | Throws<DefectInstances<Classes>>> {
     return this.catchAllCause((cause) =>
       Stream.fromEffect(failCause(trapDefects(cause, classes))),
-    ) as any;
+    ) as Stream<A, S | Throws<DefectInstances<Classes>>>;
   }
 
   either(): Stream<Either<ErrorsOf<S>, A>, Exclude<S, Throws<unknown>>> {
     return this.map<Either<ErrorsOf<S>, A>>((value) => ({ _tag: "Right", right: value })).catch(
       (error) => Stream.succeed({ _tag: "Left", left: error } as Either<ErrorsOf<S>, A>),
-    ) as any;
+    ) as Stream<Either<ErrorsOf<S>, A>, Exclude<S, Throws<unknown>>>;
   }
 
   attempt(): Stream<Either<ErrorsOf<S>, A>, Exclude<S, Throws<unknown>>> {
@@ -2793,7 +2813,7 @@ export class Stream<A, S = never> {
   exit(): Stream<Exit<ErrorsOf<S>, A>, Exclude<S, Throws<unknown>>> {
     return this.map<Exit<ErrorsOf<S>, A>>((value) => Exit.succeed(value)).catchAllCause((cause) =>
       Stream.succeed(Exit.failure(cause)),
-    ) as any;
+    ) as Stream<Exit<ErrorsOf<S>, A>, Exclude<S, Throws<unknown>>>;
   }
 
   attemptCause(): Stream<Exit<ErrorsOf<S>, A>, Exclude<S, Throws<unknown>>> {
@@ -2810,7 +2830,7 @@ export class Stream<A, S = never> {
   rethrow(): Stream<unknown, unknown> {
     const self = this as Stream<Either<unknown, unknown> | Exit<unknown, unknown>, S>;
     return new Stream(
-      (self.step as any).flatMap((s: Step<Either<unknown, unknown> | Exit<unknown, unknown>>) => {
+      self.step.flatMap((s: Step<Either<unknown, unknown> | Exit<unknown, unknown>>) => {
         if (s._tag === "Done") return succeed(DONE);
         const chunk = s.chunk;
         const length = chunk.length;
@@ -2830,7 +2850,13 @@ export class Stream<A, S = never> {
           values.length = i;
           return succeed(emit(Chunk.fromArray(values), new Stream(failed)));
         }
-        return succeed(emit(Chunk.fromArray(values), (s.next as any).rethrow()));
+        // Either or Exit items: the implementation handles both.
+        return succeed(
+          emit(
+            Chunk.fromArray(values),
+            (s.next as Stream<Exit<unknown, unknown>, unknown>).rethrow(),
+          ),
+        );
       }),
       self._finalizer,
     );
@@ -2866,10 +2892,10 @@ export class Stream<A, S = never> {
   retry(policy: RetryPolicy | RetryConfig): Stream<A, S> {
     const wrap = (s: Stream<A, S>): Stream<A, S> =>
       new Stream(
-        (withPullAttempts((attempt) => effRetry(attempt(s.step as any), policy as any)) as any).map(
+        withPullAttempts((attempt) => (effRetry as RetryWith)(attempt(s.step), policy)).map(
           (step: Step<A>) => {
             if (step._tag === "Done") return DONE;
-            return emit(step.chunk, wrap(step.next as any));
+            return emit(step.chunk, wrap(step.next as Stream<A, S>));
           },
         ),
         s._finalizer,
@@ -2877,9 +2903,9 @@ export class Stream<A, S = never> {
     return wrap(this);
   }
 
-  private mapContinuation(f: (next: Stream<A, any>) => Stream<A, any>): Stream<A, S> {
+  private mapContinuation(f: (next: Stream<A, unknown>) => Stream<A, unknown>): Stream<A, S> {
     return new Stream(
-      (this.step as any).map((s: Step<A>) => {
+      this.step.map((s: Step<A>) => {
         if (s._tag === "Done") return DONE;
         return emit(s.chunk, f(s.next));
       }),
@@ -2892,14 +2918,14 @@ export class Stream<A, S = never> {
   // `.run()` / `.runSync()` — e.g. `stream.map(f).toArray().run()`.
 
   fold<B>(zero: B, f: (acc: B, a: A) => B): Eff<B, S> {
-    function go(acc: B, stream: Stream<A, any>): Eff<B, any> {
-      return (stream.step as any).flatMap((s: Step<A>) => {
+    function go(acc: B, stream: Stream<A, unknown>): Eff<B, unknown> {
+      return stream.step.flatMap((s: Step<A>) => {
         if (s._tag === "Done") return succeed(acc);
         const next = s.chunk.reduce(acc, f);
         return go(next, s.next);
       });
     }
-    return this._finalize(go(zero, this) as any) as any;
+    return this._finalize(go(zero, this) as Eff<B, S>);
   }
 
   toArray(): Eff<A[], S> {
@@ -2912,23 +2938,23 @@ export class Stream<A, S = never> {
   }
 
   drain(): Eff<void, S> {
-    function go(stream: Stream<any, any>): Eff<void, any> {
-      return (stream.step as any).flatMap((s: Step<any>) => {
+    function go(stream: Stream<unknown, unknown>): Eff<void, unknown> {
+      return stream.step.flatMap((s: Step<unknown>) => {
         if (s._tag === "Done") return succeed(undefined);
         return go(s.next);
       });
     }
-    return this._finalize(go(this) as any) as any;
+    return this._finalize(go(this) as Eff<void, S>);
   }
 
   forEach<S2>(f: (a: A) => Eff<void, S2>): Eff<void, S | S2> {
-    function go(stream: Stream<A, any>): Eff<void, any> {
-      return (stream.step as any).flatMap((s: Step<A>) => {
+    function go(stream: Stream<A, unknown>): Eff<void, unknown> {
+      return stream.step.flatMap((s: Step<A>) => {
         if (s._tag === "Done") return succeed(undefined);
         return runChunkForEach(s.chunk, f, () => go(s.next));
       });
     }
-    return this._finalize(go(this) as any) as any;
+    return this._finalize(go(this) as Eff<void, S | S2>);
   }
 
   /**
@@ -2936,26 +2962,26 @@ export class Stream<A, S = never> {
    * reading the stream and run its cleanup (finalizers).
    */
   forEachWhile<S2>(f: (a: A) => Eff<boolean, S2>): Eff<void, S | S2> {
-    function go(stream: Stream<A, any>): Eff<void, any> {
-      return (stream.step as any).flatMap((s: Step<A>) => {
+    function go(stream: Stream<A, unknown>): Eff<void, unknown> {
+      return stream.step.flatMap((s: Step<A>) => {
         if (s._tag === "Done") return succeed(undefined);
         return runChunkWhile(s.chunk, f, () => go(s.next));
       });
     }
-    return this._finalize(go(this) as any) as any;
+    return this._finalize(go(this) as Eff<void, S | S2>);
   }
 
   head(): Eff<A | undefined, S> {
     // Chunk-level operators (filter, mapChunks, …) can emit empty chunks, so
     // keep pulling until a chunk has an element or the stream ends.
-    function go(stream: Stream<A, any>): Eff<A | undefined, any> {
-      return (stream.step as any).flatMap((s: Step<A>) => {
+    function go(stream: Stream<A, unknown>): Eff<A | undefined, unknown> {
+      return stream.step.flatMap((s: Step<A>) => {
         if (s._tag === "Done") return succeed(undefined);
         if (s.chunk.isEmpty) return go(s.next);
         return succeed(s.chunk.head());
       });
     }
-    return this._finalize(go(this) as any) as any;
+    return this._finalize(go(this) as Eff<A | undefined, S>);
   }
 
   /** Consume through the first matching element and return it. */
@@ -2969,13 +2995,13 @@ export class Stream<A, S = never> {
   }
 
   last(): Eff<A | undefined, S> {
-    function go(lastSeen: A | undefined, stream: Stream<A, any>): Eff<A | undefined, any> {
-      return (stream.step as any).flatMap((s: Step<A>) => {
+    function go(lastSeen: A | undefined, stream: Stream<A, unknown>): Eff<A | undefined, unknown> {
+      return stream.step.flatMap((s: Step<A>) => {
         if (s._tag === "Done") return succeed(lastSeen);
         return go(s.chunk.isEmpty ? lastSeen : s.chunk.last(), s.next);
       });
     }
-    return this._finalize(go(undefined, this) as any) as any;
+    return this._finalize(go(undefined, this) as Eff<A | undefined, S>);
   }
 
   count(): Eff<number, S> {
@@ -3001,9 +3027,12 @@ export class Stream<A, S = never> {
 // For each stream made by concat, the list of parts it plays in order. When
 // you concat that stream again, we add to this list instead of wrapping it
 // in one more layer (more layers = every chunk passes through more code).
-const CONCAT_SEGMENTS = new WeakMap<Stream<any, any>, readonly Stream<any, any>[]>();
+const CONCAT_SEGMENTS = new WeakMap<
+  Stream<unknown, unknown>,
+  readonly Stream<unknown, unknown>[]
+>();
 
-function concatSegments<A>(segments: readonly Stream<A, any>[]): Stream<A, unknown> {
+function concatSegments<A>(segments: readonly Stream<A, unknown>[]): Stream<A, unknown> {
   const stream = Stream.suspend(() => {
     // Cleanup for the part we are reading right now. We clear it before
     // running it, so it can never run twice.
@@ -3013,9 +3042,9 @@ function concatSegments<A>(segments: readonly Stream<A, any>[]): Stream<A, unkno
       active = null;
       return finalizer === null ? succeed(undefined) : uninterruptible(finalizer);
     };
-    const drain = (current: Stream<A, any>, index: number): Stream<A, unknown> =>
+    const drain = (current: Stream<A, unknown>, index: number): Stream<A, unknown> =>
       new Stream(
-        (current.step as any).flatMap((s: Step<A>) =>
+        current.step.flatMap((s: Step<A>) =>
           s._tag === "Done"
             ? release().flatMap(() => segment(index + 1).step)
             : succeed(emit(s.chunk, drain(s.next, index))),
@@ -3068,29 +3097,29 @@ export type Pipe<I, O, S2 = never> = (<S>(input: Stream<I, S>) => Stream<O, S | 
 export const Pipe = {
   map:
     <I, O>(f: (value: I) => O): Pipe<I, O> =>
-    (input: any) =>
+    <S>(input: Stream<I, S>) =>
       input.map(f),
 
   filter:
     <I>(predicate: (value: I) => boolean): Pipe<I, I> =>
-    (input: any) =>
+    <S>(input: Stream<I, S>) =>
       input.filter(predicate),
 
   /** Drops elements for which `f` returns undefined. */
   filterMap:
     <I, O>(f: (value: I) => O | undefined): Pipe<I, O> =>
-    (input: any) =>
+    <S>(input: Stream<I, S>) =>
       input.filterMap(f),
 
   scan:
     <I, O>(zero: O, f: (acc: O, value: I) => O): Pipe<I, O> =>
-    (input: any) =>
+    <S>(input: Stream<I, S>) =>
       input.scan(zero, f),
 
   /** Effectful stage — the pipe's own effects surface as the Pipe's `S2`. */
   evalMap:
     <I, O, S2 = never>(f: (value: I) => Eff<O, S2>): Pipe<I, O, S2> =>
-    (input: any) =>
+    <S>(input: Stream<I, S>) =>
       input.evalMap(f),
 } as const;
 
@@ -3168,7 +3197,7 @@ function trapDefects<E>(cause: Cause<E>, classes: readonly DefectClass[]): Cause
 // code, and `f` might change that array while we loop.
 function evalMapChunk<A, B, S>(chunk: Chunk<A>, f: (a: A) => Eff<B, S>): Eff<Chunk<B>, S> {
   const length = chunk.length;
-  if (length === 0) return succeed(Chunk.empty()) as any;
+  if (length === 0) return succeed(Chunk.empty<B>());
   // We reuse the copy for the results: we always read item i before we
   // write result i, so nothing gets overwritten too early.
   const items = chunk.toArray() as unknown[];
@@ -3182,9 +3211,9 @@ function evalMapChunk<A, B, S>(chunk: Chunk<A>, f: (a: A) => Eff<B, S>): Eff<Chu
       return new Suspend(Op.FlatMap, eff, (b: B) => {
         items[i] = b;
         return loop(i + 1);
-      }) as any;
+      }) as Eff<Chunk<B>, S>;
     }
-    return succeed(Chunk.fromArray(items as B[])) as any;
+    return succeed(Chunk.fromArray(items as B[]));
   };
   return loop(0);
 }
@@ -3192,15 +3221,15 @@ function evalMapChunk<A, B, S>(chunk: Chunk<A>, f: (a: A) => Eff<B, S>): Eff<Chu
 function runChunkForEach<A, S>(
   chunk: Chunk<A>,
   f: (a: A) => Eff<void, S>,
-  then: () => Eff<void, any>,
-): Eff<void, any> {
+  then: () => Eff<void, unknown>,
+): Eff<void, unknown> {
   const length = chunk.length;
   const items = chunk.toArray();
-  const loop = (from: number): Eff<void, any> => {
+  const loop = (from: number): Eff<void, unknown> => {
     for (let i = from; i < length; i++) {
       const eff = f(items[i]!) as unknown as Suspend;
       if (eff.op === Op.Succeed) continue;
-      return new Suspend(Op.FlatMap, eff, () => loop(i + 1)) as any;
+      return new Suspend(Op.FlatMap, eff, () => loop(i + 1)) as Eff<void, unknown>;
     }
     return then();
   };
@@ -3210,20 +3239,20 @@ function runChunkForEach<A, S>(
 function runChunkWhile<A, S>(
   chunk: Chunk<A>,
   f: (a: A) => Eff<boolean, S>,
-  then: () => Eff<void, any>,
-): Eff<void, any> {
+  then: () => Eff<void, unknown>,
+): Eff<void, unknown> {
   const length = chunk.length;
   const items = chunk.toArray();
-  const loop = (from: number): Eff<void, any> => {
+  const loop = (from: number): Eff<void, unknown> => {
     for (let i = from; i < length; i++) {
       const eff = f(items[i]!) as unknown as Suspend;
       if (eff.op === Op.Succeed) {
-        if (eff.a === false) return succeed(undefined) as any;
+        if (eff.a === false) return succeed(undefined);
         continue;
       }
       return new Suspend(Op.FlatMap, eff, (keepGoing: boolean) =>
         keepGoing === false ? succeed(undefined) : loop(i + 1),
-      ) as any;
+      ) as Eff<void, unknown>;
     }
     return then();
   };

@@ -13,6 +13,7 @@ import {
   Clock,
   TestClock,
 } from "../src";
+import { runUnchecked } from "./run-unchecked";
 
 // Helper: yield control so the fiber can advance to its next suspension point.
 const tick = () => new Promise((r) => setTimeout(r, 0));
@@ -62,7 +63,7 @@ describe("TestClock — sleep", () => {
     );
 
     // run() returns a Promise; the fiber is alive but suspended on the test clock.
-    const promise = run(program as any);
+    const promise = run(program);
     await tick();
     expect(landed).toBe(false);
     expect(c.pendingCount).toBe(1);
@@ -112,7 +113,7 @@ describe("TestClock — sleep", () => {
       c,
     );
 
-    await run(program as any);
+    await run(program);
     await tick();
     expect(c.pendingCount).toBe(3);
     expect(c.pendingDeadlines()).toEqual([100, 200, 300]);
@@ -136,7 +137,7 @@ describe("TestClock — timeouts", () => {
       c,
     );
 
-    const promise = run(program as any);
+    const promise = runUnchecked(program);
     await tick();
     // Two sleeps registered: the inner work (1000) and the timeout race (50)
     expect(c.pendingCount).toBe(2);
@@ -157,7 +158,7 @@ describe("TestClock — timeouts", () => {
       c,
     );
 
-    const promise = run(program as any);
+    const promise = runUnchecked(program);
     await tick();
     c.advance(10); // crosses inner deadline first
     expect(await promise).toBe("done");
@@ -169,7 +170,7 @@ describe("TestClock — delay", () => {
     const c = new TestClock();
     const program = provide(delay(succeed(42), 200), Clock, c);
 
-    const promise = run(program as any);
+    const promise = run(program);
     await tick();
     expect(c.pendingCount).toBe(1);
 
@@ -192,13 +193,13 @@ describe("TestClock — retry", () => {
     const c = new TestClock();
     let attempts = 0;
 
-    const flaky: any = sync(() => ++attempts).flatMap((n: number) =>
+    const flaky = sync(() => ++attempts).flatMap((n: number) =>
       n < 3 ? fail("not-yet") : succeed("ok"),
     );
 
     const program = provide(retry(flaky, { times: 5, delay: 1000, backoff: "fixed" }), Clock, c);
 
-    const promise = run(program as any);
+    const promise = runUnchecked(program);
     await drain();
     expect(attempts).toBe(1);
 
@@ -214,7 +215,7 @@ describe("TestClock — retry", () => {
   test("retry exhausts all attempts and surfaces the original failure", async () => {
     const c = new TestClock();
     let attempts = 0;
-    const alwaysFails: any = sync(() => ++attempts).flatMap(() => fail("nope"));
+    const alwaysFails = sync(() => ++attempts).flatMap(() => fail("nope"));
 
     const program = provide(
       retry(alwaysFails, { times: 2, delay: 100, backoff: "fixed" }),
@@ -222,7 +223,7 @@ describe("TestClock — retry", () => {
       c,
     );
 
-    const promise = run(program as any);
+    const promise = runUnchecked(program);
     await drain();
     c.advance(100);
     await drain();

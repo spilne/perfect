@@ -16,7 +16,10 @@ export const Clock: ServiceTag<Clock, "Clock"> = service<Clock>()("Clock");
  * The Clock in use: a provided one (such as a TestClock) or the real one.
  * Unlike `Clock.get` it needs nothing, since there is always a clock.
  */
-export const currentClock: Eff<Clock, never> = new Suspend(Op.GetCtx, Clock.key, null) as any;
+export const currentClock: Eff<Clock, never> = new Suspend(Op.GetCtx, Clock.key, null) as Eff<
+  Clock,
+  never
+>;
 
 /**
  * Current time in ms read from the context's Clock service — the effectful
@@ -25,9 +28,9 @@ export const currentClock: Eff<Clock, never> = new Suspend(Op.GetCtx, Clock.key,
  */
 export const clockNow: Eff<number, never> = new Suspend(
   Op.FlatMap,
-  new Suspend(Op.GetCtx, Clock.key, null) as any,
+  new Suspend(Op.GetCtx, Clock.key, null),
   (c: Clock) => new Suspend(Op.Sync, () => c.now(), null),
-) as any;
+) as Eff<number, never>;
 
 // ── Real clock: wall time via setTimeout / Date.now ────────────────
 
@@ -35,12 +38,12 @@ export class RealClock implements Clock {
   sleep(ms: number): Eff<void, never> {
     return new Suspend(
       Op.Async,
-      (resume: (v: any) => void) => {
+      (resume: (v: Suspend) => void) => {
         const id = setTimeout(() => resume(new Suspend(Op.Succeed, undefined, null)), ms);
         return () => clearTimeout(id);
       },
       null,
-    ) as any;
+    ) as Eff<void, never>;
   }
 
   now(): number {
@@ -78,7 +81,7 @@ export class TestClock implements Clock {
   sleep(ms: number): Eff<void, never> {
     return new Suspend(
       Op.Async,
-      (resume: (v: any) => void) => {
+      (resume: (v: Suspend) => void) => {
         if (ms <= 0) {
           // match real-setTimeout semantics (still yields, but immediately ready)
           const entry: PendingSleep = {
@@ -102,7 +105,7 @@ export class TestClock implements Clock {
         };
       },
       null,
-    ) as any;
+    ) as Eff<void, never>;
   }
 
   /**

@@ -1,5 +1,6 @@
 import { describe, test, expect } from "bun:test";
 import { all, succeed, fail, sleep, run, runSync, type Eff, type Throws } from "../src";
+import { runUnchecked } from "./run-unchecked";
 
 describe("all() — object form", () => {
   test("returns a record keyed by input keys", () => {
@@ -43,7 +44,7 @@ describe("all() — object form", () => {
       b: fail("nope") as Eff<never, Throws<string>>,
       c: succeed(3),
     });
-    await expect(run(program as any)).rejects.toBe("nope");
+    await expect(runUnchecked(program)).rejects.toBe("nope");
   });
 
   test("array form still works", () => {

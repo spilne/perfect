@@ -95,12 +95,12 @@ export function isTransactionalPartitionedStateBackend<V = unknown, Transaction 
 ): backend is TransactionalPartitionedStateBackend<V, Transaction> {
   return (
     "transactionDomain" in backend &&
-    typeof (backend as any).transactionDomain === "object" &&
-    (backend as any).transactionDomain !== null &&
+    typeof backend.transactionDomain === "object" &&
+    backend.transactionDomain !== null &&
     "transaction" in backend &&
-    typeof (backend as any).transaction === "function" &&
+    typeof backend.transaction === "function" &&
     "commitInTransaction" in backend &&
-    typeof (backend as any).commitInTransaction === "function"
+    typeof backend.commitInTransaction === "function"
   );
 }
 

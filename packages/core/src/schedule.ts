@@ -7,22 +7,31 @@ import { Cron, type CronOptions } from "./cron.js";
 // A Schedule<In, Out> decides whether to continue and what delay to use.
 // Each step receives the input and returns either a delay + output, or done.
 //
-// `state`/`initial` are `any` by design: the state type is existential —
-// each schedule picks its own (number, [number, number], nested records) and
-// it never escapes the step/initial pair. `unknown` here would reject every
-// implementation whose step annotates its own state type.
+// The state type is existential: each schedule picks its own (number,
+// [number, number], nested records) and it never escapes the step/initial
+// pair, so outside a schedule it is `unknown`. `step` is declared through a
+// method so its `state` parameter is checked bivariantly: a step that
+// annotates its own state type (`state: number`) still fits.
+type ScheduleStep<In, Out> = {
+  step(input: In, state: unknown, now?: number): ScheduleDecision<Out>;
+}["step"];
+
 export interface Schedule<In = unknown, Out = unknown> {
   /**
    * Decide what happens next. `now` is the current time (ms) by the Clock in
    * use; schedules that depend on the time of day, like `cron`, use it.
    */
-  readonly step: (input: In, state: any, now?: number) => ScheduleDecision<Out>;
-  readonly initial: any;
+  readonly step: ScheduleStep<In, Out>;
+  readonly initial: unknown;
 }
 
 export type ScheduleDecision<Out> =
-  // `state: any`: same existential-state rationale as Schedule.
-  | { readonly _tag: "Continue"; readonly delay: number; readonly output: Out; readonly state: any }
+  | {
+      readonly _tag: "Continue";
+      readonly delay: number;
+      readonly output: Out;
+      readonly state: unknown;
+    }
   | { readonly _tag: "Done"; readonly output: Out };
 
 // Counting schedule — forever-running, state counts attempts from 0, delay
@@ -102,7 +111,7 @@ export const Schedule = {
   ): Schedule<In, [Out1, Out2]> {
     return {
       initial: [s1.initial, s2.initial],
-      step: (input, [state1, state2]: [any, any], now) => {
+      step: (input, [state1, state2]: [unknown, unknown], now) => {
         const d1 = s1.step(input, state1, now);
         const d2 = s2.step(input, state2, now);
         if (d1._tag === "Done" || d2._tag === "Done") {
@@ -124,7 +133,7 @@ export const Schedule = {
   ): Schedule<In, [Out1, Out2]> {
     return {
       initial: [s1.initial, s2.initial],
-      step: (input, [state1, state2]: [any, any], now) => {
+      step: (input, [state1, state2]: [unknown, unknown], now) => {
         const d1 = s1.step(input, state1, now);
         const d2 = s2.step(input, state2, now);
         if (d1._tag === "Done" && d2._tag === "Done") {
@@ -242,7 +251,7 @@ export const Schedule = {
   cumulativeDelay<In, Out>(schedule: Schedule<In, Out>): Schedule<In, number> {
     return {
       initial: { inner: schedule.initial, total: 0 },
-      step: (input, state: { inner: any; total: number }, now) => {
+      step: (input, state: { inner: unknown; total: number }, now) => {
         const decision = schedule.step(input, state.inner, now);
         if (decision._tag === "Done") return { _tag: "Done", output: state.total };
         const total = state.total + decision.delay;
@@ -285,11 +294,11 @@ export function retryWith<A, S, In, Out = unknown>(
 ): Eff<A, S> {
   const { toInput, onRetry } = opts;
   const shouldRetry = opts.while;
-  function loop(state: any, attempts: number): Eff<A, S> {
-    return new Suspend(Op.CatchAll, eff, (cause: Cause) => {
+  function loop(state: unknown, attempts: number): Eff<A, S> {
+    return new Suspend(Op.CatchAll, eff, (cause: Cause): Eff<A, S> => {
       const error = Cause.firstFail(cause)?.value ?? Cause.firstDie(cause)?.value ?? cause;
       if (shouldRetry !== undefined && !shouldRetry(error)) {
-        return new Suspend(Op.Fail, cause, null);
+        return new Suspend(Op.Fail, cause, null) as Eff<never, S>;
       }
       const input = toInput ? toInput(cause) : (error as In);
       return currentClock.flatMap((clock) => {
@@ -303,14 +312,16 @@ export function retryWith<A, S, In, Out = unknown>(
               output: decision.output,
               givingUp: true,
             };
-            return (onRetry(details) as any).flatMap(() => new Suspend(Op.Fail, cause, null));
+            return (onRetry(details) as Eff<void, never>).flatMap(
+              () => new Suspend(Op.Fail, cause, null) as Eff<never, S>,
+            );
           }
-          return new Suspend(Op.Fail, cause, null);
+          return new Suspend(Op.Fail, cause, null) as Eff<never, S>;
         }
         const next = () => {
           const wait: Eff<void, never> =
-            decision.delay > 0 ? (sleep(decision.delay) as any) : (succeed(undefined) as any);
-          return (wait as any).flatMap(() => loop(decision.state, attempts + 1));
+            decision.delay > 0 ? sleep(decision.delay) : succeed(undefined);
+          return wait.flatMap(() => loop(decision.state, attempts + 1));
         };
         if (onRetry) {
           const details: RetryDetails<In, Out> = {
@@ -320,27 +331,27 @@ export function retryWith<A, S, In, Out = unknown>(
             output: decision.output,
             givingUp: false,
           };
-          return (onRetry(details) as any).flatMap(next);
+          return (onRetry(details) as Eff<void, never>).flatMap(next);
         }
         return next();
       });
-    }) as any;
+    }) as Eff<A, S>;
   }
   return loop(schedule.initial, 0);
 }
 
 export function repeat<A, S>(eff: Eff<A, S>, schedule: Schedule<A, unknown>): Eff<A, S> {
-  function loop(state: any): Eff<A, S> {
-    return (eff as any).flatMap((value: A) =>
+  function loop(state: unknown): Eff<A, S> {
+    return eff.flatMap((value: A) =>
       currentClock.flatMap((clock) => {
         const decision = schedule.step(value, state, clock.now());
         if (decision._tag === "Done") return succeed(value);
         if (decision.delay > 0) {
-          return (sleep(decision.delay) as any).flatMap(() => loop(decision.state));
+          return sleep(decision.delay).flatMap(() => loop(decision.state));
         }
         return suspend(() => loop(decision.state));
       }),
-    ) as any;
+    );
   }
   return loop(schedule.initial);
 }
