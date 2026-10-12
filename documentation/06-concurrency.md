@@ -425,6 +425,98 @@ Available fiber diagnostics:
 | `fiber.childrenSnapshot()` | copy of currently owned child fibers |
 | `addFiberSupervisor(hooks)` | observe fiber start/fork/interrupt/end events |
 
+## Actors
+
+An actor owns its state on a fiber of its own, and changes it only by
+handling messages, one at a time. Many fibers can send to it at once, and
+the state needs no locks. `tell` drops a message in the mailbox; `ask`
+sends one carrying a `reply` and waits for the answer.
+
+<!-- @embed packages/core/examples/07-concurrency.ts#actor -->
+
+```ts
+import { succeed, all, eff, fail, Actor, type Eff, type Reply, type Throws } from "@spilne/perfect-core";
+
+// An account as an actor: its balance belongs to one fiber and changes only
+// through messages, handled one at a time, so it needs no locks.
+type AccountMessage =
+  | { readonly type: "deposit"; readonly amount: number }
+  | { readonly type: "withdraw"; readonly amount: number; readonly reply: Reply<number> }
+  | { readonly type: "balance"; readonly reply: Reply<number> };
+
+const account = {
+  initial: 0,
+  receive: (balance: number, message: AccountMessage): Eff<number, Throws<string>> => {
+    switch (message.type) {
+      case "deposit":
+        return succeed(balance + message.amount);
+      case "withdraw":
+        // A failure leaves the balance as it was and fails this ask.
+        return message.amount > balance
+          ? fail("insufficient funds")
+          : message.reply(balance - message.amount).map(() => balance - message.amount);
+      case "balance":
+        return message.reply(balance).map(() => balance);
+    }
+  },
+};
+
+const outcome = await eff(function* () {
+  const acme = yield* Actor.make(account);
+  // A hundred deposits at the same time: none of them is lost.
+  yield* all(Array.from({ length: 100 }, () => acme.tell({ type: "deposit", amount: 1 })));
+  const left = yield* acme.ask<number>((reply) => ({ type: "withdraw", amount: 30, reply }));
+  const refused = yield* acme
+    .ask<number>((reply) => ({ type: "withdraw", amount: 500, reply }))
+    .either();
+  return { left, refused: refused._tag };
+})
+  .orDie()
+  .run();
+console.log(outcome); // → { left: 70, refused: "Left" }
+```
+
+<!-- @end -->
+
+- **Failures:** when handling a message fails with a typed error, the state
+  stays as it was, an `ask` for that message fails with the error, and the
+  actor goes on. A defect (a bug) stops the actor; its `ask`, the messages
+  still waiting and later ones fail with `ActorStopped`.
+- **Lifetime:** an actor stops when the scope that made it ends (the end of
+  the program, unless you end it sooner), or with `actor.stop`.
+- **Mailbox:** unbounded unless `mailboxSize`; with it, `tell` waits while
+  the mailbox is full.
+
+`Entities` runs one actor per key: made on its first message, stopped after
+`idleMs` without messages (its state goes with it). Each key's messages are
+handled in order, and different keys at the same time.
+
+<!-- @embed packages/core/examples/07-concurrency.ts#entities -->
+
+```ts
+import { eff, Entities, type Reply } from "@spilne/perfect-core";
+
+// One actor per key, made on its first message: each account's messages are
+// handled in order, different accounts at the same time.
+const balances = await eff(function* () {
+  const accounts = yield* Entities.make({ behavior: () => account, idleMs: 60_000 });
+  yield* accounts.tell("ann", { type: "deposit", amount: 50 });
+  yield* accounts.tell("bob", { type: "deposit", amount: 20 });
+  return {
+    ann: yield* accounts.ask("ann", (reply: Reply<number>) => ({ type: "balance", reply })),
+    bob: yield* accounts.ask("bob", (reply: Reply<number>) => ({ type: "balance", reply })),
+  };
+})
+  .orDie()
+  .run();
+console.log(balances); // → { ann: 50, bob: 20 }
+```
+
+<!-- @end -->
+
+An entity is made when its first message comes, so its behavior can't
+need services; provide them inside `receive`.
+
 ## API summary
 
 | API / concept | Behavior |

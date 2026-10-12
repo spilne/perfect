@@ -165,6 +165,16 @@ export type { FiberSnapshot, FiberStatus, FiberSupervisor } from "./fiber.js";
 export { Ref } from "./ref.js";
 export { Deferred } from "./deferred.js";
 export { Queue, QueueClosed, QueueShutdown } from "./queue.js";
+export {
+  Actor,
+  ActorStopped,
+  Entities,
+  type ActorOptions,
+  type ActorRef,
+  type Behavior,
+  type EntitiesOptions,
+  type Reply,
+} from "./actor.js";
 export { Semaphore } from "./semaphore.js";
 export { CircuitBreaker } from "./circuit-breaker.js";
 export type { CircuitState, CircuitOpen, CircuitBreakerOptions } from "./circuit-breaker.js";
