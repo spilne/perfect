@@ -29,6 +29,19 @@ export {
 } from "./gossip.js";
 export { Discovery } from "./discovery.js";
 export {
+  Cluster,
+  ClusterBuilder,
+  ServiceUnavailable,
+  ServiceTimeout,
+  type ClusterOptions,
+  type ClusterService,
+  type ClusterMetadata,
+  type ClusterMember,
+  type ServiceQuery,
+  type ServicePeer,
+  type ServiceCallOptions,
+} from "./cluster.js";
+export {
   Recorder,
   Replay,
   ReplayMismatch,

@@ -43,9 +43,12 @@ const program = scoped(
 - **Channels and reconnecting:** `Multiplexer` runs many channels over one
   connection, each with its own flow control; `Resilient.connect` reopens a
   broken connection with retries and an optional circuit breaker.
-- **Clusters:** `Gossip.join` keeps a SWIM membership list, `HashRing`
-  assigns keys to members, and `Discovery` (DNS, SRV, or mDNS from
-  `@spilne/perfect-net/mdns` with `multicast-dns`) finds the first members.
+- **Clusters:** `Cluster.builder(...).service(...).join()` advertises service
+  endpoints, protocol versions and supported command names. `select` finds a
+  live peer; `call` adds a deadline and caller-approved retries. `drain` removes
+  this node from selection before shutdown. Underneath, `Gossip.join` keeps
+  SWIM membership, `HashRing` gives keyed affinity, and `Discovery` (DNS, SRV,
+  or mDNS from `@spilne/perfect-net/mdns`) finds seed members.
 - **Recording:** `Recorder.wrap` writes down a conversation and `Replay.of`
   plays it back for tests, with no server.
 - **Testing:** depend on the `Transport` service and provide
@@ -54,3 +57,28 @@ const program = scoped(
   `TestRandom`).
 
 See the [networking guide](../../documentation/20-networking.md).
+
+## Service cluster
+
+```ts
+const app = eff(function* () {
+  const cluster = yield* Cluster.builder({ id, address: gossipAddress, seeds })
+    .service({ name: "orders", version: "v1", address: ordersAddress, commands: ["get"] })
+    .join();
+  const peer = yield* cluster.select({ name: "orders", command: "get", version: "v1" });
+  return peer.service.address; // Pass this to your HTTP, TCP, or RPC client.
+});
+```
+
+Provide `Transport` with `Tcp` in production, and run the program inside
+`scoped(...)`. The two-process [example](./examples/06-service-cluster.ts)
+shows a command listener and an API process using the same cluster API. Give
+each running instance a unique `id`; its service `name` stays stable across
+restarts. A command list is routing metadata, not a schema or authorization
+check: the receiving service must still validate and handle each command.
+
+`select` and `call` exclude suspected and draining members. `call` never retries
+unless `retryOn` approves the failure; use retries only for commands safe to
+repeat. A hash-ring `key` provides affinity, not exclusive ownership. Use
+fenced leases (for example, `PgPartitionedStateBackend`) for stateful work that
+must have one owner during a network partition.
