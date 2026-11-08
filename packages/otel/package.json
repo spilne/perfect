@@ -42,7 +42,7 @@
     "build": "bun ../../scripts/build-package.ts ."
   },
   "dependencies": {
-    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/api": "^1.10.0",
     "@spilne/perfect-core": "^0.6.0"
   },
   "devDependencies": {}
