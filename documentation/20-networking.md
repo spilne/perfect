@@ -278,6 +278,34 @@ messages safe to repeat.
 
 ## Clusters
 
+### Services and commands
+
+`Cluster.builder` adds a small service catalog over gossip membership. Each
+node advertises service endpoints, protocol versions, and command names. A
+client selects only alive, non-draining members that advertise the requested
+command. The command list helps routing; the receiving service still validates
+payloads and permissions.
+
+```ts
+const cluster = yield* Cluster.builder({ id, address: gossipAddress, seeds })
+  .service({ name: "orders", version: "v1", address: ordersAddress, commands: ["get"] })
+  .join();
+const peer = yield* cluster.select({ name: "orders", version: "v1", command: "get" });
+```
+
+`cluster.call(query, invoke, { timeoutMs, maxAttempts?, retryOn? })` runs a
+client effect with a deadline. It retries only when `retryOn` approves a typed
+failure, so callers can keep non-idempotent commands single-attempt. Call
+`cluster.drain` before stopping a service to withdraw its advertisement; the
+surrounding scope then leaves the gossip group. Use a unique node `id` for
+each process instance, even when the service name stays the same after a
+restart. [A two-process example](../packages/net/examples/06-service-cluster.ts)
+shows the full TCP path.
+
+The hash-ring `key` gives a consistent preferred peer, but gossip membership
+can temporarily differ during a network partition. For exclusive stateful
+ownership, use a fenced lease-backed backend instead of the service catalog.
+
 ### Consistent hashing
 
 A `HashRing` decides which node owns a key. When a node joins or leaves,
