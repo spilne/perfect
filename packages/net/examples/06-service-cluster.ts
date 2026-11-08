@@ -24,7 +24,7 @@ const role = process.argv[2];
 const host = process.env.CLUSTER_HOST ?? "127.0.0.1";
 const seed = process.env.CLUSTER_SEED ?? "127.0.0.1";
 
-if (role === "orders") {
+if (import.meta.main && role === "orders") {
   await scoped(
     eff(function* () {
       yield* Tcp.listen(
@@ -61,7 +61,7 @@ if (role === "orders") {
   )
     .orDie()
     .run();
-} else if (role === "api") {
+} else if (import.meta.main && role === "api") {
   const result = await scoped(
     provide(
       eff(function* () {
@@ -98,6 +98,6 @@ if (role === "orders") {
     .orDie()
     .run();
   console.log(result);
-} else {
+} else if (import.meta.main) {
   throw new Error("Pass orders or api");
 }
