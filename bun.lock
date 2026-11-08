@@ -29,7 +29,7 @@
     },
     "packages/core": {
       "name": "@spilne/perfect-core",
-      "version": "0.6.0",
+      "version": "0.6.1",
       "devDependencies": {
         "effect": "^4.1.0",
         "mitata": "^1.0.34",
@@ -37,9 +37,9 @@
     },
     "packages/http": {
       "name": "@spilne/perfect-http",
-      "version": "0.6.0",
+      "version": "0.6.1",
       "dependencies": {
-        "@spilne/perfect-core": "^0.6.0",
+        "@spilne/perfect-core": "^0.6.1",
       },
       "devDependencies": {
         "axios": "^1.21.0",
@@ -52,11 +52,11 @@
     },
     "packages/http-otel": {
       "name": "@spilne/perfect-http-otel",
-      "version": "0.6.0",
+      "version": "0.6.1",
       "dependencies": {
         "@opentelemetry/api": "^1.10.0",
-        "@spilne/perfect-core": "^0.6.0",
-        "@spilne/perfect-http": "^0.6.0",
+        "@spilne/perfect-core": "^0.6.1",
+        "@spilne/perfect-http": "^0.6.1",
       },
     },
     "packages/integration": {
@@ -79,16 +79,16 @@
     },
     "packages/kafka": {
       "name": "@spilne/perfect-kafka",
-      "version": "0.6.0",
+      "version": "0.6.1",
       "dependencies": {
-        "@spilne/perfect-core": "^0.6.0",
+        "@spilne/perfect-core": "^0.6.1",
       },
     },
     "packages/kafka-kafkajs": {
       "name": "@spilne/perfect-kafka-kafkajs",
-      "version": "0.6.0",
+      "version": "0.6.1",
       "dependencies": {
-        "@spilne/perfect-kafka": "^0.6.0",
+        "@spilne/perfect-kafka": "^0.6.1",
       },
       "devDependencies": {
         "kafkajs": "^2.2.4",
@@ -99,9 +99,9 @@
     },
     "packages/kafka-platformatic": {
       "name": "@spilne/perfect-kafka-platformatic",
-      "version": "0.6.0",
+      "version": "0.6.1",
       "dependencies": {
-        "@spilne/perfect-kafka": "^0.6.0",
+        "@spilne/perfect-kafka": "^0.6.1",
       },
       "devDependencies": {
         "@platformatic/kafka": "^2.14.0",
@@ -112,9 +112,9 @@
     },
     "packages/net": {
       "name": "@spilne/perfect-net",
-      "version": "0.6.0",
+      "version": "0.6.1",
       "dependencies": {
-        "@spilne/perfect-core": "^0.6.0",
+        "@spilne/perfect-core": "^0.6.1",
       },
       "devDependencies": {
         "@bufbuild/protobuf": "^2.2.0",
@@ -137,17 +137,17 @@
     },
     "packages/otel": {
       "name": "@spilne/perfect-otel",
-      "version": "0.6.0",
+      "version": "0.6.1",
       "dependencies": {
         "@opentelemetry/api": "^1.10.0",
-        "@spilne/perfect-core": "^0.6.0",
+        "@spilne/perfect-core": "^0.6.1",
       },
     },
     "packages/postgres": {
       "name": "@spilne/perfect-postgres",
-      "version": "0.6.0",
+      "version": "0.6.1",
       "dependencies": {
-        "@spilne/perfect-core": "^0.6.0",
+        "@spilne/perfect-core": "^0.6.1",
         "drizzle-orm": "0.45.4",
         "postgres": "^3.4.5",
       },
@@ -157,9 +157,9 @@
     },
     "packages/redis": {
       "name": "@spilne/perfect-redis",
-      "version": "0.6.0",
+      "version": "0.6.1",
       "dependencies": {
-        "@spilne/perfect-core": "^0.6.0",
+        "@spilne/perfect-core": "^0.6.1",
       },
       "devDependencies": {
         "ioredis": "^5.7.0",
@@ -168,27 +168,27 @@
     },
     "packages/swc-plugin": {
       "name": "@spilne/perfect-swc-plugin",
-      "version": "0.6.0",
+      "version": "0.6.1",
     },
     "packages/topology": {
       "name": "@spilne/perfect-topology",
-      "version": "0.6.0",
+      "version": "0.6.1",
       "dependencies": {
-        "@spilne/perfect-core": "^0.6.0",
+        "@spilne/perfect-core": "^0.6.1",
       },
     },
     "packages/transform": {
       "name": "@spilne/perfect-transform",
-      "version": "0.6.0",
+      "version": "0.6.1",
       "devDependencies": {
         "@swc/core": "1.16.20",
       },
     },
     "templates/stackblitz": {
       "name": "perfect-stackblitz-playground",
-      "version": "0.6.0",
+      "version": "0.6.1",
       "dependencies": {
-        "@spilne/perfect-core": "^0.6.0",
+        "@spilne/perfect-core": "^0.6.1",
       },
       "devDependencies": {
         "typescript": "^7.0.2",
@@ -974,8 +974,6 @@
     "@typescript/typescript-win32-x64": ["@typescript/typescript-win32-x64@7.0.2", "", { "os": "win32", "cpu": "x64" }, "sha512-0BQ3HkAHHlKLSp1qRvf3SUhGpGsDuhB/jgFw75guyqbxJqEaS0Cw/VFO8i2nHglJUzQCRtMMR/IBAKE3ETMC4g=="],
 
     "@ungap/structured-clone": ["@ungap/structured-clone@1.3.1", "", {}, "sha512-mUFwbeTqrVgDQxFveS+df2yfap6iuP20NAKAsBt5jDEoOTDew+zwLAOilHCeQJOVSvmgCX4ogqIrA0mnyr08yQ=="],
-
-    "@vitejs/plugin-vue": ["@vitejs/plugin-vue@5.2.4", "", { "peerDependencies": { "vite": "^5.0.0 || ^6.0.0", "vue": "^3.2.25" } }, "sha512-7Yx/SXSOcQq5HiiV3orevHUFn+pmMB4cgbEkDYgnkUWb0WfeQ/wa2yFv6D5ICiCQOVpjA7vYDXrC7AGO8yjDHA=="],
 
     "@vue/compiler-core": ["@vue/compiler-core@3.5.34", "", { "dependencies": { "@babel/parser": "^7.29.3", "@vue/shared": "3.5.34", "entities": "^7.0.1", "estree-walker": "^2.0.2", "source-map-js": "^1.2.1" } }, "sha512-s9cLyK5mLcvZ4Agva5QgRsQyLKvts9WbU9DB6NqiZkkGEdwmcEiylj5Jbwkp680drF/NNCV8OlAJSe+yMLxaJw=="],
 
@@ -1952,6 +1950,8 @@
     "tinyglobby/picomatch": ["picomatch@4.0.5", "", {}, "sha512-RvwwcruNjI1ncT5xRakeyS9Lf8lcItv34KD+aif+VH9kduAyfYBipGh12274xtenIPZ119/R9BdTBa8gAwSh0A=="],
 
     "vite/picomatch": ["picomatch@4.0.7", "", {}, "sha512-qcJu88Q2IWqJsDD529JKMdwGm/dvInW4HvQnRwiH9JtihJvzGOscDtHE3x1pBKeUOTysQ8kVmLnJ2kJu7yhcGA=="],
+
+    "vitepress/@vitejs/plugin-vue": ["@vitejs/plugin-vue@5.2.4", "", { "peerDependencies": { "vite": "^5.0.0 || ^6.0.0", "vue": "^3.2.25" } }, "sha512-7Yx/SXSOcQq5HiiV3orevHUFn+pmMB4cgbEkDYgnkUWb0WfeQ/wa2yFv6D5ICiCQOVpjA7vYDXrC7AGO8yjDHA=="],
 
     "vitepress/vite": ["vite@5.4.21", "", { "dependencies": { "esbuild": "^0.21.3", "postcss": "^8.4.43", "rollup": "^4.20.0" }, "optionalDependencies": { "fsevents": "~2.3.3" }, "peerDependencies": { "@types/node": "^18.0.0 || >=20.0.0", "less": "*", "lightningcss": "^1.21.0", "sass": "*", "sass-embedded": "*", "stylus": "*", "sugarss": "*", "terser": "^5.4.0" }, "optionalPeers": ["@types/node", "less", "lightningcss", "sass", "sass-embedded", "stylus", "sugarss", "terser"], "bin": { "vite": "bin/vite.js" } }, "sha512-o5a9xKjbtuhY6Bi5S3+HvbRERmouabWbyUcpXXUA1u+GNUKoROi9byOJ8M0nHbHYHkYICiMlqxkg1KkYmm25Sw=="],
 

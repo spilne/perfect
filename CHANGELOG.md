@@ -1,3 +1,16 @@
+## 0.6.1 (2026-11-08)
+
+### 🚀 Features
+
+- **net:** add service cluster facade ([#130](https://github.com/spilne/perfect/pull/130))
+
+### 📦 Dependencies
+
+- bump swc_core in /crates/swc-plugin-perfect in the swc group ([#122](https://github.com/spilne/perfect/pull/122))
+- bump msgpackr from 1.12.1 to 2.1.0 ([#125](https://github.com/spilne/perfect/pull/125))
+- bump the prod-minor-patch group across 1 directory with 2 updates ([#127](https://github.com/spilne/perfect/pull/127))
+- bump the dev-minor-patch group across 1 directory with 13 updates ([#129](https://github.com/spilne/perfect/pull/129))
+
 ## 0.6.0 (2026-10-12)
 
 ### 🚀 Features
