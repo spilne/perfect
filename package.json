@@ -55,7 +55,7 @@
     "test:release": "bun test scripts/test/release.test.ts"
   },
   "devDependencies": {
-    "@nx/js": "^23.2.1",
+    "@nx/js": "^24.0.4",
     "@types/bun": "latest",
     "@types/markdown-it-container": "^4.0.1",
     "@types/ws": "^8.18.2",
