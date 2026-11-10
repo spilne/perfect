@@ -17,16 +17,18 @@
 //   compromised member can forge anything. `ed25519` gives each member its own
 //   key instead; use TLS (see `Transport`) where you need encryption too.
 
+import { createHmac, timingSafeEqual } from "node:crypto";
 import {
-  createHmac,
-  createPrivateKey,
-  createPublicKey,
-  generateKeyPairSync,
-  sign as edSign,
-  timingSafeEqual,
-  verify as edVerify,
-  type KeyObject,
-} from "node:crypto";
+  ED25519_KEY_BYTES,
+  ED25519_SIGNATURE_BYTES,
+  concatBytes,
+  ed25519Keyring,
+  ed25519Signer,
+  generateEd25519Identity,
+  type Ed25519Identity,
+} from "./ed25519.js";
+
+export type { Ed25519Identity };
 
 /** Signs the messages a member sends and checks the ones it receives. */
 export interface GossipAuthenticator {
@@ -38,48 +40,9 @@ export interface GossipAuthenticator {
   verify(params: { readonly payload: Uint8Array; readonly tag: Uint8Array }): boolean;
 }
 
-/** An Ed25519 key pair as raw bytes: a 32-byte seed and the 32-byte public key. */
-export interface Ed25519Identity {
-  readonly privateKey: Uint8Array;
-  readonly publicKey: Uint8Array;
-}
-
-// PKCS#8 wrapper for a raw 32-byte Ed25519 seed.
-const PKCS8_ED25519_PREFIX = Uint8Array.from([
-  0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20,
-]);
-// SPKI wrapper for a raw 32-byte Ed25519 public key.
-const SPKI_ED25519_PREFIX = Uint8Array.from([
-  0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00,
-]);
-const ED25519_KEY_BYTES = 32;
-const ED25519_SIGNATURE_BYTES = 64;
-
-const concat = (a: Uint8Array, b: Uint8Array) => {
-  const out = new Uint8Array(a.length + b.length);
-  out.set(a);
-  out.set(b, a.length);
-  return out;
-};
-const hex = (bytes: Uint8Array) => Buffer.from(bytes).toString("hex");
-const publicKeyObject = (raw: Uint8Array): KeyObject =>
-  createPublicKey({
-    key: Buffer.from(concat(SPKI_ED25519_PREFIX, raw)),
-    format: "der",
-    type: "spki",
-  });
-const rawPublicKey = (key: KeyObject): Uint8Array =>
-  new Uint8Array(key.export({ format: "der", type: "spki" })).subarray(SPKI_ED25519_PREFIX.length);
-
 export const GossipAuth = {
   /** A fresh Ed25519 identity for a member. Keep `privateKey` secret; share `publicKey`. */
-  generateEd25519Identity(): Ed25519Identity {
-    const { privateKey, publicKey } = generateKeyPairSync("ed25519");
-    const seed = new Uint8Array(privateKey.export({ format: "der", type: "pkcs8" })).subarray(
-      PKCS8_ED25519_PREFIX.length,
-    );
-    return { privateKey: seed.slice(), publicKey: rawPublicKey(publicKey).slice() };
-  },
+  generateEd25519Identity,
 
   /**
    * Per-member identities: each message is signed with this member's Ed25519
@@ -100,36 +63,19 @@ export const GossipAuth = {
     /** The 32-byte public keys of every member allowed in, this member's included or not. */
     readonly trusted: ReadonlyArray<Uint8Array>;
   }): GossipAuthenticator {
-    const { privateKey, trusted } = params;
-    if (privateKey.length !== ED25519_KEY_BYTES) {
-      throw new RangeError("an Ed25519 private key is a 32-byte seed");
-    }
-    const secret = createPrivateKey({
-      key: Buffer.from(concat(PKCS8_ED25519_PREFIX, privateKey)),
-      format: "der",
-      type: "pkcs8",
-    });
-    const own = rawPublicKey(createPublicKey(secret));
-    const keys = new Map<string, KeyObject>();
-    for (const raw of trusted) {
-      if (raw.length !== ED25519_KEY_BYTES) {
-        throw new RangeError("an Ed25519 public key is 32 bytes");
-      }
-      keys.set(hex(raw), publicKeyObject(raw));
-    }
+    const signer = ed25519Signer(params.privateKey);
+    const keyring = ed25519Keyring(params.trusted);
+    const tagBytes = ED25519_KEY_BYTES + ED25519_SIGNATURE_BYTES;
     return {
-      tagBytes: ED25519_KEY_BYTES + ED25519_SIGNATURE_BYTES,
-      sign: (payload) => concat(own, new Uint8Array(edSign(null, payload, secret))),
-      verify: ({ payload, tag }) => {
-        try {
-          if (tag.length !== ED25519_KEY_BYTES + ED25519_SIGNATURE_BYTES) return false;
-          const key = keys.get(hex(tag.subarray(0, ED25519_KEY_BYTES)));
-          if (!key) return false;
-          return edVerify(null, payload, key, tag.subarray(ED25519_KEY_BYTES));
-        } catch {
-          return false;
-        }
-      },
+      tagBytes,
+      sign: (payload) => concatBytes(signer.publicKey, signer.sign(payload)),
+      verify: ({ payload, tag }) =>
+        tag.length === tagBytes &&
+        keyring.verify({
+          publicKey: tag.subarray(0, ED25519_KEY_BYTES),
+          message: payload,
+          signature: tag.subarray(ED25519_KEY_BYTES),
+        }),
     };
   },
 

@@ -1,4 +1,10 @@
 export { BinaryCodec } from "./codec.js";
+export {
+  AuthenticatedTransport,
+  type AuthenticatedConnectOptions,
+  type AuthenticatedTransportOptions,
+} from "./authenticated-transport.js";
+export { generateEd25519Identity } from "./ed25519.js";
 export { type Connection, type ConnectionOptions, connectionOver } from "./connection.js";
 export {
   ChannelLimitExceeded,

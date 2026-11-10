@@ -122,6 +122,44 @@ assertEq(chained, [
   `Tcp.connect(address, { ..., tls: true })`, or `tls: { ca, cert, key, ... }`
   for a custom CA or mutual TLS.
 
+### Knowing who is on the other end
+
+TLS with a CA tells you the server's name; it doesn't give every node a key of
+its own. `AuthenticatedTransport.over(transport, { privateKey, trusted })`
+wraps any `Transport` (`Tcp`, or a simulated node) so that, before a
+connection reaches your code, both ends prove they hold the private key of a
+public key in `trusted`. The handler then reads the verified key from
+`connection.peer`:
+
+```ts
+const me = generateEd25519Identity(); // once per node; share publicKey
+const secure = AuthenticatedTransport.over(Tcp, { privateKey: me.privateKey, trusted });
+
+yield * secure.listen(address, { codec, handle: (c) => serve(c, c.peer!) });
+yield * secure.connect(address, { codec, peer: expectedServerKey });
+```
+
+The handshake is three messages before any of yours: the client sends its key
+and a fresh nonce; the server answers with its key, its own nonce and a
+signature over both nonces and both keys; the client checks it and sends its
+signature over the same data. Because each signature covers both nonces, both
+keys and the signer's role, a recorded handshake can't be replayed, a
+signature can't be reflected back, and knowing a node's public key is not
+enough to pass as that node. A side that sees a key outside `trusted` stops
+before signing anything. A handshake that doesn't finish within
+`handshakeTimeoutMs` (default 5 000) is dropped, and a connection that fails it
+never reaches `handle` (the failure is logged). Without `peer` on `connect`,
+any trusted key is accepted as the server's; pass `peer` to pin the one you
+mean. Code that only has the `Transport` service can't pass `peer`, but the
+`trusted` check still applies.
+
+What it doesn't do: it proves who is on the other end when the connection
+opens. After that the messages are neither signed nor encrypted, so someone who
+can alter the byte stream can inject or change them. Run it over TLS for that,
+and sign anything that has to hold up on its own (a vote, a block) with the
+node's key. `trusted` is fixed for the life of the transport; build a new one to
+change it.
+
 ## WebSockets
 
 `WebSocketClient.connect(url, { codec })` opens a WebSocket as the same
