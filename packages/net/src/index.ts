@@ -1,4 +1,10 @@
 export { BinaryCodec } from "./codec.js";
+export {
+  AuthenticatedTransport,
+  type AuthenticatedConnectOptions,
+  type AuthenticatedTransportOptions,
+} from "./authenticated-transport.js";
+export { generateEd25519Identity } from "./ed25519.js";
 export { type Connection, type ConnectionOptions, connectionOver } from "./connection.js";
 export {
   ChannelLimitExceeded,
@@ -30,7 +36,7 @@ export {
   type MemberState,
   type MembershipEvent,
 } from "./gossip.js";
-export { GossipAuth, type GossipAuthenticator } from "./gossip-auth.js";
+export { GossipAuth, type Ed25519Identity, type GossipAuthenticator } from "./gossip-auth.js";
 export { Discovery } from "./discovery.js";
 export {
   Cluster,

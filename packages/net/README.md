@@ -52,14 +52,19 @@ const program = scoped(
 - **Recording:** `Recorder.wrap` writes down a conversation and `Replay.of`
   plays it back for tests, with no server.
 - **Testing:** depend on the `Transport` service and provide
-  `SimulatedNetwork` nodes in tests, with latency, message loss and
-  partitions under the test's control (deterministic with `TestClock` and
-  `TestRandom`).
+  `SimulatedNetwork` nodes in tests, with latency, message loss, reordering,
+  duplication, one-way partitions and node crashes under the test's control
+  (deterministic with `TestClock` and `TestRandom`).
 
+- **Identity:** `AuthenticatedTransport.over(transport, { privateKey, trusted })`
+  makes both ends prove which trusted Ed25519 key they hold before a connection
+  reaches your code; handlers read it from `connection.peer`. It authenticates
+  the connection when it opens and doesn't encrypt: pair it with TLS.
 - **Hostile peers:** message sizes, receive queues, channels per connection and
   gossip tables are all bounded, and malformed input is rejected with typed
   errors and counters. Gossip has no authentication unless you pass an
-  `authenticator` (`GossipAuth.hmacSha256(key)`, a shared cluster key); it is not
+  `authenticator` (`GossipAuth.hmacSha256(key)` for a shared cluster key, or
+  `GossipAuth.ed25519(...)` for a key per member); it is not
   encryption and does not stop replay. Run it on a private network or over TLS.
   The guide lists every limit.
 

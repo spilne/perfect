@@ -21,6 +21,11 @@ export interface Connection<M> {
   /** The other end, like "10.0.0.5:4000" or "/tmp/app.sock". */
   readonly remote: string;
   /**
+   * The Ed25519 public key the other end proved it holds, set only by an
+   * `AuthenticatedTransport`. Absent on plain connections.
+   */
+  readonly peer?: Uint8Array;
+  /**
    * Send one message. Waits when the socket's buffer is full, so a fast
    * sender can't run far ahead of the network.
    */
