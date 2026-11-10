@@ -7,11 +7,21 @@
 //   mux.incoming                           // channels the other side opens
 //
 // On the wire every frame is one message on the shared connection:
-// [kind: 1 byte][channel id: 4 bytes][payload]. The side that connected
+// [kind: 1 byte][channel id: 4 bytes][payload]. OPEN carries the opener's
+// window, and the side that accepts a channel answers with a CREDIT frame
+// for its own window, so each sender knows how much the reader will queue
+// even when the two sides are configured differently. The side that connected
 // numbers its channels 1, 3, 5... and the other side 2, 4, 6..., so ids never
 // collide. Each channel has a window: a sender may have at most `window`
 // messages the reader hasn't taken yet, and the reader grants more as it
 // takes them. A slow reader therefore only slows its own channel.
+//
+// The other side is not trusted. What it controls is bounded: at most
+// `maxChannels` open channels, at most `maxPendingIncoming` channels nobody
+// has picked up from `incoming`, and at most `window` unread messages per
+// channel. A channel past a limit is refused or failed on its own; a peer
+// that breaks the framing (a wrong or repeated channel id, an unknown
+// frame kind, a short frame) stops the whole multiplexer with a MessageError.
 
 import {
   acquireRelease,
@@ -28,7 +38,7 @@ import {
 import { Stream } from "@spilne/perfect-core/stream";
 import type { BinaryCodec } from "./codec.js";
 import type { Connection } from "./connection.js";
-import { ConnectionError, MessageError, type NetError } from "./errors.js";
+import { ChannelLimitExceeded, ConnectionError, MessageError, type NetError } from "./errors.js";
 import { Inbox } from "./inbox.js";
 
 const OPEN = 1;
@@ -53,6 +63,8 @@ function frame(kind: number, channel: number, payload?: Uint8Array): Uint8Array 
   return bytes;
 }
 
+const MAX_CHANNEL_ID = 0xffff_ffff;
+
 function creditFrame(channel: number, count: number): Uint8Array {
   const payload = new Uint8Array(4);
   new DataView(payload.buffer).setUint32(0, count);
@@ -67,18 +79,40 @@ export interface MultiplexerOptions<M> {
   readonly codec: BinaryCodec<M>;
   /** Messages a sender may have in flight per channel. Default: 256. */
   readonly window?: number;
+  /** Channels that may be open at once, whoever opened them. Default: 1024. */
+  readonly maxChannels?: number;
+  /**
+   * Channels the other side opened that nobody has taken from `incoming`
+   * yet. More are refused. Default: 128.
+   */
+  readonly maxPendingIncoming?: number;
+}
+
+/** What a multiplexer is holding, for monitoring and tests. */
+export interface MultiplexerStats {
+  /** Channels neither side has closed. */
+  readonly openChannels: number;
+  /** Channels waiting in `incoming`. */
+  readonly pendingIncoming: number;
+  /** Channels the other side opened that were refused because of a limit. */
+  readonly rejectedChannels: number;
 }
 
 /** Channels over one connection, from `Multiplexer.make`. */
 export interface Multiplexer<M> {
-  /** Open a new channel. The other side sees it in `incoming`. */
+  /**
+   * Open a new channel. The other side sees it in `incoming`. Fails with
+   * ChannelLimitExceeded at `maxChannels`.
+   */
   readonly open: Eff<Connection<M>, Throws<NetError>>;
   /** Channels the other side opens, as they arrive. Read it from one place. */
   readonly incoming: Stream<Connection<M>, Throws<NetError>>;
+  readonly stats: Eff<MultiplexerStats, never>;
 }
 
 /** One channel's state on this side. */
 class Channel<M> {
+  readonly id: number;
   readonly inbox: Inbox<M, NetError>;
   /** Messages we may still send before the reader grants more. */
   credit: number;
@@ -87,11 +121,9 @@ class Channel<M> {
   closedHere = false;
   closedThere = false;
 
-  constructor(
-    readonly id: number,
-    window: number,
-  ) {
-    this.credit = window;
+  constructor(params: { id: number; credit: number }) {
+    this.id = params.id;
+    this.credit = params.credit;
     this.inbox = new Inbox<M, NetError>();
   }
 }
@@ -109,9 +141,20 @@ export const Multiplexer = {
   ): Eff<Multiplexer<M>, never> {
     const { codec } = options;
     const window = options.window ?? 256;
+    const maxChannels = options.maxChannels ?? 1024;
+    const maxPendingIncoming = options.maxPendingIncoming ?? 128;
+    for (const [name, value] of Object.entries({ window, maxChannels, maxPendingIncoming })) {
+      if (!Number.isInteger(value) || value < 1) {
+        throw new RangeError(`${name} must be a positive integer, got ${value}`);
+      }
+    }
     const channels = new Map<number, Channel<M>>();
     const incoming = new Inbox<Connection<M>, NetError>();
     let nextId = options.side === "client" ? 1 : 2;
+    // The other side numbers its channels with the other parity, upwards.
+    const peerParity = options.side === "client" ? 0 : 1;
+    let lastPeerId = 0;
+    let rejectedChannels = 0;
     let stopped: NetError | undefined;
 
     const remote = connection.remote;
@@ -162,7 +205,8 @@ export const Multiplexer = {
       const close: Eff<void, never> = suspend(() => {
         if (channel.closedHere) return succeed(undefined);
         channel.closedHere = true;
-        if (channel.closedThere) channels.delete(channel.id);
+        // Frames still on their way for it are dropped as for any unknown id.
+        channels.delete(channel.id);
         return connection.send(frame(CLOSE, channel.id)).catch(() => succeed(undefined));
       });
 
@@ -174,45 +218,92 @@ export const Multiplexer = {
       };
     };
 
-    const onFrame = (bytes: Uint8Array): void => {
-      if (bytes.length < HEADER) return;
+    const ignore = succeed(undefined);
+    const windowBytes = new Uint8Array(4);
+    new DataView(windowBytes.buffer).setUint32(0, window);
+
+    /** The other side broke the protocol: stop everything and hang up. */
+    const violation = (message: string): Eff<void, never> => {
+      stop(new MessageError({ address: remote, message: `protocol violation: ${message}` }));
+      return connection.close;
+    };
+
+    /** End one channel with an error, and tell the other side. */
+    const failChannel = (channel: Channel<M>, error: MessageError): Eff<void, never> => {
+      channel.inbox.fail(error);
+      channel.closedThere = true;
+      channel.closedHere = true;
+      channels.delete(channel.id);
+      wakeSenders(channel);
+      return connection.send(frame(CLOSE, channel.id)).catch(() => ignore);
+    };
+
+    const onFrame = (bytes: Uint8Array): Eff<void, never> => {
+      if (stopped) return ignore;
+      if (bytes.length < HEADER) return violation(`a frame of ${bytes.length} bytes is too short`);
       const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
       const kind = view.getUint8(0);
       const id = view.getUint32(1);
       const payload = bytes.subarray(HEADER);
       if (kind === OPEN) {
-        const channel = new Channel<M>(id, window);
+        if (id % 2 !== peerParity || id <= lastPeerId) {
+          return violation(`channel ${id} can't be opened by the other side now`);
+        }
+        lastPeerId = id;
+        if (payload.length !== 4) return violation(`an OPEN frame of ${payload.length} bytes`);
+        const peerWindow = new DataView(payload.buffer, payload.byteOffset, 4).getUint32(0);
+        if (channels.size >= maxChannels || incoming.size >= maxPendingIncoming) {
+          rejectedChannels += 1;
+          return connection.send(frame(CLOSE, id)).catch(() => ignore);
+        }
+        const channel = new Channel<M>({ id, credit: peerWindow });
         channels.set(id, channel);
         incoming.push(asConnection(channel));
-        return;
+        return connection.send(creditFrame(id, window)).catch(() => ignore);
+      }
+      if (kind !== DATA && kind !== CREDIT && kind !== CLOSE) {
+        return violation(`unknown frame kind ${kind}`);
+      }
+      if (kind === CREDIT && payload.length !== 4) {
+        return violation(`a credit frame of ${payload.length} bytes instead of 4`);
       }
       const channel = channels.get(id);
-      if (!channel) return;
+      if (!channel) return ignore;
       if (kind === DATA) {
+        if (channel.inbox.size >= window) {
+          return failChannel(
+            channel,
+            new MessageError({
+              address: remote,
+              message: `channel ${id} got more than its window of ${window} unread messages`,
+            }),
+          );
+        }
         let message: M;
         try {
           message = codec.decode(payload);
         } catch (error) {
-          channel.inbox.fail(
+          return failChannel(
+            channel,
             new MessageError({
               address: remote,
               message: `couldn't decode: ${String(error)}`,
               cause: error,
             }),
           );
-          return;
         }
         channel.inbox.push(message);
       } else if (kind === CREDIT) {
         channel.credit += new DataView(payload.buffer, payload.byteOffset, 4).getUint32(0);
         wakeSenders(channel);
-      } else if (kind === CLOSE) {
+      } else {
         channel.closedThere = true;
         channel.inbox.end();
         // A sender waiting for credit won't get any now.
         wakeSenders(channel);
-        if (channel.closedHere) channels.delete(id);
+        channels.delete(id);
       }
+      return ignore;
     };
 
     const stop = (error: NetError) => {
@@ -223,11 +314,12 @@ export const Multiplexer = {
         channel.inbox.end();
         wakeSenders(channel);
       }
+      channels.clear();
     };
 
     // Read the shared connection and hand each frame to its channel.
     const reader = connection.messages
-      .forEach((bytes) => sync(() => onFrame(bytes)))
+      .forEach(onFrame)
       .exit()
       .flatMap((exit) =>
         sync(() =>
@@ -241,10 +333,33 @@ export const Multiplexer = {
 
     const open: Eff<Connection<M>, Throws<NetError>> = suspend(() => {
       if (stopped) return fail(stopped);
-      const channel = new Channel<M>(nextId, window);
+      if (channels.size >= maxChannels) {
+        return fail(
+          new ChannelLimitExceeded({
+            address: remote,
+            message: `already ${channels.size} open channels (the limit is ${maxChannels})`,
+          }),
+        );
+      }
+      if (nextId > MAX_CHANNEL_ID) {
+        return fail(
+          new ChannelLimitExceeded({
+            address: remote,
+            message: "this connection has used up its channel ids",
+          }),
+        );
+      }
+      // It may send nothing until the other side answers with its window.
+      const channel = new Channel<M>({ id: nextId, credit: 0 });
       nextId += 2;
       channels.set(channel.id, channel);
-      return connection.send(frame(OPEN, channel.id)).map(() => asConnection(channel));
+      return connection
+        .send(frame(OPEN, channel.id, windowBytes))
+        .catch((error) => {
+          channels.delete(channel.id);
+          return fail(error);
+        })
+        .map(() => asConnection(channel));
     });
 
     const incomingStream = Stream.unfoldChunkEffect(undefined, () =>
@@ -261,6 +376,11 @@ export const Multiplexer = {
     ).map(() => ({
       open,
       incoming: incomingStream,
+      stats: sync(() => ({
+        openChannels: channels.size,
+        pendingIncoming: incoming.size,
+        rejectedChannels,
+      })),
     }));
   },
 } as const;

@@ -1,6 +1,7 @@
 export { BinaryCodec } from "./codec.js";
 export { type Connection, type ConnectionOptions, connectionOver } from "./connection.js";
 export {
+  ChannelLimitExceeded,
   ConnectError,
   ConnectionError,
   ListenError,
@@ -17,7 +18,7 @@ export {
   formatAddress,
 } from "./transport.js";
 export { SimulatedNetwork, type LinkConditions } from "./simulator.js";
-export { Multiplexer, type MultiplexerOptions } from "./multiplexer.js";
+export { Multiplexer, type MultiplexerOptions, type MultiplexerStats } from "./multiplexer.js";
 export { Resilient, type ResilientOptions } from "./resilient.js";
 export { HashRing, hash32, type Move } from "./hash-ring.js";
 export {
