@@ -174,9 +174,9 @@ A connection's codec turns its messages into bytes and back. Built in:
 `BinaryCodec.bytes`, `BinaryCodec.utf8` and `BinaryCodec.json<T>()`. For
 compact binary formats, install the library and use its adapter:
 
-| Format | Import | Library |
-| --- | --- | --- |
-| MessagePack | `msgpackCodec<T>()` from `@spilne/perfect-net/msgpack` | `msgpackr` |
+| Format           | Import                                                             | Library              |
+| ---------------- | ------------------------------------------------------------------ | -------------------- |
+| MessagePack      | `msgpackCodec<T>()` from `@spilne/perfect-net/msgpack`             | `msgpackr`           |
 | Protocol Buffers | `protobufCodec(MessageSchema)` from `@spilne/perfect-net/protobuf` | `@bufbuild/protobuf` |
 
 Any `{ encode(message): Uint8Array; decode(bytes): T }` works as a codec.
@@ -242,11 +242,11 @@ channel's messages end, senders waiting for credit fail, and `open` fails.
 
 The other side is not trusted, so what it controls is bounded:
 
-| Option | Default | |
-| --- | --- | --- |
-| `window` | 256 | unread messages per channel; a peer that sends more has that channel failed (a `MessageError` for the reader, a CLOSE to the peer) |
-| `maxChannels` | 1024 | open channels, whoever opened them; `open` fails with `ChannelLimitExceeded`, channels the peer opens beyond it are refused with a CLOSE |
-| `maxPendingIncoming` | 128 | channels the peer opened that nobody has taken from `incoming`; more are refused |
+| Option               | Default |                                                                                                                                          |
+| -------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `window`             | 256     | unread messages per channel; a peer that sends more has that channel failed (a `MessageError` for the reader, a CLOSE to the peer)       |
+| `maxChannels`        | 1024    | open channels, whoever opened them; `open` fails with `ChannelLimitExceeded`, channels the peer opens beyond it are refused with a CLOSE |
+| `maxPendingIncoming` | 128     | channels the peer opened that nobody has taken from `incoming`; more are refused                                                         |
 
 A peer that breaks the framing (a repeated, backward or wrong-parity
 channel id, an unknown frame kind, a short frame) stops the whole
@@ -316,10 +316,12 @@ command. The command list helps routing; the receiving service still validates
 payloads and permissions.
 
 ```ts
-const cluster = yield* Cluster.builder({ id, address: gossipAddress, seeds })
-  .service({ name: "orders", version: "v1", address: ordersAddress, commands: ["get"] })
-  .join();
-const peer = yield* cluster.select({ name: "orders", version: "v1", command: "get" });
+const cluster =
+  yield *
+  Cluster.builder({ id, address: gossipAddress, seeds })
+    .service({ name: "orders", version: "v1", address: ordersAddress, commands: ["get"] })
+    .join();
+const peer = yield * cluster.select({ name: "orders", version: "v1", command: "get" });
 ```
 
 `cluster.call(query, invoke, { timeoutMs, maxAttempts?, retryOn? })` runs a
@@ -430,20 +432,20 @@ the sender's member list, so news reaches everyone in a few rounds.
 Members leaving at the end of their scope say goodbye, so the others don't
 have to wait for them to time out.
 
-| Option | Default | |
-| --- | --- | --- |
-| `intervalMs` | 1000 | how often to check a member |
-| `pingTimeoutMs` | 300 | how long to wait for an answer |
-| `indirectChecks` | 3 | members asked to check one that didn't answer |
-| `suspicionMs` | 5000 | how long a suspect has to show it is alive |
-| `deadRetentionMs` | six times `suspicionMs`, at least 30 intervals | how long dead and departed members are remembered |
-| `seedRefreshMs` | five intervals, at least `suspicionMs` | how often to retry seeds that aren't members while others are known |
-| `maxDigestMembers` | 128 | members listed in one message |
-| `maxMembersPerMessage` | 512 | members a received message may list (at least `maxDigestMembers + 1`) |
-| `maxMessageBytes` | 1 MiB | the largest message accepted |
-| `maxMembers` | 10 000 | members remembered, dead ones included |
-| `maxInboundConnections` | 1024 | gossip connections open at once |
-| `authenticator` | none | signs and verifies messages (see below) |
+| Option                  | Default                                        |                                                                       |
+| ----------------------- | ---------------------------------------------- | --------------------------------------------------------------------- |
+| `intervalMs`            | 1000                                           | how often to check a member                                           |
+| `pingTimeoutMs`         | 300                                            | how long to wait for an answer                                        |
+| `indirectChecks`        | 3                                              | members asked to check one that didn't answer                         |
+| `suspicionMs`           | 5000                                           | how long a suspect has to show it is alive                            |
+| `deadRetentionMs`       | six times `suspicionMs`, at least 30 intervals | how long dead and departed members are remembered                     |
+| `seedRefreshMs`         | five intervals, at least `suspicionMs`         | how often to retry seeds that aren't members while others are known   |
+| `maxDigestMembers`      | 128                                            | members listed in one message                                         |
+| `maxMembersPerMessage`  | 512                                            | members a received message may list (at least `maxDigestMembers + 1`) |
+| `maxMessageBytes`       | 1 MiB                                          | the largest message accepted                                          |
+| `maxMembers`            | 10 000                                         | members remembered, dead ones included                                |
+| `maxInboundConnections` | 1024                                           | gossip connections open at once                                       |
+| `authenticator`         | none                                           | signs and verifies messages (see below)                               |
 
 Metadata is sent as JSON with every message, so keep it small.
 
@@ -505,11 +507,28 @@ What this gives you, and what it doesn't: it stops anyone without the key
 from taking part or forging news. It is not encryption, so membership and
 metadata are visible on the wire. It does not stop replay of a recorded
 message; incarnation numbers make most replays harmless, but not all. A
-leaked key, or one compromised member, can forge anything. For per-member
-identity or confidentiality, run gossip over TLS with client certificates
-(`Transport` options) instead or as well. To plug in something else (a
-different MAC, key rotation), implement `GossipAuthenticator`: a `tagBytes`
-length, `sign(payload)` and `verify({ payload, tag })`.
+leaked key, or one compromised member, can forge anything.
+
+For a key per member, use `GossipAuth.ed25519`. Each member signs with its own
+Ed25519 key and sends its public key in the tag; a message is accepted only
+when that key is in the `trusted` list. A leaked key then lets someone
+impersonate one member, and you remove a member by leaving its key out of the
+list:
+
+```ts
+const me = GossipAuth.generateEd25519Identity(); // once per member; share publicKey
+Gossip.join({
+  ...,
+  authenticator: GossipAuth.ed25519({ privateKey: me.privateKey, trusted: allPublicKeys }),
+});
+```
+
+The signature proves who sent a message, not that what the sender says about
+other members is true, and `trusted` is fixed for the life of the
+authenticator. For confidentiality, run gossip over TLS with client
+certificates (`Transport` options) instead or as well. To plug in something
+else (a different MAC, key rotation), implement `GossipAuthenticator`: a
+`tagBytes` length, `sign(payload)` and `verify({ payload, tag })`.
 
 ### Finding members
 
@@ -517,12 +536,12 @@ length, `sign(payload)` and `verify({ payload, tag })`.
 addresses. Gossip runs it every round while it knows no other member, and
 every `seedRefreshMs` otherwise (see Seeds above).
 
-| Discovery | Finds |
-| --- | --- |
-| `Discovery.of(addresses)` | the given addresses |
-| `Discovery.dns({ hostname, port })` | every address of a DNS name, such as a Kubernetes headless service |
-| `Discovery.srv(name)` | the targets and ports of SRV records |
-| `Discovery.all([...])` | everything the given discoveries find |
+| Discovery                                                    | Finds                                                                     |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------- |
+| `Discovery.of(addresses)`                                    | the given addresses                                                       |
+| `Discovery.dns({ hostname, port })`                          | every address of a DNS name, such as a Kubernetes headless service        |
+| `Discovery.srv(name)`                                        | the targets and ports of SRV records                                      |
+| `Discovery.all([...])`                                       | everything the given discoveries find                                     |
 | `Mdns.discover({ service })` from `@spilne/perfect-net/mdns` | members that `Mdns.announce` on the local network (needs `multicast-dns`) |
 
 A failed lookup logs a warning and finds no addresses. It doesn't fail.
@@ -570,12 +589,12 @@ console.log(simulated); // → { reply: [{ type: "pong", n: 1 }], cutOff: "Left"
 
 <!-- @end -->
 
-| API | What it does |
-| --- | --- |
-| `SimulatedNetwork.make()` | a new network |
-| `network.node(name)` | that node's `Transport`; it listens on `{ host: name, port }` |
-| `network.link(a, b, { latencyMs, lossRate })` | link conditions, both directions |
-| `network.partition(a, b)` / `network.heal(a, b)` | cut and restore the link |
+| API                                              | What it does                                                  |
+| ------------------------------------------------ | ------------------------------------------------------------- |
+| `SimulatedNetwork.make()`                        | a new network                                                 |
+| `network.node(name)`                             | that node's `Transport`; it listens on `{ host: name, port }` |
+| `network.link(a, b, { latencyMs, lossRate })`    | link conditions, both directions                              |
+| `network.partition(a, b)` / `network.heal(a, b)` | cut and restore the link                                      |
 
 Messages on a link keep their order in each direction, as on TCP, even when
 random latency would draw a shorter delay for a later message. `lossRate`

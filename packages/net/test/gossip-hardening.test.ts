@@ -650,3 +650,90 @@ describe("authenticated gossip", () => {
     expect(() => GossipAuth.hmacSha256("short")).toThrow(RangeError);
   });
 });
+
+describe("gossip with per-member Ed25519 identities", () => {
+  const identities = Array.from({ length: 3 }, () => GossipAuth.generateEd25519Identity());
+  const trusted = identities.map((i) => i.publicKey);
+  const authFor = (index: number, allowed = trusted) =>
+    GossipAuth.ed25519({ privateKey: identities[index]!.privateKey, trusted: allowed });
+  const signedBy = (authenticator: ReturnType<typeof authFor>, message: unknown) => {
+    const payload = json(message);
+    const tag = authenticator.sign(payload);
+    const bytes = new Uint8Array(tag.length + payload.length);
+    bytes.set(tag);
+    bytes.set(payload, tag.length);
+    return bytes;
+  };
+
+  test("members with trusted keys form a cluster", async () => {
+    const c = await newHarness();
+    await c.add("a", [], { authenticator: authFor(0) });
+    await c.add("b", ["a"], { authenticator: authFor(1) });
+    await c.add("c", ["a"], { authenticator: authFor(2) });
+    await c.pass(1_500);
+    for (const id of ["a", "b", "c"]) expect(await c.view(id)).toEqual(["a", "b", "c"]);
+    expect((await c.stats("a")).rejectedMessages).toBe(0);
+  });
+
+  test("a member whose key is not trusted stays out, with a valid signature of its own", async () => {
+    const c = await newHarness();
+    const stranger = GossipAuth.ed25519({
+      privateKey: GossipAuth.generateEd25519Identity().privateKey,
+      trusted,
+    });
+    await c.add("a", [], { authenticator: authFor(0) });
+    await c.add("b", ["a"], { authenticator: authFor(1) });
+    await c.add("stranger", ["a"], { authenticator: stranger });
+    await c.pass(2_000);
+    expect(await c.view("a")).toEqual(["a", "b"]);
+    expect(await c.view("stranger")).toEqual(["stranger"]);
+  });
+
+  test("dropping a key from the trusted set locks that member out", async () => {
+    const c = await newHarness();
+    const withoutC = trusted.slice(0, 2);
+    await c.add("a", [], { authenticator: authFor(0, withoutC) });
+    await c.add("b", ["a"], { authenticator: authFor(1, withoutC) });
+    await c.add("c", ["a"], { authenticator: authFor(2) });
+    await c.pass(2_000);
+    expect(await c.view("a")).toEqual(["a", "b"]);
+  });
+
+  test("tampered, unsigned and truncated messages are rejected", async () => {
+    const c = await newHarness();
+    await c.add("a", [], { ...quiet, authenticator: authFor(0) });
+    const message = ping([entry("forged")]);
+    const tampered = signedBy(authFor(1), message);
+    tampered[tampered.length - 3] = tampered[tampered.length - 3]! ^ 1;
+    const badSignature = signedBy(authFor(1), message);
+    badSignature[40] = badSignature[40]! ^ 1;
+    for (const bytes of [json(message), tampered, badSignature, json(message).subarray(0, 10)]) {
+      await c.inject("a", bytes);
+    }
+    expect(await c.view("a")).toEqual(["a"]);
+    expect((await c.stats("a")).rejected.unauthenticated).toBe(4);
+
+    await c.inject("a", signedBy(authFor(1), message));
+    expect(await c.view("a")).toEqual(["a", "forged"]);
+  });
+
+  test("a signature cannot be moved to another message", () => {
+    const sender = authFor(1);
+    const verifier = authFor(0);
+    const tag = sender.sign(json({ a: 1 }));
+    expect(verifier.verify({ payload: json({ a: 1 }), tag })).toBe(true);
+    expect(verifier.verify({ payload: json({ a: 2 }), tag })).toBe(false);
+  });
+
+  test("malformed keys and tags are refused without throwing from verify", () => {
+    expect(() => GossipAuth.ed25519({ privateKey: new Uint8Array(31), trusted })).toThrow(
+      RangeError,
+    );
+    expect(() =>
+      GossipAuth.ed25519({ privateKey: identities[0]!.privateKey, trusted: [new Uint8Array(5)] }),
+    ).toThrow(RangeError);
+    const verifier = authFor(0);
+    expect(verifier.verify({ payload: json({}), tag: new Uint8Array(0) })).toBe(false);
+    expect(verifier.verify({ payload: json({}), tag: new Uint8Array(96) })).toBe(false);
+  });
+});

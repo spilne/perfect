@@ -30,7 +30,7 @@ export {
   type MemberState,
   type MembershipEvent,
 } from "./gossip.js";
-export { GossipAuth, type GossipAuthenticator } from "./gossip-auth.js";
+export { GossipAuth, type Ed25519Identity, type GossipAuthenticator } from "./gossip-auth.js";
 export { Discovery } from "./discovery.js";
 export {
   Cluster,
