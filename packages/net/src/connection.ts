@@ -7,7 +7,13 @@ import { Stream } from "@spilne/perfect-core/stream";
 import { async, fail, succeed, suspend, type Eff, type Throws } from "@spilne/perfect-core";
 import type { BinaryCodec } from "./codec.js";
 import { ConnectionError, MessageError, type NetError } from "./errors.js";
-import { encodeFrame, FrameReader, FrameTooBig, DEFAULT_MAX_FRAME_BYTES } from "./frames.js";
+import {
+  encodeFrame,
+  FrameError,
+  FrameReader,
+  FrameTruncated,
+  DEFAULT_MAX_FRAME_BYTES,
+} from "./frames.js";
 import { Inbox } from "./inbox.js";
 
 /** An open connection that sends and receives messages of type `M`. */
@@ -47,12 +53,16 @@ export function connectionOver<M>(
   options: ConnectionOptions<M>,
 ): Connection<M> {
   const { codec } = options;
+  const highWaterMark = options.highWaterMark ?? 1024;
+  if (!(highWaterMark >= 1)) {
+    throw new RangeError(`highWaterMark must be at least 1, got ${highWaterMark}`);
+  }
   const reader = new FrameReader(options.maxMessageBytes ?? DEFAULT_MAX_FRAME_BYTES);
-  const inbox = new Inbox<M, NetError>(
-    options.highWaterMark ?? 1024,
-    () => socket.pause(),
-    () => socket.resume(),
-  );
+  const inbox = new Inbox<M, NetError>({
+    highWaterMark,
+    pause: () => socket.pause(),
+    resume: () => socket.resume(),
+  });
   let closed = false;
 
   const broken = (message: string, cause?: unknown) =>
@@ -62,12 +72,22 @@ export function connectionOver<M>(
     socket.destroy();
   };
 
+  const ended = () => {
+    if (reader.pendingBytes > 0 && !reader.failure) {
+      const truncated = new FrameTruncated(reader.pendingBytes);
+      inbox.fail(
+        new MessageError({ address: remote, message: truncated.message, cause: truncated }),
+      );
+    }
+    inbox.end();
+  };
+
   socket.on("data", (chunk: Uint8Array) => {
     let frames: Uint8Array[];
     try {
       frames = reader.push(chunk);
     } catch (error) {
-      if (error instanceof FrameTooBig) return unreadable(error.message, error);
+      if (error instanceof FrameError) return unreadable(error.message, error);
       throw error;
     }
     for (const frame of frames) {
@@ -79,12 +99,14 @@ export function connectionOver<M>(
       }
       inbox.push(message);
     }
+    // The messages before a bad header were delivered above; now fail.
+    if (reader.failure) unreadable(reader.failure.message, reader.failure);
   });
-  socket.on("end", () => inbox.end());
+  socket.on("end", ended);
   socket.on("error", (error) => inbox.fail(broken(error.message, error)));
   socket.on("close", () => {
     closed = true;
-    inbox.end();
+    ended();
   });
 
   let corked = false;

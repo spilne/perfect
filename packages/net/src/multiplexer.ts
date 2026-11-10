@@ -92,11 +92,7 @@ class Channel<M> {
     window: number,
   ) {
     this.credit = window;
-    this.inbox = new Inbox<M, NetError>(
-      Infinity,
-      () => {},
-      () => {},
-    );
+    this.inbox = new Inbox<M, NetError>();
   }
 }
 
@@ -114,11 +110,7 @@ export const Multiplexer = {
     const { codec } = options;
     const window = options.window ?? 256;
     const channels = new Map<number, Channel<M>>();
-    const incoming = new Inbox<Connection<M>, NetError>(
-      Infinity,
-      () => {},
-      () => {},
-    );
+    const incoming = new Inbox<Connection<M>, NetError>();
     let nextId = options.side === "client" ? 1 : 2;
     let stopped: NetError | undefined;
 

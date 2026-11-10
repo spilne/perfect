@@ -149,11 +149,7 @@ export function serveConnections<M, S>(params: {
   readonly options: ListenOptions<M, S>;
 }): Eff<Listener, Throws<ListenError> | Exclude<S, Throws<unknown>>> {
   const { options } = params;
-  const accepted = new Inbox<Connection<M>, never>(
-    Infinity,
-    () => {},
-    () => {},
-  );
+  const accepted = new Inbox<Connection<M>, never>();
 
   const serveOne = (connection: Connection<M>): Eff<unknown, Exclude<S, Throws<unknown>>> =>
     options
