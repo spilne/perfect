@@ -3,6 +3,8 @@
 // Run: bunx tsc --noEmit test/type-errors.ts
 
 import {
+  Transactor,
+  type Commits,
   eff,
   type Eff,
   type Throws,
@@ -29,6 +31,7 @@ import {
   run,
   runSync,
   all,
+  scoped,
   cached,
   RequestResolver,
   Config,
@@ -750,4 +753,94 @@ const _err8 = run(
   const _okGet: Eff<number | undefined, Throws<"db down">> = resolver.get("a");
   // @ts-expect-error the load's error has to be handled
   const _badGetRun = () => resolver.get("a").run();
+}
+
+// ── Commits ────────────────────────────────────────────────────────
+{
+  const committing = succeed(1) as Eff<number, Commits<"pg">>;
+  // run() accepts an effect whose only leftover tag is Commits.
+  void run(committing);
+  // @ts-expect-error Commits<"pg"> is not assignable to never
+  const _notNever: Eff<number, never> = committing;
+}
+
+// ── Transactions: one resource per transaction ─────────────────────
+{
+  const driver = {
+    begin: succeed({}),
+    commit: () => succeed(undefined),
+    rollback: () => succeed(undefined),
+  };
+  const a = Transactor.make({ kind: "a", driver });
+  const b = Transactor.make({ kind: "b", driver });
+  const useA = a.withHandle(() => succeed(1));
+  const useB = b.withHandle(() => succeed(2));
+
+  // @ts-expect-error Tx<"b"> needed inside an "a" transaction
+  a.transact(useA.flatMap(() => useB));
+  // @ts-expect-error a finished "b" transaction nested inside an "a" transaction
+  a.transact(useA.flatMap(() => b.transact(useB)));
+  // @ts-expect-error Tx<"b"> needed inside an "a" transaction (generator form)
+  a.transact(function* () {
+    yield* useA;
+    yield* useB;
+  });
+  // @ts-expect-error a "b" transaction nested inside an "a" transaction (generator form)
+  a.transact(function* () {
+    yield* useA;
+    yield* b.transact(useB);
+  });
+  // The generator form accepts its own resource.
+  a.transact(function* () {
+    return yield* useA;
+  });
+
+  // One after the other is fine, and both commits show in the type.
+  const _sequential: Eff<number, Commits<"a"> | Commits<"b">> = a
+    .transact(useA)
+    .flatMap(() => b.transact(useB));
+
+  // @ts-expect-error a store call outside any transaction is a missing service
+  const _outside = () => useA.run();
+}
+
+// ── Transactions: Commits survives combinators ────────────────────
+{
+  const { transactor: m, table } = Transactor.memory();
+  const rows = table<number>("rows");
+  const b = Transactor.make({
+    kind: "b",
+    driver: { begin: succeed({}), commit: () => succeed(undefined), rollback: () => succeed(undefined) },
+  });
+  const inMemory = m.transact(rows.set("x", 1));
+  const inB = b.transact(b.withHandle(() => succeed(1)));
+  const useRows = rows.get("x");
+
+  // The mark is kept in the result type.
+  const _all: Eff<unknown, Commits<"memory">> = all([inMemory, inMemory]);
+  const _race: Eff<unknown, Commits<"memory">> = race([inMemory, inMemory]);
+  const _forEachPar: Eff<unknown, Commits<"memory">> = forEachPar([1, 2], () => inMemory);
+  const _retry: Eff<unknown, Commits<"memory">> = retry(inMemory, { times: 2 });
+  const _scoped: Eff<unknown, Commits<"memory">> = scoped(inMemory);
+  const _fork: Eff<unknown, Commits<"memory">> = fork(inMemory);
+  const _catchTag: Eff<unknown, Commits<"memory">> = inMemory
+    .flatMap(() => fail({ _tag: "X" as const }))
+    .catchTag("X", () => succeed(0));
+
+  // A "b" transaction hidden inside a combinator is still refused.
+  // @ts-expect-error through all
+  m.transact(useRows.flatMap(() => all([inB])));
+  // @ts-expect-error through race
+  m.transact(useRows.flatMap(() => race([inB, inB])));
+  // @ts-expect-error through forEachPar
+  m.transact(useRows.flatMap(() => forEachPar([1], () => inB)));
+  // @ts-expect-error through retry
+  m.transact(useRows.flatMap(() => retry(inB, { times: 2 })));
+  // @ts-expect-error through scoped
+  m.transact(useRows.flatMap(() => scoped(inB)));
+  // @ts-expect-error through fork
+  m.transact(useRows.flatMap(() => fork(inB)));
+  const inBCaught = inB.flatMap(() => fail({ _tag: "Y" as const })).catchTag("Y", () => succeed(0));
+  // @ts-expect-error through catchTag
+  m.transact(useRows.flatMap(() => inBCaught));
 }

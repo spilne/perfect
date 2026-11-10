@@ -10,7 +10,20 @@ import { GenericContainer, Wait, type StartedTestContainer } from "testcontainer
 import { drizzle } from "drizzle-orm/postgres-js";
 import { sql } from "drizzle-orm";
 import postgres from "postgres";
-import { run } from "@spilne/perfect-core";
+import {
+  Cause,
+  MixedTransactionDefect,
+  type Throws,
+  type Transactor,
+  awaitFiber,
+  fail,
+  fork,
+  fromPromise,
+  interrupt,
+  run,
+  sleep,
+  succeed,
+} from "@spilne/perfect-core";
 import {
   CheckpointName,
   LeaseEpoch,
@@ -31,6 +44,8 @@ import { PgRateLimiter } from "../src/lib/pg-rate-limiter";
 import { PgRef } from "../src/lib/pg-ref";
 import { PgSingleflight } from "../src/lib/pg-singleflight";
 import { PgmqQueue } from "../src/pgmq/pgmq-queue";
+import { PgTransactor, type PgTx } from "../src/lib/pg-transactor";
+import type { PostgresError } from "../src/lib/postgres-error";
 import * as pgmq from "../src/pgmq/pgmq";
 // These tests await effects directly (await queue.publish(x)).
 import "@spilne/perfect-core/thenable";
@@ -433,6 +448,122 @@ describe.skipIf(!dockerAvailable)("integration — postgres:17-alpine", () => {
     expect([r1, r2, r3]).toEqual(["result", "result", "result"]);
     expect(executions).toBe(1);
   }, 20_000);
+
+  // ── PgTransactor ────────────────────────────────────────────────
+
+  type PgTransactorFor<K extends string> = Transactor<K, PgTx, Throws<PostgresError>>;
+
+  const countItems = async (client: ReturnType<typeof postgres>, table: string) =>
+    Number((await client.unsafe(`SELECT count(*)::int AS n FROM ${table}`))[0]!.n);
+
+  const insertItem = (pg: PgTransactorFor<"pg">, table: string, id: string) =>
+    pg.withHandle(({ db: tx }) =>
+      fromPromise(
+        () => tx.execute(sql.raw(`INSERT INTO ${table} (id) VALUES ('${id}')`)),
+        (cause) => cause,
+      ).orDie(),
+    );
+
+  it("pg-transactor: commit makes all writes visible", async () => {
+    await sqlClient`CREATE TABLE tx_commit (id text PRIMARY KEY)`;
+    const pg = PgTransactor.make({ db });
+
+    await run(
+      pg.transact(function* () {
+        yield* insertItem(pg, "tx_commit", "a");
+        yield* insertItem(pg, "tx_commit", "b");
+      }).orDie(),
+    );
+
+    expect(await countItems(sqlClient, "tx_commit")).toBe(2);
+  }, 20_000);
+
+  it("pg-transactor: a typed failure rolls back", async () => {
+    await sqlClient`CREATE TABLE tx_rollback (id text PRIMARY KEY)`;
+    const pg = PgTransactor.make({ db });
+
+    await run(
+      pg
+        .transact(function* () {
+          yield* insertItem(pg, "tx_rollback", "a");
+          return yield* fail({ _tag: "Declined" as const });
+        })
+        .catchTag("Declined", () => succeed(undefined))
+        .orDie(),
+    );
+
+    expect(await countItems(sqlClient, "tx_rollback")).toBe(0);
+  }, 20_000);
+
+  it("pg-transactor: uncommitted writes are invisible to another connection", async () => {
+    await sqlClient`CREATE TABLE tx_isolation (id text PRIMARY KEY)`;
+    const pg = PgTransactor.make({ db });
+    const other = postgres(connString(container));
+    let seenInside = -1;
+
+    await run(
+      pg.transact(function* () {
+        yield* insertItem(pg, "tx_isolation", "a");
+        seenInside = yield* fromPromise(
+          () => countItems(other, "tx_isolation"),
+          (cause) => cause,
+        ).orDie();
+      }).orDie(),
+    );
+
+    expect(seenInside).toBe(0);
+    expect(await countItems(other, "tx_isolation")).toBe(1);
+    await other.end();
+  }, 20_000);
+
+  it("pg-transactor: interrupting rolls back", async () => {
+    await sqlClient`CREATE TABLE tx_interrupt (id text PRIMARY KEY)`;
+    const pg = PgTransactor.make({ db });
+
+    await run(
+      fork(
+        pg.transact(insertItem(pg, "tx_interrupt", "a").flatMap(() => sleep(1_000_000))).exit(),
+      ).flatMap((fiber) =>
+        sleep(200)
+          .flatMap(() => interrupt(fiber))
+          .flatMap(() => awaitFiber(fiber)),
+      ),
+    );
+
+    expect(await countItems(sqlClient, "tx_interrupt")).toBe(0);
+    expect(await countItems(sqlClient, "tx_commit")).toBe(2); // the pool still works
+  }, 20_000);
+
+  it("pg-transactor: a second transactor left at \"pg\" cannot use the first one's transaction", async () => {
+    await sqlClient`CREATE TABLE tx_same_kind (id text PRIMARY KEY)`;
+    const main = PgTransactor.make({ db });
+    const billing = PgTransactor.make({ db });
+
+    const exit = await run(main.transact(insertItem(billing, "tx_same_kind", "a")).exit());
+
+    expect(exit._tag).toBe("Failure");
+    const defect = exit._tag === "Failure" ? Cause.defects(exit.cause)[0] : undefined;
+    expect(defect).toBeInstanceOf(MixedTransactionDefect);
+    expect(await countItems(sqlClient, "tx_same_kind")).toBe(0);
+  }, 20_000);
+
+  it("pg-transactor: a failed commit fails with PostgresError", async () => {
+    await sqlClient`CREATE TABLE tx_deferred (id text, CONSTRAINT tx_deferred_unique UNIQUE (id) DEFERRABLE INITIALLY DEFERRED)`;
+    const pg = PgTransactor.make({ db });
+
+    const result = await run(
+      pg
+        .transact(function* () {
+          yield* insertItem(pg, "tx_deferred", "a");
+          yield* insertItem(pg, "tx_deferred", "a");
+        })
+        .map(() => "committed")
+        .catchTag("PostgresError", (e) => succeed(e.operation)),
+    );
+
+    expect(result).toBe("pg.commit");
+    expect(await countItems(sqlClient, "tx_deferred")).toBe(0);
+  }, 20_000);
 });
 
 // ---------------------------------------------------------------------------
@@ -628,4 +759,70 @@ describe.skipIf(!dockerAvailable)("integration — pgmq (ghcr.io/pgmq/pg17-pgmq)
     expect(x2!.value).toEqual({ userId: "x", sequence: 2 });
     await x2!.ack();
   }, 60_000);
+
+  // ── publishIn: PGMQ inside a Postgres transaction ───────────────
+
+  it("publishIn commits with the other writes", async () => {
+    await sqlClient`CREATE TABLE tx_payments (id text PRIMARY KEY)`;
+    const queue = await PgmqQueue.create<{ job: string }>(db, "tx_commit_q", {
+      defaultPollIntervalMs: 50,
+    });
+    const pg = PgTransactor.make({ db });
+
+    await run(
+      pg
+        .transact(function* () {
+          yield* pg.withHandle(({ db: tx }) =>
+            fromPromise(
+              () => tx.execute(sql`INSERT INTO tx_payments (id) VALUES ('p1')`),
+              (cause) => cause,
+            ).orDie(),
+          );
+          yield* queue.publishIn(pg, { job: "a" });
+        })
+        .orDie(),
+    );
+
+    const rows = await sqlClient`SELECT id FROM tx_payments`;
+    expect(rows.length).toBe(1);
+    const [envelope] = await run(queue.subscribeAck().take(1).toArray().orDie());
+    expect(envelope!.value).toEqual({ job: "a" });
+    await envelope!.ack();
+  }, 30_000);
+
+  it("publishIn rolls back with the transaction", async () => {
+    await sqlClient`CREATE TABLE tx_payments_rb (id text PRIMARY KEY)`;
+    const queue = await PgmqQueue.create<{ job: string }>(db, "tx_rollback_q", {
+      defaultPollIntervalMs: 50,
+    });
+    const pg = PgTransactor.make({ db });
+
+    await run(
+      pg
+        .transact(function* () {
+          yield* pg.withHandle(({ db: tx }) =>
+            fromPromise(
+              () => tx.execute(sql`INSERT INTO tx_payments_rb (id) VALUES ('p1')`),
+              (cause) => cause,
+            ).orDie(),
+          );
+          yield* queue.publishIn(pg, { job: "a" });
+          return yield* fail({ _tag: "Declined" as const });
+        })
+        .catchTag("Declined", () => succeed(undefined))
+        .orDie(),
+    );
+
+    const rows = await sqlClient`SELECT id FROM tx_payments_rb`;
+    expect(rows.length).toBe(0);
+    expect((await queue.metrics()).queueLength).toBe(0);
+  }, 30_000);
+
+  it("publishIn outside a transaction does not compile", async () => {
+    const queue = await PgmqQueue.create<{ job: string }>(db, "tx_types_q");
+    const pg = PgTransactor.make({ db });
+    // @ts-expect-error publishIn needs Tx<"pg">, so it must run inside pg.transact
+    const _outside = () => run(queue.publishIn(pg, { job: "a" }).orDie());
+    expect(_outside).toBeDefined();
+  });
 });

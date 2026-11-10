@@ -7,7 +7,14 @@
 // batch); database and schema failures remain in the Stream effect channel.
 // ---------------------------------------------------------------------------
 
-import { fromPromise, succeed, type Eff, type Throws } from "@spilne/perfect-core";
+import {
+  fromPromise,
+  succeed,
+  type Eff,
+  type Throws,
+  type Transactor,
+  type Tx,
+} from "@spilne/perfect-core";
 import { Stream, type SchemaParser } from "@spilne/perfect-core/stream";
 import { JsonCodec } from "@spilne/perfect-core/connect";
 import type {
@@ -20,6 +27,7 @@ import type {
   TransactionalSinkable,
 } from "@spilne/perfect-core/connect";
 import type { DrizzleDb } from "../lib/drizzle-db.js";
+import type { PgTx } from "../lib/pg-transactor.js";
 import { pollStream } from "../lib/poll-stream.js";
 import { PostgresError, toPostgresError } from "../lib/postgres-error.js";
 import type { ReadMode, AckMode, PgmqRecord } from "./types.js";
@@ -255,6 +263,21 @@ export class PgmqQueue<T>
         });
       },
       (cause) => toPgmqQueueError("pgmq.publish", cause),
+    );
+  }
+
+  /** Publish inside an open transaction: the message is sent only if it commits. */
+  publishIn<K extends string>(
+    transactor: Transactor<K, PgTx, Throws<PostgresError>>,
+    value: T,
+  ): Eff<void, Tx<K, PgTx> | Throws<PgmqQueueError>> {
+    return transactor.withHandle(({ db }) =>
+      fromPromise(
+        async () => {
+          await pgmq.send(db, this.queue, { data: this.codec.encode(value) });
+        },
+        (cause) => toPgmqQueueError("pgmq.publishIn", cause),
+      ),
     );
   }
 
