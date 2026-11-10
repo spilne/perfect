@@ -56,6 +56,13 @@ const program = scoped(
   partitions under the test's control (deterministic with `TestClock` and
   `TestRandom`).
 
+- **Hostile peers:** message sizes, receive queues, channels per connection and
+  gossip tables are all bounded, and malformed input is rejected with typed
+  errors and counters. Gossip has no authentication unless you pass an
+  `authenticator` (`GossipAuth.hmacSha256(key)`, a shared cluster key); it is not
+  encryption and does not stop replay. Run it on a private network or over TLS.
+  The guide lists every limit.
+
 See the [networking guide](../../documentation/20-networking.md).
 
 ## Service cluster

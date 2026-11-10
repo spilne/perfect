@@ -57,6 +57,11 @@ export interface ListenOptions<M, S> extends ConnectionOptions<M> {
   readonly handle: (connection: Connection<M>) => Eff<unknown, S>;
   /** Serve TLS with this certificate and key (and options). */
   readonly tls?: tls.TlsOptions;
+  /**
+   * Connections served at once, at most. A connection arriving over the
+   * limit is closed straight away. Default: no limit.
+   */
+  readonly maxConnections?: number;
 }
 
 /** A running listener. */
@@ -149,11 +154,7 @@ export function serveConnections<M, S>(params: {
   readonly options: ListenOptions<M, S>;
 }): Eff<Listener, Throws<ListenError> | Exclude<S, Throws<unknown>>> {
   const { options } = params;
-  const accepted = new Inbox<Connection<M>, never>(
-    Infinity,
-    () => {},
-    () => {},
-  );
+  const accepted = new Inbox<Connection<M>, never>();
 
   const serveOne = (connection: Connection<M>): Eff<unknown, Exclude<S, Throws<unknown>>> =>
     options
@@ -183,8 +184,18 @@ export function serveConnections<M, S>(params: {
       .map(() => undefined),
   );
 
+  const maxConnections = options.maxConnections ?? Infinity;
+  if (!(maxConnections >= 1)) {
+    throw new RangeError(`maxConnections must be at least 1, got ${maxConnections}`);
+  }
+  let active = 0;
   const open = params
-    .start((socket, remote) => accepted.push(connectionOver(socket, remote, options)))
+    .start((socket, remote) => {
+      if (active >= maxConnections) return void socket.destroy();
+      active += 1;
+      socket.once("close", () => (active -= 1));
+      accepted.push(connectionOver(socket, remote, options));
+    })
     .flatMap((started) =>
       forkDaemon(acceptLoop).map((loop) => {
         let closed = false;
@@ -228,7 +239,9 @@ function listenOnSockets<M, S>(
           ? tls.createServer(options.tls, onSocket)
           : net.createServer(onSocket);
         const sockets = new Set<net.Socket>();
-        server.on(options.tls ? "secureConnection" : "connection", (socket: net.Socket) => {
+        // The raw socket is tracked from the start, so a TLS client that never
+        // finishes its handshake is closed with the listener too.
+        server.on("connection", (socket: net.Socket) => {
           sockets.add(socket);
           socket.once("close", () => sockets.delete(socket));
         });

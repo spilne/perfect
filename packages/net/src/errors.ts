@@ -32,5 +32,11 @@ export class MessageError extends TaggedError("MessageError")<{
   readonly cause?: unknown;
 }>() {}
 
+/** A multiplexer has as many channels as it allows, or has used up its channel ids. */
+export class ChannelLimitExceeded extends TaggedError("ChannelLimitExceeded")<{
+  readonly address: string;
+  readonly message: string;
+}>() {}
+
 /** What can go wrong once a connection is open. */
-export type NetError = ConnectionError | MessageError;
+export type NetError = ConnectionError | MessageError | ChannelLimitExceeded;

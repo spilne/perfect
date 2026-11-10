@@ -1,6 +1,27 @@
 import { describe, expect, test } from "bun:test";
-import { RetryPolicy, eff, fork, scoped, sleep } from "@spilne/perfect-core";
-import { BinaryCodec, Resilient, SimulatedNetwork, Tcp, type Connection } from "../src";
+import {
+  Deferred,
+  RetryPolicy,
+  acquireRelease,
+  eff,
+  fail,
+  fork,
+  forkDaemon,
+  scoped,
+  sleep,
+  succeed,
+  suspend,
+  sync,
+} from "@spilne/perfect-core";
+import { Stream } from "@spilne/perfect-core/stream";
+import {
+  BinaryCodec,
+  ConnectionError,
+  Resilient,
+  SimulatedNetwork,
+  Tcp,
+  type Connection,
+} from "../src";
 
 const codec = BinaryCodec.json<number>();
 const quickRetry = RetryPolicy.exponential({ initial: 1 }).withMaxRetries(3);
@@ -146,5 +167,55 @@ describe("Resilient.connect", () => {
       .orDie()
       .run();
     expect(answer).toBe(42);
+  });
+
+  test("a connection that finishes opening after close is closed, not kept", async () => {
+    let live = 0;
+    let opens = 0;
+    const result = await eff(function* () {
+      const gate = yield* Deferred.make<void>();
+      const fake = (broken: boolean): Connection<number> => ({
+        remote: "fake",
+        send: () =>
+          broken
+            ? fail(new ConnectionError({ address: "fake", message: "broken" }))
+            : succeed(undefined),
+        messages: Stream.empty(),
+        close: succeed(undefined),
+      });
+      const open = suspend(() => {
+        opens += 1;
+        const mine = opens;
+        // The first connection is broken at once; the second takes its time.
+        return (mine === 1 ? succeed(undefined) : gate.await).flatMap(() =>
+          acquireRelease(
+            sync(() => {
+              live += 1;
+              return fake(mine === 1);
+            }),
+            () => sync(() => void (live -= 1)),
+          ),
+        );
+      });
+      const lifetime = yield* forkDaemon(
+        scoped(
+          Resilient.connect(open, { retry: quickRetry }).flatMap((connection) =>
+            fork(connection.send(1).either()).flatMap(() => sleep(1e9)),
+          ),
+        ),
+      );
+      yield* sleep(20);
+      const reconnecting = { opens, live };
+      yield* sync(() => void lifetime.interrupt());
+      yield* sleep(20);
+      yield* gate.succeed(undefined);
+      yield* sleep(50);
+      return { reconnecting, opens, live };
+    })
+      .orDie()
+      .run();
+    expect(result.reconnecting).toEqual({ opens: 2, live: 0 });
+    expect(result.live).toBe(0);
+    expect(result.opens).toBe(2);
   });
 });

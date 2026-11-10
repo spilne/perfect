@@ -10,20 +10,61 @@ type State<E> =
   | { readonly _tag: "Ended" }
   | { readonly _tag: "Failed"; readonly error: E };
 
+/** What to do with a message that arrives when `max` messages already wait. */
+export type OverflowPolicy = "fail" | "drop-oldest" | "drop-newest";
+
+export interface InboxOptions<E> {
+  /** Pause the source once this many messages wait. Default: never. */
+  readonly highWaterMark?: number;
+  readonly pause?: () => void;
+  readonly resume?: () => void;
+  /**
+   * A hard limit for sources that can't be paused (a WebSocket): what
+   * happens to a message that arrives while `max` wait unread. `fail` ends
+   * the inbox with `error()` once what is already here has been read.
+   */
+  readonly limit?: {
+    readonly max: number;
+    readonly policy: OverflowPolicy;
+    readonly error: () => E;
+  };
+}
+
 export class Inbox<T, E> {
   private items: T[] = [];
   private state: State<E> = { _tag: "Open" };
   private waiting: ((batch: Eff<T[] | undefined, Throws<E>>) => void) | undefined;
   private paused = false;
+  private dropped = 0;
+  private readonly highWaterMark: number;
+  private readonly pause: () => void;
+  private readonly resume: () => void;
 
-  constructor(
-    private readonly highWaterMark: number,
-    private readonly pause: () => void,
-    private readonly resume: () => void,
-  ) {}
+  constructor(private readonly options: InboxOptions<E> = {}) {
+    this.highWaterMark = options.highWaterMark ?? Infinity;
+    this.pause = options.pause ?? (() => {});
+    this.resume = options.resume ?? (() => {});
+  }
+
+  /** Messages waiting to be read. */
+  get size(): number {
+    return this.items.length;
+  }
+
+  /** Messages thrown away by the overflow policy so far. */
+  get droppedCount(): number {
+    return this.dropped;
+  }
 
   push(item: T): void {
     if (this.state._tag !== "Open") return;
+    const limit = this.options.limit;
+    if (limit && this.items.length >= limit.max) {
+      if (limit.policy === "fail") return this.fail(limit.error());
+      this.dropped += 1;
+      if (limit.policy === "drop-newest") return;
+      this.items.shift();
+    }
     this.items.push(item);
     this.wakeReader();
     if (!this.paused && this.items.length >= this.highWaterMark) {

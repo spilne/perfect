@@ -12,8 +12,8 @@
 // Multiplexer and the Recorder like any other.
 //
 // The WebSocket API can't pause the other side, so received messages are
-// buffered however fast they come; read them promptly. Sending waits while
-// more than `maxBufferedBytes` are queued in the socket.
+// buffered up to `maxQueuedMessages`, then `onOverflow` decides. Sending waits
+// while more than `maxBufferedBytes` are queued in the socket.
 
 import {
   acquireRelease,
@@ -42,6 +42,18 @@ export interface WebSocketOptions<M> extends ConnectionOptions<M> {
   readonly timeoutMs?: number;
   /** `send` waits while more than this many bytes wait to go out. Default: 1 MiB. */
   readonly maxBufferedBytes?: number;
+  /**
+   * The most received messages that may wait unread. A WebSocket can't be
+   * paused, so this is the only bound on memory. Default: 10 000.
+   */
+  readonly maxQueuedMessages?: number;
+  /**
+   * What happens to a message that arrives over `maxQueuedMessages`: `fail`
+   * (default) fails `messages` with a MessageError, after the queued ones,
+   * and closes the socket; `drop-oldest` and `drop-newest` throw one message
+   * away and carry on.
+   */
+  readonly onOverflow?: "fail" | "drop-oldest" | "drop-newest";
 }
 
 /** Close codes that mean the connection ended normally. */
@@ -116,12 +128,23 @@ function connectionOver<M>(
   const { codec } = options;
   const maxMessageBytes = options.maxMessageBytes ?? DEFAULT_MAX_FRAME_BYTES;
   const maxBufferedBytes = options.maxBufferedBytes ?? 1024 * 1024;
-  // The socket can't be paused, so the inbox never asks it to.
-  const inbox = new Inbox<M, NetError>(
-    Infinity,
-    () => {},
-    () => {},
-  );
+  const maxQueued = options.maxQueuedMessages ?? 10_000;
+  if (!(maxQueued >= 1))
+    throw new RangeError(`maxQueuedMessages must be at least 1, got ${maxQueued}`);
+  // The socket can't be paused, so the inbox has a hard limit instead.
+  const inbox = new Inbox<M, NetError>({
+    limit: {
+      max: maxQueued,
+      policy: options.onOverflow ?? "fail",
+      error: () => {
+        socket.close(1008, "too many unread messages");
+        return new MessageError({
+          address: remote,
+          message: `more than ${maxQueued} received messages are waiting to be read`,
+        });
+      },
+    },
+  });
   const broken = (message: string, cause?: unknown) =>
     new ConnectionError({ address: remote, message, cause });
 
@@ -144,8 +167,9 @@ function connectionOver<M>(
       socket.close(1009, "message too big");
       return;
     }
+    let message: M;
     try {
-      inbox.push(codec.decode(bytes));
+      message = codec.decode(bytes);
     } catch (error) {
       inbox.fail(
         new MessageError({
@@ -154,7 +178,10 @@ function connectionOver<M>(
           cause: error,
         }),
       );
+      socket.close(1007, "undecodable message");
+      return;
     }
+    inbox.push(message);
   });
   socket.addEventListener("close", (event: CloseEvent) => {
     if (NORMAL_CLOSE.has(event.code)) inbox.end();

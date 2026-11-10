@@ -1,7 +1,16 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { RetryPolicy, eff, fork, join, sleep, tryPromise } from "@spilne/perfect-core";
+import {
+  RetryPolicy,
+  eff,
+  fork,
+  join,
+  sleep,
+  sync,
+  timeoutOption,
+  tryPromise,
+} from "@spilne/perfect-core";
 import { WebSocketServer, type WebSocket as ServerSocket } from "ws";
-import { BinaryCodec, Resilient, WebSocketClient } from "../src";
+import { BinaryCodec, Resilient, WebSocketClient, type WebSocketOptions } from "../src";
 
 type Message = { readonly n: number };
 const codec = BinaryCodec.json<Message>();
@@ -156,5 +165,85 @@ describe("WebSocketClient", () => {
       .run();
     expect(replies).toEqual([{ n: 2 }, { n: 4 }]);
     expect(connections).toBe(2);
+  });
+
+  describe("a consumer that reads slower than the server sends", () => {
+    const burst = (socket: ServerSocket) => {
+      for (let n = 0; n < 50; n++) socket.send(JSON.stringify({ n }));
+    };
+    // Give the whole burst time to arrive before anyone reads.
+    const readLater = (url: string, options: Partial<WebSocketOptions<Message>>) =>
+      WebSocketClient.connect(url, { codec, ...options })
+        .use((connection) =>
+          sleep(150).flatMap(() => connection.messages.take(50).toArray().either()),
+        )
+        .orDie()
+        .run();
+
+    test("fails with a MessageError once the queue limit is passed", async () => {
+      let serverClosed = false;
+      const { url } = await serve((socket) => {
+        socket.on("close", () => (serverClosed = true));
+        burst(socket);
+      });
+      const result = await readLater(url, { maxQueuedMessages: 5 });
+      expect(result._tag === "Left" && result.left._tag).toBe("MessageError");
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(serverClosed).toBe(true);
+    });
+
+    test("drop-oldest keeps the newest messages", async () => {
+      const { url } = await serve(burst);
+      const seen: number[] = [];
+      await WebSocketClient.connect(url, {
+        codec,
+        maxQueuedMessages: 5,
+        onOverflow: "drop-oldest",
+      })
+        .use((connection) =>
+          sleep(150).flatMap(() =>
+            timeoutOption(
+              connection.messages.forEach((m) => sync(() => void seen.push(m.n))),
+              100,
+            ),
+          ),
+        )
+        .orDie()
+        .run();
+      expect(seen).toEqual([45, 46, 47, 48, 49]);
+    });
+
+    test("drop-newest keeps the oldest messages", async () => {
+      const { url } = await serve(burst);
+      const seen: number[] = [];
+      await WebSocketClient.connect(url, {
+        codec,
+        maxQueuedMessages: 5,
+        onOverflow: "drop-newest",
+      })
+        .use((connection) =>
+          sleep(150).flatMap(() =>
+            timeoutOption(
+              connection.messages.forEach((m) => sync(() => void seen.push(m.n))),
+              100,
+            ),
+          ),
+        )
+        .orDie()
+        .run();
+      expect(seen).toEqual([0, 1, 2, 3, 4]);
+    });
+
+    test("as many queued messages as the limit is fine", async () => {
+      const { url } = await serve((socket) => {
+        for (let n = 0; n < 5; n++) socket.send(JSON.stringify({ n }));
+        socket.close(1000);
+      });
+      const result = await WebSocketClient.connect(url, { codec, maxQueuedMessages: 5 })
+        .use((connection) => sleep(100).flatMap(() => connection.messages.toArray()))
+        .orDie()
+        .run();
+      expect(result.map((m) => m.n)).toEqual([0, 1, 2, 3, 4]);
+    });
   });
 });

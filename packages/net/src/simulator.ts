@@ -8,6 +8,9 @@
 //   yield* provide(client, Transport, network.node("a"));   // connects to { host: "b", port }
 //   network.partition("a", "b");                            // now nothing gets through
 //
+// There is no TLS on it: connecting or listening with `tls` fails instead of
+// pretending to be secure.
+//
 // Delays use the Clock service and random choices the Random service of the
 // code that called `make`, so with TestClock and TestRandom a test is fully
 // deterministic. Connections use the same framing and codec code as real
@@ -78,6 +81,19 @@ export class SimulatedNetwork {
 
   /** Set the conditions of the link between `a` and `b`. */
   link(a: string, b: string, conditions: LinkConditions): void {
+    const { latencyMs, lossRate } = conditions;
+    if (lossRate !== undefined && !(lossRate >= 0 && lossRate <= 1)) {
+      throw new RangeError(`lossRate must be from 0 to 1, got ${lossRate}`);
+    }
+    const [min, max] =
+      typeof latencyMs === "object"
+        ? [latencyMs.min, latencyMs.max]
+        : [latencyMs ?? 0, latencyMs ?? 0];
+    if (!(min >= 0 && max >= min && Number.isFinite(max))) {
+      throw new RangeError(
+        `latencyMs must be a finite number of ms from 0 up (or a min and max with min <= max), got ${JSON.stringify(latencyMs)}`,
+      );
+    }
     this.links.set(pairKey(a, b), conditions);
   }
 
@@ -116,6 +132,11 @@ export class SimulatedNetwork {
   ): Eff<Connection<M>, Throws<ConnectError>> {
     return suspend(() => {
       const where = formatAddress(address);
+      if (options.tls !== undefined) {
+        return fail(
+          new ConnectError({ address: where, message: "the simulated network doesn't do TLS" }),
+        );
+      }
       const host = "path" in address ? from : address.host;
       if (!this.reachable(from, host)) {
         return fail(
@@ -144,6 +165,14 @@ export class SimulatedNetwork {
       options,
       start: (accept) =>
         suspend(() => {
+          if (options.tls !== undefined) {
+            return fail(
+              new ListenError({
+                address: formatAddress(address),
+                message: "the simulated network doesn't do TLS",
+              }),
+            );
+          }
           const bound: Address =
             "path" in address
               ? address
