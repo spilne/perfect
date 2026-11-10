@@ -24,10 +24,13 @@ export { HashRing, hash32, type Move } from "./hash-ring.js";
 export {
   Gossip,
   type GossipOptions,
+  type GossipRejection,
+  type GossipStats,
   type Member,
   type MemberState,
   type MembershipEvent,
 } from "./gossip.js";
+export { GossipAuth, type GossipAuthenticator } from "./gossip-auth.js";
 export { Discovery } from "./discovery.js";
 export {
   Cluster,
