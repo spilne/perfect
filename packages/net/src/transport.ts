@@ -239,7 +239,9 @@ function listenOnSockets<M, S>(
           ? tls.createServer(options.tls, onSocket)
           : net.createServer(onSocket);
         const sockets = new Set<net.Socket>();
-        server.on(options.tls ? "secureConnection" : "connection", (socket: net.Socket) => {
+        // The raw socket is tracked from the start, so a TLS client that never
+        // finishes its handshake is closed with the listener too.
+        server.on("connection", (socket: net.Socket) => {
           sockets.add(socket);
           socket.once("close", () => sockets.delete(socket));
         });

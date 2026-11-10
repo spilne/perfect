@@ -61,15 +61,22 @@ interface Held<M> {
  * them when that caller's scope ends, which for a reconnect inside `send`
  * could be right away.
  */
-function hold<M>(
-  open: Eff<Connection<M>, Throws<ConnectError>>,
-): Eff<Held<M>, Throws<ConnectError>> {
+function hold<M>(params: {
+  open: Eff<Connection<M>, Throws<ConnectError>>;
+  /** Whether nobody wants the connection any more: then it is closed as soon as it opens. */
+  abandoned: () => boolean;
+}): Eff<Held<M>, Throws<ConnectError>> {
+  const { open, abandoned } = params;
   return Deferred.make<Connection<M>, ConnectError>().flatMap((opened) =>
     Deferred.make<void>().flatMap((letGo) =>
       forkDaemon(
         scoped(
           open
-            .flatMap((connection) => opened.succeed(connection).flatMap(() => letGo.await))
+            .flatMap((connection) =>
+              abandoned()
+                ? succeed(undefined)
+                : opened.succeed(connection).flatMap(() => letGo.await),
+            )
             .catch((error) => opened.fail(error).map(() => undefined)),
         ),
       ).flatMap(() =>
@@ -98,22 +105,27 @@ export const Resilient = {
     // A reconnect in progress, shared by everyone who needs the connection.
     let reconnecting: Eff<Held<M>, Throws<ConnectError>> | undefined;
     let closed = false;
+    let reconnectFiber: { interrupt(): unknown } | undefined;
     let remote = "";
 
     const openOnce: Eff<Held<M>, Throws<ConnectError>> = breaker
       ? breaker
-          .protect(hold(open))
+          .protect(hold({ open, abandoned: () => closed }))
           .catchTag("CircuitOpen", () =>
             fail(new ConnectError({ address: remote, message: "the circuit breaker is open" })),
           )
-      : hold(open);
+      : hold({ open, abandoned: () => closed });
 
     const reconnect: Eff<Held<M>, Throws<ConnectError>> = suspend(() => {
       if (reconnecting) return reconnecting;
-      const attempt = retry(openOnce, policy).map((held) => {
+      const closedError = () =>
+        new ConnectError({ address: remote, message: "the connection is closed" });
+      const attempt = retry(openOnce, policy).flatMap((held) => {
+        // Closed while it was opening: nobody will use it.
+        if (closed) return held.release.flatMap(() => fail(closedError()));
         current = held;
         remote = held.connection.remote;
-        return held;
+        return succeed(held);
       });
       // Every caller waits for the same attempt.
       reconnecting = Deferred.make<Held<M>, ConnectError>().flatMap((result) =>
@@ -121,8 +133,16 @@ export const Resilient = {
           attempt
             .flatMap((held) => result.succeed(held))
             .catch((error) => result.fail(error))
-            .ensuring(sync(() => (reconnecting = undefined))),
-        ).flatMap(() => result.await),
+            .ensuring(
+              sync(() => (reconnecting = undefined)).flatMap(() =>
+                // Interrupted by close: don't leave callers waiting.
+                result.fail(closedError()),
+              ),
+            ),
+        ).flatMap((fiber) => {
+          reconnectFiber = fiber;
+          return result.await;
+        }),
       );
       return reconnecting;
     });
@@ -177,6 +197,7 @@ export const Resilient = {
 
     const close: Eff<void, never> = suspend(() => {
       closed = true;
+      reconnectFiber?.interrupt();
       const held = current;
       current = undefined;
       return held ? held.connection.close.flatMap(() => held.release) : succeed(undefined);

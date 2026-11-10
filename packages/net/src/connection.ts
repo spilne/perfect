@@ -169,11 +169,18 @@ export function connectionOver<M>(
     if (closed || socket.destroyed) return resume(succeed(undefined));
     // Give the other end a moment to finish, then make sure it's gone.
     const timer = setTimeout(() => socket.destroy(), 5_000);
-    socket.once("close", () => {
+    const done = () => {
       clearTimeout(timer);
       resume(succeed(undefined));
-    });
+    };
+    socket.once("close", done);
     socket.end();
+    // Interrupted: stop waiting for the other end and drop the connection.
+    return () => {
+      clearTimeout(timer);
+      socket.off("close", done);
+      socket.destroy();
+    };
   });
 
   return {
