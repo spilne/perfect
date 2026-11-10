@@ -16,6 +16,7 @@
     { "path": "./packages/http" },
     { "path": "./packages/http-otel" },
     { "path": "./packages/otel" },
+    { "path": "./packages/ledger" },
     { "path": "./packages/topology" },
     { "path": "./packages/kafka" },
     { "path": "./packages/postgres" },

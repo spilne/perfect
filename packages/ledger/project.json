@@ -1,0 +1,10 @@
+{
+  "name": "@spilne/perfect-ledger",
+  "sourceRoot": "packages/ledger/src",
+  "targets": {
+    "build": {},
+    "test": {},
+    "lint": {},
+    "typecheck": {}
+  }
+}

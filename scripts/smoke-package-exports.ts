@@ -26,6 +26,7 @@ const packages = [
   },
   { dir: "packages/postgres", imports: ["dist/index.js", "dist/pgmq/index.js"] },
   { dir: "packages/redis", imports: ["dist/index.js"] },
+  { dir: "packages/ledger", imports: ["dist/index.js"] },
   { dir: "packages/topology", imports: ["dist/index.js"] },
   {
     dir: "packages/transform",
