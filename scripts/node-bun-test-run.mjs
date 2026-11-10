@@ -19,6 +19,7 @@ const ALL_TEST_ROOTS = [
   "packages/http-otel/test",
   "packages/net/test",
   "packages/otel/test",
+  "packages/ledger/test",
   "packages/topology/test",
   "packages/transform/test",
   "packages/kafka/test",

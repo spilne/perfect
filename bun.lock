@@ -110,6 +110,10 @@
         "@platformatic/kafka": "^2.14.0",
       },
     },
+    "packages/ledger": {
+      "name": "@spilne/perfect-ledger",
+      "version": "0.6.1",
+    },
     "packages/net": {
       "name": "@spilne/perfect-net",
       "version": "0.6.1",
@@ -830,6 +834,8 @@
     "@spilne/perfect-kafka-kafkajs": ["@spilne/perfect-kafka-kafkajs@workspace:packages/kafka-kafkajs"],
 
     "@spilne/perfect-kafka-platformatic": ["@spilne/perfect-kafka-platformatic@workspace:packages/kafka-platformatic"],
+
+    "@spilne/perfect-ledger": ["@spilne/perfect-ledger@workspace:packages/ledger"],
 
     "@spilne/perfect-net": ["@spilne/perfect-net@workspace:packages/net"],
 
