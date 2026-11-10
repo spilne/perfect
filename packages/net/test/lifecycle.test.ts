@@ -56,7 +56,6 @@ describe("maxConnections", () => {
           maxConnections: 2,
           handle: (connection) => connection.messages.forEach(() => sleep(0)),
         });
-        const port = portOf(listener.address);
         const open = connect(portOf(listener.address)).flatMap((socket) =>
           sync(() => {
             sockets.push(socket);

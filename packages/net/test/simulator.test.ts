@@ -276,3 +276,100 @@ describe("SimulatedNetwork", () => {
     expect(answer).toBe(10);
   });
 });
+
+describe("SimulatedNetwork fidelity", () => {
+  test("random latency spreads arrivals out but never reorders a direction, in either direction", async () => {
+    const clock = new TestClock();
+    const atServer: [number, number][] = [];
+    const atClient: [number, number][] = [];
+    const program = scoped(
+      eff(function* () {
+        const network = yield* SimulatedNetwork.make();
+        network.link("client", "server", { latencyMs: { min: 1, max: 100 } });
+        const listener = yield* network.node("server").listen(
+          { host: "server", port: 0 },
+          {
+            codec,
+            handle: (connection) =>
+              eff(function* () {
+                for (let n = 0; n < 30; n++) yield* connection.send(n);
+                yield* connection.messages.forEach((n) =>
+                  eff(function* () {
+                    atServer.push([n, clock.now()]);
+                  }),
+                );
+              }),
+          },
+        );
+        const connection = yield* network.node("client").connect(listener.address, { codec });
+        for (let n = 0; n < 30; n++) yield* connection.send(n);
+        yield* connection.messages.forEach((n) =>
+          eff(function* () {
+            atClient.push([n, clock.now()]);
+          }),
+        );
+      }),
+    );
+    const fiber = runFiber(
+      provide(provide(program, Clock, clock), Random, new TestRandom(11)).orDie(),
+    );
+    for (let t = 0; t < 400; t++) {
+      clock.advance(1);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+    fiber.interrupt();
+    const order = Array.from({ length: 30 }, (_, n) => n);
+    for (const arrivals of [atServer, atClient]) {
+      expect(arrivals.map(([n]) => n)).toEqual(order);
+      const times = arrivals.map(([, at]) => at);
+      expect(times).toEqual([...times].sort((a, b) => a - b));
+      // Control: the latency really varied, so the order above was kept on purpose.
+      expect(new Set(times).size).toBeGreaterThan(2);
+    }
+  });
+
+  test("conditions that mean nothing are refused when the link is set", () => {
+    const run = (conditions: Parameters<SimulatedNetwork["link"]>[2]) =>
+      provide(
+        SimulatedNetwork.make().flatMap((network) =>
+          eff(function* () {
+            network.link("a", "b", conditions);
+          }),
+        ),
+        Random,
+        new TestRandom(1),
+      )
+        .orDie()
+        .run();
+    expect(run({ lossRate: 1.5 })).rejects.toThrow(RangeError);
+    expect(run({ lossRate: -0.1 })).rejects.toThrow(RangeError);
+    expect(run({ lossRate: Number.NaN })).rejects.toThrow(RangeError);
+    expect(run({ latencyMs: -5 })).rejects.toThrow(RangeError);
+    expect(run({ latencyMs: { min: 50, max: 10 } })).rejects.toThrow(RangeError);
+    expect(run({ latencyMs: Number.NaN })).rejects.toThrow(RangeError);
+    expect(run({ latencyMs: { min: 1, max: 5 }, lossRate: 0.2 })).resolves.toBeUndefined();
+  });
+
+  test("TLS is refused instead of silently ignored", async () => {
+    const result = await scoped(
+      eff(function* () {
+        const network = yield* SimulatedNetwork.make();
+        const secureListen = yield* network
+          .node("server")
+          .listen({ host: "server", port: 1 }, { codec, handle: doubler, tls: {} })
+          .either();
+        const listener = yield* network
+          .node("server")
+          .listen({ host: "server", port: 1 }, { codec, handle: doubler });
+        const secureConnect = yield* network
+          .node("client")
+          .connect(listener.address, { codec, tls: true })
+          .either();
+        return { listen: secureListen._tag, connect: secureConnect._tag };
+      }),
+    )
+      .orDie()
+      .run();
+    expect(result).toEqual({ listen: "Left", connect: "Left" });
+  });
+});
