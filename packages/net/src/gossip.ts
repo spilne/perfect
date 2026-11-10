@@ -17,12 +17,14 @@
 // of them gets an answer either, the member is suspected. A suspected member
 // that doesn't prove it is alive within `suspicionMs` is declared dead.
 //
-// Every message carries the sender's whole member list, and the receiver
-// merges it into its own, so news spreads through the cluster in a few
-// rounds. Each member has an incarnation number that only it increases:
-// when it hears that it is suspected, it increases the number and tells
-// everyone it is alive, and the higher number wins over the suspicion.
-// Gossip carries a bounded sample of the member list, not all of it: up to
+// Every message carries a list of members, and the receiver merges it into
+// its own, so news spreads through the cluster in a few rounds. Each member
+// has an incarnation number that only it increases: when it hears that it is
+// suspected, it increases the number and tells everyone it is alive, and the
+// higher number wins over the suspicion. At the same incarnation, worse news
+// wins: dead and left over suspect over alive.
+//
+// The list is a bounded sample of the table, not all of it: up to
 // `maxDigestMembers` entries per message (default 128), made of the members
 // that changed most recently and a window that rotates over the rest, so
 // every entry is passed on within a few rounds and message size doesn't

@@ -104,7 +104,15 @@ assertEq(chained, [
   the socket pauses until the reader catches up.
 - **Errors** are typed: `ConnectError` and `ListenError` when opening fails,
   `ConnectionError` when an open connection breaks, `MessageError` when a
-  message can't be decoded or is too big.
+  message can't be decoded or is too big, or when the connection ends in the
+  middle of a message (a cut-off message is never mistaken for a clean end).
+  Messages that arrived before a bad one are still delivered, then the
+  stream fails and the connection is dropped.
+- **Limits:** `maxMessageBytes` (default 16 MiB) bounds one message and
+  must fit the 4-byte length header; `highWaterMark` (default 1024) pauses
+  the socket while that many received messages wait unread, so a slow reader
+  slows the sender instead of growing memory. `maxConnections` on `listen`
+  closes connections beyond that many at once (default: no limit).
 - **Closing** sends what is still buffered first. If the other side doesn't
   read it within 5 seconds, the socket is closed anyway, and a `send` still
   waiting on it fails with `ConnectionError`.
@@ -153,8 +161,11 @@ assertEq(ticks, [
   reason"). The client closes with 1000 when its scope ends.
 - **Backpressure:** `send` waits while more than `maxBufferedBytes`
   (default 1 MiB) wait to go out. The WebSocket API can't pause the other
-  side, so received messages are buffered however fast they come; read
-  them promptly.
+  side, so received messages are queued up to `maxQueuedMessages` (default
+  10 000). Past that, `onOverflow` decides: `"fail"` (default) fails
+  `messages` with a `MessageError` after the queued ones and closes the
+  socket; `"drop-oldest"` and `"drop-newest"` throw one message away and
+  carry on. A message that can't be decoded also closes the socket.
 - **Reconnecting:** `Resilient.connect(WebSocketClient.connect(url, opts))`.
 
 ## Codecs
@@ -224,9 +235,27 @@ console.log(shouted); // → ["HELLO", "BYE"]
 
 Each channel has a window of messages (`window`, default 256) that the
 sender may have unread on the other side. When the reader falls behind,
-that channel's `send` waits, and the other channels keep going. When the
-shared connection closes or breaks, every channel's messages end and `open`
-fails.
+that channel's `send` waits, and the other channels keep going. Each side
+tells the other its window when a channel opens, so the two sides may use
+different windows. When the shared connection closes or breaks, every
+channel's messages end, senders waiting for credit fail, and `open` fails.
+
+The other side is not trusted, so what it controls is bounded:
+
+| Option | Default | |
+| --- | --- | --- |
+| `window` | 256 | unread messages per channel; a peer that sends more has that channel failed (a `MessageError` for the reader, a CLOSE to the peer) |
+| `maxChannels` | 1024 | open channels, whoever opened them; `open` fails with `ChannelLimitExceeded`, channels the peer opens beyond it are refused with a CLOSE |
+| `maxPendingIncoming` | 128 | channels the peer opened that nobody has taken from `incoming`; more are refused |
+
+A peer that breaks the framing (a repeated, backward or wrong-parity
+channel id, an unknown frame kind, a short frame) stops the whole
+multiplexer with a `MessageError` and the connection is closed. Closed
+channels leave the tables at once; late frames for them are ignored.
+`mux.stats` shows the open and pending channels and how many were
+refused. The wire format changed (OPEN carries the window, and the
+accepting side answers with a CREDIT frame), so both ends must run the same
+version.
 
 ## Reconnecting
 
@@ -407,14 +436,86 @@ have to wait for them to time out.
 | `pingTimeoutMs` | 300 | how long to wait for an answer |
 | `indirectChecks` | 3 | members asked to check one that didn't answer |
 | `suspicionMs` | 5000 | how long a suspect has to show it is alive |
+| `deadRetentionMs` | six times `suspicionMs`, at least 30 intervals | how long dead and departed members are remembered |
+| `seedRefreshMs` | five intervals, at least `suspicionMs` | how often to retry seeds that aren't members while others are known |
+| `maxDigestMembers` | 128 | members listed in one message |
+| `maxMembersPerMessage` | 512 | members a received message may list (at least `maxDigestMembers + 1`) |
+| `maxMessageBytes` | 1 MiB | the largest message accepted |
+| `maxMembers` | 10 000 | members remembered, dead ones included |
+| `maxInboundConnections` | 1024 | gossip connections open at once |
+| `authenticator` | none | signs and verifies messages (see below) |
 
-Metadata is sent as JSON with every message, so keep it small. Clusters of
-up to a few hundred members are fine.
+Metadata is sent as JSON with every message, so keep it small.
+
+**Scaling.** A message carries a sample of the member list, not all of it:
+this member, the entries that changed most recently, and a window that
+rotates over the rest, up to `maxDigestMembers` entries. Message size
+therefore doesn't grow with the cluster, but news about a quiet member takes
+about `members / maxDigestMembers` rounds to be passed on. A few thousand
+members work; at tens of thousands, spreading takes minutes and you should
+shard into several clusters. Members that died or left are forgotten after
+`deadRetentionMs`; forgetting them earlier than the news takes to spread
+lets stale gossip bring them back as new members for a while.
+
+**Seeds.** With no other member known, the seeds are tried every round.
+Otherwise the seeds that aren't live members are tried every
+`seedRefreshMs`, so a seed that starts late is joined, and two halves of a
+cluster that declared each other dead find each other once the network
+heals. A seed that never answers is never a member, so it is never
+suspected and never reported as having left. Seed discovery runs on the
+member's own loop, so it never overlaps with itself and stops with the
+member.
+
+**Precedence.** News about a member is ordered by incarnation, then, at the
+same incarnation, `dead` and `left` over `suspect` over `alive`. Only the
+member itself can raise its incarnation: when it hears it is suspected or
+dead at its own incarnation, or hears any higher incarnation than its own
+(left over from an earlier run), it outbids it with the next one.
+
+**Hostile messages.** Nothing in a received message is trusted. A message
+that is over `maxMessageBytes`, lists more than `maxMembersPerMessage`
+members, isn't valid UTF-8 and JSON, or has a member or address that is
+malformed or out of range (an unknown state, an incarnation that is
+negative, fractional or past 2^40, a port outside 1 to 65535, an id over
+256 characters) is dropped as a whole, before anything in it is used, and
+the connection is closed. `gossip.stats` counts them by reason
+(`undecodable`, `too-large`, `malformed`, `too-many-members`,
+`unauthenticated`), counts members ignored because the table was full
+(`droppedMembers`), and reports `tableSize`. Connections that sit idle for
+a few probe timeouts are dropped, so strangers can't hold every
+connection open.
+
+### Gossip security
+
+Gossip has no authentication by default. Anyone who can reach a member's
+port can add members, declare others suspect or dead (which others will
+refute only if the member is alive and reachable), or make members connect
+to arbitrary addresses with `ping-req`. Run gossip on a private network.
+
+To keep strangers out, pass an `authenticator`. `GossipAuth.hmacSha256(key)`
+signs every message with HMAC-SHA-256 under a key shared by the cluster
+(at least 16 random bytes) and drops messages with a missing or wrong tag
+before parsing them:
+
+```ts
+Gossip.join({ ..., authenticator: GossipAuth.hmacSha256(process.env.CLUSTER_KEY!) });
+```
+
+What this gives you, and what it doesn't: it stops anyone without the key
+from taking part or forging news. It is not encryption, so membership and
+metadata are visible on the wire. It does not stop replay of a recorded
+message; incarnation numbers make most replays harmless, but not all. A
+leaked key, or one compromised member, can forge anything. For per-member
+identity or confidentiality, run gossip over TLS with client certificates
+(`Transport` options) instead or as well. To plug in something else (a
+different MAC, key rotation), implement `GossipAuthenticator`: a `tagBytes`
+length, `sign(payload)` and `verify({ payload, tag })`.
 
 ### Finding members
 
 `seeds` takes a list of addresses or a `Discovery`, an effect that finds
-addresses. Gossip runs it again whenever it knows no other member.
+addresses. Gossip runs it every round while it knows no other member, and
+every `seedRefreshMs` otherwise (see Seeds above).
 
 | Discovery | Finds |
 | --- | --- |
@@ -476,9 +577,13 @@ console.log(simulated); // → { reply: [{ type: "pong", n: 1 }], cutOff: "Left"
 | `network.link(a, b, { latencyMs, lossRate })` | link conditions, both directions |
 | `network.partition(a, b)` / `network.heal(a, b)` | cut and restore the link |
 
-Messages on a link keep their order, as on TCP. `lossRate` loses whole
-messages, which TCP never does; use it to test code that must cope with lost
-messages, such as heartbeats.
+Messages on a link keep their order in each direction, as on TCP, even when
+random latency would draw a shorter delay for a later message. `lossRate`
+loses whole messages, which TCP never does; use it to test code that must
+cope with lost messages, such as heartbeats. Conditions that mean nothing (a
+`lossRate` outside 0 to 1, a negative latency, `min` above `max`) throw a
+`RangeError` from `link`, and `tls` on `connect` or `listen` fails with a
+`ConnectError` or `ListenError`: the simulator does no TLS and won't pretend to.
 
 ## Recording and replaying
 
