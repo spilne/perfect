@@ -108,6 +108,9 @@ Each is also a fluent method: `program.run()`, `.runSync()`, `.runExit()`, `.run
   `combineLatest`, `withLatest`, single-pass `broadcastThrough`, reliable
   `observe`/`takeUntil`, typed stream recovery, source-reacquiring `retryFrom`,
   Clock-driven time operators, and CSV/base64/binary pipes
+- **Transactions** — `Transactor`, `Tx<K>`, `Commits<K>`: one resource per
+  transaction, mixing refused at compile time; in-memory backend
+  (`Transactor.memory()`), Postgres in `@spilne/perfect-postgres`
 - **Coordination** — `Ref`, `Deferred`, `Queue`, `Semaphore`, `Latch`,
   `Barrier`, `PubSub`, `SubscriptionRef`, `Pool`, `WorkerPool`
 - **Resilience** — `CircuitBreaker`, `RateLimiter`, `Throttle`,

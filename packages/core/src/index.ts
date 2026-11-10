@@ -2,6 +2,7 @@ export type {
   Eff,
   Throws,
   Needs,
+  Commits,
   InferValue,
   InferEffects,
   EffectCheck,
@@ -223,3 +224,20 @@ export type {
 
 export { eff, type Bind } from "./syntax/index.js";
 import "./syntax/index.js";
+
+// Transactions
+export {
+  Transactor,
+  MixedTransactionDefect,
+  TransactionClosedDefect,
+  TransactionBusyDefect,
+} from "./transaction.js";
+export type {
+  Tx,
+  TxDriver,
+  Transacted,
+  NoForeignTx,
+  ForeignTx,
+  MemoryTable,
+  MemoryTxHandle,
+} from "./transaction.js";

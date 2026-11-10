@@ -7,6 +7,70 @@ coordination primitives, and durable topology state.
 bun add @spilne/perfect-postgres drizzle-orm postgres
 ```
 
+## Transactions
+
+`PgTransactor` runs effects inside one Postgres transaction. Store calls that
+must run inside it say so in their type with `Tx<"pg">`, so forgetting
+`transact` does not compile. Everything inside commits together; a typed
+failure, a defect or an interrupt rolls it all back.
+
+```ts
+import { fromPromise } from "@spilne/perfect-core";
+import { PgTransactor } from "@spilne/perfect-postgres";
+import { PgmqQueue } from "@spilne/perfect-postgres/pgmq";
+
+const pg = PgTransactor.make({ db });
+const events = await PgmqQueue.create<{ paymentId: string }>(db, "payment_events");
+
+const markPaid = (paymentId: string) =>
+  pg.transact(function* () {
+    yield* pg.withHandle(({ db }) =>
+      fromPromise(
+        () => db.update(payments).set({ status: "paid" }).where(eq(payments.id, paymentId)),
+        (cause) => new PaymentWriteFailed({ cause }),
+      ),
+    );
+    yield* events.publishIn(pg, { paymentId }); // sent only if the transaction commits
+  });
+// markPaid: (paymentId) => Eff<void, Commits<"pg"> | Throws<PaymentWriteFailed | PgmqQueueError | PostgresError>>
+```
+
+What to know:
+
+- **Only `Tx<K>` work is all-or-nothing.** An HTTP call, a log line or a
+  write to another system inside `transact` still happens if the transaction
+  rolls back. Call external services before or after it.
+- **One resource per transaction.** Nothing commits Postgres and something
+  else together, so using another resource's transaction inside this one is a
+  compile error:
+  `"Cannot use another resource's transaction inside this one": "redis"`. It
+  is also refused at run time (`MixedTransactionDefect`) if a cast hides it.
+  A second database gets its own kind: `PgTransactor.make({ db: billingDb, kind: "billing" })`.
+- **`Commits<"pg">` stays in the type** after `transact`. Written-out return
+  types must include it; `run()` ignores it.
+- **Nesting the same transactor joins the outer transaction.** There are no
+  savepoints: an inner failure that is caught inside the outer transaction
+  does not undo the inner writes.
+- **Join forks before the transaction ends.** A fiber that uses the
+  transaction after it committed dies with `TransactionClosedDefect`.
+- **Waiting for a connection is not interruptible.** `transact` waits for a
+  pool connection before it can begin, and that wait finishes even if a
+  timeout fires, so size the pool for your concurrency. Once the transaction
+  has begun, interrupts roll it back as usual.
+- **An interrupt during commit still commits.** The commit runs to the end,
+  but the caller sees an interrupt. Don't treat an interrupted `transact` as
+  "not committed"; make the work safe to retry instead (for example with an
+  event id).
+- **Store calls on one transaction run one at a time.** A transaction is one
+  connection, so running them in parallel (`all`, `race`, `forEachPar`) dies
+  with `TransactionBusyDefect`. Parallel work that doesn't touch the
+  transaction is fine.
+
+The `TransactionalSinkable` / `publishInTransaction` contracts used by
+topology exactly-once delivery below are the older, Promise-based way to share
+a transaction. They will move onto `Tx<K>`; new application code should use
+`PgTransactor`.
+
 ## Atomic topology delivery
 
 `PgPartitionedStateBackend` stores state by topology, stage, and partition. It

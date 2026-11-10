@@ -10,6 +10,10 @@ export interface Needs<D, Name extends string = string> {
   readonly _needs: D;
   readonly _service: Name;
 }
+/** The effect commits a transaction on resource K. run() ignores it. */
+export interface Commits<K extends string = string> {
+  readonly _commits: K;
+}
 
 // ── Op codes ───────────────────────────────────────────────────────
 export const enum Op {
@@ -118,7 +122,7 @@ export type ExcludeTags<S, Tags extends string> =
 // Extract specific effect categories from the union
 type ExtractErrors<S> = ErrorsOf<S>;
 type ExtractServices<S> = S extends Needs<infer D> ? D : never;
-type ExtractOther<S> = Exclude<S, Throws<unknown> | Needs<unknown>>;
+type ExtractOther<S> = Exclude<S, Throws<unknown> | Needs<unknown> | Commits>;
 
 // Produce a readable error object when effects aren't fully handled
 export type EffectCheck<S> = [S] extends [never]

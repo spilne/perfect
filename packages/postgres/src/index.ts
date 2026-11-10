@@ -11,6 +11,9 @@ export { createPostgresDb, execRaw } from "./lib/drizzle-db.js";
 export { ensureTable } from "./lib/schema-utils.js";
 export { PostgresError } from "./lib/postgres-error.js";
 
+// Transactions
+export { PgTransactor, type PgTx } from "./lib/pg-transactor.js";
+
 // Queues
 export { PgQueue, type PgQueueConfig } from "./lib/pg-queue.js";
 export { createQueueTable, type QueueTable } from "./lib/pg-queue-schema.js";
