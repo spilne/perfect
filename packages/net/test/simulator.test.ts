@@ -12,8 +12,9 @@ import {
   scoped,
   sleep,
   type Eff,
+  type Throws,
 } from "@spilne/perfect-core";
-import { BinaryCodec, SimulatedNetwork, Transport, type Connection } from "../src";
+import { BinaryCodec, SimulatedNetwork, Transport, type Connection, type NetError } from "../src";
 
 const codec = BinaryCodec.json<number>();
 const doubler = (connection: Connection<number>) =>
@@ -371,5 +372,223 @@ describe("SimulatedNetwork fidelity", () => {
       .orDie()
       .run();
     expect(result).toEqual({ listen: "Left", connect: "Left" });
+  });
+});
+
+describe("SimulatedNetwork message-level faults", () => {
+  // `server` records what it receives; `client` connects to it. Runs `body`
+  // on a TestClock and returns what the server saw.
+  const run = async (params: {
+    readonly seed?: number;
+    readonly setup: (network: SimulatedNetwork) => void;
+    readonly body: (
+      connection: Connection<number>,
+      network: SimulatedNetwork,
+    ) => Eff<void, Throws<NetError>>;
+  }) => {
+    const received: number[] = [];
+    const clock = new TestClock();
+    const program = scoped(
+      eff(function* () {
+        const network = yield* SimulatedNetwork.make();
+        params.setup(network);
+        yield* network.node("server").listen(
+          { host: "server", port: 1 },
+          {
+            codec,
+            handle: (connection) =>
+              connection.messages.forEach((n) =>
+                eff(function* () {
+                  received.push(n);
+                }),
+              ),
+          },
+        );
+        const connection = yield* network
+          .node("client")
+          .connect({ host: "server", port: 1 }, { codec });
+        yield* params.body(connection, network);
+        yield* sleep(60);
+      }),
+    );
+    // Virtual time: how long the machine takes to run this can't change the order of arrivals.
+    const fiber = runFiber(
+      provide(provide(program, Clock, clock), Random, new TestRandom(params.seed ?? 5)).orDie(),
+    );
+    for (let t = 0; t < 80; t++) {
+      clock.advance(1);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+    fiber.interrupt();
+    return received;
+  };
+  const sendAll = (values: number[]) => (connection: Connection<number>) =>
+    eff(function* () {
+      for (const n of values) yield* connection.send(n);
+    });
+  const values = Array.from({ length: 40 }, (_, i) => i);
+
+  test("an unordered link lets messages overtake each other, the same way for the same seed", async () => {
+    const setup = (network: SimulatedNetwork) =>
+      network.link("client", "server", { latencyMs: { min: 1, max: 30 }, ordered: false });
+    const first = await run({ setup, body: sendAll(values) });
+    expect([...first].sort((a, b) => a - b)).toEqual(values);
+    expect(first).not.toEqual(values);
+    expect(await run({ setup, body: sendAll(values) })).toEqual(first);
+  });
+
+  test("an ordered link with random latency keeps order (the default is unchanged)", async () => {
+    const received = await run({
+      setup: (network) => network.link("client", "server", { latencyMs: { min: 1, max: 30 } }),
+      body: sendAll(values),
+    });
+    expect(received).toEqual(values);
+  });
+
+  test("duplicateRate delivers messages twice, in order on an ordered link", async () => {
+    const received = await run({
+      setup: (network) => network.link("client", "server", { duplicateRate: 1 }),
+      body: sendAll([1, 2, 3]),
+    });
+    expect(received).toEqual([1, 1, 2, 2, 3, 3]);
+  });
+
+  test("duplicates on an unordered link are independent copies", async () => {
+    const received = await run({
+      setup: (network) =>
+        network.link("client", "server", {
+          latencyMs: { min: 1, max: 30 },
+          ordered: false,
+          duplicateRate: 1,
+        }),
+      body: sendAll(values),
+    });
+    expect([...received].sort((a, b) => a - b)).toEqual(values.flatMap((n) => [n, n]));
+  });
+
+  test("closing waits for messages still on the way on an unordered link", async () => {
+    const received = await run({
+      setup: (network) =>
+        network.link("client", "server", {
+          latencyMs: { min: 1, max: 30 },
+          ordered: false,
+          duplicateRate: 0.5,
+        }),
+      body: (connection) =>
+        eff(function* () {
+          for (const n of values) yield* connection.send(n);
+          yield* connection.close;
+        }),
+    });
+    expect(new Set(received)).toEqual(new Set(values));
+  });
+
+  test("block cuts one direction only and stops new connections", async () => {
+    const result = await scoped(
+      eff(function* () {
+        const network = yield* SimulatedNetwork.make();
+        const atServer: number[] = [];
+        const atClient: number[] = [];
+        yield* network.node("server").listen(
+          { host: "server", port: 1 },
+          {
+            codec,
+            handle: (connection) =>
+              connection.messages.forEach((n) =>
+                eff(function* () {
+                  atServer.push(n);
+                  yield* connection.send(n + 100);
+                }),
+              ),
+          },
+        );
+        const connection = yield* network
+          .node("client")
+          .connect({ host: "server", port: 1 }, { codec });
+        yield* fork(
+          connection.messages.forEach((n) =>
+            eff(function* () {
+              atClient.push(n);
+            }),
+          ),
+        );
+
+        network.block("server", "client"); // the client still reaches the server
+        yield* connection.send(1);
+        yield* sleep(10);
+        const fresh = yield* network
+          .node("client")
+          .connect({ host: "server", port: 1 }, { codec })
+          .either();
+
+        network.unblock("server", "client");
+        yield* connection.send(2);
+        yield* sleep(10);
+        return { atServer, atClient, fresh: fresh._tag };
+      }),
+    )
+      .orDie()
+      .run();
+    // 1 reached the server but its reply was lost; after unblocking, 2 round-trips.
+    expect(result).toEqual({ atServer: [1, 2], atClient: [102], fresh: "Left" });
+  });
+
+  test("crash closes the node's connections and listeners until it restarts", async () => {
+    const result = await scoped(
+      eff(function* () {
+        const network = yield* SimulatedNetwork.make();
+        const serve = () =>
+          network.node("server").listen({ host: "server", port: 1 }, { codec, handle: doubler });
+        yield* serve();
+        const connection = yield* network
+          .node("client")
+          .connect({ host: "server", port: 1 }, { codec });
+        yield* connection.send(1);
+        const before = yield* connection.messages.take(1).toArray();
+
+        network.crash("server");
+        const afterCrash = yield* connection.messages.toArray(); // the stream ends
+        const refused = yield* network
+          .node("client")
+          .connect({ host: "server", port: 1 }, { codec })
+          .either();
+        const listenWhileDown = yield* serve().either();
+        const fromDead = yield* network
+          .node("server")
+          .connect({ host: "client", port: 2 }, { codec })
+          .either();
+
+        network.restart("server");
+        yield* serve();
+        const again = yield* network.node("client").connect({ host: "server", port: 1 }, { codec });
+        yield* again.send(5);
+        const after = yield* again.messages.take(1).toArray();
+        return {
+          before,
+          afterCrash,
+          refused: refused._tag,
+          listenWhileDown: listenWhileDown._tag,
+          fromDead: fromDead._tag,
+          up: network.isUp("server"),
+          after,
+        };
+      }),
+    )
+      .orDie()
+      .run();
+    expect(result).toEqual({
+      before: [2],
+      afterCrash: [],
+      refused: "Left",
+      listenWhileDown: "Left",
+      fromDead: "Left",
+      up: true,
+      after: [10],
+    });
+  });
+
+  test("a duplicate rate outside 0 to 1 is refused", async () => {
+    const network = await SimulatedNetwork.make().run();
+    expect(() => network.link("a", "b", { duplicateRate: 1.5 })).toThrow(RangeError);
   });
 });

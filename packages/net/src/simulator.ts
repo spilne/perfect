@@ -7,6 +7,8 @@
 //   yield* provide(server, Transport, network.node("b"));   // listens on b
 //   yield* provide(client, Transport, network.node("a"));   // connects to { host: "b", port }
 //   network.partition("a", "b");                            // now nothing gets through
+//   network.block("a", "b");                                // only a -> b is cut
+//   network.crash("b");                                     // b's connections close, its listeners go
 //
 // There is no TLS on it: connecting or listening with `tls` fails instead of
 // pretending to be secure.
@@ -53,6 +55,21 @@ export interface LinkConditions {
    * code that must cope with lost messages, like heartbeats. Default: 0.
    */
   readonly lossRate?: number;
+  /**
+   * Whether messages arrive in the order they were sent. Default: true, as
+   * on TCP. With `false` a message with a short random delay can overtake an
+   * earlier one. Every send is one whole message, so this is for code that
+   * treats the connection as message-oriented and must cope with reordering,
+   * like a consensus protocol. The multiplexer and anything else that
+   * relies on TCP's ordering will break on such a link.
+   */
+  readonly ordered?: boolean;
+  /**
+   * The chance (0 to 1) that a message arrives twice. The copy takes its own
+   * random delay, so it can arrive later than messages sent after it.
+   * Default: 0.
+   */
+  readonly duplicateRate?: number;
 }
 
 const pairKey = (a: string, b: string) => (a < b ? `${a}\u0000${b}` : `${b}\u0000${a}`);
@@ -64,7 +81,13 @@ const pairKey = (a: string, b: string) => (a < b ? `${a}\u0000${b}` : `${b}\u000
 export class SimulatedNetwork {
   private readonly links = new Map<string, LinkConditions>();
   private readonly partitions = new Set<string>();
-  private readonly listeners = new Map<string, (socket: Duplex, remote: string) => void>();
+  private readonly blocked = new Set<string>();
+  private readonly down = new Set<string>();
+  private readonly sockets = new Map<string, Set<Duplex>>();
+  private readonly listeners = new Map<
+    string,
+    { readonly node: string; readonly accept: (socket: Duplex, remote: string) => void }
+  >();
   private nextPort = 40_000;
 
   private constructor(
@@ -81,9 +104,12 @@ export class SimulatedNetwork {
 
   /** Set the conditions of the link between `a` and `b`. */
   link(a: string, b: string, conditions: LinkConditions): void {
-    const { latencyMs, lossRate } = conditions;
+    const { latencyMs, lossRate, duplicateRate } = conditions;
     if (lossRate !== undefined && !(lossRate >= 0 && lossRate <= 1)) {
       throw new RangeError(`lossRate must be from 0 to 1, got ${lossRate}`);
+    }
+    if (duplicateRate !== undefined && !(duplicateRate >= 0 && duplicateRate <= 1)) {
+      throw new RangeError(`duplicateRate must be from 0 to 1, got ${duplicateRate}`);
     }
     const [min, max] =
       typeof latencyMs === "object"
@@ -107,9 +133,52 @@ export class SimulatedNetwork {
     this.partitions.delete(pairKey(a, b));
   }
 
-  /** Whether `a` and `b` can reach each other right now. */
-  reachable(a: string, b: string): boolean {
-    return a === b || !this.partitions.has(pairKey(a, b));
+  /**
+   * Cut only the direction `from` -> `to`: `to` still reaches `from`. New
+   * connections between them fail too, since a connection needs both ways.
+   */
+  block(from: string, to: string): void {
+    this.blocked.add(`${from}\u0000${to}`);
+  }
+
+  /** Undo a `block`. */
+  unblock(from: string, to: string): void {
+    this.blocked.delete(`${from}\u0000${to}`);
+  }
+
+  /**
+   * Whether messages from `from` reach `to` right now: both nodes are up and
+   * neither a partition nor a `block` is in the way.
+   */
+  reachable(from: string, to: string): boolean {
+    if (this.down.has(from) || this.down.has(to)) return false;
+    if (from === to) return true;
+    return !this.partitions.has(pairKey(from, to)) && !this.blocked.has(`${from}\u0000${to}`);
+  }
+
+  /**
+   * Crash `name`: every connection it has is closed (its peers see the
+   * connection end), its listeners are removed, and nothing reaches it or
+   * leaves it until `restart`. The simulator doesn't stop the fibers that
+   * run the node's code: the test does that, and starts them again after
+   * `restart`, when they have to listen and connect afresh.
+   */
+  crash(name: string): void {
+    this.down.add(name);
+    for (const [where, listener] of this.listeners) {
+      if (listener.node === name) this.listeners.delete(where);
+    }
+    for (const socket of [...(this.sockets.get(name) ?? [])]) socket.destroy();
+  }
+
+  /** Bring a crashed node back, with no listeners and no connections. */
+  restart(name: string): void {
+    this.down.delete(name);
+  }
+
+  /** Whether `name` has not crashed (or has restarted). */
+  isUp(name: string): boolean {
+    return !this.down.has(name);
   }
 
   /**
@@ -138,19 +207,22 @@ export class SimulatedNetwork {
         );
       }
       const host = "path" in address ? from : address.host;
-      if (!this.reachable(from, host)) {
+      if (this.down.has(from)) {
+        return fail(new ConnectError({ address: where, message: `${from} is down` }));
+      }
+      if (!this.reachable(from, host) || !this.reachable(host, from)) {
         return fail(
           new ConnectError({ address: where, message: `${host} is unreachable from ${from}` }),
         );
       }
-      const accept = this.listeners.get(where);
-      if (!accept) {
+      const listener = this.listeners.get(where);
+      if (!listener) {
         return fail(
           new ConnectError({ address: where, message: `connection refused by ${where}` }),
         );
       }
       const [client, server] = this.socketPair(from, host);
-      accept(server, `${from}:${this.nextPort++}`);
+      listener.accept(server, `${from}:${this.nextPort++}`);
       return succeed(connectionOver(client, where, options));
     });
   }
@@ -173,6 +245,11 @@ export class SimulatedNetwork {
               }),
             );
           }
+          if (this.down.has(node)) {
+            return fail(
+              new ListenError({ address: formatAddress(address), message: `${node} is down` }),
+            );
+          }
           const bound: Address =
             "path" in address
               ? address
@@ -181,7 +258,7 @@ export class SimulatedNetwork {
           if (this.listeners.has(where)) {
             return fail(new ListenError({ address: where, message: `${where} is already in use` }));
           }
-          this.listeners.set(where, accept);
+          this.listeners.set(where, { node, accept });
           return succeed({ address: bound, stop: () => this.listeners.delete(where) });
         }),
     });
@@ -195,7 +272,17 @@ export class SimulatedNetwork {
     const toA = this.direction(b, a, () => sideA);
     sideA = this.socket(toB);
     sideB = this.socket(toA);
+    this.track(a, sideA);
+    this.track(b, sideB);
     return [sideA, sideB];
+  }
+
+  /** Remember `socket` as belonging to `node` until it closes, so a crash can close it. */
+  private track(node: string, socket: Duplex): void {
+    let set = this.sockets.get(node);
+    if (!set) this.sockets.set(node, (set = new Set()));
+    set.add(socket);
+    socket.once("close", () => set.delete(socket));
   }
 
   private socket(send: (chunk: Uint8Array | null) => void): Duplex {
@@ -241,6 +328,28 @@ export class SimulatedNetwork {
         if (!target.destroyed) target.push(chunk);
       }
     };
+    const schedule = (run: () => void, wait: number) => {
+      if (wait <= 0) queueMicrotask(run);
+      else runFiber(this.clock.sleep(wait).map(run));
+    };
+    // Goes into the queue above, after everything sent before it.
+    const enqueueOrdered = (chunk: Uint8Array | null, latency: number) => {
+      const now = this.clock.now();
+      const deliverAt = Math.max(now + latency, lastDelivery);
+      lastDelivery = deliverAt;
+      inFlight.push(chunk);
+      const number = sent++;
+      schedule(() => deliverThrough(number), deliverAt - now);
+    };
+    // Arrives on its own schedule, whatever was sent before or after. Closing
+    // waits for the latest of these (see `lastDelivery`), so none arrives after it.
+    const deliverAlone = (chunk: Uint8Array, latency: number) => {
+      lastDelivery = Math.max(lastDelivery, this.clock.now() + latency);
+      schedule(() => {
+        const target = peer();
+        if (!target.destroyed) target.push(chunk);
+      }, latency);
+    };
     return (chunk: Uint8Array | null) => {
       if (ended) return;
       const conditions = this.links.get(pairKey(from, to)) ?? {};
@@ -253,14 +362,14 @@ export class SimulatedNetwork {
         // that closes a connection doesn't hang waiting for the other side.
         ended = true;
       }
-      const now = this.clock.now();
-      const deliverAt = Math.max(now + this.latency(conditions), lastDelivery);
-      lastDelivery = deliverAt;
-      inFlight.push(chunk);
-      const number = sent++;
-      const wait = deliverAt - now;
-      if (wait <= 0) queueMicrotask(() => deliverThrough(number));
-      else runFiber(this.clock.sleep(wait).map(() => deliverThrough(number)));
+      const unordered = chunk !== null && conditions.ordered === false;
+      if (chunk !== null && unordered) deliverAlone(chunk, this.latency(conditions));
+      else enqueueOrdered(chunk, this.latency(conditions));
+      const duplicateRate = conditions.duplicateRate ?? 0;
+      if (chunk !== null && duplicateRate > 0 && runSync(this.random.next()) < duplicateRate) {
+        if (unordered) deliverAlone(chunk, this.latency(conditions));
+        else enqueueOrdered(chunk, this.latency(conditions));
+      }
     };
   }
 

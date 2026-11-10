@@ -550,8 +550,9 @@ A failed lookup logs a warning and finds no addresses. It doesn't fail.
 
 Code that gets its connections from the `Transport` service runs on real
 sockets when you provide `Tcp`, and on a `SimulatedNetwork` in tests. The
-simulator connects named nodes through links whose latency, message loss
-and partitions the test controls. It uses the `Clock` and `Random`
+simulator connects named nodes through links whose latency, message loss,
+reordering, duplication and partitions the test controls, and it can crash
+and restart nodes. It uses the `Clock` and `Random`
 services, so with `TestClock` and `TestRandom` a test is deterministic.
 
 <!-- @embed packages/net/examples/01-connections.ts#simulated-network -->
@@ -589,12 +590,14 @@ console.log(simulated); // → { reply: [{ type: "pong", n: 1 }], cutOff: "Left"
 
 <!-- @end -->
 
-| API                                              | What it does                                                  |
-| ------------------------------------------------ | ------------------------------------------------------------- |
-| `SimulatedNetwork.make()`                        | a new network                                                 |
-| `network.node(name)`                             | that node's `Transport`; it listens on `{ host: name, port }` |
-| `network.link(a, b, { latencyMs, lossRate })`    | link conditions, both directions                              |
-| `network.partition(a, b)` / `network.heal(a, b)` | cut and restore the link                                      |
+| API                                                                   | What it does                                                  |
+| --------------------------------------------------------------------- | ------------------------------------------------------------- |
+| `SimulatedNetwork.make()`                                             | a new network                                                 |
+| `network.node(name)`                                                  | that node's `Transport`; it listens on `{ host: name, port }` |
+| `network.link(a, b, { latencyMs, lossRate, ordered, duplicateRate })` | link conditions, both directions                              |
+| `network.partition(a, b)` / `network.heal(a, b)`                      | cut and restore the link                                      |
+| `network.block(from, to)` / `network.unblock(from, to)`               | cut and restore one direction only                            |
+| `network.crash(name)` / `network.restart(name)`                       | close a node's connections and listeners; bring it back empty |
 
 Messages on a link keep their order in each direction, as on TCP, even when
 random latency would draw a shorter delay for a later message. `lossRate`
@@ -603,6 +606,20 @@ cope with lost messages, such as heartbeats. Conditions that mean nothing (a
 `lossRate` outside 0 to 1, a negative latency, `min` above `max`) throw a
 `RangeError` from `link`, and `tls` on `connect` or `listen` fails with a
 `ConnectError` or `ListenError`: the simulator does no TLS and won't pretend to.
+
+To test code that has to survive an unreliable network, such as a consensus
+protocol, set `ordered: false` on a link so that a message with a short random
+delay can overtake an earlier one, and `duplicateRate` to deliver some
+messages twice. Each `send` is one whole message, so these act on messages.
+The multiplexer and anything else that relies on TCP's ordering breaks on
+such a link, which is the point of opting in. `block` cuts one direction: the
+other node still reaches this one, and new connections fail because a
+connection needs both ways. `crash` closes every connection of a node (its
+peers see them end), removes its listeners and refuses everything to and from
+it until `restart`. The simulator can't stop the fibers that run the node's
+code. The test does that, then starts them again after `restart`, when they
+listen and connect afresh. Messages already on their way to a crashed node
+are lost.
 
 ## Recording and replaying
 

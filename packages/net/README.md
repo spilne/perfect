@@ -52,9 +52,9 @@ const program = scoped(
 - **Recording:** `Recorder.wrap` writes down a conversation and `Replay.of`
   plays it back for tests, with no server.
 - **Testing:** depend on the `Transport` service and provide
-  `SimulatedNetwork` nodes in tests, with latency, message loss and
-  partitions under the test's control (deterministic with `TestClock` and
-  `TestRandom`).
+  `SimulatedNetwork` nodes in tests, with latency, message loss, reordering,
+  duplication, one-way partitions and node crashes under the test's control
+  (deterministic with `TestClock` and `TestRandom`).
 
 - **Hostile peers:** message sizes, receive queues, channels per connection and
   gossip tables are all bounded, and malformed input is rejected with typed
